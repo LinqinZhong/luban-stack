@@ -1,6 +1,6 @@
 # Voider
 
-前后端分离的本地系统项目。
+H5 低代码开发工具（前后端分离本地系统）。
 
 ## 项目结构
 
@@ -32,12 +32,73 @@ npm run dev
 
 前端默认运行在 `http://localhost:5173`
 
+## 项目配置 voider.json
+
+每个项目根目录需包含 `voider.json`，示例：
+
+```json
+{
+  "name": "活动页",
+  "version": "0.1.0",
+  "author": "your-name",
+  "engineVersion": "1.0.0",
+  "canvas": {
+    "width": 375
+  }
+}
+```
+
+| 字段 | 说明 |
+|------|------|
+| `name` | 项目名称 |
+| `version` | 项目版本号 |
+| `author` | 作者 |
+| `engineVersion` | 引擎版本号 |
+| `canvas.width` | 画布宽度（px），默认 `375` |
+
+打开项目时，所选文件夹必须已有合法的 `voider.json`；新建项目会写入该文件并创建空的 `pages/` 目录。
+
+## 页面目录 pages/
+
+```
+pages/
+└── home/
+    ├── config.json   # 页面配置
+    └── index.xml     # 页面内容（Android 风格布局 XML）
+```
+
+`config.json` 示例：
+
+```json
+{
+  "name": "首页",
+  "title": "首页"
+}
+```
+
+`index.xml` 目前支持四个控件：
+
+| 控件 | 说明 |
+|------|------|
+| `Text` | 文本 |
+| `Button` | 按钮 |
+| `LinearLayout` | 线性布局（`orientation`: vertical / horizontal） |
+| `RelativeLayout` | 相对布局（`layout_alignParent*` / `layout_center*` 等） |
+
 ## API 接口
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | GET | `/api` | 获取 API 基本信息 |
 | GET | `/api/health` | 健康检查 |
+| GET | `/api/projects/meta` | 获取引擎版本、默认画布宽度等元信息 |
+| GET | `/api/projects/browse?path=` | 浏览本地文件夹（空 path 为磁盘根） |
+| POST | `/api/projects/open` | 打开项目（校验 voider.json） |
+| POST | `/api/projects/create` | 新建项目并写入 voider.json |
+| GET | `/api/pages?projectPath=` | 列出项目 pages 下的页面 |
+| POST | `/api/pages` | 新建页面（写入 config.json + index.xml） |
+| GET | `/api/pages/:pageId?projectPath=` | 读取页面配置与 XML |
+| PUT | `/api/pages/:pageId/xml` | 保存页面 XML |
 
 ## 构建部署
 

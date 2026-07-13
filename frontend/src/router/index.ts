@@ -1,21 +1,40 @@
 import { createRouter, createWebHistory } from 'vue-router'
+import { useProjectStore } from '../stores/project'
+import MainLayout from '../layouts/MainLayout.vue'
 
 const router = createRouter({
   history: createWebHistory(),
   routes: [
     {
       path: '/',
-      name: 'home',
-      component: () => import('../views/HomeView.vue'),
-      meta: { title: '首页' },
+      name: 'welcome',
+      component: () => import('../views/WelcomeView.vue'),
+      meta: { title: '选择项目' },
     },
     {
-      path: '/about',
-      name: 'about',
-      component: () => import('../views/AboutView.vue'),
-      meta: { title: '关于' },
+      path: '/',
+      component: MainLayout,
+      meta: { requiresProject: true },
+      children: [
+        {
+          path: 'workspace',
+          name: 'workspace',
+          component: () => import('../views/WorkspaceView.vue'),
+          meta: { title: '工作区' },
+        },
+      ],
     },
   ],
+})
+
+router.beforeEach((to) => {
+  const projectStore = useProjectStore()
+
+  if (to.matched.some((record) => record.meta.requiresProject) && !projectStore.hasProject) {
+    return { name: 'welcome' }
+  }
+
+  return true
 })
 
 router.afterEach((to) => {
