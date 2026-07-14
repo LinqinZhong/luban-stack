@@ -108,6 +108,49 @@ const buttonStyle = computed(() => ({
   minHeight: height.value === 'wrap_content' ? '36px' : undefined,
 }))
 
+/** 编辑态未展开的 {item.xxx} 等变量，不当作真实 URL 加载 */
+function isTemplateSrc(src: string): boolean {
+  return /\{[^{}]+\}/.test(src)
+}
+
+const imageSrc = computed(() => {
+  const src = attrs.value.src?.trim() || ''
+  if (!src || isTemplateSrc(src)) return ''
+  return src
+})
+const imageAlt = computed(() => attrs.value.alt || '')
+const imageTitle = computed(() => attrs.value.title || undefined)
+const imageLoading = computed(() => {
+  const value = attrs.value.loading?.trim().toLowerCase()
+  return value === 'lazy' || value === 'eager' ? value : undefined
+})
+const imagePlaceholderLabel = computed(() => {
+  const src = attrs.value.src?.trim() || ''
+  if (isTemplateSrc(src)) return '图片'
+  return imageAlt.value || 'Image'
+})
+
+const imageStyle = computed(() => ({
+  ...layoutStyle.value,
+  ...borderStyle(attrs.value),
+  display: 'block',
+  objectFit: (attrs.value.objectFit || 'cover') as CSSProperties['objectFit'],
+  background: attrs.value.background || undefined,
+}))
+
+const imagePlaceholderStyle = computed(() => ({
+  ...layoutStyle.value,
+  ...borderStyle(attrs.value),
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  background: attrs.value.background || '#f2f3f5',
+  color: '#909399',
+  fontSize: '12px',
+  minWidth: width.value === 'wrap_content' ? '80px' : undefined,
+  minHeight: height.value === 'wrap_content' ? '60px' : undefined,
+}))
+
 const linearStyle = computed(() => {
   const horizontal = attrs.value.orientation === 'horizontal'
   const matchHeight = height.value === 'match_parent'
@@ -313,6 +356,41 @@ function forwardOpenRepeat(id: string) {
   </WidgetSelectShell>
 
   <WidgetSelectShell
+    v-else-if="node.tag === 'Image'"
+    :selected="isSelected"
+    :hovered="isHovered"
+    :margin-attrs="attrs"
+    :width="width"
+    :height="height"
+    :parent-horizontal="parentHorizontal"
+    :parent-vertical="parentVertical"
+    :fill-parent="isRelativeChild"
+    :repeat-badge="showRepeatBadge"
+    @click="handleSelect"
+    @mouseenter="handleMouseEnter"
+    @open-repeat="handleOpenRepeat"
+  >
+    <img
+      v-if="imageSrc"
+      class="widget image"
+      :src="imageSrc"
+      :alt="imageAlt"
+      :title="imageTitle"
+      :loading="imageLoading"
+      :style="imageStyle"
+      draggable="false"
+    />
+    <div
+      v-else
+      class="widget image image-placeholder"
+      :style="imagePlaceholderStyle"
+      :title="imageTitle"
+    >
+      {{ imagePlaceholderLabel }}
+    </div>
+  </WidgetSelectShell>
+
+  <WidgetSelectShell
     v-else-if="node.tag === 'LinearLayout'"
     :selected="isSelected"
     :hovered="isHovered"
@@ -394,5 +472,25 @@ function forwardOpenRepeat(id: string) {
 
 .widget.button {
   font-family: inherit;
+}
+
+.widget.image {
+  vertical-align: top;
+  user-select: none;
+  pointer-events: none;
+}
+
+.widget.image-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #909399;
+  font-size: 12px;
+  border: 1px dashed #dcdfe6;
+  box-sizing: border-box;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 4px;
 }
 </style>

@@ -25,8 +25,10 @@ import { useProjectStore } from '../stores/project'
 import {
   appendWidget,
   canDeleteNode,
+  moveWidget,
   removeWidget,
   WIDGET_OPTIONS,
+  type MovePosition,
   type WidgetTag,
 } from '../utils/xml-node'
 import type { PageData } from '../types/page-data'
@@ -267,6 +269,28 @@ async function handleDeleteWidget() {
   }
 }
 
+async function handleMoveWidget(payload: {
+  sourceId: string
+  targetId: string
+  position: MovePosition
+}) {
+  if (!activePage.value || !isEditMode.value) return
+
+  try {
+    const { xml, newNodeId } = moveWidget(
+      activePage.value.xml,
+      payload.sourceId,
+      payload.targetId,
+      payload.position,
+    )
+    selectedNodeId.value = newNodeId
+    await handleXmlUpdate(xml)
+    ElMessage.success('已调整控件结构')
+  } catch (err) {
+    ElMessage.error(err instanceof Error ? err.message : '移动控件失败')
+  }
+}
+
 onMounted(() => {
   void loadPages()
 })
@@ -309,8 +333,10 @@ onMounted(() => {
         v-if="activePage && !isDataPoolMode"
         :xml="activePage.xml"
         :selected-id="selectedNodeId"
+        :editable="isEditMode"
         @select="selectedNodeId = $event"
         @open-repeat="handleOpenRepeatConfig"
+        @move="handleMoveWidget"
       />
     </aside>
 

@@ -1,7 +1,15 @@
 import type { XmlNode } from './xml'
 import { parsePageXml } from './xml'
 
-export type WidgetTag = 'Text' | 'Button' | 'LinearLayout' | 'RelativeLayout'
+export type WidgetTag = 'Text' | 'Button' | 'Image' | 'LinearLayout' | 'RelativeLayout'
+
+export type MovePosition = 'before' | 'after' | 'inner'
+
+const CONTAINER_TAGS = new Set<string>(['LinearLayout', 'RelativeLayout'])
+
+export function isContainerTag(tag: string): boolean {
+  return CONTAINER_TAGS.has(tag)
+}
 
 export const WIDGET_OPTIONS: Array<{
   tag: WidgetTag
@@ -10,9 +18,23 @@ export const WIDGET_OPTIONS: Array<{
 }> = [
   { tag: 'Text', label: '文本 Text', description: '显示一段文本' },
   { tag: 'Button', label: '按钮 Button', description: '可点击按钮' },
+  { tag: 'Image', label: '图片 Image', description: '显示网络或本地图片' },
   { tag: 'LinearLayout', label: '线性布局 LinearLayout', description: '水平或垂直排列子控件' },
   { tag: 'RelativeLayout', label: '相对布局 RelativeLayout', description: '相对父容器定位子控件' },
 ]
+
+export const IMAGE_OBJECT_FIT_OPTIONS = [
+  { value: 'fill', label: 'fill' },
+  { value: 'contain', label: 'contain' },
+  { value: 'cover', label: 'cover' },
+  { value: 'none', label: 'none' },
+  { value: 'scale-down', label: 'scale-down' },
+] as const
+
+export const IMAGE_LOADING_OPTIONS = [
+  { value: 'eager', label: 'eager' },
+  { value: 'lazy', label: 'lazy' },
+] as const
 
 /** path id 形如 0:LinearLayout/1:Button */
 export function findXmlNodeById(root: XmlNode, id: string): XmlNode | null {
@@ -143,6 +165,12 @@ function createWidgetElement(doc: Document, tag: WidgetTag): Element {
     el.setAttribute('width', 'match_parent')
     el.setAttribute('height', '44')
     el.setAttribute('marginTop', '8')
+  } else if (tag === 'Image') {
+    el.setAttribute('src', '')
+    el.setAttribute('alt', '图片')
+    el.setAttribute('objectFit', 'cover')
+    el.setAttribute('width', '120')
+    el.setAttribute('height', '80')
   } else if (tag === 'LinearLayout') {
     el.setAttribute('orientation', 'vertical')
     el.setAttribute('width', 'match_parent')
@@ -195,7 +223,7 @@ export function appendWidget(
       throw new Error('未找到选中节点')
     }
 
-    if (selected.tagName === 'LinearLayout' || selected.tagName === 'RelativeLayout') {
+    if (isContainerTag(selected.tagName)) {
       parentEl = selected
       parentId = selectedId
     } else if (selectedId.includes('/')) {
@@ -210,7 +238,7 @@ export function appendWidget(
     throw new Error('未找到可添加的父容器')
   }
 
-  if (parentEl.tagName !== 'LinearLayout' && parentEl.tagName !== 'RelativeLayout') {
+  if (!isContainerTag(parentEl.tagName)) {
     throw new Error('只能向 LinearLayout / RelativeLayout 添加子控件')
   }
 
@@ -258,6 +286,105 @@ export function removeWidget(
   return {
     xml: serializeDoc(doc),
     parentId,
+  }
+}
+
+function pathIdForElement(el: Element): string {
+  const segments: string[] = []
+  let current: Element | null = el
+  const root = el.ownerDocument.documentElement
+
+  while (current) {
+    if (current === root) {
+      segments.unshift(`0:${current.tagName}`)
+      break
+    }
+    const parent = current.parentElement
+    if (!parent) break
+    const index = Array.from(parent.children).indexOf(current)
+    segments.unshift(`${index}:${current.tagName}`)
+    current = parent
+  }
+
+  return segments.join('/')
+}
+
+function isAncestorId(ancestorId: string, descendantId: string): boolean {
+  return descendantId === ancestorId || descendantId.startsWith(`${ancestorId}/`)
+}
+
+/** 校验拖拽落点是否合法（与控件树 allow-drop 规则一致） */
+export function canMoveWidget(
+  sourceId: string,
+  targetId: string,
+  position: MovePosition,
+  targetTag: string,
+): string | null {
+  if (!sourceId || !targetId) return '缺少拖拽节点'
+  if (!sourceId.includes('/')) return '根节点不能拖拽'
+  if (sourceId === targetId) return '不能拖到自身'
+  if (isAncestorId(sourceId, targetId)) return '不能拖到自身的子节点内'
+  if (position === 'inner') {
+    if (!isContainerTag(targetTag)) {
+      return `${targetTag} 不支持子节点`
+    }
+  } else if (!targetId.includes('/')) {
+    return '不能把控件放到根节点同级'
+  }
+  return null
+}
+
+/**
+ * 移动控件：before/after 为同级插入，inner 为插入到目标容器末尾。
+ */
+export function moveWidget(
+  xml: string,
+  sourceId: string,
+  targetId: string,
+  position: MovePosition,
+): { xml: string; newNodeId: string } {
+  const parser = new DOMParser()
+  const doc = parser.parseFromString(xml, 'application/xml')
+  if (doc.querySelector('parsererror')) {
+    throw new Error('XML 解析失败，无法移动控件')
+  }
+
+  const sourceEl = elementAtPath(doc, sourceId)
+  const targetEl = elementAtPath(doc, targetId)
+  if (!sourceEl || !targetEl) {
+    throw new Error('未找到拖拽节点')
+  }
+
+  const err = canMoveWidget(sourceId, targetId, position, targetEl.tagName)
+  if (err) throw new Error(err)
+
+  // 无实际变化：已在目标容器末尾且 inner；或 before/after 相邻且已是该位置
+  if (position === 'inner' && sourceEl.parentElement === targetEl) {
+    const children = Array.from(targetEl.children)
+    if (children[children.length - 1] === sourceEl) {
+      return { xml, newNodeId: sourceId }
+    }
+  }
+  if (position === 'before' && sourceEl.nextElementSibling === targetEl) {
+    return { xml, newNodeId: sourceId }
+  }
+  if (position === 'after' && targetEl.nextElementSibling === sourceEl) {
+    return { xml, newNodeId: sourceId }
+  }
+
+  sourceEl.parentElement?.removeChild(sourceEl)
+
+  if (position === 'inner') {
+    targetEl.appendChild(sourceEl)
+  } else if (position === 'before') {
+    targetEl.parentElement?.insertBefore(sourceEl, targetEl)
+  } else {
+    targetEl.parentElement?.insertBefore(sourceEl, targetEl.nextSibling)
+  }
+
+  return {
+    xml: serializeDoc(doc),
+    newNodeId: pathIdForElement(sourceEl),
   }
 }
 

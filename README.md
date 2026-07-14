@@ -76,12 +76,13 @@ pages/
 }
 ```
 
-`index.xml` 目前支持四个控件：
+`index.xml` 目前支持以下控件：
 
 | 控件 | 说明 |
 |------|------|
 | `Text` | 文本 |
 | `Button` | 按钮 |
+| `Image` | 图片（`src` / `alt` / `title` / `objectFit` / `loading`，尺寸用通用 `width` / `height`） |
 | `LinearLayout` | 线性布局（`orientation`: vertical / horizontal） |
 | `RelativeLayout` | 相对布局（`layout_alignParent*` / `layout_center*` 等） |
 

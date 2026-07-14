@@ -6,6 +6,8 @@ import {
   findNodeFromXml,
   findParentTagFromXml,
   GRAVITY_OPTIONS,
+  IMAGE_LOADING_OPTIONS,
+  IMAGE_OBJECT_FIT_OPTIONS,
   INTERACTION_EVENTS,
   ORIENTATION_OPTIONS,
   RELATIVE_BOOL_ATTRS,
@@ -75,6 +77,11 @@ const layoutForm = reactive({
   text: '',
   textSize: '',
   textColor: '',
+  src: '',
+  alt: '',
+  title: '',
+  objectFit: 'cover',
+  loading: '',
   layout_alignParentLeft: false,
   layout_alignParentRight: false,
   layout_alignParentTop: false,
@@ -139,6 +146,11 @@ function syncLayoutForm() {
   layoutForm.text = node.attrs.text ?? node.text ?? ''
   layoutForm.textSize = node.attrs.textSize ?? ''
   layoutForm.textColor = node.attrs.textColor ?? ''
+  layoutForm.src = node.attrs.src ?? ''
+  layoutForm.alt = node.attrs.alt ?? ''
+  layoutForm.title = node.attrs.title ?? ''
+  layoutForm.objectFit = node.attrs.objectFit || 'cover'
+  layoutForm.loading = node.attrs.loading ?? ''
 
   for (const item of RELATIVE_BOOL_ATTRS) {
     layoutForm[item.key] = node.attrs[item.key] === 'true'
@@ -205,12 +217,15 @@ const showTextProps = computed(
   () => selectedNode.value?.tag === 'Text' || selectedNode.value?.tag === 'Button',
 )
 
+const showImageProps = computed(() => selectedNode.value?.tag === 'Image')
+
 const showLinearProps = computed(() => selectedNode.value?.tag === 'LinearLayout')
 
 const showLayoutContainerProps = computed(
   () =>
     selectedNode.value?.tag === 'LinearLayout' ||
-    selectedNode.value?.tag === 'RelativeLayout',
+    selectedNode.value?.tag === 'RelativeLayout' ||
+    selectedNode.value?.tag === 'Image',
 )
 
 const arrayFieldOptions = computed(() =>
@@ -498,6 +513,66 @@ function clearRepeatConfig() {
                   placeholder="#303133"
                   @change="commitAttr('textColor', layoutForm.textColor)"
                 />
+              </el-form-item>
+            </el-form>
+          </template>
+
+          <template v-if="showImageProps">
+            <div class="section-title">图片</div>
+            <el-form label-position="top" size="small">
+              <el-form-item label="src">
+                <el-input
+                  v-model="layoutForm.src"
+                  clearable
+                  placeholder="图片 URL"
+                  @change="commitAttr('src', layoutForm.src)"
+                />
+              </el-form-item>
+              <el-form-item label="alt">
+                <el-input
+                  v-model="layoutForm.alt"
+                  clearable
+                  placeholder="替代文本"
+                  @change="commitAttr('alt', layoutForm.alt)"
+                />
+              </el-form-item>
+              <el-form-item label="title">
+                <el-input
+                  v-model="layoutForm.title"
+                  clearable
+                  placeholder="悬停提示"
+                  @change="commitAttr('title', layoutForm.title)"
+                />
+              </el-form-item>
+              <el-form-item label="objectFit">
+                <el-select
+                  v-model="layoutForm.objectFit"
+                  clearable
+                  placeholder="默认 cover"
+                  @change="commitAttr('objectFit', layoutForm.objectFit)"
+                >
+                  <el-option
+                    v-for="opt in IMAGE_OBJECT_FIT_OPTIONS"
+                    :key="opt.value"
+                    :label="opt.label"
+                    :value="opt.value"
+                  />
+                </el-select>
+              </el-form-item>
+              <el-form-item label="loading">
+                <el-select
+                  v-model="layoutForm.loading"
+                  clearable
+                  placeholder="默认 eager"
+                  @change="commitAttr('loading', layoutForm.loading)"
+                >
+                  <el-option
+                    v-for="opt in IMAGE_LOADING_OPTIONS"
+                    :key="opt.value"
+                    :label="opt.label"
+                    :value="opt.value"
+                  />
+                </el-select>
               </el-form-item>
             </el-form>
           </template>

@@ -10,6 +10,7 @@ export interface XmlNode {
 const SUPPORTED_TAGS = new Set([
   'Text',
   'Button',
+  'Image',
   'LinearLayout',
   'RelativeLayout',
 ])

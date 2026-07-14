@@ -15,6 +15,13 @@ function nodeLabel(node: XmlNode): string {
     const short = text.length > 16 ? `${text.slice(0, 16)}…` : text
     return `${node.tag} · ${short}`
   }
+  if (node.tag === 'Image') {
+    const label = node.attrs.alt || node.attrs.src
+    if (label) {
+      const short = label.length > 16 ? `${label.slice(0, 16)}…` : label
+      return `${node.tag} · ${short}`
+    }
+  }
   if (node.tag === 'LinearLayout') {
     const orientation = node.attrs.orientation || 'vertical'
     return `${node.tag} (${orientation})`
