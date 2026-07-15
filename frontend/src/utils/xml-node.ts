@@ -8,11 +8,18 @@ export type WidgetTag =
   | 'Icon'
   | 'LinearLayout'
   | 'RelativeLayout'
+  | 'Swiper'
+  | 'Mask'
   | 'Component'
 
 export type MovePosition = 'before' | 'after' | 'inner'
 
-const CONTAINER_TAGS = new Set<string>(['LinearLayout', 'RelativeLayout'])
+const CONTAINER_TAGS = new Set<string>([
+  'LinearLayout',
+  'RelativeLayout',
+  'Swiper',
+  'Mask',
+])
 
 export function isContainerTag(tag: string): boolean {
   return CONTAINER_TAGS.has(tag)
@@ -29,6 +36,12 @@ export const WIDGET_OPTIONS: Array<{
   { tag: 'Icon', label: '图标 Icon', description: '引用图标库中的 SVG 符号' },
   { tag: 'LinearLayout', label: '线性布局 LinearLayout', description: '水平或垂直排列子控件' },
   { tag: 'RelativeLayout', label: '相对布局 RelativeLayout', description: '相对父容器定位子控件' },
+  { tag: 'Swiper', label: '滑动窗口 Swiper', description: '多页横滑轮播，子控件各为一页' },
+  {
+    tag: 'Mask',
+    label: '遮罩 Mask',
+    description: '全屏遮罩层，一屏仅显示栈顶一个；openMask / closeMask 控制',
+  },
 ]
 
 export const IMAGE_OBJECT_FIT_OPTIONS = [
@@ -194,6 +207,34 @@ function createWidgetElement(doc: Document, tag: WidgetTag): Element {
     el.setAttribute('width', 'match_parent')
     el.setAttribute('height', '120')
     el.setAttribute('padding', '8')
+  } else if (tag === 'Swiper') {
+    el.setAttribute('width', 'match_parent')
+    el.setAttribute('height', '160')
+    el.setAttribute('indicatorDots', 'true')
+    el.setAttribute('circular', 'true')
+    el.setAttribute('autoplay', 'false')
+    el.setAttribute('interval', '3000')
+    el.setAttribute('duration', '280')
+    el.setAttribute('current', '0')
+  } else if (tag === 'Mask') {
+    const used = new Set(
+      Array.from(doc.getElementsByTagName('Mask')).map(
+        (item) => item.getAttribute('name')?.trim() || '',
+      ),
+    )
+    let name = 'mask'
+    let n = 1
+    while (used.has(name)) {
+      n += 1
+      name = `mask_${n}`
+    }
+    el.setAttribute('name', name)
+    el.setAttribute('width', 'match_parent')
+    el.setAttribute('height', 'match_parent')
+    el.setAttribute('background', 'rgba(0,0,0,0.45)')
+    el.setAttribute('gravity', 'center')
+    el.setAttribute('padding', '24')
+    el.setAttribute('closeOnClick', 'true')
   } else if (tag === 'Component') {
     el.setAttribute('componentId', '')
     el.setAttribute('width', 'match_parent')
@@ -257,7 +298,7 @@ export function appendWidget(
   }
 
   if (!isContainerTag(parentEl.tagName)) {
-    throw new Error('只能向 LinearLayout / RelativeLayout 添加子控件')
+    throw new Error('只能向 LinearLayout / RelativeLayout / Swiper / Mask 添加子控件')
   }
 
   const widget = createWidgetElement(doc, tag)

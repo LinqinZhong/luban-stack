@@ -85,7 +85,71 @@ async function readConfigFile(projectPath: string): Promise<VoiderProjectConfig>
     throw new ProjectError(`${VOIDER_CONFIG_FILE} 配置不完整或字段无效`, 400)
   }
 
-  return parsed
+  const config: VoiderProjectConfig = {
+    name: parsed.name,
+    version: parsed.version,
+    author: parsed.author,
+    engineVersion: parsed.engineVersion,
+    canvas: { width: parsed.canvas.width },
+  }
+  if (parsed.entryPage?.trim()) {
+    config.entryPage = parsed.entryPage.trim()
+  }
+  return config
+}
+
+async function writeConfigFile(
+  projectPath: string,
+  config: VoiderProjectConfig,
+): Promise<void> {
+  const configPath = path.join(projectPath, VOIDER_CONFIG_FILE)
+  try {
+    await writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`, 'utf-8')
+  } catch {
+    throw new ProjectError(`无法写入 ${VOIDER_CONFIG_FILE}`, 500)
+  }
+}
+
+/** 设置 / 清除入口页面 */
+export async function setEntryPage(
+  projectPathInput: string,
+  pageIdInput: string | null,
+): Promise<ProjectResult> {
+  const projectPath = normalizeProjectPath(projectPathInput)
+  await assertDirectory(projectPath)
+  const config = await readConfigFile(projectPath)
+
+  if (pageIdInput == null || !String(pageIdInput).trim()) {
+    delete config.entryPage
+  } else {
+    const pageId = String(pageIdInput).trim()
+    if (!/^[a-zA-Z0-9_-]+$/.test(pageId)) {
+      throw new ProjectError('页面 ID 仅支持字母、数字、下划线和短横线')
+    }
+    const pageDirPath = path.join(projectPath, 'pages', pageId)
+    try {
+      const info = await stat(pageDirPath)
+      if (!info.isDirectory()) {
+        throw new ProjectError('入口页面不存在', 404)
+      }
+    } catch (err) {
+      if (err instanceof ProjectError) throw err
+      throw new ProjectError('入口页面不存在', 404)
+    }
+    config.entryPage = pageId
+  }
+
+  await writeConfigFile(projectPath, config)
+  return { path: projectPath, config }
+}
+
+export async function getProjectEntryPage(
+  projectPathInput: string,
+): Promise<string | undefined> {
+  const projectPath = normalizeProjectPath(projectPathInput)
+  await assertDirectory(projectPath)
+  const config = await readConfigFile(projectPath)
+  return config.entryPage
 }
 
 export async function openProject(inputPath: string): Promise<ProjectResult> {

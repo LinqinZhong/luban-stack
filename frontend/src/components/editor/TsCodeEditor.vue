@@ -28,6 +28,10 @@ const props = defineProps<{
    * 用于数据池同级字段等
    */
   ambientVars?: MethodParam[]
+  /**
+   * 额外 ambient 声明（如 declare function emit...），原样注入 Monaco ExtraLib
+   */
+  ambientExtra?: string
   returnType?: MethodReturnType
 }>()
 
@@ -71,7 +75,12 @@ function sanitizeName(name: string | undefined): string {
 function buildSignature(): string {
   const paramList = (props.params ?? [])
     .filter((item) => item.name.trim())
-    .map((item) => `${item.name.trim()}: ${mapTsType(item.type)}`)
+    .map((item) => {
+      const raw = item.name.trim()
+      const rest = raw.startsWith('...')
+      const name = rest ? raw : raw
+      return `${name}: ${mapTsType(item.type)}`
+    })
     .join(', ')
   const ret = mapTsType(props.returnType || 'void')
   return `function ${sanitizeName(props.functionName)}(${paramList}): ${ret} {`
@@ -106,10 +115,9 @@ function refreshAmbient() {
   const lines = (props.ambientVars ?? [])
     .filter((item) => item.name.trim())
     .map((item) => `declare const ${item.name.trim()}: ${mapTsType(item.type)};`)
-  monaco.languages.typescript.typescriptDefaults.addExtraLib(
-    `${lines.join('\n')}\n`,
-    ambientUri,
-  )
+  const extra = (props.ambientExtra ?? '').trim()
+  const source = `${lines.join('\n')}${lines.length && extra ? '\n' : ''}${extra}\n`
+  monaco.languages.typescript.typescriptDefaults.addExtraLib(source, ambientUri)
 }
 
 function applyShellDecorations() {
@@ -304,9 +312,12 @@ watch(
 
 watch(
   () =>
-    (props.ambientVars ?? [])
-      .map((item) => `${item.name}:${item.type}`)
-      .join('|'),
+    [
+      (props.ambientVars ?? [])
+        .map((item) => `${item.name}:${item.type}`)
+        .join('|'),
+      props.ambientExtra ?? '',
+    ].join('##'),
   () => {
     refreshAmbient()
   },

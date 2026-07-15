@@ -8,61 +8,12 @@ import type { ComponentConfig, ComponentPropDef } from '../types/component'
 /** 组件入参运行时命名空间；数据池字段禁止使用此名 */
 export const DOLLAR_PROPS_NAME = '$props'
 
-/** Component 节点上的布局/元数据属性，不会当作 prop 覆盖值 */
-const COMPONENT_HOST_ATTRS = new Set([
-  'componentId',
-  'name',
-  'width',
-  'height',
-  'margin',
-  'marginLeft',
-  'marginRight',
-  'marginTop',
-  'marginBottom',
-  'padding',
-  'paddingLeft',
-  'paddingRight',
-  'paddingTop',
-  'paddingBottom',
-  'background',
-  'gravity',
-  'orientation',
-  'gap',
-  'borderRadius',
-  'borderWidth',
-  'borderColor',
-  'overflow',
-  'repeat',
-  'repeatIndex',
-  'layout_marginLeft',
-  'layout_marginTop',
-  'layout_marginRight',
-  'layout_marginBottom',
-  'layout_alignParentLeft',
-  'layout_alignParentRight',
-  'layout_alignParentTop',
-  'layout_alignParentBottom',
-  'layout_centerHorizontal',
-  'layout_centerVertical',
-  'layout_centerInParent',
-  'layout_toLeftOf',
-  'layout_toRightOf',
-  'layout_above',
-  'layout_below',
-  'onClick',
-  'onLongClick',
-  'onAppear',
-  'v-if',
-  'v-show',
-  'dynamicStyles',
-])
-
 export function isReservedDataFieldName(name: string): boolean {
   return name.trim() === DOLLAR_PROPS_NAME
 }
 
 function coercePropValue(type: DataFieldType, raw: string): DataFieldValue {
-  if (type === 'string' || type === 'icon') return raw
+  if (type === 'string' || type === 'icon' || type === 'color') return raw
   if (type === 'number') {
     const n = Number(raw)
     return Number.isFinite(n) ? n : 0
@@ -94,7 +45,8 @@ function defaultsFromDefs(defs: ComponentPropDef[]): Record<string, unknown> {
 /**
  * 组装组件运行时 `$props`：
  * - 先用 config.props 的 defaultValue
- * - 再用 Component 实例属性中与 prop 同名的值覆盖（字符串按类型转换）
+ * - 再用 Component 实例属性中与「已声明 prop」同名的值覆盖（字符串按类型转换）
+ * - 与宿主布局属性同名时（如 background）仍写入 $props，因为控件树里用 {$props.background}
  */
 export function buildDollarProps(
   config: ComponentConfig | null | undefined,
@@ -111,7 +63,6 @@ export function buildDollarProps(
   )
 
   for (const [key, raw] of Object.entries(instanceAttrs)) {
-    if (COMPONENT_HOST_ATTRS.has(key)) continue
     const def = byName.get(key)
     if (!def) continue
     result[key] = coercePropValue(def.type, raw)

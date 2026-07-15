@@ -1,9 +1,12 @@
 import { Router } from 'express'
 import { ProjectError } from '../services/project.js'
 import {
+  copyPage,
   createPage,
+  deletePage,
   getPage,
   listPages,
+  savePageConfig,
   savePageData,
   savePageXml,
 } from '../services/pages.js'
@@ -50,6 +53,47 @@ router.post('/', async (req, res) => {
       title,
     })
     res.status(201).json(page)
+  } catch (err) {
+    handleError(res, err)
+  }
+})
+
+router.post('/:pageId/copy', async (req, res) => {
+  try {
+    const page = await copyPage({
+      projectPath: getProjectPath(req),
+      pageId: req.params.pageId,
+      newId: req.body?.newId,
+      name: req.body?.name,
+      title: req.body?.title,
+    })
+    res.status(201).json(page)
+  } catch (err) {
+    handleError(res, err)
+  }
+})
+
+router.put('/:pageId/config', async (req, res) => {
+  try {
+    const page = await savePageConfig({
+      projectPath: getProjectPath(req),
+      pageId: req.params.pageId,
+      name: req.body?.name,
+      title: req.body?.title,
+    })
+    res.json(page)
+  } catch (err) {
+    handleError(res, err)
+  }
+})
+
+router.delete('/:pageId', async (req, res) => {
+  try {
+    const result = await deletePage({
+      projectPath: getProjectPath(req),
+      pageId: req.params.pageId,
+    })
+    res.json(result)
   } catch (err) {
     handleError(res, err)
   }

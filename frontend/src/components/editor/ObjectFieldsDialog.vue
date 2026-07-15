@@ -13,13 +13,15 @@ import {
   type ObjectSubField,
 } from '../../types/page-data'
 import IconValueSelect from './IconValueSelect.vue'
+import ColorPicker from './ColorPicker.vue'
 
-/** 对象内字段类型（含图标；不含嵌套对象） */
+/** 对象内字段类型（含图标/颜色；不含嵌套对象） */
 const OBJECT_FIELD_TYPE_OPTIONS: Array<{ label: string; value: DataFieldType }> = [
   { label: '字符串', value: 'string' },
   { label: '数值', value: 'number' },
   { label: '布尔值', value: 'boolean' },
   { label: '图标', value: 'icon' },
+  { label: '颜色', value: 'color' },
   { label: '数组', value: 'array' },
 ]
 
@@ -250,6 +252,14 @@ function handleSave() {
           <IconValueSelect
             :model-value="String(selectedNode.value ?? '')"
             :options="iconOptions"
+            @update:model-value="selectedNode.value = $event"
+          />
+        </div>
+        <div v-else-if="selectedNode.type === 'color'" class="field-row">
+          <label>数据值</label>
+          <ColorPicker
+            :model-value="String(selectedNode.value ?? '')"
+            placeholder="#409eff / rgba(...)"
             @update:model-value="selectedNode.value = $event"
           />
         </div>

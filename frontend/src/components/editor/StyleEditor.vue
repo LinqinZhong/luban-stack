@@ -56,6 +56,8 @@ const showBorder = computed(
     props.showBorder ??
     (props.tag === 'LinearLayout' ||
       props.tag === 'RelativeLayout' ||
+      props.tag === 'Swiper' ||
+      props.tag === 'Mask' ||
       props.tag === 'Image'),
 )
 const showOverflow = computed(

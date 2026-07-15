@@ -13,6 +13,7 @@ import {
   type VisibilityConditionConfig,
 } from '../../types/dynamic-styles'
 import type { DataField } from '../../types/page-data'
+import type { ComponentPropDef } from '../../types/component'
 import { findNearestRepeatListName } from '../../utils/data-field-paths'
 
 const props = defineProps<{
@@ -20,6 +21,10 @@ const props = defineProps<{
   title: string
   config: VisibilityConditionConfig | null
   dataFields?: DataField[]
+  /** 编辑组件时传入（含空数组），字段树展示 $props */
+  componentProps?: ComponentPropDef[] | null
+  /** 路由参数（含空对象），字段树展示 $route */
+  routeParams?: Record<string, unknown> | null
   selectedNodeId?: string
   xml?: string
 }>()
@@ -177,7 +182,9 @@ function handleClear() {
           <template #default="{ row }">
             <DataFieldPathSelect
               v-model="row.field"
-              :fields="dataFields"
+              :fields="props.dataFields"
+              :component-props="props.componentProps"
+              :route-params="props.routeParams"
               :repeat-list-name="repeatListName"
             />
           </template>

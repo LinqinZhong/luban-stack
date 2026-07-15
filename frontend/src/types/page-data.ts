@@ -5,6 +5,7 @@ export type DataFieldType =
   | 'json'
   | 'array'
   | 'icon'
+  | 'color'
 
 export type DataFieldValue =
   | string
@@ -67,6 +68,7 @@ export const DATA_FIELD_TYPE_OPTIONS: { label: string; value: DataFieldType }[] 
   { label: '数值', value: 'number' },
   { label: '布尔值', value: 'boolean' },
   { label: '图标', value: 'icon' },
+  { label: '颜色', value: 'color' },
   { label: '对象', value: 'json' },
   { label: '数组', value: 'array' },
 ]
@@ -77,6 +79,7 @@ export const NESTED_FIELD_TYPE_OPTIONS: { label: string; value: DataFieldType }[
   { label: '数值', value: 'number' },
   { label: '布尔值', value: 'boolean' },
   { label: '图标', value: 'icon' },
+  { label: '颜色', value: 'color' },
   { label: '数组', value: 'array' },
 ]
 
@@ -128,6 +131,8 @@ export function defaultValue(type: DataFieldType): DataFieldValue {
     case 'array':
       return []
     case 'icon':
+      return ''
+    case 'color':
       return ''
     default:
       return ''

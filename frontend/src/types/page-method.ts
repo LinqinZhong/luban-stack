@@ -72,7 +72,81 @@ export const BUILTIN_METHODS: PageMethod[] = [
     body: '// 写入数据池字段\n// prop: 字段名；value: 任意值',
     builtin: true,
   },
+  {
+    name: 'showToast',
+    params: [
+      { name: 'message', type: 'string' },
+      { name: 'duration', type: 'string' },
+    ],
+    returnType: 'void',
+    body:
+      '// 弹出 Toast 提示\n' +
+      "// message: 提示内容\n" +
+      "// duration: 'short'（短，默认）或 'long'（长）",
+    builtin: true,
+  },
+  {
+    name: 'openMask',
+    params: [{ name: 'name', type: 'string' }],
+    returnType: 'void',
+    body:
+      '// 打开遮罩（按 name 入栈）\n' +
+      '// 同一页面同时只显示栈顶遮罩；打开新遮罩时先前遮罩会暂时关闭，关闭后可恢复',
+    builtin: true,
+  },
+  {
+    name: 'closeMask',
+    params: [{ name: 'name', type: 'string' }],
+    returnType: 'void',
+    body:
+      '// 关闭遮罩\n' +
+      '// 不传 name：关闭当前栈顶\n' +
+      '// 传入 name：关闭该层及其之上的遮罩',
+    builtin: true,
+  },
+  {
+    name: 'closeAllMasks',
+    params: [],
+    returnType: 'void',
+    body: '// 关闭页面上所有遮罩并清空堆栈',
+    builtin: true,
+  },
 ]
+
+/** 仅组件 function 目录注入的预置方法 */
+export const COMPONENT_BUILTIN_METHODS: PageMethod[] = [
+  {
+    name: 'emit',
+    params: [
+      { name: 'event', type: 'string' },
+      { name: '...args', type: 'any' },
+    ],
+    returnType: 'void',
+    body:
+      '// 向父页面抛出组件事件\n' +
+      "// 用法：emit(事件名, ...事件参数)\n" +
+      "// 事件名对应组件设置里「事件方法」的名称；其后参数按该事件定义的参数依次传入\n" +
+      "// 例如事件 onClick 定义了参数 id，则：emit('onClick', id)",
+    builtin: true,
+  },
+]
+
+export function builtinsForRoot(root: 'pages' | 'components'): PageMethod[] {
+  if (root === 'components') {
+    return [
+      ...BUILTIN_METHODS.map((item) => ({ ...item, builtin: true as const })),
+      ...COMPONENT_BUILTIN_METHODS.map((item) => ({ ...item, builtin: true as const })),
+    ]
+  }
+  return BUILTIN_METHODS.map((item) => ({ ...item, builtin: true as const }))
+}
+
+export function isBuiltinMethodName(
+  name: string,
+  root: 'pages' | 'components' = 'pages',
+): boolean {
+  return builtinsForRoot(root).some((item) => item.name === name)
+}
 
 export function isValidMethodName(name: string): boolean {
   return /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(name)
@@ -157,12 +231,67 @@ function normalizeReturnType(value: unknown): MethodReturnType {
   return normalizeParamType(value)
 }
 
+function mapAmbientTsType(type: string): string {
+  switch (type) {
+    case 'string':
+      return 'string'
+    case 'number':
+      return 'number'
+    case 'boolean':
+      return 'boolean'
+    case 'object':
+      return 'Record<string, unknown>'
+    case 'array':
+      return 'unknown[]'
+    case 'void':
+      return 'void'
+    default:
+      return 'any'
+  }
+}
+
+/**
+ * 根据组件「事件方法」生成 emit 的 ambient 声明，供方法体编辑器提示。
+ * emit(eventName, ...该事件定义的参数)
+ */
+export function buildEmitAmbientDeclarations(
+  events: Array<{ name: string; params: MethodParam[] }>,
+): string {
+  const lines: string[] = [
+    '/** 向父页面抛出组件事件：emit(事件名, ...事件参数) */',
+  ]
+  for (const event of events) {
+    const eventName = event.name.trim()
+    if (!eventName || !/^[A-Za-z_$][\w$]*$/.test(eventName)) continue
+    const params = (event.params ?? [])
+      .filter((item) => item.name.trim())
+      .map((item) => {
+        const name = item.name.trim().replace(/^\.\.\./, '')
+        const safe = /^[A-Za-z_$][\w$]*$/.test(name) ? name : 'arg'
+        return `${safe}: ${mapAmbientTsType(item.type)}`
+      })
+    const paramList = params.length ? `, ${params.join(', ')}` : ''
+    lines.push(`declare function emit(event: '${eventName}'${paramList}): void;`)
+  }
+  lines.push('declare function emit(event: string, ...args: any[]): void;')
+  return `${lines.join('\n')}\n`
+}
+
+/** 事件绑定：内联自定义方法体（下拉里的「自定义」） */
+export const CUSTOM_EVENT_METHOD = '__custom__'
+
 /** 事件绑定：单个方法调用 */
 export interface EventMethodBinding {
   id: string
   method: string
   /** 参数名 → 字面量/表达式字符串 */
   args: Record<string, string>
+  /** method === CUSTOM_EVENT_METHOD 时的 TypeScript 方法体 */
+  body?: string
+}
+
+export function isCustomEventMethod(method: string | undefined): boolean {
+  return method === CUSTOM_EVENT_METHOD
 }
 
 export function parseEventBindings(raw: string | undefined): EventMethodBinding[] {
@@ -185,9 +314,12 @@ export function parseEventBindings(raw: string | undefined): EventMethodBinding[
       .filter((item) => item && typeof item === 'object')
       .map((item, index) => {
         const row = item as Partial<EventMethodBinding>
+        const method = String(row.method ?? '').trim()
+        const body =
+          typeof row.body === 'string' ? row.body : undefined
         return {
           id: row.id || `bind_${index}_${Date.now()}`,
-          method: String(row.method ?? '').trim(),
+          method,
           args:
             row.args && typeof row.args === 'object' && !Array.isArray(row.args)
               ? Object.fromEntries(
@@ -197,6 +329,9 @@ export function parseEventBindings(raw: string | undefined): EventMethodBinding[
                   ]),
                 )
               : {},
+          ...(method === CUSTOM_EVENT_METHOD || body != null
+            ? { body: body ?? '' }
+            : {}),
         }
       })
       .filter((item) => item.method)
@@ -210,11 +345,17 @@ export function parseEventBindings(raw: string | undefined): EventMethodBinding[
 export function serializeEventBindings(bindings: EventMethodBinding[]): string {
   const list = bindings
     .filter((item) => item.method.trim())
-    .map((item) => ({
-      id: item.id,
-      method: item.method.trim(),
-      args: item.args ?? {},
-    }))
+    .map((item) => {
+      const row: EventMethodBinding = {
+        id: item.id,
+        method: item.method.trim(),
+        args: item.args ?? {},
+      }
+      if (item.method.trim() === CUSTOM_EVENT_METHOD) {
+        row.body = typeof item.body === 'string' ? item.body : ''
+      }
+      return row
+    })
   if (!list.length) return ''
   return JSON.stringify(list)
 }
@@ -225,9 +366,10 @@ export function countEventBindings(raw: string | undefined): number {
 
 export const INTERACTION_EVENT_KEYS = ['onClick', 'onLongClick', 'onAppear'] as const
 
-export function countNodeEventBindings(attrs: Record<string, string | undefined>): number {
-  return INTERACTION_EVENT_KEYS.reduce(
-    (sum, key) => sum + countEventBindings(attrs[key]),
-    0,
-  )
+export function countNodeEventBindings(
+  attrs: Record<string, string | undefined>,
+  extraKeys: string[] = [],
+): number {
+  const keys = [...new Set<string>([...INTERACTION_EVENT_KEYS, ...extraKeys])]
+  return keys.reduce((sum, key) => sum + countEventBindings(attrs[key]), 0)
 }

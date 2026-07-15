@@ -4,7 +4,8 @@ import { constants } from 'node:fs'
 import path from 'node:path'
 import { ProjectError } from './project.js'
 import {
-  BUILTIN_METHODS,
+  builtinsForRoot,
+  isBuiltinMethodName,
   isValidMethodName,
   parseMethodFile,
   serializeMethodFile,
@@ -93,7 +94,7 @@ export async function listPageMethods(
   for (const file of files) {
     if (!file.endsWith('.ts')) continue
     const base = file.slice(0, -3)
-    if (BUILTIN_METHODS.some((item) => item.name === base)) continue
+    if (isBuiltinMethodName(base, root)) continue
     try {
       const raw = await readFile(path.join(dir, file), 'utf-8')
       custom.push(parseMethodFile(raw, base))
@@ -104,10 +105,7 @@ export async function listPageMethods(
 
   custom.sort((a, b) => a.name.localeCompare(b.name))
   return {
-    methods: [
-      ...BUILTIN_METHODS.map((item) => ({ ...item, builtin: true })),
-      ...custom,
-    ],
+    methods: [...builtinsForRoot(root), ...custom],
   }
 }
 
@@ -127,12 +125,12 @@ export async function savePageMethod(options: {
   if (!isValidMethodName(name)) {
     throw new ProjectError('方法名需以字母或下划线开头，仅含字母、数字、下划线')
   }
-  if (BUILTIN_METHODS.some((item) => item.name === name)) {
+  if (isBuiltinMethodName(name, root)) {
     throw new ProjectError('不能覆盖预置方法')
   }
 
   const previousName = options.previousName?.trim()
-  if (previousName && BUILTIN_METHODS.some((item) => item.name === previousName)) {
+  if (previousName && isBuiltinMethodName(previousName, root)) {
     throw new ProjectError('不能修改预置方法')
   }
 
@@ -175,7 +173,7 @@ export async function deletePageMethod(options: {
 
   const name = options.name?.trim() ?? ''
   if (!name) throw new ProjectError('请提供方法名')
-  if (BUILTIN_METHODS.some((item) => item.name === name)) {
+  if (isBuiltinMethodName(name, root)) {
     throw new ProjectError('不能删除预置方法')
   }
 

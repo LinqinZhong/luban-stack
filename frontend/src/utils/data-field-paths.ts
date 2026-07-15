@@ -1,6 +1,7 @@
 import type { DataField, DataFieldType } from '../types/page-data'
+import { defaultValue, inferValueType } from '../types/page-data'
+import type { ComponentPropDef } from '../types/component'
 import { findNodeFromXml } from './xml-node'
-import { inferValueType } from '../types/page-data'
 
 export interface FieldPathTreeNode {
   id: string
@@ -182,12 +183,71 @@ function buildRepeatItemTree(
   }
 }
 
-/** 构建条件字段树：可选数据池字段 + 祖先/自身 repeat 的 index / item.xxx */
+/** 组件参数树：$props / $props.xxx（componentProps 非 null/undefined 时始终展示根） */
+function buildPropsTree(
+  componentProps: ComponentPropDef[] | null | undefined,
+): FieldPathTreeNode | null {
+  if (componentProps == null) return null
+
+  const list = Array.isArray(componentProps) ? componentProps : []
+  const defs = list.filter((item) => item?.name?.trim())
+  return {
+    id: '$props',
+    label: '$props（组件参数）',
+    value: '$props',
+    type: 'json',
+    selectable: true,
+    children: defs.length
+      ? defs.map((def) => {
+          const name = def.name.trim()
+          const sample =
+            def.defaultValue === '' || def.defaultValue === undefined
+              ? defaultValue(def.type)
+              : def.defaultValue
+          return buildFromUnknown(`$props.${name}`, name, sample)
+        })
+      : undefined,
+  }
+}
+
+/** 路由参数树：$route / $route.xxx */
+function buildRouteTree(
+  routeParams: Record<string, unknown> | null | undefined,
+): FieldPathTreeNode | null {
+  if (routeParams == null) return null
+
+  const entries = Object.entries(routeParams)
+  return {
+    id: '$route',
+    label: '$route（路由参数）',
+    value: '$route',
+    type: 'json',
+    selectable: true,
+    children: entries.length
+      ? entries.map(([key, value]) =>
+          buildFromUnknown(`$route.${key}`, key, value),
+        )
+      : [
+          // 编辑态尚无跳转参数时，仍提供常用 id 供选择
+          buildFromUnknown('$route.id', 'id', ''),
+        ],
+  }
+}
+
+/** 构建条件字段树：数据池 + 组件 $props + 路由 $route + repeat */
 export function buildConditionFieldTree(
   fields: DataField[],
   repeatListName?: string | null,
+  componentProps?: ComponentPropDef[] | null,
+  routeParams?: Record<string, unknown> | null,
 ): FieldPathTreeNode[] {
   const roots: FieldPathTreeNode[] = []
+
+  const propsRoot = buildPropsTree(componentProps)
+  if (propsRoot) roots.push(propsRoot)
+
+  const routeRoot = buildRouteTree(routeParams)
+  if (routeRoot) roots.push(routeRoot)
 
   if (repeatListName) {
     const repeatRoot = buildRepeatItemTree(repeatListName, fields)
@@ -196,7 +256,7 @@ export function buildConditionFieldTree(
 
   for (const field of fields) {
     const name = field.name.trim()
-    if (!name) continue
+    if (!name || name === '$props' || name === '$route') continue
     roots.push(buildFromUnknown(name, name, field.value))
   }
 
@@ -208,12 +268,13 @@ export function pathNeedsArrayIndex(
   path: string,
   fields: DataField[],
   repeatListName?: string | null,
+  componentProps?: ComponentPropDef[] | null,
+  routeParams?: Record<string, unknown> | null,
 ): boolean {
   if (!path || path === 'index' || path === 'item' || path.startsWith('item.')) {
-    // item.xxx 若本身是数组仍需要下标
     if (path.startsWith('item.') && !/\[\d+\]$/.test(path)) {
       const node = findTreeNodeByValue(
-        buildConditionFieldTree(fields, repeatListName),
+        buildConditionFieldTree(fields, repeatListName, componentProps, routeParams),
         path,
       )
       return node?.type === 'array'
@@ -223,7 +284,7 @@ export function pathNeedsArrayIndex(
   if (/\[\d+\]$/.test(path)) return false
 
   const node = findTreeNodeByValue(
-    buildConditionFieldTree(fields, repeatListName),
+    buildConditionFieldTree(fields, repeatListName, componentProps, routeParams),
     path,
   )
   return node?.type === 'array'

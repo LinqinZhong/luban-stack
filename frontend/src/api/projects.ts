@@ -11,6 +11,8 @@ export interface VoiderProjectConfig {
   canvas: {
     width: number
   }
+  /** 入口页面 id */
+  entryPage?: string
 }
 
 export interface ProjectResult {
@@ -79,6 +81,16 @@ export function saveIconLibrary(payload: {
   icons: IconDefinition[]
 }) {
   return request<IconLibrary>('/api/projects/icons', {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  })
+}
+
+export function setProjectEntryPage(payload: {
+  projectPath: string
+  pageId: string | null
+}) {
+  return request<ProjectResult>('/api/projects/entry', {
     method: 'PUT',
     body: JSON.stringify(payload),
   })

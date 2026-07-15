@@ -12,6 +12,7 @@ import {
   type ComponentPropDef,
 } from '../../types/component'
 import IconValueSelect from './IconValueSelect.vue'
+import ColorPicker from './ColorPicker.vue'
 
 const props = defineProps<{
   modelValue: boolean
@@ -39,6 +40,28 @@ const jsonDefaultText = reactive({ value: '' })
 const isEdit = computed(() => Boolean(props.prop?.name?.trim()))
 const title = computed(() => (isEdit.value ? '编辑参数' : '添加参数'))
 
+const defaultEditor = computed(() => {
+  const type = String(draft.type ?? '')
+  if (type === 'string') return 'string'
+  if (type === 'number') return 'number'
+  if (type === 'boolean') return 'boolean'
+  if (type === 'icon') return 'icon'
+  if (type === 'color') return 'color'
+  if (type === 'array') return 'array'
+  if (type === 'json') return 'json'
+  return 'json'
+})
+
+const colorDefault = computed({
+  get: () => {
+    const value = draft.defaultValue
+    return value == null || typeof value === 'object' ? '' : String(value)
+  },
+  set(value: string) {
+    draft.defaultValue = value
+  },
+})
+
 function formatDefaultForJson(value: DataFieldValue): string {
   try {
     return JSON.stringify(value ?? defaultValue('json'), null, 2)
@@ -60,6 +83,10 @@ function syncDraft(source: ComponentPropDef | null) {
   } else {
     jsonDefaultText.value = ''
   }
+  // 颜色默认值若被错误存成对象，纠正为字符串
+  if (draft.type === 'color' && typeof draft.defaultValue === 'object') {
+    draft.defaultValue = ''
+  }
 }
 
 watch(
@@ -70,11 +97,16 @@ watch(
   },
 )
 
-function onTypeChange(type: DataFieldType) {
+function onTypeChange(raw: DataFieldType | string) {
+  const type = (
+    typeof raw === 'string' ? raw : String(raw ?? '')
+  ) as DataFieldType
   draft.type = type
   draft.defaultValue = defaultValue(type)
   if (type === 'json' || type === 'array') {
     jsonDefaultText.value = formatDefaultForJson(draft.defaultValue)
+  } else {
+    jsonDefaultText.value = ''
   }
 }
 
@@ -122,6 +154,9 @@ function handleSave() {
     const parsed = parseComplexDefault()
     if (parsed === null) return
     defaultVal = parsed
+  } else if (draft.type === 'color' || draft.type === 'icon' || draft.type === 'string') {
+    defaultVal =
+      defaultVal == null || typeof defaultVal === 'object' ? '' : String(defaultVal)
   }
 
   emit('save', {
@@ -170,35 +205,43 @@ function handleSave() {
 
       <el-form-item label="默认值">
         <el-input
-          v-if="draft.type === 'string'"
+          v-if="defaultEditor === 'string'"
           :model-value="String(draft.defaultValue ?? '')"
           placeholder="默认值"
           @update:model-value="draft.defaultValue = $event"
         />
         <el-input-number
-          v-else-if="draft.type === 'number'"
+          v-else-if="defaultEditor === 'number'"
           :model-value="Number(draft.defaultValue ?? 0)"
           controls-position="right"
           style="width: 100%"
           @update:model-value="draft.defaultValue = Number($event ?? 0)"
         />
         <el-switch
-          v-else-if="draft.type === 'boolean'"
+          v-else-if="defaultEditor === 'boolean'"
           :model-value="Boolean(draft.defaultValue)"
           @update:model-value="draft.defaultValue = $event"
         />
         <IconValueSelect
-          v-else-if="draft.type === 'icon'"
+          v-else-if="defaultEditor === 'icon'"
           :model-value="String(draft.defaultValue ?? '')"
           :options="iconOptions"
           @update:model-value="draft.defaultValue = $event"
+        />
+        <ColorPicker
+          v-else-if="defaultEditor === 'color'"
+          :key="'color-default'"
+          v-model="colorDefault"
+          placeholder="#409eff / rgba(...)"
         />
         <el-input
           v-else
           v-model="jsonDefaultText.value"
           type="textarea"
           :rows="5"
-          :placeholder="draft.type === 'array' ? 'JSON 数组，例如 []' : 'JSON 对象，例如 {}'"
+          :placeholder="
+            defaultEditor === 'array' ? 'JSON 数组，例如 []' : 'JSON 对象，例如 {}'
+          "
         />
       </el-form-item>
 

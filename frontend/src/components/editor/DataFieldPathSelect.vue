@@ -1,18 +1,23 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import type { DataField } from '../../types/page-data'
+import type { ComponentPropDef } from '../../types/component'
 import NumericInput from './NumericInput.vue'
 import {
   buildConditionFieldTree,
   composeFieldPath,
-  disableNonSelectable,
   pathNeedsArrayIndex,
   splitFieldPath,
+  type FieldPathTreeNode,
 } from '../../utils/data-field-paths'
 
 const props = defineProps<{
   modelValue: string
   fields?: DataField[]
+  /** 组件参数定义；传入数组（含空数组）即展示 $props 根 */
+  componentProps?: ComponentPropDef[] | null
+  /** 路由参数；传入对象（含空对象）即展示 $route 根 */
+  routeParams?: Record<string, unknown> | null
   /** 最近的 repeat 数组字段名 */
   repeatListName?: string | null
 }>()
@@ -25,16 +30,44 @@ const treeSelected = ref('')
 const arrayIndex = ref('')
 
 const treeData = computed(() =>
-  disableNonSelectable(
-    buildConditionFieldTree(props.fields ?? [], props.repeatListName),
+  buildConditionFieldTree(
+    props.fields ?? [],
+    props.repeatListName,
+    props.componentProps,
+    props.routeParams,
   ),
 )
+
+/** 展平为 el-select 选项，避免 tree-select 在表格单元格内偶发「无数据」 */
+const flatOptions = computed(() => {
+  const out: Array<{ value: string; label: string }> = []
+
+  function walk(nodes: FieldPathTreeNode[], trail: string[]) {
+    for (const node of nodes) {
+      const nextTrail = [...trail, node.label]
+      if (node.selectable && node.value) {
+        out.push({
+          value: node.value,
+          label: nextTrail.join(' / '),
+        })
+      }
+      if (node.children?.length) {
+        walk(node.children, nextTrail)
+      }
+    }
+  }
+
+  walk(treeData.value, [])
+  return out
+})
 
 const showIndexInput = computed(() =>
   pathNeedsArrayIndex(
     treeSelected.value,
     props.fields ?? [],
     props.repeatListName,
+    props.componentProps,
+    props.routeParams,
   ),
 )
 
@@ -42,10 +75,9 @@ watch(
   () => props.modelValue,
   (value) => {
     const { selected, arrayIndex: idx } = splitFieldPath(value || '')
-    // 若完整 path 在树里能精确命中（含 list[0].x），优先整段选中
-    const exact = findExactInTree(treeData.value, value || '')
+    const exact = flatOptions.value.find((item) => item.value === (value || ''))
     if (exact) {
-      treeSelected.value = exact
+      treeSelected.value = exact.value
       arrayIndex.value = ''
       return
     }
@@ -55,22 +87,6 @@ watch(
   { immediate: true },
 )
 
-function findExactInTree(
-  nodes: Array<{ value?: string; children?: unknown[] }>,
-  value: string,
-): string {
-  if (!value) return ''
-  for (const node of nodes) {
-    if (node.value === value) return value
-    const kids = node.children as Array<{ value?: string; children?: unknown[] }> | undefined
-    if (kids?.length) {
-      const found = findExactInTree(kids, value)
-      if (found) return found
-    }
-  }
-  return ''
-}
-
 function emitPath() {
   const next = showIndexInput.value
     ? composeFieldPath(treeSelected.value, arrayIndex.value)
@@ -78,7 +94,7 @@ function emitPath() {
   emit('update:modelValue', next)
 }
 
-function onTreeChange() {
+function onSelectChange() {
   if (!showIndexInput.value) {
     arrayIndex.value = ''
   } else if (!arrayIndex.value) {
@@ -94,26 +110,32 @@ function onIndexChange() {
 
 <template>
   <div class="field-path-select">
-    <el-tree-select
+    <el-select
+      v-if="flatOptions.length"
       v-model="treeSelected"
-      :data="treeData"
       filterable
       clearable
-      check-strictly
-      :render-after-expand="false"
-      default-expand-all
       placeholder="选择字段"
-      :props="{
-        label: 'label',
-        children: 'children',
-        value: 'value',
-        disabled: 'disabled',
-      }"
       style="flex: 1; min-width: 0"
-      @change="onTreeChange"
+      @change="onSelectChange"
+    >
+      <el-option
+        v-for="opt in flatOptions"
+        :key="opt.value"
+        :label="opt.label"
+        :value="opt.value"
+      />
+    </el-select>
+    <el-input
+      v-else
+      :model-value="modelValue"
+      clearable
+      placeholder="输入字段，如 $props.id / $route.id"
+      style="flex: 1; min-width: 0"
+      @update:model-value="emit('update:modelValue', $event ?? '')"
     />
     <NumericInput
-      v-if="showIndexInput"
+      v-if="flatOptions.length && showIndexInput"
       v-model="arrayIndex"
       class="index-input"
       placeholder="下标"

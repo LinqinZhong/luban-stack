@@ -38,8 +38,8 @@ const props = defineProps<{
    */
   insideScrollPort?: boolean
   /**
-   * 纵向父布局内需要「占满剩余高度」的节点（如内容区 RelativeLayout）。
-   * 仅此类节点使用 flex:1；其它纵向子项按内容堆叠，避免重叠。
+   * 纵向父布局内需要「占满剩余高度」的节点（height=match_parent）。
+   * 仅此类节点使用 flex:1；其它纵向子项按内容堆叠。
    */
   fillRemainingHeight?: boolean
 }>()
@@ -177,7 +177,7 @@ const fillCrossAxis = computed(
     absoluteStretchedY.value,
 )
 
-/** 纵向普通子项按内容堆叠；内容区 RelativeLayout 除外 */
+/** 纵向普通子项按内容堆叠；match_parent 撑满项除外 */
 const stackByContent = computed(
   () =>
     !props.scrollPort &&
@@ -227,6 +227,10 @@ const showMarginFrame = computed(
 
 const showContentFrame = computed(() => props.selected || props.hovered)
 
+const hasBadges = computed(
+  () => Boolean(props.repeatBadge) || (props.eventBadgeCount ?? 0) > 0,
+)
+
 const frameKind = computed(() => {
   if (props.selected) return 'selected'
   if (props.hovered) return 'hovered'
@@ -270,7 +274,7 @@ function onClick(event: MouseEvent) {
       >
         <slot />
         <div v-if="showContentFrame" class="frame-content" :class="frameKind" />
-        <div v-if="repeatBadge || (eventBadgeCount ?? 0) > 0" class="badge-stack">
+        <div v-if="hasBadges" class="badge-stack">
           <EventBadge
             v-if="(eventBadgeCount ?? 0) > 0"
             :count="eventBadgeCount"
@@ -293,14 +297,11 @@ function onClick(event: MouseEvent) {
 
 .margin-box {
   position: relative;
+  overflow: visible;
 }
 
-.content-box.selected {
-  z-index: 2;
-}
-
-.content-box.hovered {
-  z-index: 1;
+.content-box {
+  overflow: visible;
 }
 
 .frame-content,
@@ -333,15 +334,6 @@ function onClick(event: MouseEvent) {
 
 .frame-margin.hovered {
   border: 2px dashed #ff85c0;
-}
-
-.repeat-badge-corner {
-  position: absolute;
-  top: 0;
-  right: 0;
-  z-index: 25;
-  /* 中心对齐控件右上角 */
-  transform: translate(50%, -50%);
 }
 
 .badge-stack {

@@ -1,9 +1,12 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { Delete, Plus, View } from '@element-plus/icons-vue'
 import type { PageMethod } from '../../types/page-method'
 
-defineProps<{
+const props = defineProps<{
   methods: PageMethod[]
+  /** 组件方法面板文案 */
+  forComponent?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -11,6 +14,12 @@ const emit = defineEmits<{
   edit: [method: PageMethod]
   remove: [method: PageMethod]
 }>()
+
+const panelDesc = computed(() =>
+  props.forComponent
+    ? '组件 function 目录 · 内置 emit(事件名, ...参数) 向父页面抛事件'
+    : '页面 function 目录 · 一个方法一个 .ts 文件',
+)
 </script>
 
 <template>
@@ -18,7 +27,7 @@ const emit = defineEmits<{
     <div class="toolbar">
       <div>
         <div class="title">方法</div>
-        <div class="desc">页面 function 目录 · 一个方法一个 .ts 文件</div>
+        <div class="desc">{{ panelDesc }}</div>
       </div>
       <el-button type="primary" :icon="Plus" @click="emit('add')">添加方法</el-button>
     </div>

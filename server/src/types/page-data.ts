@@ -5,6 +5,7 @@ export type DataFieldType =
   | 'json'
   | 'array'
   | 'icon'
+  | 'color'
 
 export type DataFieldValue =
   | string

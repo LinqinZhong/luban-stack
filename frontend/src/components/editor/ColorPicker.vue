@@ -28,8 +28,8 @@ const swatchColor = computed(() => {
   return value.startsWith('#') ? value : '#ffffff'
 })
 
-function normalizeColor(value: string): string {
-  const trimmed = value.trim()
+function normalizeColor(value: unknown): string {
+  const trimmed = String(value ?? '').trim()
   if (!trimmed || trimmed === 'transparent') return trimmed
   if (trimmed.startsWith('#')) return trimmed
   return trimmed

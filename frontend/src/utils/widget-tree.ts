@@ -46,6 +46,13 @@ function nodeLabel(node: XmlNode): string {
     const orientation = node.attrs.orientation || 'vertical'
     return `${node.tag} (${orientation})`
   }
+  if (node.tag === 'Swiper') {
+    const n = node.children.length
+    return n ? `${node.tag} · ${n}页` : node.tag
+  }
+  if (node.tag === 'Mask') {
+    return '遮罩 Mask'
+  }
   return node.tag
 }
 

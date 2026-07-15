@@ -13,7 +13,10 @@ export interface VoiderProjectConfig {
     /** 画布宽度（px） */
     width: number
   }
+  /** 入口页面 id（pages/ 下目录名） */
+  entryPage?: string
 }
+
 
 export const ENGINE_VERSION = '1.0.0'
 export const DEFAULT_CANVAS_WIDTH = 375
@@ -42,14 +45,25 @@ export function isValidProjectConfig(value: unknown): value is VoiderProjectConf
   const config = value as Record<string, unknown>
   const canvas = config.canvas as Record<string, unknown> | undefined
 
-  return (
-    typeof config.name === 'string' &&
-    typeof config.version === 'string' &&
-    typeof config.author === 'string' &&
-    typeof config.engineVersion === 'string' &&
-    !!canvas &&
-    typeof canvas.width === 'number' &&
-    Number.isFinite(canvas.width) &&
-    canvas.width > 0
-  )
+  if (
+    typeof config.name !== 'string' ||
+    typeof config.version !== 'string' ||
+    typeof config.author !== 'string' ||
+    typeof config.engineVersion !== 'string' ||
+    !canvas ||
+    typeof canvas.width !== 'number' ||
+    !Number.isFinite(canvas.width) ||
+    canvas.width <= 0
+  ) {
+    return false
+  }
+
+  if (
+    config.entryPage !== undefined &&
+    (typeof config.entryPage !== 'string' || !config.entryPage.trim())
+  ) {
+    return false
+  }
+
+  return true
 }

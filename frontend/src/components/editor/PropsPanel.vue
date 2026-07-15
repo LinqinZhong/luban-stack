@@ -6,7 +6,7 @@ import DynamicStyleStateDialog from './DynamicStyleStateDialog.vue'
 import EventBindDialog from './EventBindDialog.vue'
 import NumericInput from './NumericInput.vue'
 import VisibilityConditionDialog from './VisibilityConditionDialog.vue'
-import { countEventBindings, type PageMethod } from '../../types/page-method'
+import { countEventBindings, type MethodParam, type PageMethod } from '../../types/page-method'
 import {
   findNodeFromXml,
   findParentTagFromXml,
@@ -19,7 +19,6 @@ import {
   setNodeAttribute,
   setNodeAttributes,
   SIZE_OPTIONS,
-  type InteractionEventKey,
 } from '../../utils/xml-node'
 import { OVERFLOW_OPTIONS } from '../../utils/xml'
 import type { DataField } from '../../types/page-data'
@@ -55,6 +54,12 @@ const props = defineProps<{
   dataFields?: DataField[]
   iconOptions?: Array<{ id: string; label: string }>
   methods?: PageMethod[]
+  /** 当前组件的事件方法定义（绑定 emit 时用） */
+  emitEvents?: import('../../types/component').ComponentEventDef[]
+  /** 编辑组件资源时的参数定义（条件/动态样式可选 $props；传数组含空） */
+  componentProps?: ComponentPropDef[] | null
+  /** 当前路由参数（可选 $route） */
+  routeParams?: Record<string, unknown> | null
   /** 页面中引用的组件（用于配置组件入参） */
   componentMap?: ComponentRenderMap
   /** 自增请求：切换到动态并打开重复弹窗 */
@@ -79,11 +84,52 @@ const parentTag = computed(() =>
 
 const isRelativeChild = computed(() => parentTag.value === 'RelativeLayout')
 
-const eventForm = reactive<Record<InteractionEventKey, string>>({
-  onClick: '',
-  onLongClick: '',
-  onAppear: '',
+const isComponentNode = computed(() => selectedNode.value?.tag === 'Component')
+
+const selectedComponentDetail = computed(() => {
+  if (!isComponentNode.value || !selectedNode.value) return null
+  const id = selectedNode.value.attrs.componentId?.trim()
+  if (!id || !props.componentMap) return null
+  return props.componentMap[id] ?? null
 })
+
+/** 事件 Tab 展示的事件：普通控件为内置交互；Component 为其「事件方法」定义 */
+const selectableEvents = computed(() => {
+  if (isComponentNode.value) {
+    const events = selectedComponentDetail.value?.config.events ?? []
+    return events
+      .map((item) => {
+        const name = item.name.trim()
+        if (!name) return null
+        const params = (item.params ?? [])
+          .filter((p) => p.name.trim())
+          .map((p) => `${p.name.trim()}: ${p.type}`)
+          .join(', ')
+        return {
+          key: name,
+          label: params ? `${name}(${params})` : name,
+        }
+      })
+      .filter((item): item is { key: string; label: string } => Boolean(item))
+  }
+  return INTERACTION_EVENTS.map((item) => ({
+    key: item.key,
+    label: item.label,
+  }))
+})
+
+const eventForm = reactive<Record<string, string>>({})
+
+function syncEventForm() {
+  const node = selectedNode.value
+  const keys = selectableEvents.value.map((item) => item.key)
+  for (const key of Object.keys(eventForm)) {
+    if (!keys.includes(key)) delete eventForm[key]
+  }
+  for (const key of keys) {
+    eventForm[key] = node?.attrs[key] ?? ''
+  }
+}
 
 const layoutForm = reactive({
   name: '',
@@ -120,6 +166,15 @@ const layoutForm = reactive({
   iconId: '',
   size: '',
   color: '',
+  autoplay: false,
+  circular: true,
+  indicatorDots: true,
+  interval: '3000',
+  duration: '280',
+  current: '0',
+  indicatorColor: '',
+  indicatorActiveColor: '',
+  closeOnClick: true,
   layout_alignParentLeft: false,
   layout_alignParentRight: false,
   layout_alignParentTop: false,
@@ -194,6 +249,24 @@ function syncLayoutForm() {
   layoutForm.iconId = node.attrs.iconId ?? ''
   layoutForm.size = node.attrs.size ?? ''
   layoutForm.color = node.attrs.color ?? ''
+  layoutForm.autoplay = node.attrs.autoplay === 'true'
+  layoutForm.circular =
+    node.attrs.circular == null ||
+    node.attrs.circular === '' ||
+    node.attrs.circular === 'true'
+  layoutForm.indicatorDots =
+    node.attrs.indicatorDots == null ||
+    node.attrs.indicatorDots === '' ||
+    node.attrs.indicatorDots === 'true'
+  layoutForm.interval = node.attrs.interval ?? '3000'
+  layoutForm.duration = node.attrs.duration ?? '280'
+  layoutForm.current = node.attrs.current ?? '0'
+  layoutForm.indicatorColor = node.attrs.indicatorColor ?? ''
+  layoutForm.indicatorActiveColor = node.attrs.indicatorActiveColor ?? ''
+  layoutForm.closeOnClick =
+    node.attrs.closeOnClick == null ||
+    node.attrs.closeOnClick === '' ||
+    node.attrs.closeOnClick === 'true'
 
   for (const item of RELATIVE_BOOL_ATTRS) {
     layoutForm[item.key] = node.attrs[item.key] === 'true'
@@ -205,11 +278,9 @@ function syncLayoutForm() {
 }
 
 watch(
-  selectedNode,
-  (node) => {
-    for (const event of INTERACTION_EVENTS) {
-      eventForm[event.key] = node?.attrs[event.key] ?? ''
-    }
+  [selectedNode, selectableEvents],
+  () => {
+    syncEventForm()
     syncLayoutForm()
   },
   { immediate: true },
@@ -219,6 +290,7 @@ watch(
   () => props.xml,
   () => {
     if (props.tab === 'style') syncLayoutForm()
+    if (props.tab === 'event') syncEventForm()
   },
 )
 
@@ -232,19 +304,30 @@ function commitAttr(name: string, value: string) {
   }
 }
 
-function eventBindingSummary(key: InteractionEventKey): string {
+function eventBindingSummary(key: string): string {
   const count = countEventBindings(eventForm[key])
   if (!count) return '未配置'
   return `已绑定 ${count} 个方法`
 }
 
 const eventBindVisible = ref(false)
-const eventBindKey = ref<InteractionEventKey>('onClick')
+const eventBindKey = ref('onClick')
 const eventBindLabel = ref('')
+const eventBindParams = ref<MethodParam[]>([])
 
-function openEventBind(key: InteractionEventKey, label: string) {
+function openEventBind(key: string, label: string) {
   eventBindKey.value = key
   eventBindLabel.value = label
+  if (isComponentNode.value) {
+    const def = (selectedComponentDetail.value?.config.events ?? []).find(
+      (item) => item.name.trim() === key,
+    )
+    eventBindParams.value = (def?.params ?? [])
+      .filter((item) => item.name.trim())
+      .map((item) => ({ name: item.name.trim(), type: item.type }))
+  } else {
+    eventBindParams.value = []
+  }
   eventBindVisible.value = true
 }
 
@@ -281,14 +364,8 @@ const showImageProps = computed(() => selectedNode.value?.tag === 'Image')
 
 const showIconProps = computed(() => selectedNode.value?.tag === 'Icon')
 
-const isComponentNode = computed(() => selectedNode.value?.tag === 'Component')
-
-const selectedComponentDetail = computed(() => {
-  if (!isComponentNode.value || !selectedNode.value) return null
-  const id = selectedNode.value.attrs.componentId?.trim()
-  if (!id || !props.componentMap) return null
-  return props.componentMap[id] ?? null
-})
+const showSwiperProps = computed(() => selectedNode.value?.tag === 'Swiper')
+const showMaskProps = computed(() => selectedNode.value?.tag === 'Mask')
 
 /** 在线组件可配置的参数定义（过滤空名） */
 const componentPropDefs = computed(() =>
@@ -337,6 +414,10 @@ function propDefaultPreview(def: ComponentPropDef): string {
   return String(v)
 }
 
+function looksLikeDataBinding(raw: string | undefined): boolean {
+  return /\{[^{}]+\}/.test(String(raw ?? ''))
+}
+
 function commitComponentProp(name: string) {
   commitAttr(name, componentPropForm[name] ?? '')
 }
@@ -362,6 +443,8 @@ const showLayoutContainerProps = computed(
   () =>
     selectedNode.value?.tag === 'LinearLayout' ||
     selectedNode.value?.tag === 'RelativeLayout' ||
+    selectedNode.value?.tag === 'Swiper' ||
+    selectedNode.value?.tag === 'Mask' ||
     selectedNode.value?.tag === 'Image',
 )
 
@@ -933,6 +1016,92 @@ function saveVisibilityConfig(config: VisibilityConditionConfig) {
             </el-form>
           </template>
 
+          <template v-if="showSwiperProps">
+            <div class="section-title">滑动窗口</div>
+            <el-form label-position="top" size="small">
+              <el-form-item label="autoplay 自动播放">
+                <el-switch
+                  v-model="layoutForm.autoplay"
+                  @change="commitAttr('autoplay', layoutForm.autoplay ? 'true' : '')"
+                />
+              </el-form-item>
+              <el-form-item label="interval 间隔(ms)">
+                <NumericInput
+                  v-model="layoutForm.interval"
+                  placeholder="3000"
+                  :min="800"
+                  :max="60000"
+                  @change="commitAttr('interval', layoutForm.interval)"
+                />
+              </el-form-item>
+              <el-form-item label="circular 循环">
+                <el-switch
+                  v-model="layoutForm.circular"
+                  @change="commitAttr('circular', layoutForm.circular ? 'true' : 'false')"
+                />
+              </el-form-item>
+              <el-form-item label="indicatorDots 指示点">
+                <el-switch
+                  v-model="layoutForm.indicatorDots"
+                  @change="
+                    commitAttr('indicatorDots', layoutForm.indicatorDots ? 'true' : 'false')
+                  "
+                />
+              </el-form-item>
+              <el-form-item label="indicatorColor">
+                <ColorPicker
+                  v-model="layoutForm.indicatorColor"
+                  placeholder="rgba(0,0,0,0.25)"
+                  @change="commitAttr('indicatorColor', layoutForm.indicatorColor)"
+                />
+              </el-form-item>
+              <el-form-item label="indicatorActiveColor">
+                <ColorPicker
+                  v-model="layoutForm.indicatorActiveColor"
+                  placeholder="#409eff"
+                  @change="commitAttr('indicatorActiveColor', layoutForm.indicatorActiveColor)"
+                />
+              </el-form-item>
+              <el-form-item label="duration 动画(ms)">
+                <NumericInput
+                  v-model="layoutForm.duration"
+                  placeholder="280"
+                  :min="0"
+                  :max="3000"
+                  @change="commitAttr('duration', layoutForm.duration)"
+                />
+              </el-form-item>
+              <el-form-item label="current 初始页">
+                <NumericInput
+                  v-model="layoutForm.current"
+                  placeholder="0"
+                  :min="0"
+                  :max="99"
+                  @change="commitAttr('current', layoutForm.current)"
+                />
+              </el-form-item>
+              <p class="hint">每个直接子控件为一页；预览时可左右滑动切换。</p>
+            </el-form>
+          </template>
+
+          <template v-if="showMaskProps">
+            <div class="section-title">遮罩</div>
+            <el-form label-position="top" size="small">
+              <el-form-item label="closeOnClick 点击遮罩关闭">
+                <el-switch
+                  v-model="layoutForm.closeOnClick"
+                  @change="
+                    commitAttr('closeOnClick', layoutForm.closeOnClick ? 'true' : 'false')
+                  "
+                />
+              </el-form-item>
+              <p class="hint">
+                用上方 name 作为标识。预览态调用 openMask(name) 入栈打开，一屏仅显示栈顶；closeMask /
+                closeAllMasks 关闭。多个遮罩请使用不同 name。
+              </p>
+            </el-form>
+          </template>
+
           <template v-if="isRelativeChild">
             <div class="section-title">相对布局定位</div>
             <el-form label-position="top" size="small">
@@ -992,9 +1161,14 @@ function saveVisibilityConfig(config: VisibilityConditionConfig) {
 
           <div class="section-title">事件列表</div>
 
-          <el-form label-position="top" size="small">
+          <el-empty
+            v-if="isComponentNode && !selectableEvents.length"
+            description="该组件暂无事件方法，请先在组件设置中添加"
+            :image-size="48"
+          />
+          <el-form v-else label-position="top" size="small">
             <el-form-item
-              v-for="event in INTERACTION_EVENTS"
+              v-for="event in selectableEvents"
               :key="event.key"
               :label="event.label"
             >
@@ -1014,8 +1188,11 @@ function saveVisibilityConfig(config: VisibilityConditionConfig) {
           <EventBindDialog
             v-model="eventBindVisible"
             :event-label="eventBindLabel"
+            :event-key="eventBindKey"
+            :event-params="eventBindParams"
             :raw-value="eventForm[eventBindKey]"
             :methods="methods ?? []"
+            :emit-events="emitEvents"
             :data-fields="dataFields"
             :icon-options="iconOptions"
             @save="handleEventBindSave"
@@ -1058,10 +1235,36 @@ function saveVisibilityConfig(config: VisibilityConditionConfig) {
                   :key="def.name"
                   :label="`${def.name}${def.required ? ' *' : ''} · ${propTypeLabel(def.type)}${def.twoWay ? ' · model' : ''}`"
                 >
+                  <IconValueSelect
+                    v-if="def.type === 'icon'"
+                    v-model="componentPropForm[def.name]"
+                    :options="iconSelectOptions"
+                    allow-create
+                    clearable
+                    :placeholder="`默认：${propDefaultPreview(def)}`"
+                    @change="commitComponentProp(def.name)"
+                  />
+                  <template v-else-if="def.type === 'color'">
+                    <ColorPicker
+                      v-if="!looksLikeDataBinding(componentPropForm[def.name])"
+                      v-model="componentPropForm[def.name]"
+                      placeholder="#409eff / rgba(...)"
+                      @change="commitComponentProp(def.name)"
+                    />
+                    <el-input
+                      v-else
+                      v-model="componentPropForm[def.name]"
+                      clearable
+                      placeholder="颜色值或 {数据池字段}"
+                      @change="commitComponentProp(def.name)"
+                    />
+                    <p class="hint">可填色值，或绑定数据池：<code>{'{titleBarColor}'}</code></p>
+                  </template>
                   <el-input
+                    v-else
                     v-model="componentPropForm[def.name]"
                     clearable
-                    :placeholder="`默认：${propDefaultPreview(def)}；可用 {item.字段}`"
+                    :placeholder="`默认：${propDefaultPreview(def)}；可用 {item.字段} 或 {数据池字段}`"
                     @change="commitComponentProp(def.name)"
                   />
                   <p v-if="def.remark" class="prop-remark">{{ def.remark }}</p>
@@ -1191,7 +1394,9 @@ function saveVisibilityConfig(config: VisibilityConditionConfig) {
       v-model="styleStateDialogVisible"
       :state="editingStyleState"
       :node-tag="selectedNode?.tag"
-      :data-fields="dataFields"
+      :data-fields="props.dataFields"
+      :component-props="props.componentProps"
+      :route-params="props.routeParams"
       :selected-node-id="selectedId"
       :xml="xml"
       @save="saveStyleState"
@@ -1201,7 +1406,9 @@ function saveVisibilityConfig(config: VisibilityConditionConfig) {
       v-model="visibilityDialogVisible"
       :title="visibilityDialogTitle"
       :config="editingVisibilityConfig"
-      :data-fields="dataFields"
+      :data-fields="props.dataFields"
+      :component-props="props.componentProps"
+      :route-params="props.routeParams"
       :selected-node-id="selectedId"
       :xml="xml"
       @save="saveVisibilityConfig"

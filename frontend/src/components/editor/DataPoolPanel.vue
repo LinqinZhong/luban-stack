@@ -4,6 +4,7 @@ import { Delete, Plus } from '@element-plus/icons-vue'
 import ArrayFieldsDialog from './ArrayFieldsDialog.vue'
 import ComputedBindingDialog from './ComputedBindingDialog.vue'
 import IconValueSelect from './IconValueSelect.vue'
+import ColorPicker from './ColorPicker.vue'
 import ObjectFieldsDialog from './ObjectFieldsDialog.vue'
 import {
   createEmptyDataField,
@@ -64,6 +65,14 @@ function handleTypeChange(index: number, type: DataField['type']) {
     arrayFields: undefined,
     objectFields: undefined,
   })
+}
+
+/** 颜色/字符串类展示用：避免对象被 String() 成 [object Object] */
+function colorSafeString(value: unknown): string {
+  if (value == null) return ''
+  if (typeof value === 'string') return value
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value)
+  return ''
 }
 
 function addField() {
@@ -266,18 +275,30 @@ function saveComputeBody(body: string) {
             />
             <IconValueSelect
               v-else-if="row.type === 'icon'"
-              :model-value="String(row.value ?? '')"
+              :model-value="colorSafeString(row.value)"
               :options="iconOptions"
+              @update:model-value="updateField($index, { value: $event })"
+            />
+            <ColorPicker
+              v-else-if="row.type === 'color'"
+              :model-value="colorSafeString(row.value)"
+              placeholder="#409eff / rgba(...)"
               @update:model-value="updateField($index, { value: $event })"
             />
             <div v-else-if="row.type === 'json'" class="complex-value">
               <span class="value-preview">{{ objectFieldCount(row) }} 个字段</span>
               <el-button type="primary" link @click="openObjectEditor($index)">编辑</el-button>
             </div>
-            <div v-else class="complex-value">
+            <div v-else-if="row.type === 'array'" class="complex-value">
               <span class="value-preview">{{ arrayItemCount(row) }} 项</span>
               <el-button type="primary" link @click="openArrayEditor($index)">编辑</el-button>
             </div>
+            <el-input
+              v-else
+              :model-value="colorSafeString(row.value)"
+              placeholder="值"
+              @update:model-value="updateField($index, { value: $event })"
+            />
           </template>
         </el-table-column>
 

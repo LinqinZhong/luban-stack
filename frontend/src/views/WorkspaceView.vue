@@ -12,17 +12,21 @@ import {
   View,
 } from '@element-plus/icons-vue'
 import {
+  copyPage,
   createPage,
+  deletePage,
   deletePageMethod,
   getPage,
   listPageMethods,
   listPages,
+  savePageConfig,
   savePageData,
   savePageMethod,
   savePageXml,
   type PageDetail,
   type PageSummary,
 } from '../api/pages'
+import { createMaskStack } from '../composables/useMaskStack'
 import {
   createComponent,
   deleteComponentMethod,
@@ -38,6 +42,7 @@ import {
 import {
   getIconLibrary,
   saveIconLibrary as saveIconLibraryApi,
+  setProjectEntryPage,
 } from '../api/projects'
 import DataPoolPanel from '../components/editor/DataPoolPanel.vue'
 import IconLibraryPanel from '../components/editor/IconLibraryPanel.vue'
@@ -49,10 +54,13 @@ import PageCanvas from '../components/xml/PageCanvas.vue'
 import WidgetTree from '../components/xml/WidgetTree.vue'
 import { useProjectStore } from '../stores/project'
 import {
+  buildEmitAmbientDeclarations,
+  builtinsForRoot,
   createEmptyMethod,
   type PageMethod,
 } from '../types/page-method'
 import { runEventBindings } from '../utils/event-runtime'
+import { createComponentEmit } from '../utils/component-emit'
 import type { PreviewInteractPayload } from '../utils/event-runtime'
 import { resolveComputedPageData } from '../utils/compute-runtime'
 import { buildDollarProps } from '../utils/component-props'
@@ -105,8 +113,32 @@ const editorHiddenNodeIds = ref<string[]>([])
 const pageMethods = ref<PageMethod[]>([])
 const methodDialogVisible = ref(false)
 const editingMethod = ref<PageMethod | null>(null)
-/** 预览态 navigateTo / navigateBack 历史 */
-const pageHistory = ref<string[]>([])
+/** 预览态 navigateTo / navigateBack 历史（含路由参数） */
+const pageHistory = ref<Array<{ pageId: string; params: Record<string, unknown> }>>([])
+/** 预览态当前页跳转参数（navigateTo 传入） */
+const routeParams = ref<Record<string, unknown>>({})
+/** 预览态手机框内 Toast */
+const previewToast = ref<{ message: string; id: number } | null>(null)
+let previewToastTimer: ReturnType<typeof setTimeout> | null = null
+/** 画布平移 / 缩放（切页保持，重置按钮仍可归位） */
+const canvasPanX = ref(0)
+const canvasPanY = ref(0)
+const canvasZoom = ref(1)
+/** 预览态遮罩堆栈（一屏仅栈顶可见） */
+const maskStack = createMaskStack()
+
+function showPreviewToast(message: string, duration: 'short' | 'long' = 'short') {
+  const text = String(message ?? '').trim() || ' '
+  previewToast.value = { message: text, id: Date.now() }
+  if (previewToastTimer) clearTimeout(previewToastTimer)
+  previewToastTimer = setTimeout(
+    () => {
+      previewToast.value = null
+      previewToastTimer = null
+    },
+    duration === 'long' ? 4500 : 2000,
+  )
+}
 
 const createForm = reactive({
   id: '',
@@ -143,10 +175,34 @@ const resolvedPageData = computed(() =>
   resolveComputedPageData(activeDoc.value?.data ?? { fields: [] }),
 )
 
+const editorConditionComponentProps = computed(() =>
+  isComponentResource.value ? (activeComponent.value?.config.props ?? []) : null,
+)
+
 /** 编辑组件时：用 config.props 默认值作为 $props */
 const editorDollarProps = computed(() => {
   if (!isComponentResource.value || !activeComponent.value) return undefined
   return buildDollarProps(activeComponent.value.config)
+})
+
+/** 组件方法体 ambient：内置 emit，参数签名跟「事件方法」对齐 */
+const methodAmbientExtra = computed(() => {
+  if (!isComponentResource.value || !activeComponent.value) return ''
+  return buildEmitAmbientDeclarations(activeComponent.value.config.events ?? [])
+})
+
+/** 展示用方法列表（保证含最新预置方法，兼容未重启服务端） */
+const editorMethods = computed(() => {
+  const list = pageMethods.value
+  const expected = builtinsForRoot(
+    isComponentResource.value ? 'components' : 'pages',
+  )
+  const names = new Set(list.map((item) => item.name))
+  const missing = expected.filter((item) => !names.has(item.name))
+  if (!missing.length) return list
+  const builtins = list.filter((item) => item.builtin)
+  const custom = list.filter((item) => !item.builtin)
+  return [...builtins, ...missing, ...custom]
 })
 
 function parseFrameSize(
@@ -220,6 +276,31 @@ const centerFileLabel = computed(() => {
   if (isIconsMode.value) return 'icons.json'
   if (isMethodsMode.value) return 'function/'
   return 'index.xml'
+})
+
+function formatRouteParamValue(value: unknown): string {
+  if (value == null) return ''
+  if (typeof value === 'object') {
+    try {
+      return JSON.stringify(value)
+    } catch {
+      return String(value)
+    }
+  }
+  return String(value)
+}
+
+/** 预览态路径后展示 ?id=... 等跳转参数 */
+const centerPathQuery = computed(() => {
+  if (workspaceMode.value !== 'preview' || isComponentResource.value) return ''
+  const entries = Object.entries(routeParams.value)
+  if (!entries.length) return ''
+  return `?${entries
+    .map(
+      ([key, value]) =>
+        `${encodeURIComponent(key)}=${encodeURIComponent(formatRouteParamValue(value))}`,
+    )
+    .join('&')}`
 })
 
 const propsPlaceholderText = computed(() => {
@@ -328,18 +409,47 @@ async function loadPageMethods(pageId?: string) {
     const result = isComponentResource.value
       ? await listComponentMethods(projectStore.path, id)
       : await listPageMethods(projectStore.path, id)
-    pageMethods.value = result.methods
+    let methods = result.methods
+    // 保证预置方法齐全（兼容未重启的旧服务端）
+    {
+      const expected = builtinsForRoot(
+        isComponentResource.value ? 'components' : 'pages',
+      )
+      const names = new Set(methods.map((item) => item.name))
+      const missing = expected.filter((item) => !names.has(item.name))
+      if (missing.length) {
+        const builtins = methods.filter((item) => item.builtin)
+        const custom = methods.filter((item) => !item.builtin)
+        methods = [...builtins, ...missing, ...custom]
+      }
+    }
+    pageMethods.value = methods
   } catch (err) {
     pageMethods.value = []
     console.error(err)
   }
 }
 
-async function openPage(pageId: string, options?: { keepHistory?: boolean }) {
+async function openPage(
+  pageId: string,
+  options?: {
+    keepHistory?: boolean
+    params?: Record<string, unknown> | null
+  },
+) {
   if (!projectStore.path) return
 
   if (!options?.keepHistory) {
     pageHistory.value = []
+  }
+
+  if (options?.params !== undefined) {
+    routeParams.value =
+      options.params && typeof options.params === 'object' && !Array.isArray(options.params)
+        ? { ...options.params }
+        : {}
+  } else if (!options?.keepHistory) {
+    routeParams.value = {}
   }
 
   resourceKind.value = 'page'
@@ -348,6 +458,7 @@ async function openPage(pageId: string, options?: { keepHistory?: boolean }) {
   activeComponent.value = null
   selectedNodeId.value = ''
   editorHiddenNodeIds.value = []
+  maskStack.closeAll()
   loadingPage.value = true
   try {
     activePage.value = await getPage(projectStore.path, pageId)
@@ -370,6 +481,8 @@ async function openComponent(componentId: string) {
   selectedNodeId.value = ''
   editorHiddenNodeIds.value = []
   pageHistory.value = []
+  routeParams.value = {}
+  maskStack.closeAll()
   loadingPage.value = true
   try {
     activeComponent.value = await getComponent(projectStore.path, componentId)
@@ -417,6 +530,122 @@ function openCreateDialog() {
   createForm.name = ''
   createForm.title = ''
   createVisible.value = true
+}
+
+type PageMenuCommand = 'rename' | 'copy' | 'setEntry' | 'delete'
+
+async function handlePageMenuCommand(command: PageMenuCommand, page: PageSummary) {
+  if (!projectStore.path) return
+
+  try {
+    if (command === 'rename') {
+      const { value } = await ElMessageBox.prompt('请输入新的页面名称', '重命名', {
+        confirmButtonText: '确定',
+        cancelButtonText: '取消',
+        inputValue: page.name,
+        inputPattern: /\S+/,
+        inputErrorMessage: '名称不能为空',
+      })
+      const name = value.trim()
+      await savePageConfig({
+        projectPath: projectStore.path,
+        pageId: page.id,
+        name,
+      })
+      ElMessage.success('已重命名')
+      if (activePage.value?.id === page.id) {
+        activePage.value = {
+          ...activePage.value,
+          config: {
+            ...activePage.value.config,
+            name,
+            title:
+              activePage.value.config.title === activePage.value.config.name
+                ? name
+                : activePage.value.config.title,
+          },
+        }
+      }
+      pages.value = pages.value.map((item) =>
+        item.id === page.id
+          ? {
+              ...item,
+              name,
+              title: item.title === item.name ? name : item.title,
+            }
+          : item,
+      )
+      return
+    }
+
+    if (command === 'copy') {
+      const { value } = await ElMessageBox.prompt('请输入新页面 ID', '复制页面', {
+        confirmButtonText: '确定',
+        cancelButtonText: '取消',
+        inputValue: `${page.id}_copy`,
+        inputPattern: /^[a-zA-Z0-9_-]+$/,
+        inputErrorMessage: '仅支持字母、数字、下划线和短横线',
+      })
+      const newId = value.trim()
+      const copied = await copyPage({
+        projectPath: projectStore.path,
+        pageId: page.id,
+        newId,
+      })
+      ElMessage.success(`已复制为 ${copied.config.name}`)
+      await loadPages(copied.id)
+      return
+    }
+
+    if (command === 'setEntry') {
+      const result = await setProjectEntryPage({
+        projectPath: projectStore.path,
+        pageId: page.id,
+      })
+      projectStore.setProject(result.path, result.config)
+      pages.value = pages.value.map((item) => ({
+        ...item,
+        isEntry: item.id === page.id,
+      }))
+      ElMessage.success(`已将「${page.name}」设为入口`)
+      return
+    }
+
+    if (command === 'delete') {
+      await ElMessageBox.confirm(
+        `确定删除页面「${page.name}」（${page.id}）吗？此操作不可恢复。`,
+        '删除页面',
+        {
+          type: 'warning',
+          confirmButtonText: '删除',
+          cancelButtonText: '取消',
+          confirmButtonClass: 'el-button--danger',
+        },
+      )
+      const result = await deletePage({
+        projectPath: projectStore.path,
+        pageId: page.id,
+      })
+      if (result.entryCleared && projectStore.config) {
+        const next = { ...projectStore.config }
+        delete next.entryPage
+        projectStore.setProject(projectStore.path, next)
+      }
+      ElMessage.success('已删除')
+      const nextSelect =
+        activePageId.value === page.id
+          ? pages.value.find((item) => item.id !== page.id)?.id
+          : activePageId.value
+      if (activePageId.value === page.id) {
+        activePageId.value = ''
+        activePage.value = null
+      }
+      await loadPages(nextSelect || undefined)
+    }
+  } catch (err) {
+    if (err === 'cancel' || err === 'close') return
+    ElMessage.error(err instanceof Error ? err.message : '操作失败')
+  }
 }
 
 async function handleCreatePage() {
@@ -499,33 +728,114 @@ async function handleXmlUpdate(xml: string) {
 async function handlePreviewInteract(payload: PreviewInteractPayload) {
   if (workspaceMode.value !== 'preview' || !activeDoc.value) return
 
-  await runEventBindings(payload.raw, {
-    pageData: resolvedPageData.value,
-    scope: payload.scope,
-    hasPage: (pageId) => pages.value.some((item) => item.id === pageId),
-    navigateTo: async (pageId) => {
-      if (activePageId.value && activePageId.value !== pageId) {
-        pageHistory.value.push(activePageId.value)
+  const runWithContext = async (
+    raw: string | undefined,
+    options?: {
+      scope?: PreviewInteractPayload['scope']
+      eventArgs?: Record<string, unknown>
+      dollarProps?: Record<string, unknown>
+      emitFn?: (event: string, ...args: unknown[]) => void
+      emitWithArgs?: (event: string, args: Record<string, string>) => void
+    },
+  ) => {
+    await runEventBindings(raw, {
+      pageData: resolvedPageData.value,
+      scope: options?.scope ?? payload.scope,
+      eventArgs: options?.eventArgs ?? payload.eventArgs,
+      dollarProps: options?.dollarProps ?? payload.dollarProps,
+      emit: options?.emitFn,
+      emitWithArgs: options?.emitWithArgs,
+      hasPage: (pageId) => pages.value.some((item) => item.id === pageId),
+      navigateTo: async (pageId, params) => {
+        if (activePageId.value && activePageId.value !== pageId) {
+          pageHistory.value.push({
+            pageId: activePageId.value,
+            params: { ...routeParams.value },
+          })
+        }
+        await openPage(pageId, {
+          keepHistory: true,
+          params:
+            params && typeof params === 'object' && !Array.isArray(params)
+              ? params
+              : {},
+        })
+      },
+      navigateBack: async () => {
+        const prev = pageHistory.value.pop()
+        if (!prev) {
+          ElMessage.info('没有可返回的页面')
+          return
+        }
+        await openPage(prev.pageId, {
+          keepHistory: true,
+          params: prev.params,
+        })
+      },
+      setData: (prop, value) => {
+        applyPreviewSetData(prop, value)
+      },
+      showToast: (message, duration) => {
+        showPreviewToast(message, duration)
+      },
+      openMask: (name) => {
+        maskStack.open(name)
+      },
+      closeMask: (name) => {
+        maskStack.close(name)
+      },
+      closeAllMasks: () => {
+        maskStack.closeAll()
+      },
+      onUnknownMethod: (name) => {
+        if (name.startsWith('navigateTo:')) {
+          ElMessage.warning(name.replace(/^navigateTo:\s*/, ''))
+        } else if (name.startsWith('自定义方法')) {
+          ElMessage.error(name)
+        }
+      },
+    })
+  }
+
+  const hostEmit = payload.componentEmit
+
+  const dispatchHostEvent = (
+    eventName: string,
+    args: Record<string, unknown>,
+  ) => {
+    if (!hostEmit) return
+    const raw = hostEmit.hostAttrs[eventName]
+    if (!raw?.trim()) return
+    void runWithContext(raw, {
+      scope: hostEmit.hostScope ?? payload.scope,
+      eventArgs: args,
+    })
+  }
+
+  const emitFn = hostEmit
+    ? createComponentEmit(hostEmit.events, dispatchHostEvent)
+    : undefined
+
+  const emitWithArgs = hostEmit
+    ? (eventName: string, args: Record<string, string>) => {
+        // 按事件形参名打包；未声明的键一并带上
+        const params =
+          hostEmit.events.find((item) => item.name.trim() === eventName)
+            ?.params ?? []
+        const packed: Record<string, unknown> = {}
+        for (const param of params) {
+          const key = param.name.trim()
+          if (!key || key.startsWith('...')) continue
+          if (key in args) packed[key] = args[key]
+        }
+        for (const [key, value] of Object.entries(args)) {
+          if (!(key in packed)) packed[key] = value
+        }
+        dispatchHostEvent(eventName, packed)
       }
-      await openPage(pageId, { keepHistory: true })
-    },
-    navigateBack: async () => {
-      const prev = pageHistory.value.pop()
-      if (!prev) {
-        ElMessage.info('没有可返回的页面')
-        return
-      }
-      await openPage(prev, { keepHistory: true })
-    },
-    setData: (prop, value) => {
-      applyPreviewSetData(prop, value)
-    },
-    onUnknownMethod: (name) => {
-      if (name.startsWith('navigateTo:')) {
-        ElMessage.warning(name.replace(/^navigateTo:\s*/, ''))
-      }
-    },
-  })
+    : undefined
+
+  await runWithContext(payload.raw, { emitFn, emitWithArgs })
 }
 
 function applyPreviewSetData(prop: string, value: import('../types/page-data').DataFieldValue) {
@@ -849,20 +1159,42 @@ onMounted(() => {
             <el-skeleton v-if="loadingPages && !pages.length" :rows="4" animated />
             <el-empty v-else-if="!pages.length" description="暂无页面，点击新建" :image-size="64" />
             <div v-else class="page-list">
-              <button
+              <el-dropdown
                 v-for="page in pages"
                 :key="page.id"
-                type="button"
-                class="page-item"
-                :class="{ active: page.id === activePageId }"
-                @click="openPage(page.id)"
+                trigger="contextmenu"
+                class="page-dropdown"
+                @command="(cmd) => handlePageMenuCommand(cmd as PageMenuCommand, page)"
               >
-                <el-icon><Document /></el-icon>
-                <div class="page-meta">
-                  <div class="page-name">{{ page.name }}</div>
-                  <div class="page-id">{{ page.id }}</div>
-                </div>
-              </button>
+                <button
+                  type="button"
+                  class="page-item"
+                  :class="{ active: page.id === activePageId, entry: page.isEntry }"
+                  @click="openPage(page.id)"
+                  @contextmenu.prevent
+                >
+                  <el-icon><Document /></el-icon>
+                  <div class="page-meta">
+                    <div class="page-name">
+                      <span>{{ page.name }}</span>
+                      <span v-if="page.isEntry" class="entry-badge">入口</span>
+                    </div>
+                    <div class="page-id">{{ page.id }}</div>
+                  </div>
+                </button>
+                <template #dropdown>
+                  <el-dropdown-menu>
+                    <el-dropdown-item command="rename">重命名</el-dropdown-item>
+                    <el-dropdown-item command="copy">复制</el-dropdown-item>
+                    <el-dropdown-item command="setEntry" :disabled="page.isEntry">
+                      设为入口
+                    </el-dropdown-item>
+                    <el-dropdown-item command="delete" divided>
+                      删除
+                    </el-dropdown-item>
+                  </el-dropdown-menu>
+                </template>
+              </el-dropdown>
             </div>
           </template>
           <template v-else>
@@ -914,7 +1246,7 @@ onMounted(() => {
         <template v-else-if="activeDoc">
           <span class="preview-title">{{ activeDoc.config.title || activeDoc.config.name }}</span>
           <span class="preview-sub">
-            {{ isComponentResource ? 'components' : 'pages' }}/{{ activeDoc.id }}/{{ centerFileLabel }}
+            {{ isComponentResource ? 'components' : 'pages' }}/{{ activeDoc.id }}/{{ centerFileLabel }}{{ centerPathQuery }}
           </span>
         </template>
         <span v-else class="preview-title">{{ isComponentResource ? '组件预览' : '页面预览' }}</span>
@@ -939,13 +1271,18 @@ onMounted(() => {
         />
         <MethodsPanel
           v-else-if="isMethodsMode"
-          :methods="pageMethods"
+          :methods="editorMethods"
+          :for-component="isComponentResource"
           @add="openAddMethod"
           @edit="openEditMethod"
           @remove="handleRemoveMethod"
         />
         <PageCanvas
           v-else
+          v-model:pan-x="canvasPanX"
+          v-model:pan-y="canvasPanY"
+          v-model:zoom="canvasZoom"
+          :mask-stack="maskStack"
           :xml="activeDoc.xml"
           :canvas-width="canvasFrameWidth"
           :canvas-height="canvasFrameHeight === undefined ? undefined : canvasFrameHeight"
@@ -959,7 +1296,9 @@ onMounted(() => {
           :icon-library="iconLibrary"
           :component-map="componentMap"
           :dollar-props="editorDollarProps"
+          :route-params="routeParams"
           :hidden-node-ids="isEditMode ? editorHiddenNodeIds : undefined"
+          :toast="workspaceMode === 'preview' ? previewToast : null"
           @select="selectedNodeId = $event"
           @open-repeat="handleOpenRepeatConfig"
           @interact="handlePreviewInteract"
@@ -992,7 +1331,7 @@ onMounted(() => {
       <ComponentMetaPanel
         v-if="!selectedNodeId"
         :config="activeComponent!.config"
-        :methods="pageMethods"
+        :methods="editorMethods"
         :icon-options="iconOptions"
         @update:config="handleComponentConfigUpdate"
       />
@@ -1006,7 +1345,10 @@ onMounted(() => {
           :selected-id="selectedNodeId"
           :data-fields="activeDoc.data?.fields ?? []"
           :icon-options="iconOptions"
-          :methods="pageMethods"
+          :methods="editorMethods"
+          :emit-events="activeComponent?.config.events"
+          :component-props="editorConditionComponentProps"
+          :route-params="null"
           :component-map="componentMap"
           :open-repeat-request="openRepeatRequest"
           @update:xml="handleXmlUpdate"
@@ -1020,7 +1362,9 @@ onMounted(() => {
       :selected-id="selectedNodeId"
       :data-fields="activeDoc.data?.fields ?? []"
       :icon-options="iconOptions"
-      :methods="pageMethods"
+      :methods="editorMethods"
+      :component-props="null"
+      :route-params="routeParams"
       :component-map="componentMap"
       :open-repeat-request="openRepeatRequest"
       @update:xml="handleXmlUpdate"
@@ -1036,6 +1380,7 @@ onMounted(() => {
     <MethodEditDialog
       v-model="methodDialogVisible"
       :method="editingMethod"
+      :ambient-extra="methodAmbientExtra"
       @save="handleSaveMethod"
     />
 
@@ -1190,13 +1535,23 @@ onMounted(() => {
   flex-direction: column;
 }
 
+.page-dropdown {
+  display: block;
+  width: 100%;
+  margin-bottom: 4px;
+}
+
+.page-dropdown :deep(.el-tooltip__trigger) {
+  display: block;
+  width: 100%;
+}
+
 .page-item {
   width: 100%;
   display: flex;
   align-items: flex-start;
   gap: 8px;
   padding: 10px 12px;
-  margin-bottom: 4px;
   border: 0;
   border-radius: 6px;
   background: transparent;
@@ -1216,12 +1571,27 @@ onMounted(() => {
 
 .page-meta {
   min-width: 0;
+  flex: 1;
 }
 
 .page-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   font-size: 14px;
   font-weight: 500;
   line-height: 1.3;
+}
+
+.entry-badge {
+  flex-shrink: 0;
+  padding: 0 5px;
+  border-radius: 3px;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 16px;
+  color: #e6a23c;
+  background: #fdf6ec;
 }
 
 .page-id {
@@ -1260,7 +1630,11 @@ onMounted(() => {
 .preview-sub {
   font-size: 12px;
   color: #94a3b8;
-  line-height: 1;
+  line-height: 1.3;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .preview-body {

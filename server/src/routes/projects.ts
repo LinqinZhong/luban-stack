@@ -4,6 +4,7 @@ import {
   createProject,
   openProject,
   ProjectError,
+  setEntryPage,
 } from '../services/project.js'
 import { readIconLibrary, saveIconLibrary } from '../services/icons.js'
 import { DEFAULT_CANVAS_WIDTH, ENGINE_VERSION } from '../types/voider-project.js'
@@ -67,6 +68,25 @@ router.post('/create', async (req, res) => {
       engineVersion,
       canvasWidth,
     })
+    res.json(result)
+  } catch (err) {
+    handleError(res, err)
+  }
+})
+
+router.put('/entry', async (req, res) => {
+  try {
+    const projectPath =
+      typeof req.body?.projectPath === 'string' ? req.body.projectPath : ''
+    const pageId =
+      req.body?.pageId === null || req.body?.pageId === undefined
+        ? null
+        : String(req.body.pageId)
+    if (!projectPath.trim()) {
+      res.status(400).json({ message: '请提供 projectPath' })
+      return
+    }
+    const result = await setEntryPage(projectPath.trim(), pageId)
     res.json(result)
   } catch (err) {
     handleError(res, err)

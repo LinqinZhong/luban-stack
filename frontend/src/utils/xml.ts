@@ -16,6 +16,8 @@ const SUPPORTED_TAGS = new Set([
   'Icon',
   'LinearLayout',
   'RelativeLayout',
+  'Swiper',
+  'Mask',
   'Component',
 ])
 

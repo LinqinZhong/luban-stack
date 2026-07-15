@@ -16,6 +16,8 @@ import {
 const props = defineProps<{
   modelValue: boolean
   method: PageMethod | null
+  /** 组件方法体可用的 emit 等 ambient 声明 */
+  ambientExtra?: string
 }>()
 
 const emit = defineEmits<{
@@ -203,6 +205,7 @@ function handleSave() {
           :readonly="draft.builtin"
           :params="draft.params"
           :return-type="draft.returnType"
+          :ambient-extra="draft.builtin ? '' : ambientExtra"
         />
       </el-form-item>
     </el-form>

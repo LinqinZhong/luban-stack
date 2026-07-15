@@ -17,7 +17,7 @@ import {
   overflowStyle,
   paddingStyle,
 } from '../../utils/xml'
-import { resolveMatchingStyleOverrides, evaluateScenarios } from '../../utils/dynamic-style-runtime'
+import { resolveMatchingStyleOverrides, evaluateScenarios, interpolateDataBindings } from '../../utils/dynamic-style-runtime'
 import {
   buildDollarProps,
   interpolateDollarProps,
@@ -29,7 +29,10 @@ import {
   parseVisibilityConditions,
 } from '../../types/dynamic-styles'
 import { countEventBindings, countNodeEventBindings, INTERACTION_EVENT_KEYS } from '../../types/page-method'
+import { MASK_HOST_KEY, MASK_STACK_KEY } from '../../composables/useMaskStack'
 import WidgetSelectShell from './WidgetSelectShell.vue'
+import OverlayScrollPort from './OverlayScrollPort.vue'
+import SwiperPort from './SwiperPort.vue'
 import XmlNodeView from './XmlNodeView.vue'
 
 /** 纵向滚动列标记：子孙节点 match_parent 高度勿再 flex 抢视口 */
@@ -65,6 +68,13 @@ const props = defineProps<{
   componentMap?: ComponentRenderMap
   /** 组件入参运行时对象（$props） */
   dollarProps?: Record<string, unknown>
+  /** 路由参数运行时对象（$route） */
+  routeParams?: Record<string, unknown>
+  /**
+   * 是否执行 onClick / onLongClick / onAppear。
+   * 编辑态为 false（含 Component 内部 selectable=false 的节点），避免抢走选中。
+   */
+  interactEnabled?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -74,6 +84,9 @@ const emit = defineEmits<{
   interact: [payload: PreviewInteractPayload]
 }>()
 
+const maskStack = inject(MASK_STACK_KEY, null)
+const maskHostRef = inject(MASK_HOST_KEY, null)
+
 const isEditorHidden = computed(() =>
   (props.hiddenNodeIds ?? []).includes(props.nodeId),
 )
@@ -81,6 +94,7 @@ const isEditorHidden = computed(() =>
 const runtimeScope = computed(() => ({
   ...(props.node.scope ?? {}),
   $props: props.dollarProps,
+  $route: props.routeParams,
 }))
 
 const mountAllowed = computed(() => {
@@ -97,20 +111,46 @@ const showAllowed = computed(() => {
   return evaluateScenarios(config.scenarios, props.pageData, runtimeScope.value)
 })
 
-/** v-show：条件为假时隐藏但仍挂载 */
-const visuallyHidden = computed(() => !showAllowed.value)
+/** 遮罩 id：优先 name，否则用节点路径 */
+const maskKey = computed(
+  () => props.node.attrs.name?.trim() || props.nodeId,
+)
+
+const maskIsOpen = computed(() => {
+  if (props.node.tag !== 'Mask') return true
+  if (props.selectable) return true
+  return Boolean(maskStack?.isTop(maskKey.value))
+})
+
+/** v-show / 遮罩栈：条件为假时隐藏但仍挂载 */
+const visuallyHidden = computed(
+  () => !showAllowed.value || (props.node.tag === 'Mask' && !maskIsOpen.value),
+)
 
 const previewClickable = computed(
-  () => !props.selectable && countEventBindings(props.node.attrs.onClick) > 0,
+  () =>
+    Boolean(props.interactEnabled) &&
+    !props.selectable &&
+    countEventBindings(props.node.attrs.onClick) > 0,
 )
 const previewLongClickable = computed(
-  () => !props.selectable && countEventBindings(props.node.attrs.onLongClick) > 0,
+  () =>
+    Boolean(props.interactEnabled) &&
+    !props.selectable &&
+    countEventBindings(props.node.attrs.onLongClick) > 0,
 )
 const previewInteractive = computed(
   () => previewClickable.value || previewLongClickable.value,
 )
 
-/** 基础 attrs + 按 scope / 数据池求值后的动态样式覆盖；预览态再替换 $props */
+const componentDetail = computed(() => {
+  if (props.node.tag !== 'Component') return null
+  const id = props.node.attrs.componentId?.trim()
+  if (!id || !props.componentMap) return null
+  return props.componentMap[id] ?? null
+})
+
+/** 基础 attrs + 动态样式；解析数据池绑定；预览态再替换 $props */
 const attrs = computed(() => {
   const base = props.node.attrs
   const overrides = resolveMatchingStyleOverrides(
@@ -120,32 +160,46 @@ const attrs = computed(() => {
   )
   let merged = Object.keys(overrides).length ? { ...base, ...overrides } : base
 
-  if (!props.selectable && props.dollarProps) {
-    const next: Record<string, string> = {}
-    for (const [key, value] of Object.entries(merged)) {
-      next[key] = SKIP_DOLLAR_PROPS_ATTRS.has(key)
-        ? value
-        : interpolateDollarProps(value, props.dollarProps)
+  const skipEventKeys = new Set<string>([
+    ...SKIP_DOLLAR_PROPS_ATTRS,
+    ...(componentDetail.value?.config.events ?? [])
+      .map((item) => item.name.trim())
+      .filter(Boolean),
+  ])
+  const next: Record<string, string> = {}
+  for (const [key, value] of Object.entries(merged)) {
+    if (skipEventKeys.has(key)) {
+      next[key] = value
+      continue
     }
-    merged = next
+    // 编辑态也解析 {数据池字段}，方便画布直接看到绑定效果
+    let resolved = interpolateDataBindings(value, props.pageData, runtimeScope.value)
+    if (!props.selectable && props.dollarProps) {
+      resolved = interpolateDollarProps(resolved, props.dollarProps)
+    }
+    next[key] = resolved
   }
-  return merged
+  return next
 })
 const width = computed(() => parseSize(attrs.value.width, 'wrap_content'))
 const height = computed(() => parseSize(attrs.value.height, 'wrap_content'))
 const isSelected = computed(() => props.selectable && props.selectedId === props.nodeId)
 const isHovered = computed(() => props.selectable && props.hoveredId === props.nodeId)
 
-/** RelativeLayout 在纵向父布局中需占满剩余高度（绝对定位子节点依赖此盒子） */
-const fillRemainingHeight = computed(() => props.node.tag === 'RelativeLayout')
+/** 纵向父布局中 height=match_parent：占满剩余高度（滚动列内除外） */
+const fillRemainingHeight = computed(
+  () =>
+    height.value === 'match_parent' &&
+    Boolean(props.parentVertical) &&
+    !Boolean(props.parentScrollable),
+)
 
 /**
- * 纵向父布局内的普通子项按内容堆叠；RelativeLayout / 滚动视口除外。
+ * 纵向父布局内、非 match_parent 的子项按内容堆叠；
+ * match_parent 由 fillRemainingHeight / linearStyle 撑满剩余空间。
  */
 const stackInVerticalParent = computed(
-  () =>
-    Boolean(props.parentVertical) &&
-    props.node.tag !== 'RelativeLayout',
+  () => Boolean(props.parentVertical) && height.value !== 'match_parent',
 )
 
 const innerSizeStyle = computed(() => {
@@ -217,15 +271,19 @@ const textStyle = computed(() => ({
   wordBreak: 'break-word' as const,
 }))
 
-const componentDetail = computed(() => {
-  const id = attrs.value.componentId?.trim()
-  if (!id || !props.componentMap) return null
-  return props.componentMap[id] ?? null
+const instanceDollarProps = computed(() => {
+  const config = componentDetail.value?.config
+  const source = props.node.attrs
+  // 编辑/预览都把 {titleBarColor} 等解析进 $props，画布才能看到绑定结果
+  const resolved: Record<string, string> = {}
+  for (const [key, value] of Object.entries(source)) {
+    resolved[key] = interpolateDataBindings(value, props.pageData, {
+      ...(props.node.scope ?? {}),
+      $route: props.routeParams,
+    })
+  }
+  return buildDollarProps(config, resolved)
 })
-
-const instanceDollarProps = computed(() =>
-  buildDollarProps(componentDetail.value?.config, attrs.value),
-)
 
 const componentRoot = computed(() => {
   const detail = componentDetail.value
@@ -329,6 +387,9 @@ const imageStyle = computed(() => ({
   display: 'block',
   objectFit: (attrs.value.objectFit || 'cover') as CSSProperties['objectFit'],
   background: attrs.value.background || undefined,
+  ...(height.value === 'match_parent'
+    ? { width: '100%', height: '100%', minHeight: 0, flex: '1 1 auto' }
+    : {}),
   // 图片自身圆角仍需裁切，不受布局 overflow 属性控制
   ...(attrs.value.borderRadius ? { overflow: 'hidden' as const } : {}),
 }))
@@ -343,6 +404,9 @@ const imagePlaceholderStyle = computed(() => ({
   fontSize: '12px',
   minWidth: width.value === 'wrap_content' ? '80px' : undefined,
   minHeight: height.value === 'wrap_content' ? '60px' : undefined,
+  ...(height.value === 'match_parent'
+    ? { width: '100%', height: '100%', minHeight: 0, flex: '1 1 auto' }
+    : {}),
   ...(attrs.value.borderRadius ? { overflow: 'hidden' as const } : {}),
 }))
 
@@ -417,6 +481,7 @@ provide(
 )
 
 const layoutOverflowStyle = computed(() => {
+  // 编辑态始终 visible，避免选中框角标/绝对定位子项被裁切
   if (props.selectable) return { overflow: 'visible' as const }
   return overflowStyle(attrs.value, 'hidden')
 })
@@ -467,13 +532,63 @@ const linearStyle = computed(() => {
               height: '100%',
               flex: '1 1 auto',
               minHeight: 0,
-              overflow: 'hidden',
+              ...(props.selectable ? {} : { overflow: 'hidden' as const }),
             }
       : isScrollLayout.value
         ? { maxHeight: '100%', minHeight: 0 }
         : {}),
   }
 })
+
+const swiperStyle = computed(() => {
+  const matchHeight = height.value === 'match_parent'
+  const matchWidth = width.value === 'match_parent'
+  const stackHeight =
+    insideScrollColumn.value || stackInVerticalParent.value
+  return {
+    ...layoutStyle.value,
+    position: 'relative' as const,
+    background: attrs.value.background || 'transparent',
+    // 编辑态让后续页可溢出显示；预览态裁切以保证轮播
+    overflow: (props.selectable ? 'visible' : 'hidden') as 'visible' | 'hidden',
+    ...(matchWidth ? { width: '100%', minWidth: 0 } : {}),
+    ...(matchHeight
+      ? stackHeight
+        ? {
+            height: '160px',
+            maxHeight: 'none',
+            flex: '0 0 auto',
+            alignSelf: 'stretch',
+          }
+        : {
+            height: '100%',
+            minHeight: 0,
+            flex: '1 1 auto',
+            alignSelf: 'stretch',
+          }
+      : { minHeight: 0 }),
+  }
+})
+
+const swiperAutoplay = computed(() => parseBool(attrs.value.autoplay))
+const swiperCircular = computed(
+  () => attrs.value.circular == null || attrs.value.circular === '' || parseBool(attrs.value.circular),
+)
+const swiperIndicator = computed(
+  () =>
+    attrs.value.indicatorDots == null ||
+    attrs.value.indicatorDots === '' ||
+    parseBool(attrs.value.indicatorDots),
+)
+const swiperInterval = computed(() => parseNumber(attrs.value.interval, 3000))
+const swiperDuration = computed(() => parseNumber(attrs.value.duration, 280))
+const swiperCurrent = computed(() => parseNumber(attrs.value.current, 0))
+const swiperIndicatorColor = computed(
+  () => attrs.value.indicatorColor?.trim() || 'rgba(0,0,0,0.25)',
+)
+const swiperIndicatorActiveColor = computed(
+  () => attrs.value.indicatorActiveColor?.trim() || '#409eff',
+)
 
 const relativeStyle = computed(() => {
   const matchHeight = height.value === 'match_parent'
@@ -497,7 +612,10 @@ const relativeStyle = computed(() => {
               maxHeight: '100%',
               alignSelf: 'stretch',
             }
-          : { height: '100%', overflow: 'hidden' }
+          : {
+              height: '100%',
+              ...(props.selectable ? {} : { overflow: 'hidden' as const }),
+            }
       : isScrollLayout.value
         ? { maxHeight: '100%', minHeight: 0 }
         : {}),
@@ -538,6 +656,54 @@ function mapGravityCross(gravity: string | undefined, horizontal: boolean) {
   if (g.includes('center_horizontal') || g === 'center') return 'center'
   return 'stretch'
 }
+
+const maskHostEl = computed(() => maskHostRef?.value ?? null)
+
+const maskSurfaceStyle = computed(() => ({
+  display: 'flex' as const,
+  flexDirection: 'column' as const,
+  alignItems: mapGravityCross(attrs.value.gravity, false),
+  justifyContent: mapGravityMain(attrs.value.gravity, false),
+  ...paddingStyle(attrs.value),
+  ...borderStyle(attrs.value),
+  background: attrs.value.background || 'rgba(0,0,0,0.45)',
+  boxSizing: 'border-box' as const,
+}))
+
+/** 编辑态：树内预览占位，便于编排子控件 */
+const maskEditStyle = computed(() => ({
+  ...maskSurfaceStyle.value,
+  position: 'relative' as const,
+  width: '100%',
+  minHeight: '120px',
+  border: '1px dashed #909399',
+  borderRadius: '8px',
+}))
+
+/** 预览态：挂到手机框遮罩层，铺满屏幕 */
+const maskOverlayStyle = computed(() => ({
+  ...maskSurfaceStyle.value,
+  position: 'absolute' as const,
+  inset: '0',
+  width: '100%',
+  height: '100%',
+  zIndex: 1,
+}))
+
+const maskCloseOnClick = computed(
+  () =>
+    attrs.value.closeOnClick == null ||
+    attrs.value.closeOnClick === '' ||
+    parseBool(attrs.value.closeOnClick),
+)
+
+const maskPreviewVisible = computed(
+  () =>
+    !props.selectable &&
+    mountAllowed.value &&
+    showAllowed.value &&
+    maskIsOpen.value,
+)
 
 function childRelativeStyle(child: XmlNode): CSSProperties {
   const a = child.attrs
@@ -592,9 +758,20 @@ const showRepeatBadge = computed(
   () => Boolean(props.selectable && attrs.value.repeat?.trim()),
 )
 
-const eventBadgeCount = computed(() =>
-  props.selectable ? countNodeEventBindings(attrs.value) : 0,
-)
+const eventBadgeCount = computed(() => {
+  if (!props.selectable) return 0
+  if (props.node.tag === 'Component') {
+    const names = (componentDetail.value?.config.events ?? [])
+      .map((item) => item.name.trim())
+      .filter(Boolean)
+    const keys = [...new Set<string>([...INTERACTION_EVENT_KEYS, ...names])]
+    return keys.reduce(
+      (sum, key) => sum + countEventBindings(attrs.value[key]),
+      0,
+    )
+  }
+  return countNodeEventBindings(attrs.value)
+})
 
 function childId(index: number, tag: string) {
   return `${props.nodeId}/${index}:${tag}`
@@ -607,6 +784,7 @@ function emitInteract(eventKey: PreviewEventKey) {
     eventKey,
     raw,
     scope: props.node.scope,
+    dollarProps: props.dollarProps,
   })
 }
 
@@ -624,6 +802,11 @@ function handleSelect(event: MouseEvent) {
   if (!previewClickable.value) return
   event.stopPropagation()
   emitInteract('onClick')
+}
+
+function handleMaskBackdropClick() {
+  if (props.selectable || !maskCloseOnClick.value) return
+  maskStack?.close(maskKey.value)
 }
 
 function handleMouseEnter() {
@@ -683,8 +866,21 @@ function forwardInteract(payload: PreviewInteractPayload) {
   emit('interact', payload)
 }
 
+/** Component 子树交互：补上 emit 回写上下文后再向上抛 */
+function forwardComponentInteract(payload: PreviewInteractPayload) {
+  emit('interact', {
+    ...payload,
+    componentEmit: payload.componentEmit ?? {
+      events: componentDetail.value?.config.events ?? [],
+      // 用原始节点 attrs，避免动态样式/$props 插值改写事件绑定 JSON
+      hostAttrs: { ...props.node.attrs },
+      hostScope: props.node.scope,
+    },
+  })
+}
+
 onMounted(() => {
-  if (props.selectable) return
+  if (!props.interactEnabled || props.selectable) return
   if (countEventBindings(props.node.attrs.onAppear) <= 0) return
   emitInteract('onAppear')
 })
@@ -900,11 +1096,14 @@ onBeforeUnmount(() => {
         :node="componentRoot"
         :node-id="`${nodeId}/c:0:${componentRoot.tag}`"
         :selectable="false"
+        :interact-enabled="interactEnabled"
         :parent-scrollable="inScrollColumn"
         :icon-library="iconLibrary"
         :page-data="componentDetail?.data ?? pageData"
         :component-map="componentMap"
         :dollar-props="instanceDollarProps"
+        :route-params="routeParams"
+        @interact="forwardComponentInteract"
       />
       <div v-else :style="componentPlaceholderStyle">
         <div class="component-title">{{ attrs.name || attrs.componentId || 'Component' }}</div>
@@ -912,6 +1111,165 @@ onBeforeUnmount(() => {
       </div>
     </div>
   </WidgetSelectShell>
+
+  <WidgetSelectShell
+    v-else-if="node.tag === 'Swiper'"
+    :selected="isSelected"
+    :hovered="isHovered"
+    :margin-attrs="attrs"
+    :width="width"
+    :height="height"
+    :parent-horizontal="parentHorizontal"
+    :parent-vertical="parentVertical"
+    :fill-parent="isRoot"
+    :extra-style="shellExtraStyle"
+    :repeat-badge="showRepeatBadge"
+    :event-badge-count="eventBadgeCount"
+    :visually-hidden="visuallyHidden"
+    :interactive="previewInteractive"
+    :inside-scroll-port="insideScrollColumn"
+    :fill-remaining-height="fillRemainingHeight"
+    @click="handleSelect"
+    @mouseenter="handleMouseEnter"
+    @pointerdown="handlePointerDown"
+    @pointerup="handlePointerUp"
+    @pointerleave="handlePointerLeave"
+    @open-repeat="handleOpenRepeat"
+  >
+    <div class="widget swiper" :style="swiperStyle">
+      <SwiperPort
+        :editable="selectable"
+        :slide-count="node.children.length"
+        :autoplay="!selectable && swiperAutoplay"
+        :interval="swiperInterval"
+        :circular="swiperCircular"
+        :indicator="swiperIndicator"
+        :indicator-color="swiperIndicatorColor"
+        :indicator-active-color="swiperIndicatorActiveColor"
+        :duration="swiperDuration"
+        :current="swiperCurrent"
+      >
+        <template #default="{ index }">
+          <XmlNodeView
+            v-if="node.children[index]"
+            :node="node.children[index]"
+            :node-id="childId(index, node.children[index].tag)"
+            :selected-id="selectedId"
+            :hovered-id="hoveredId"
+            :selectable="selectable"
+            :interact-enabled="interactEnabled"
+            :parent-horizontal="false"
+            :parent-vertical="true"
+            :parent-scrollable="inScrollColumn"
+            :icon-library="iconLibrary"
+            :page-data="pageData"
+            :hidden-node-ids="hiddenNodeIds"
+            :component-map="componentMap"
+            :dollar-props="dollarProps"
+            :route-params="routeParams"
+            @select="forwardSelect"
+            @hover="forwardHover"
+            @open-repeat="forwardOpenRepeat"
+            @interact="forwardInteract"
+          />
+        </template>
+      </SwiperPort>
+    </div>
+  </WidgetSelectShell>
+
+  <WidgetSelectShell
+    v-else-if="node.tag === 'Mask' && selectable"
+    :selected="isSelected"
+    :hovered="isHovered"
+    :margin-attrs="attrs"
+    :width="width"
+    :height="height"
+    :parent-horizontal="parentHorizontal"
+    :parent-vertical="parentVertical"
+    :fill-parent="isRoot"
+    :extra-style="shellExtraStyle"
+    :repeat-badge="showRepeatBadge"
+    :event-badge-count="eventBadgeCount"
+    :visually-hidden="visuallyHidden"
+    :interactive="previewInteractive"
+    :inside-scroll-port="insideScrollColumn"
+    :fill-remaining-height="fillRemainingHeight"
+    @click="handleSelect"
+    @mouseenter="handleMouseEnter"
+    @pointerdown="handlePointerDown"
+    @pointerup="handlePointerUp"
+    @pointerleave="handlePointerLeave"
+    @open-repeat="handleOpenRepeat"
+  >
+    <div class="widget mask mask-edit" :style="maskEditStyle">
+      <XmlNodeView
+        v-for="(child, index) in node.children"
+        :key="childId(index, child.tag)"
+        :node="child"
+        :node-id="childId(index, child.tag)"
+        :selected-id="selectedId"
+        :hovered-id="hoveredId"
+        :selectable="selectable"
+        :interact-enabled="interactEnabled"
+        :parent-horizontal="false"
+        :parent-vertical="true"
+        :parent-scrollable="inScrollColumn"
+        :icon-library="iconLibrary"
+        :page-data="pageData"
+        :hidden-node-ids="hiddenNodeIds"
+        :component-map="componentMap"
+        :dollar-props="dollarProps"
+        :route-params="routeParams"
+        @select="forwardSelect"
+        @hover="forwardHover"
+        @open-repeat="forwardOpenRepeat"
+        @interact="forwardInteract"
+      />
+      <div v-if="!node.children.length" class="mask-empty">
+        向遮罩添加子弹窗等内容 · name「{{ maskKey }}」
+      </div>
+    </div>
+  </WidgetSelectShell>
+
+  <Teleport
+    v-else-if="node.tag === 'Mask' && maskHostEl"
+    :to="maskHostEl"
+  >
+    <div
+      v-if="maskPreviewVisible"
+      class="mask-overlay"
+      :style="maskOverlayStyle"
+      @click="handleMaskBackdropClick"
+    >
+      <div class="mask-panel" @click.stop>
+        <XmlNodeView
+          v-for="(child, index) in node.children"
+          :key="childId(index, child.tag)"
+          :node="child"
+          :node-id="childId(index, child.tag)"
+          :selected-id="selectedId"
+          :hovered-id="hoveredId"
+          :selectable="selectable"
+          :interact-enabled="interactEnabled"
+          :parent-horizontal="false"
+          :parent-vertical="true"
+          :icon-library="iconLibrary"
+          :page-data="pageData"
+          :hidden-node-ids="hiddenNodeIds"
+          :component-map="componentMap"
+          :dollar-props="dollarProps"
+          :route-params="routeParams"
+          @select="forwardSelect"
+          @hover="forwardHover"
+          @open-repeat="forwardOpenRepeat"
+          @interact="forwardInteract"
+        />
+      </div>
+    </div>
+  </Teleport>
+
+  <!-- 预览且宿主未就绪时占位，避免落入 unsupported -->
+  <template v-else-if="node.tag === 'Mask'" />
 
   <WidgetSelectShell
     v-else-if="node.tag === 'LinearLayout'"
@@ -938,11 +1296,11 @@ onBeforeUnmount(() => {
     @pointerleave="handlePointerLeave"
     @open-repeat="handleOpenRepeat"
   >
-    <div
-      class="widget linear"
-      :class="{ 'is-scrollable': isScrollLayout }"
-      :style="linearStyle"
-      @wheel="isScrollLayout ? $event.stopPropagation() : undefined"
+    <OverlayScrollPort
+      :enabled="isScrollLayout"
+      content-class="widget linear"
+      :content-style="linearStyle"
+      @wheel="$event.stopPropagation()"
     >
       <XmlNodeView
         v-for="(child, index) in node.children"
@@ -952,6 +1310,7 @@ onBeforeUnmount(() => {
         :selected-id="selectedId"
         :hovered-id="hoveredId"
         :selectable="selectable"
+        :interact-enabled="interactEnabled"
         :parent-horizontal="isHorizontalLinear"
         :parent-vertical="!isHorizontalLinear"
         :parent-scrollable="inScrollColumn"
@@ -960,12 +1319,13 @@ onBeforeUnmount(() => {
         :hidden-node-ids="hiddenNodeIds"
         :component-map="componentMap"
         :dollar-props="dollarProps"
+        :route-params="routeParams"
         @select="forwardSelect"
         @hover="forwardHover"
         @open-repeat="forwardOpenRepeat"
         @interact="forwardInteract"
       />
-    </div>
+    </OverlayScrollPort>
   </WidgetSelectShell>
 
   <WidgetSelectShell
@@ -993,11 +1353,11 @@ onBeforeUnmount(() => {
     @pointerleave="handlePointerLeave"
     @open-repeat="handleOpenRepeat"
   >
-    <div
-      class="widget relative"
-      :class="{ 'is-scrollable': isScrollLayout }"
-      :style="relativeStyle"
-      @wheel="isScrollLayout ? $event.stopPropagation() : undefined"
+    <OverlayScrollPort
+      :enabled="isScrollLayout"
+      content-class="widget relative"
+      :content-style="relativeStyle"
+      @wheel="$event.stopPropagation()"
     >
       <XmlNodeView
         v-for="(child, index) in node.children"
@@ -1007,6 +1367,7 @@ onBeforeUnmount(() => {
         :selected-id="selectedId"
         :hovered-id="hoveredId"
         :selectable="selectable"
+        :interact-enabled="interactEnabled"
         :extra-style="childRelativeStyle(child)"
         :parent-scrollable="inScrollColumn"
         :icon-library="iconLibrary"
@@ -1014,17 +1375,45 @@ onBeforeUnmount(() => {
         :hidden-node-ids="hiddenNodeIds"
         :component-map="componentMap"
         :dollar-props="dollarProps"
+        :route-params="routeParams"
         @select="forwardSelect"
         @hover="forwardHover"
         @open-repeat="forwardOpenRepeat"
         @interact="forwardInteract"
       />
-    </div>
+    </OverlayScrollPort>
   </WidgetSelectShell>
   </template>
 </template>
 
 <style scoped>
+.widget.swiper {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  box-sizing: border-box;
+}
+
+.mask-empty {
+  width: 100%;
+  padding: 16px 8px;
+  font-size: 12px;
+  color: #909399;
+  text-align: center;
+  pointer-events: none;
+}
+
+.mask-panel {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  max-width: 100%;
+  max-height: 100%;
+  min-width: 0;
+  min-height: 0;
+  box-sizing: border-box;
+}
+
 .component-title {
   font-size: 13px;
   font-weight: 600;
@@ -1043,45 +1432,6 @@ onBeforeUnmount(() => {
   border: 1px dashed #f56c6c;
 }
 
-.widget.linear.is-scrollable,
-.widget.relative.is-scrollable {
-  flex: 1 1 0% !important;
-  width: 100%;
-  min-height: 0 !important;
-  min-width: 0;
-  align-self: stretch;
-  /* 移动端风格滚动条：细、圆角、半透明 */
-  scrollbar-width: thin;
-  scrollbar-color: rgba(15, 23, 42, 0.28) transparent;
-}
-
-.widget.linear.is-scrollable::-webkit-scrollbar,
-.widget.relative.is-scrollable::-webkit-scrollbar {
-  width: 3px;
-  height: 3px;
-}
-
-.widget.linear.is-scrollable::-webkit-scrollbar-track,
-.widget.relative.is-scrollable::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.widget.linear.is-scrollable::-webkit-scrollbar-thumb,
-.widget.relative.is-scrollable::-webkit-scrollbar-thumb {
-  background: rgba(15, 23, 42, 0.28);
-  border-radius: 999px;
-}
-
-.widget.linear.is-scrollable::-webkit-scrollbar-thumb:hover,
-.widget.relative.is-scrollable::-webkit-scrollbar-thumb:hover {
-  background: rgba(15, 23, 42, 0.42);
-}
-
-.widget.linear.is-scrollable::-webkit-scrollbar-corner,
-.widget.relative.is-scrollable::-webkit-scrollbar-corner {
-  background: transparent;
-}
-
 .widget.button {
   font-family: inherit;
 }
@@ -1089,13 +1439,11 @@ onBeforeUnmount(() => {
 .widget.image {
   vertical-align: top;
   user-select: none;
-  pointer-events: none;
 }
 
 .widget.icon {
   vertical-align: top;
   user-select: none;
-  pointer-events: none;
   overflow: visible;
 }
 

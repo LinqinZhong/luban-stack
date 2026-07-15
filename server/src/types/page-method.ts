@@ -49,7 +49,81 @@ export const BUILTIN_METHODS: PageMethod[] = [
     body: '// 写入数据池字段\n// prop: 字段名；value: 任意值',
     builtin: true,
   },
+  {
+    name: 'showToast',
+    params: [
+      { name: 'message', type: 'string' },
+      { name: 'duration', type: 'string' },
+    ],
+    returnType: 'void',
+    body:
+      '// 弹出 Toast 提示\n' +
+      "// message: 提示内容\n" +
+      "// duration: 'short'（短，默认）或 'long'（长）",
+    builtin: true,
+  },
+  {
+    name: 'openMask',
+    params: [{ name: 'name', type: 'string' }],
+    returnType: 'void',
+    body:
+      '// 打开遮罩（按 name 入栈）\n' +
+      '// 同一页面同时只显示栈顶遮罩；打开新遮罩时先前遮罩会暂时关闭，关闭后可恢复',
+    builtin: true,
+  },
+  {
+    name: 'closeMask',
+    params: [{ name: 'name', type: 'string' }],
+    returnType: 'void',
+    body:
+      '// 关闭遮罩\n' +
+      '// 不传 name：关闭当前栈顶\n' +
+      '// 传入 name：关闭该层及其之上的遮罩',
+    builtin: true,
+  },
+  {
+    name: 'closeAllMasks',
+    params: [],
+    returnType: 'void',
+    body: '// 关闭页面上所有遮罩并清空堆栈',
+    builtin: true,
+  },
 ]
+
+/** 仅组件 function 目录注入的预置方法 */
+export const COMPONENT_BUILTIN_METHODS: PageMethod[] = [
+  {
+    name: 'emit',
+    params: [
+      { name: 'event', type: 'string' },
+      { name: '...args', type: 'any' },
+    ],
+    returnType: 'void',
+    body:
+      '// 向父页面抛出组件事件\n' +
+      "// 用法：emit(事件名, ...事件参数)\n" +
+      "// 事件名对应组件设置里「事件方法」的名称；其后参数按该事件定义的参数依次传入\n" +
+      "// 例如事件 onClick 定义了参数 id，则：emit('onClick', id)",
+    builtin: true,
+  },
+]
+
+export function builtinsForRoot(root: 'pages' | 'components'): PageMethod[] {
+  if (root === 'components') {
+    return [
+      ...BUILTIN_METHODS.map((item) => ({ ...item, builtin: true as const })),
+      ...COMPONENT_BUILTIN_METHODS.map((item) => ({ ...item, builtin: true as const })),
+    ]
+  }
+  return BUILTIN_METHODS.map((item) => ({ ...item, builtin: true as const }))
+}
+
+export function isBuiltinMethodName(
+  name: string,
+  root: 'pages' | 'components' = 'pages',
+): boolean {
+  return builtinsForRoot(root).some((item) => item.name === name)
+}
 
 export function isValidMethodName(name: string): boolean {
   return /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(name)

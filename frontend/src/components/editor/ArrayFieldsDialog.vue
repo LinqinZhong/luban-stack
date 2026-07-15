@@ -4,6 +4,7 @@ import { DocumentCopy, Plus, Rank } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import ArrayFieldsDialog from './ArrayFieldsDialog.vue'
 import IconValueSelect from './IconValueSelect.vue'
+import ColorPicker from './ColorPicker.vue'
 import ObjectFieldsDialog from './ObjectFieldsDialog.vue'
 import {
   ARRAY_ITEM_TYPE_OPTIONS,
@@ -408,6 +409,12 @@ function handleSave() {
             v-else-if="item.type === 'icon'"
             :model-value="String(item.value ?? '')"
             :options="iconOptions"
+            @update:model-value="item.value = $event"
+          />
+          <ColorPicker
+            v-else-if="item.type === 'color'"
+            :model-value="String(item.value ?? '')"
+            placeholder="#409eff / rgba(...)"
             @update:model-value="item.value = $event"
           />
           <div v-else-if="item.type === 'json'" class="complex-value object-value">

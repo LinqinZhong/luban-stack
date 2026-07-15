@@ -11,6 +11,7 @@ export interface PageSummary {
   name: string
   title: string
   path: string
+  isEntry?: boolean
 }
 
 export interface PageDetail {
@@ -43,6 +44,53 @@ export function createPage(payload: {
     method: 'POST',
     body: JSON.stringify(payload),
   })
+}
+
+export function savePageConfig(payload: {
+  projectPath: string
+  pageId: string
+  name: string
+  title?: string
+}) {
+  return request<PageDetail>(
+    `/api/pages/${encodeURIComponent(payload.pageId)}/config`,
+    {
+      method: 'PUT',
+      body: JSON.stringify({
+        projectPath: payload.projectPath,
+        name: payload.name,
+        title: payload.title,
+      }),
+    },
+  )
+}
+
+export function copyPage(payload: {
+  projectPath: string
+  pageId: string
+  newId: string
+  name?: string
+  title?: string
+}) {
+  return request<PageDetail>(
+    `/api/pages/${encodeURIComponent(payload.pageId)}/copy`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        projectPath: payload.projectPath,
+        newId: payload.newId,
+        name: payload.name,
+        title: payload.title,
+      }),
+    },
+  )
+}
+
+export function deletePage(payload: { projectPath: string; pageId: string }) {
+  return request<{ ok: boolean; entryCleared: boolean }>(
+    `/api/pages/${encodeURIComponent(payload.pageId)}?projectPath=${encodeURIComponent(payload.projectPath)}`,
+    { method: 'DELETE' },
+  )
 }
 
 export function savePageXml(payload: {

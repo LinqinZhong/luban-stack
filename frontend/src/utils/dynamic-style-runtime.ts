@@ -15,6 +15,8 @@ export interface DynamicStyleScope {
   index?: number
   /** 组件入参：$props.xxx */
   $props?: Record<string, unknown>
+  /** 路由参数：$route.xxx */
+  $route?: Record<string, unknown>
 }
 
 type PathToken = { kind: 'key'; value: string } | { kind: 'index'; value: number }
@@ -66,14 +68,63 @@ export function resolveConditionValue(
   if (raw.startsWith('props.')) {
     return walkTokens(scope?.$props, tokenizePath(raw.slice('props.'.length)))
   }
+  if (raw === '$route' || raw === 'route') return scope?.$route
+  if (raw.startsWith('$route.')) {
+    return walkTokens(scope?.$route, tokenizePath(raw.slice('$route.'.length)))
+  }
+  if (raw.startsWith('route.')) {
+    return walkTokens(scope?.$route, tokenizePath(raw.slice('route.'.length)))
+  }
 
   if (!pageData) return undefined
   const tokens = tokenizePath(raw)
   if (!tokens.length || tokens[0].kind !== 'key') return undefined
-  if (tokens[0].value === DOLLAR_PROPS_NAME) return undefined
+  if (tokens[0].value === DOLLAR_PROPS_NAME || tokens[0].value === '$route') {
+    return undefined
+  }
   const field = pageData.fields.find((item) => item.name.trim() === tokens[0].value)
   if (!field) return undefined
   return walkTokens(field.value, tokens.slice(1))
+}
+
+function formatBindingValue(value: unknown): string {
+  if (value == null) return ''
+  if (typeof value === 'object') {
+    try {
+      return JSON.stringify(value)
+    } catch {
+      return ''
+    }
+  }
+  return String(value)
+}
+
+/**
+ * 替换属性/文本中的 `{字段}`：数据池 / item / index / $route 等。
+ * 解析不到的占位符原样保留（如待后续处理的 {$props.xxx}）。
+ */
+export function interpolateDataBindings(
+  template: string,
+  pageData: PageData | undefined,
+  scope?: DynamicStyleScope,
+): string {
+  if (!template || !template.includes('{')) return template
+  return template.replace(/\{([^{}]+)\}/g, (match, rawExpr: string) => {
+    const expr = rawExpr.trim()
+    if (!expr) return match
+    // $props 留给 interpolateDollarProps，避免宿主组装 $props 时自引用
+    if (
+      expr === '$props' ||
+      expr === 'props' ||
+      expr.startsWith('$props.') ||
+      expr.startsWith('props.')
+    ) {
+      return match
+    }
+    const value = resolveConditionValue(expr, pageData, scope)
+    if (value === undefined) return match
+    return formatBindingValue(value)
+  })
 }
 
 function compareValues(op: StyleConditionOp, left: unknown, right: string): boolean {

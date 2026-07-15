@@ -1,7 +1,7 @@
-import { access, mkdir, readdir, readFile, writeFile, stat } from 'node:fs/promises'
+import { access, mkdir, readdir, readFile, writeFile, stat, cp, rm } from 'node:fs/promises'
 import { constants } from 'node:fs'
 import path from 'node:path'
-import { ProjectError } from './project.js'
+import { ProjectError, setEntryPage, getProjectEntryPage } from './project.js'
 import {
   createDefaultPageData,
   type ArraySubField,
@@ -25,6 +25,8 @@ export interface PageSummary {
   name: string
   title: string
   path: string
+  /** 是否为项目入口页 */
+  isEntry?: boolean
 }
 
 export interface PageDetail {
@@ -135,6 +137,7 @@ const DATA_FIELD_TYPES = new Set([
   'json',
   'array',
   'icon',
+  'color',
 ])
 
 function defaultValue(type: DataField['type']) {
@@ -148,6 +151,7 @@ function defaultValue(type: DataField['type']) {
     case 'array':
       return []
     case 'icon':
+    case 'color':
       return ''
     default:
       return ''
@@ -351,6 +355,7 @@ async function readPageData(dir: string): Promise<PageData> {
 export async function listPages(projectPathInput: string): Promise<PageSummary[]> {
   const projectPath = await assertProjectDir(projectPathInput)
   const root = await ensurePagesDir(projectPath)
+  const entryPage = await getProjectEntryPage(projectPath).catch(() => undefined)
 
   let names: string[]
   try {
@@ -380,6 +385,7 @@ export async function listPages(projectPathInput: string): Promise<PageSummary[]
           name: config.name,
           title: config.title || config.name,
           path: dir,
+          isEntry: Boolean(entryPage && entryPage === name),
         })
       } catch {
         // skip incomplete page folders
@@ -387,7 +393,10 @@ export async function listPages(projectPathInput: string): Promise<PageSummary[]
     }),
   )
 
-  return pages.sort((a, b) => a.id.localeCompare(b.id, 'zh-CN'))
+  return pages.sort((a, b) => {
+    if (a.isEntry !== b.isEntry) return a.isEntry ? -1 : 1
+    return a.id.localeCompare(b.id, 'zh-CN')
+  })
 }
 
 export async function getPage(
@@ -544,4 +553,142 @@ export async function savePageXml(options: {
   }
 
   return getPage(projectPath, pageId)
+}
+
+export async function savePageConfig(options: {
+  projectPath: string
+  pageId: string
+  name: string
+  title?: string
+}): Promise<PageDetail> {
+  const projectPath = await assertProjectDir(options.projectPath)
+  const pageId = assertSafePageId(options.pageId)
+  const dir = pageDir(projectPath, pageId)
+
+  try {
+    const info = await stat(dir)
+    if (!info.isDirectory()) throw new ProjectError('页面不存在', 404)
+  } catch (err) {
+    if (err instanceof ProjectError) throw err
+    throw new ProjectError('页面不存在', 404)
+  }
+
+  const name = options.name?.trim()
+  if (!name) throw new ProjectError('请填写页面名称')
+
+  const prev = await readPageConfig(dir)
+  const config: PageConfig = {
+    name,
+    title:
+      options.title !== undefined
+        ? options.title.trim() || name
+        : prev.title === prev.name
+          ? name
+          : prev.title || name,
+  }
+
+  try {
+    await writeFile(
+      path.join(dir, PAGE_CONFIG_FILE),
+      `${JSON.stringify(config, null, 2)}\n`,
+      'utf-8',
+    )
+  } catch {
+    throw new ProjectError(`无法写入 ${PAGE_CONFIG_FILE}`, 500)
+  }
+
+  return getPage(projectPath, pageId)
+}
+
+export async function copyPage(options: {
+  projectPath: string
+  pageId: string
+  newId: string
+  name?: string
+  title?: string
+}): Promise<PageDetail> {
+  const projectPath = await assertProjectDir(options.projectPath)
+  const sourceId = assertSafePageId(options.pageId)
+  const newId = assertSafePageId(options.newId)
+  if (sourceId === newId) {
+    throw new ProjectError('新页面 ID 不能与原页面相同')
+  }
+
+  const sourceDir = pageDir(projectPath, sourceId)
+  const targetDir = pageDir(projectPath, newId)
+
+  try {
+    const info = await stat(sourceDir)
+    if (!info.isDirectory()) throw new ProjectError('原页面不存在', 404)
+  } catch (err) {
+    if (err instanceof ProjectError) throw err
+    throw new ProjectError('原页面不存在', 404)
+  }
+
+  try {
+    await access(targetDir, constants.F_OK)
+    throw new ProjectError(`页面 ${newId} 已存在`)
+  } catch (err) {
+    if (err instanceof ProjectError) throw err
+  }
+
+  try {
+    await cp(sourceDir, targetDir, { recursive: true })
+  } catch {
+    throw new ProjectError('复制页面失败', 500)
+  }
+
+  const sourceConfig = await readPageConfig(sourceDir)
+  const name = options.name?.trim() || `${sourceConfig.name} 副本`
+  const title =
+    options.title?.trim() ||
+    (sourceConfig.title ? `${sourceConfig.title} 副本` : name)
+
+  try {
+    await writeFile(
+      path.join(targetDir, PAGE_CONFIG_FILE),
+      `${JSON.stringify({ name, title }, null, 2)}\n`,
+      'utf-8',
+    )
+  } catch {
+    throw new ProjectError('无法写入复制页面的配置', 500)
+  }
+
+  return getPage(projectPath, newId)
+}
+
+export async function deletePage(options: {
+  projectPath: string
+  pageId: string
+}): Promise<{ ok: boolean; entryCleared: boolean }> {
+  const projectPath = await assertProjectDir(options.projectPath)
+  const pageId = assertSafePageId(options.pageId)
+  const dir = pageDir(projectPath, pageId)
+
+  try {
+    const info = await stat(dir)
+    if (!info.isDirectory()) throw new ProjectError('页面不存在', 404)
+  } catch (err) {
+    if (err instanceof ProjectError) throw err
+    throw new ProjectError('页面不存在', 404)
+  }
+
+  try {
+    await rm(dir, { recursive: true, force: true })
+  } catch {
+    throw new ProjectError('删除页面失败', 500)
+  }
+
+  let entryCleared = false
+  try {
+    const entry = await getProjectEntryPage(projectPath)
+    if (entry === pageId) {
+      await setEntryPage(projectPath, null)
+      entryCleared = true
+    }
+  } catch {
+    // ignore entry cleanup failures
+  }
+
+  return { ok: true, entryCleared }
 }
