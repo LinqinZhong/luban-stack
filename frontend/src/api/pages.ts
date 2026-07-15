@@ -162,3 +162,26 @@ export function deletePageMethod(payload: {
     { method: 'DELETE' },
   )
 }
+
+export function getPageLifecycle(projectPath: string, pageId: string) {
+  return request<{ lifecycle: import('../types/lifecycle').LifecycleConfig }>(
+    `/api/pages/${encodeURIComponent(pageId)}/lifecycle?projectPath=${encodeURIComponent(projectPath)}`,
+  )
+}
+
+export function savePageLifecycle(payload: {
+  projectPath: string
+  pageId: string
+  lifecycle: import('../types/lifecycle').LifecycleConfig
+}) {
+  return request<{ lifecycle: import('../types/lifecycle').LifecycleConfig }>(
+    `/api/pages/${encodeURIComponent(payload.pageId)}/lifecycle`,
+    {
+      method: 'PUT',
+      body: JSON.stringify({
+        projectPath: payload.projectPath,
+        lifecycle: payload.lifecycle,
+      }),
+    },
+  )
+}

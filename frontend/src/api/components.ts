@@ -121,3 +121,26 @@ export function deleteComponentMethod(payload: {
     { method: 'DELETE' },
   )
 }
+
+export function getComponentLifecycle(projectPath: string, componentId: string) {
+  return request<{ lifecycle: import('../types/lifecycle').LifecycleConfig }>(
+    `/api/components/${encodeURIComponent(componentId)}/lifecycle?projectPath=${encodeURIComponent(projectPath)}`,
+  )
+}
+
+export function saveComponentLifecycle(payload: {
+  projectPath: string
+  componentId: string
+  lifecycle: import('../types/lifecycle').LifecycleConfig
+}) {
+  return request<{ lifecycle: import('../types/lifecycle').LifecycleConfig }>(
+    `/api/components/${encodeURIComponent(payload.componentId)}/lifecycle`,
+    {
+      method: 'PUT',
+      body: JSON.stringify({
+        projectPath: payload.projectPath,
+        lifecycle: payload.lifecycle,
+      }),
+    },
+  )
+}

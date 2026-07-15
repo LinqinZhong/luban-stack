@@ -15,6 +15,7 @@ import {
   listPageMethods,
   savePageMethod,
 } from '../services/functions.js'
+import { getLifecycle, saveLifecycle } from '../services/lifecycle.js'
 
 const router = Router()
 
@@ -168,6 +169,33 @@ router.put('/:pageId/data', async (req, res) => {
       data: req.body?.data,
     })
     res.json(page)
+  } catch (err) {
+    handleError(res, err)
+  }
+})
+
+router.get('/:pageId/lifecycle', async (req, res) => {
+  try {
+    const result = await getLifecycle(
+      getProjectPath(req),
+      req.params.pageId,
+      'pages',
+    )
+    res.json(result)
+  } catch (err) {
+    handleError(res, err)
+  }
+})
+
+router.put('/:pageId/lifecycle', async (req, res) => {
+  try {
+    const result = await saveLifecycle({
+      projectPath: getProjectPath(req),
+      id: req.params.pageId,
+      root: 'pages',
+      lifecycle: req.body?.lifecycle,
+    })
+    res.json(result)
   } catch (err) {
     handleError(res, err)
   }

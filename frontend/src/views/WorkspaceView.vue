@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, reactive, ref } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   Box,
@@ -17,10 +17,12 @@ import {
   deletePage,
   deletePageMethod,
   getPage,
+  getPageLifecycle,
   listPageMethods,
   listPages,
   savePageConfig,
   savePageData,
+  savePageLifecycle,
   savePageMethod,
   savePageXml,
   type PageDetail,
@@ -31,10 +33,12 @@ import {
   createComponent,
   deleteComponentMethod,
   getComponent,
+  getComponentLifecycle,
   listComponentMethods,
   listComponents,
   saveComponentConfig,
   saveComponentData,
+  saveComponentLifecycle,
   saveComponentMethod,
   saveComponentXml,
   type ComponentDetail,
@@ -48,6 +52,8 @@ import DataPoolPanel from '../components/editor/DataPoolPanel.vue'
 import IconLibraryPanel from '../components/editor/IconLibraryPanel.vue'
 import MethodEditDialog from '../components/editor/MethodEditDialog.vue'
 import MethodsPanel from '../components/editor/MethodsPanel.vue'
+import LifecyclePanel from '../components/editor/LifecyclePanel.vue'
+import LeafIcon from '../components/icons/LeafIcon.vue'
 import ComponentMetaPanel from '../components/editor/ComponentMetaPanel.vue'
 import PropsPanel, { type PropsTab } from '../components/editor/PropsPanel.vue'
 import PageCanvas from '../components/xml/PageCanvas.vue'
@@ -68,6 +74,14 @@ import { resolveComputedPageData } from '../utils/compute-runtime'
 import { buildDollarProps } from '../utils/component-props'
 import type { DataFieldValue } from '../types/page-data'
 import {
+  createEmptyLifecycleConfig,
+  LIFECYCLE_MOUNT_KEYS,
+  LIFECYCLE_UNMOUNT_KEYS,
+  LIFECYCLE_UPDATE_KEYS,
+  type LifecycleConfig,
+  type LifecycleHookKey,
+} from '../types/lifecycle'
+import {
   appendComponent,
   appendWidget,
   canDeleteNode,
@@ -86,7 +100,13 @@ import {
   type IconLibrary,
 } from '../types/icon-library'
 
-type WorkspaceMode = 'preview' | 'edit' | 'datapool' | 'icons' | 'methods'
+type WorkspaceMode =
+  | 'preview'
+  | 'edit'
+  | 'datapool'
+  | 'icons'
+  | 'methods'
+  | 'lifecycle'
 
 const projectStore = useProjectStore()
 
@@ -116,8 +136,12 @@ const iconLibrary = ref<IconLibrary>(createEmptyIconLibrary())
 /** 编辑态临时隐藏，不写入 XML；预览模式不生效 */
 const editorHiddenNodeIds = ref<string[]>([])
 const pageMethods = ref<PageMethod[]>([])
+const lifecycleConfig = ref<LifecycleConfig>(createEmptyLifecycleConfig())
 const methodDialogVisible = ref(false)
 const editingMethod = ref<PageMethod | null>(null)
+/** 预览态是否已跑过挂载生命周期序列 */
+let lifecycleSessionActive = false
+let lifecycleSaveTimer: ReturnType<typeof setTimeout> | null = null
 /** 预览态 navigateTo / navigateBack 历史（含路由参数） */
 const pageHistory = ref<Array<{ pageId: string; params: Record<string, unknown> }>>([])
 /** 预览态当前页跳转参数（navigateTo 传入） */
@@ -249,8 +273,13 @@ const isEditMode = computed(() => workspaceMode.value === 'edit')
 const isDataPoolMode = computed(() => workspaceMode.value === 'datapool')
 const isIconsMode = computed(() => workspaceMode.value === 'icons')
 const isMethodsMode = computed(() => workspaceMode.value === 'methods')
+const isLifecycleMode = computed(() => workspaceMode.value === 'lifecycle')
 const hideWidgetTree = computed(
-  () => isDataPoolMode.value || isIconsMode.value || isMethodsMode.value,
+  () =>
+    isDataPoolMode.value ||
+    isIconsMode.value ||
+    isMethodsMode.value ||
+    isLifecycleMode.value,
 )
 
 const canDeleteSelected = computed(
@@ -277,12 +306,14 @@ const modeTabs = [
   { key: 'datapool' as const, label: '数据池', icon: Coin },
   { key: 'icons' as const, label: '图标库', icon: Picture },
   { key: 'methods' as const, label: '方法', icon: Lightning },
+  { key: 'lifecycle' as const, label: '生命周期', icon: LeafIcon },
 ]
 
 const centerFileLabel = computed(() => {
   if (isDataPoolMode.value) return 'data.json'
   if (isIconsMode.value) return 'icons.json'
   if (isMethodsMode.value) return 'function/'
+  if (isLifecycleMode.value) return 'lifecycle.json'
   return 'index.xml'
 })
 
@@ -316,6 +347,7 @@ const propsPlaceholderText = computed(() => {
   if (isDataPoolMode.value) return '数据池模式下请在中间区域编辑'
   if (isIconsMode.value) return '图标库模式下请在中间区域编辑'
   if (isMethodsMode.value) return '方法模式下请在中间区域编辑'
+  if (isLifecycleMode.value) return '生命周期模式下请在中间区域编辑'
   if (isComponentResource.value && activeComponent.value && !selectedNodeId.value) {
     return '选中控件可编辑样式，或查看组件设置'
   }
@@ -454,6 +486,54 @@ async function loadPageMethods(pageId?: string) {
   }
 }
 
+async function loadLifecycle(resourceId?: string) {
+  if (!projectStore.path) return
+  const id =
+    resourceId ||
+    (isComponentResource.value ? activeComponentId.value : activePageId.value)
+  if (!id) {
+    lifecycleConfig.value = createEmptyLifecycleConfig()
+    return
+  }
+  try {
+    const result = isComponentResource.value
+      ? await getComponentLifecycle(projectStore.path, id)
+      : await getPageLifecycle(projectStore.path, id)
+    lifecycleConfig.value = result.lifecycle ?? createEmptyLifecycleConfig()
+  } catch (err) {
+    lifecycleConfig.value = createEmptyLifecycleConfig()
+    console.error(err)
+  }
+}
+
+async function handleLifecycleUpdate(lifecycle: LifecycleConfig) {
+  if (!projectStore.path || !activeDoc.value) return
+  lifecycleConfig.value = lifecycle
+  if (lifecycleSaveTimer) clearTimeout(lifecycleSaveTimer)
+  lifecycleSaveTimer = setTimeout(async () => {
+    if (!projectStore.path || !activeDoc.value) return
+    try {
+      if (isComponentResource.value) {
+        const result = await saveComponentLifecycle({
+          projectPath: projectStore.path,
+          componentId: activeDoc.value.id,
+          lifecycle: lifecycleConfig.value,
+        })
+        lifecycleConfig.value = result.lifecycle
+      } else {
+        const result = await savePageLifecycle({
+          projectPath: projectStore.path,
+          pageId: activeDoc.value.id,
+          lifecycle: lifecycleConfig.value,
+        })
+        lifecycleConfig.value = result.lifecycle
+      }
+    } catch (err) {
+      ElMessage.error(err instanceof Error ? err.message : '保存生命周期失败')
+    }
+  }, 400)
+}
+
 async function openPage(
   pageId: string,
   options?: {
@@ -476,6 +556,8 @@ async function openPage(
     routeParams.value = {}
   }
 
+  await teardownLifecycleSession()
+
   resourceKind.value = 'page'
   activePageId.value = pageId
   activeComponentId.value = ''
@@ -489,15 +571,17 @@ async function openPage(
     const migrated = migrateLegacyMaskToModal(detail.xml)
     if (migrated.changed) {
       activePage.value = { ...detail, xml: migrated.xml }
-      await loadPageMethods(pageId)
+      await Promise.all([loadPageMethods(pageId), loadLifecycle(pageId)])
       await handleXmlUpdate(migrated.xml)
     } else {
       activePage.value = detail
-      await loadPageMethods(pageId)
+      await Promise.all([loadPageMethods(pageId), loadLifecycle(pageId)])
     }
+    await syncLifecycleSession()
   } catch (err) {
     activePage.value = null
     pageMethods.value = []
+    lifecycleConfig.value = createEmptyLifecycleConfig()
     ElMessage.error(err instanceof Error ? err.message : '打开页面失败')
   } finally {
     loadingPage.value = false
@@ -506,6 +590,8 @@ async function openPage(
 
 async function openComponent(componentId: string) {
   if (!projectStore.path) return
+  await teardownLifecycleSession()
+
   resourceKind.value = 'component'
   activeComponentId.value = componentId
   activePageId.value = ''
@@ -521,15 +607,17 @@ async function openComponent(componentId: string) {
     const migrated = migrateLegacyMaskToModal(detail.xml)
     if (migrated.changed) {
       activeComponent.value = { ...detail, xml: migrated.xml }
-      await loadPageMethods(componentId)
+      await Promise.all([loadPageMethods(componentId), loadLifecycle(componentId)])
       await handleXmlUpdate(migrated.xml)
     } else {
       activeComponent.value = detail
-      await loadPageMethods(componentId)
+      await Promise.all([loadPageMethods(componentId), loadLifecycle(componentId)])
     }
+    await syncLifecycleSession()
   } catch (err) {
     activeComponent.value = null
     pageMethods.value = []
+    lifecycleConfig.value = createEmptyLifecycleConfig()
     ElMessage.error(err instanceof Error ? err.message : '打开组件失败')
   } finally {
     loadingPage.value = false
@@ -547,6 +635,7 @@ function switchResourceKind(kind: ResourceKind) {
     else {
       activePage.value = null
       pageMethods.value = []
+      lifecycleConfig.value = createEmptyLifecycleConfig()
     }
   } else {
     const id = activeComponentId.value || components.value[0]?.id
@@ -554,6 +643,7 @@ function switchResourceKind(kind: ResourceKind) {
     else {
       activeComponent.value = null
       pageMethods.value = []
+      lifecycleConfig.value = createEmptyLifecycleConfig()
     }
   }
 }
@@ -862,77 +952,123 @@ function runComponentExposedMethod(
   })
 }
 
+async function runPreviewBindings(
+  raw: string | undefined,
+  options?: {
+    scope?: PreviewInteractPayload['scope']
+    eventArgs?: Record<string, unknown>
+    dollarProps?: Record<string, unknown>
+    emitFn?: (event: string, ...args: unknown[]) => void
+    emitWithArgs?: (event: string, args: Record<string, string>) => void
+  },
+) {
+  if (!activeDoc.value) return
+  await runEventBindings(raw, {
+    pageData: resolvedPageData.value,
+    xml: activeDoc.value.xml,
+    modalStack,
+    componentMap: componentMap.value,
+    componentMethodsMap: componentMethodsMap.value,
+    runComponentMethod: runComponentExposedMethod,
+    resolveMethod: (name) =>
+      pageMethods.value.find((item) => item.name === name && !item.builtin),
+    scope: options?.scope,
+    eventArgs: options?.eventArgs,
+    dollarProps: options?.dollarProps,
+    emit: options?.emitFn,
+    emitWithArgs: options?.emitWithArgs,
+    hasPage: (pageId) => pages.value.some((item) => item.id === pageId),
+    navigateTo: async (pageId, params) => {
+      if (activePageId.value && activePageId.value !== pageId) {
+        pageHistory.value.push({
+          pageId: activePageId.value,
+          params: { ...routeParams.value },
+        })
+      }
+      await openPage(pageId, {
+        keepHistory: true,
+        params:
+          params && typeof params === 'object' && !Array.isArray(params)
+            ? params
+            : {},
+      })
+    },
+    navigateBack: async () => {
+      const prev = pageHistory.value.pop()
+      if (!prev) {
+        ElMessage.info('没有可返回的页面')
+        return
+      }
+      await openPage(prev.pageId, {
+        keepHistory: true,
+        params: prev.params,
+      })
+    },
+    setData: (prop, value) => {
+      applyPreviewSetData(prop, value)
+    },
+    showToast: (message, duration) => {
+      showPreviewToast(message, duration)
+    },
+    onUnknownMethod: (name) => {
+      if (name.startsWith('navigateTo:')) {
+        ElMessage.warning(name.replace(/^navigateTo:\s*/, ''))
+      } else if (name.startsWith('自定义方法')) {
+        ElMessage.error(name)
+      }
+    },
+  })
+}
+
+async function runLifecycleHook(key: LifecycleHookKey) {
+  const raw = lifecycleConfig.value[key]
+  if (!raw?.trim()) return
+  await runPreviewBindings(raw)
+}
+
+async function teardownLifecycleSession() {
+  if (!lifecycleSessionActive) return
+  for (const key of LIFECYCLE_UNMOUNT_KEYS) {
+    await runLifecycleHook(key)
+  }
+  lifecycleSessionActive = false
+}
+
+async function setupLifecycleSession() {
+  if (workspaceMode.value !== 'preview' || !activeDoc.value) return
+  if (lifecycleSessionActive) return
+  lifecycleSessionActive = true
+  for (const key of LIFECYCLE_MOUNT_KEYS) {
+    await runLifecycleHook(key)
+  }
+}
+
+async function syncLifecycleSession() {
+  if (workspaceMode.value === 'preview' && activeDoc.value) {
+    await setupLifecycleSession()
+  }
+}
+
+async function runLifecycleUpdateSequence() {
+  if (!lifecycleSessionActive || workspaceMode.value !== 'preview') return
+  for (const key of LIFECYCLE_UPDATE_KEYS) {
+    await runLifecycleHook(key)
+  }
+}
+
+watch(workspaceMode, async (mode, prev) => {
+  if (prev === 'preview' && mode !== 'preview') {
+    await teardownLifecycleSession()
+    return
+  }
+  if (mode === 'preview' && prev !== 'preview') {
+    await nextTick()
+    await syncLifecycleSession()
+  }
+})
+
 async function handlePreviewInteract(payload: PreviewInteractPayload) {
   if (workspaceMode.value !== 'preview' || !activeDoc.value) return
-
-  const runWithContext = async (
-    raw: string | undefined,
-    options?: {
-      scope?: PreviewInteractPayload['scope']
-      eventArgs?: Record<string, unknown>
-      dollarProps?: Record<string, unknown>
-      emitFn?: (event: string, ...args: unknown[]) => void
-      emitWithArgs?: (event: string, args: Record<string, string>) => void
-    },
-  ) => {
-    await runEventBindings(raw, {
-      pageData: resolvedPageData.value,
-      xml: activeDoc.value?.xml,
-      modalStack,
-      componentMap: componentMap.value,
-      componentMethodsMap: componentMethodsMap.value,
-      runComponentMethod: runComponentExposedMethod,
-      resolveMethod: (name) =>
-        pageMethods.value.find(
-          (item) => item.name === name && !item.builtin,
-        ),
-      scope: options?.scope ?? payload.scope,
-      eventArgs: options?.eventArgs ?? payload.eventArgs,
-      dollarProps: options?.dollarProps ?? payload.dollarProps,
-      emit: options?.emitFn,
-      emitWithArgs: options?.emitWithArgs,
-      hasPage: (pageId) => pages.value.some((item) => item.id === pageId),
-      navigateTo: async (pageId, params) => {
-        if (activePageId.value && activePageId.value !== pageId) {
-          pageHistory.value.push({
-            pageId: activePageId.value,
-            params: { ...routeParams.value },
-          })
-        }
-        await openPage(pageId, {
-          keepHistory: true,
-          params:
-            params && typeof params === 'object' && !Array.isArray(params)
-              ? params
-              : {},
-        })
-      },
-      navigateBack: async () => {
-        const prev = pageHistory.value.pop()
-        if (!prev) {
-          ElMessage.info('没有可返回的页面')
-          return
-        }
-        await openPage(prev.pageId, {
-          keepHistory: true,
-          params: prev.params,
-        })
-      },
-      setData: (prop, value) => {
-        applyPreviewSetData(prop, value)
-      },
-      showToast: (message, duration) => {
-        showPreviewToast(message, duration)
-      },
-      onUnknownMethod: (name) => {
-        if (name.startsWith('navigateTo:')) {
-          ElMessage.warning(name.replace(/^navigateTo:\s*/, ''))
-        } else if (name.startsWith('自定义方法')) {
-          ElMessage.error(name)
-        }
-      },
-    })
-  }
 
   const hostEmit = payload.componentEmit
 
@@ -943,7 +1079,7 @@ async function handlePreviewInteract(payload: PreviewInteractPayload) {
     if (!hostEmit) return
     const raw = hostEmit.hostAttrs[eventName]
     if (!raw?.trim()) return
-    void runWithContext(raw, {
+    void runPreviewBindings(raw, {
       scope: hostEmit.hostScope ?? payload.scope,
       eventArgs: args,
     })
@@ -972,7 +1108,13 @@ async function handlePreviewInteract(payload: PreviewInteractPayload) {
       }
     : undefined
 
-  await runWithContext(payload.raw, { emitFn, emitWithArgs })
+  await runPreviewBindings(payload.raw, {
+    scope: payload.scope,
+    eventArgs: payload.eventArgs,
+    dollarProps: payload.dollarProps,
+    emitFn,
+    emitWithArgs,
+  })
 }
 
 function applyPreviewSetData(prop: string, value: import('../types/page-data').DataFieldValue) {
@@ -984,7 +1126,10 @@ function applyPreviewSetData(prop: string, value: import('../types/page-data').D
     return
   }
   fields[index] = { ...fields[index], value }
-  void handleDataUpdate({ fields })
+  void (async () => {
+    await handleDataUpdate({ fields })
+    await runLifecycleUpdateSequence()
+  })()
 }
 
 async function handleDataUpdate(data: import('../types/page-data').PageData) {
@@ -1421,6 +1566,19 @@ onMounted(() => {
           @add="openAddMethod"
           @edit="openEditMethod"
           @remove="handleRemoveMethod"
+        />
+        <LifecyclePanel
+          v-else-if="isLifecycleMode"
+          :lifecycle="lifecycleConfig"
+          :methods="editorMethods"
+          :for-component="isComponentResource"
+          :data-fields="activeDoc.data?.fields ?? []"
+          :xml="activeDoc.xml"
+          :component-map="componentMap"
+          :component-methods-map="componentMethodsMap"
+          :icon-options="iconOptions"
+          :emit-events="isComponentResource ? activeComponent?.config.events : undefined"
+          @update:lifecycle="handleLifecycleUpdate"
         />
         <PageCanvas
           v-else
