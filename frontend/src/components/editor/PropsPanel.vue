@@ -1,7 +1,12 @@
 <script setup lang="ts">
 import { computed, nextTick, reactive, ref, watch } from 'vue'
+import { Delete, Plus } from '@element-plus/icons-vue'
 import ColorPicker from './ColorPicker.vue'
+import DynamicStyleStateDialog from './DynamicStyleStateDialog.vue'
+import EventBindDialog from './EventBindDialog.vue'
 import NumericInput from './NumericInput.vue'
+import VisibilityConditionDialog from './VisibilityConditionDialog.vue'
+import { countEventBindings, type PageMethod } from '../../types/page-method'
 import {
   findNodeFromXml,
   findParentTagFromXml,
@@ -16,6 +21,29 @@ import {
   SIZE_OPTIONS,
   type InteractionEventKey,
 } from '../../utils/xml-node'
+import type { DataField } from '../../types/page-data'
+import {
+  DYNAMIC_STYLES_ATTR,
+  V_IF_ATTR,
+  V_SHOW_ATTR,
+  createEmptyState,
+  createEmptyVisibilityConfig,
+  parseDynamicStyles,
+  parseVisibilityConditions,
+  serializeDynamicStyles,
+  serializeVisibilityConditions,
+  type DynamicStyleState,
+  type DynamicStylesConfig,
+  type VisibilityConditionConfig,
+} from '../../types/dynamic-styles'
+import {
+  findNearestRepeatListName,
+  listRepeatItemIconOptions,
+} from '../../utils/data-field-paths'
+import IconValueSelect from './IconValueSelect.vue'
+import type { ComponentRenderMap } from '../../types/component-render'
+import type { ComponentPropDef } from '../../types/component'
+import { DATA_FIELD_TYPE_OPTIONS } from '../../types/page-data'
 
 export type PropsTab = 'style' | 'event' | 'dynamic'
 
@@ -23,7 +51,11 @@ const props = defineProps<{
   tab: PropsTab
   xml: string
   selectedId: string
-  dataFields?: Array<{ name: string; type: string }>
+  dataFields?: DataField[]
+  iconOptions?: Array<{ id: string; label: string }>
+  methods?: PageMethod[]
+  /** 页面中引用的组件（用于配置组件入参） */
+  componentMap?: ComponentRenderMap
   /** 自增请求：切换到动态并打开重复弹窗 */
   openRepeatRequest?: number
 }>()
@@ -53,6 +85,7 @@ const eventForm = reactive<Record<InteractionEventKey, string>>({
 })
 
 const layoutForm = reactive({
+  name: '',
   widthMode: 'wrap_content' as string,
   widthValue: 100,
   heightMode: 'wrap_content' as string,
@@ -82,6 +115,9 @@ const layoutForm = reactive({
   title: '',
   objectFit: 'cover',
   loading: '',
+  iconId: '',
+  size: '',
+  color: '',
   layout_alignParentLeft: false,
   layout_alignParentRight: false,
   layout_alignParentTop: false,
@@ -126,6 +162,7 @@ function syncLayoutForm() {
   layoutForm.widthValue = width.value
   layoutForm.heightMode = height.mode
   layoutForm.heightValue = height.value
+  layoutForm.name = node.attrs.name ?? ''
   layoutForm.margin = node.attrs.margin ?? ''
   layoutForm.marginLeft = node.attrs.marginLeft ?? ''
   layoutForm.marginRight = node.attrs.marginRight ?? ''
@@ -151,6 +188,9 @@ function syncLayoutForm() {
   layoutForm.title = node.attrs.title ?? ''
   layoutForm.objectFit = node.attrs.objectFit || 'cover'
   layoutForm.loading = node.attrs.loading ?? ''
+  layoutForm.iconId = node.attrs.iconId ?? ''
+  layoutForm.size = node.attrs.size ?? ''
+  layoutForm.color = node.attrs.color ?? ''
 
   for (const item of RELATIVE_BOOL_ATTRS) {
     layoutForm[item.key] = node.attrs[item.key] === 'true'
@@ -189,8 +229,25 @@ function commitAttr(name: string, value: string) {
   }
 }
 
-function commitEvent(key: InteractionEventKey) {
-  commitAttr(key, eventForm[key])
+function eventBindingSummary(key: InteractionEventKey): string {
+  const count = countEventBindings(eventForm[key])
+  if (!count) return '未配置'
+  return `已绑定 ${count} 个方法`
+}
+
+const eventBindVisible = ref(false)
+const eventBindKey = ref<InteractionEventKey>('onClick')
+const eventBindLabel = ref('')
+
+function openEventBind(key: InteractionEventKey, label: string) {
+  eventBindKey.value = key
+  eventBindLabel.value = label
+  eventBindVisible.value = true
+}
+
+function handleEventBindSave(value: string) {
+  eventForm[eventBindKey.value] = value
+  commitAttr(eventBindKey.value, value)
 }
 
 function commitWidth() {
@@ -218,6 +275,83 @@ const showTextProps = computed(
 )
 
 const showImageProps = computed(() => selectedNode.value?.tag === 'Image')
+
+const showIconProps = computed(() => selectedNode.value?.tag === 'Icon')
+
+const isComponentNode = computed(() => selectedNode.value?.tag === 'Component')
+
+const selectedComponentDetail = computed(() => {
+  if (!isComponentNode.value || !selectedNode.value) return null
+  const id = selectedNode.value.attrs.componentId?.trim()
+  if (!id || !props.componentMap) return null
+  return props.componentMap[id] ?? null
+})
+
+/** 在线组件可配置的参数定义（过滤空名） */
+const componentPropDefs = computed(() =>
+  (selectedComponentDetail.value?.config.props ?? []).filter((item) =>
+    item.name.trim(),
+  ),
+)
+
+const componentPropForm = reactive<Record<string, string>>({})
+
+function syncComponentPropForm() {
+  const node = selectedNode.value
+  const defs = componentPropDefs.value
+  for (const key of Object.keys(componentPropForm)) {
+    delete componentPropForm[key]
+  }
+  if (!node || node.tag !== 'Component') return
+  for (const def of defs) {
+    const name = def.name.trim()
+    componentPropForm[name] = node.attrs[name] ?? ''
+  }
+}
+
+watch(
+  [selectedNode, componentPropDefs, () => props.xml],
+  () => {
+    syncComponentPropForm()
+  },
+  { immediate: true, deep: true },
+)
+
+function propTypeLabel(type: string): string {
+  return DATA_FIELD_TYPE_OPTIONS.find((item) => item.value === type)?.label ?? type
+}
+
+function propDefaultPreview(def: ComponentPropDef): string {
+  const v = def.defaultValue
+  if (v == null || v === '') return '空'
+  if (typeof v === 'object') {
+    try {
+      return JSON.stringify(v)
+    } catch {
+      return ''
+    }
+  }
+  return String(v)
+}
+
+function commitComponentProp(name: string) {
+  commitAttr(name, componentPropForm[name] ?? '')
+}
+
+const iconSelectOptions = computed(() => {
+  const library = props.iconOptions ?? []
+  const repeatList = findNearestRepeatListName(props.xml, props.selectedId)
+  const itemIcons = listRepeatItemIconOptions(props.dataFields ?? [], repeatList)
+  // 重复项图标放前面，方便选择；库图标在后
+  const seen = new Set<string>()
+  const merged: Array<{ id: string; label: string }> = []
+  for (const opt of [...itemIcons, ...library]) {
+    if (!opt.id || seen.has(opt.id)) continue
+    seen.add(opt.id)
+    merged.push(opt)
+  }
+  return merged
+})
 
 const showLinearProps = computed(() => selectedNode.value?.tag === 'LinearLayout')
 
@@ -294,6 +428,133 @@ function clearRepeatConfig() {
     console.error(err)
   }
 }
+
+const dynamicStylesConfig = computed<DynamicStylesConfig>(() =>
+  parseDynamicStyles(selectedNode.value?.attrs[DYNAMIC_STYLES_ATTR]),
+)
+
+const styleStateDialogVisible = ref(false)
+const editingStyleState = ref<DynamicStyleState | null>(null)
+
+function commitDynamicStyles(config: DynamicStylesConfig) {
+  if (!props.selectedId || !selectedNode.value) return
+  try {
+    const next = setNodeAttribute(
+      props.xml,
+      props.selectedId,
+      DYNAMIC_STYLES_ATTR,
+      serializeDynamicStyles(config),
+    )
+    emit('update:xml', next)
+  } catch (err) {
+    console.error(err)
+  }
+}
+
+function addStyleState() {
+  const states = [...dynamicStylesConfig.value.states]
+  const state = createEmptyState(states.length + 1)
+  states.push(state)
+  commitDynamicStyles({ states })
+  editingStyleState.value = state
+  styleStateDialogVisible.value = true
+}
+
+function openStyleState(state: DynamicStyleState) {
+  editingStyleState.value = {
+    ...state,
+    scenarios: state.scenarios.map((scene) => ({
+      ...scene,
+      conditions: scene.conditions.map((cond) => ({ ...cond })),
+    })),
+    styles: { ...state.styles },
+  }
+  styleStateDialogVisible.value = true
+}
+
+function saveStyleState(state: DynamicStyleState) {
+  const states = dynamicStylesConfig.value.states.map((item) =>
+    item.id === state.id ? state : item,
+  )
+  if (!states.some((item) => item.id === state.id)) {
+    states.push(state)
+  }
+  commitDynamicStyles({ states })
+}
+
+function removeStyleState(stateId: string) {
+  commitDynamicStyles({
+    states: dynamicStylesConfig.value.states.filter((item) => item.id !== stateId),
+  })
+}
+
+const showIfConfig = computed(() =>
+  parseVisibilityConditions(selectedNode.value?.attrs[V_SHOW_ATTR]),
+)
+
+const mountIfConfig = computed(() =>
+  parseVisibilityConditions(selectedNode.value?.attrs[V_IF_ATTR]),
+)
+
+function visibilitySummary(config: VisibilityConditionConfig): string {
+  const scenes = config.scenarios.filter((scene) =>
+    scene.conditions.some((cond) => cond.field.trim()),
+  )
+  if (!scenes.length) return '未配置'
+  const condCount = scenes.reduce(
+    (sum, scene) =>
+      sum + scene.conditions.filter((cond) => cond.field.trim()).length,
+    0,
+  )
+  return `${scenes.length} 个场景 · ${condCount} 个条件`
+}
+
+const showIfSummary = computed(() => visibilitySummary(showIfConfig.value))
+const mountIfSummary = computed(() => visibilitySummary(mountIfConfig.value))
+
+const visibilityDialogVisible = ref(false)
+const visibilityDialogKind = ref<'show' | 'mount'>('show')
+const editingVisibilityConfig = ref<VisibilityConditionConfig | null>(null)
+
+const visibilityDialogTitle = computed(() =>
+  visibilityDialogKind.value === 'show'
+    ? '编辑显示条件 · v-show'
+    : '编辑挂载条件 · v-if',
+)
+
+function openVisibilityDialog(kind: 'show' | 'mount') {
+  visibilityDialogKind.value = kind
+  const config = kind === 'show' ? showIfConfig.value : mountIfConfig.value
+  editingVisibilityConfig.value = config.scenarios.length
+    ? {
+        scenarios: config.scenarios.map((scene) => ({
+          ...scene,
+          conditions: scene.conditions.map((cond) => ({ ...cond })),
+        })),
+      }
+    : createEmptyVisibilityConfig()
+  visibilityDialogVisible.value = true
+}
+
+function commitVisibilityAttr(attr: string, config: VisibilityConditionConfig) {
+  if (!props.selectedId || !selectedNode.value) return
+  try {
+    const next = setNodeAttribute(
+      props.xml,
+      props.selectedId,
+      attr,
+      serializeVisibilityConditions(config),
+    )
+    emit('update:xml', next)
+  } catch (err) {
+    console.error(err)
+  }
+}
+
+function saveVisibilityConfig(config: VisibilityConditionConfig) {
+  const attr = visibilityDialogKind.value === 'show' ? V_SHOW_ATTR : V_IF_ATTR
+  commitVisibilityAttr(attr, config)
+}
 </script>
 
 <template>
@@ -324,6 +585,18 @@ function clearRepeatConfig() {
             <div class="node-tag">{{ selectedNode.tag }}</div>
             <div class="node-id">{{ selectedId }}</div>
           </div>
+
+          <div class="section-title">基本</div>
+          <el-form label-position="top" size="small">
+            <el-form-item label="name">
+              <el-input
+                v-model="layoutForm.name"
+                clearable
+                placeholder="控件命名，显示在控件树"
+                @change="commitAttr('name', layoutForm.name)"
+              />
+            </el-form-item>
+          </el-form>
 
           <div class="section-title">尺寸</div>
           <el-form label-position="top" size="small">
@@ -577,6 +850,40 @@ function clearRepeatConfig() {
             </el-form>
           </template>
 
+          <template v-if="showIconProps">
+            <div class="section-title">图标</div>
+            <el-form label-position="top" size="small">
+              <el-form-item label="iconId">
+                <IconValueSelect
+                  v-model="layoutForm.iconId"
+                  :options="iconSelectOptions"
+                  placeholder="选择图标或重复项字段"
+                  @change="commitAttr('iconId', layoutForm.iconId)"
+                />
+                <p v-if="iconSelectOptions.some((o) => o.id.startsWith('{item.'))" class="hint">
+                  当前在重复列表内，可选 for 项下的图标字段（如
+                  <code>{'{item.icon}'}</code>）
+                </p>
+              </el-form-item>
+              <el-form-item label="size">
+                <NumericInput
+                  v-model="layoutForm.size"
+                  placeholder="例如：24"
+                  :min="1"
+                  :max="500"
+                  @change="commitAttr('size', layoutForm.size)"
+                />
+              </el-form-item>
+              <el-form-item label="color">
+                <ColorPicker
+                  v-model="layoutForm.color"
+                  placeholder="#303133"
+                  @change="commitAttr('color', layoutForm.color)"
+                />
+              </el-form-item>
+            </el-form>
+          </template>
+
           <template v-if="showLinearProps">
             <div class="section-title">线性布局</div>
             <el-form label-position="top" size="small">
@@ -668,14 +975,28 @@ function clearRepeatConfig() {
               :key="event.key"
               :label="event.label"
             >
-              <el-input
-                v-model="eventForm[event.key]"
-                placeholder="例如：navigate:login"
-                clearable
-                @change="commitEvent(event.key)"
-              />
+              <div class="event-row">
+                <span class="event-summary">{{ eventBindingSummary(event.key) }}</span>
+                <el-button
+                  type="primary"
+                  link
+                  @click="openEventBind(event.key, event.label)"
+                >
+                  配置
+                </el-button>
+              </div>
             </el-form-item>
           </el-form>
+
+          <EventBindDialog
+            v-model="eventBindVisible"
+            :event-label="eventBindLabel"
+            :raw-value="eventForm[eventBindKey]"
+            :methods="methods ?? []"
+            :data-fields="dataFields"
+            :icon-options="iconOptions"
+            @save="handleEventBindSave"
+          />
         </div>
       </template>
 
@@ -691,12 +1012,53 @@ function clearRepeatConfig() {
             <div class="node-id">{{ selectedId }}</div>
           </div>
 
+          <template v-if="isComponentNode">
+            <div class="section-title">组件参数 · $props</div>
+            <el-alert
+              v-if="!selectedComponentDetail"
+              type="warning"
+              :closable="false"
+              show-icon
+              title="未找到组件定义，请确认 componentId 是否有效"
+              style="margin-bottom: 12px"
+            />
+            <template v-else-if="!componentPropDefs.length">
+              <el-empty
+                description="该组件暂无参数，请先在组件设置中添加"
+                :image-size="48"
+              />
+            </template>
+            <template v-else>
+              <el-form label-position="top" size="small">
+                <el-form-item
+                  v-for="def in componentPropDefs"
+                  :key="def.name"
+                  :label="`${def.name}${def.required ? ' *' : ''} · ${propTypeLabel(def.type)}${def.twoWay ? ' · model' : ''}`"
+                >
+                  <el-input
+                    v-model="componentPropForm[def.name]"
+                    clearable
+                    :placeholder="`默认：${propDefaultPreview(def)}；可用 {item.字段}`"
+                    @change="commitComponentProp(def.name)"
+                  />
+                  <p v-if="def.remark" class="prop-remark">{{ def.remark }}</p>
+                </el-form-item>
+              </el-form>
+              <p class="hint">
+                写入当前 Component 节点属性；组件内部用
+                <code>{'{$props.字段名}'}</code>
+                读取。留空则使用组件默认值。
+              </p>
+            </template>
+          </template>
+
           <el-alert
             v-if="isRootNode"
             type="info"
             :closable="false"
             show-icon
-            title="根节点不支持重复配置"
+            title="根节点不支持列表重复配置"
+            style="margin-bottom: 12px"
           />
           <template v-else>
             <div class="section-title">列表渲染</div>
@@ -715,6 +1077,51 @@ function clearRepeatConfig() {
               <code>{'{index}'}</code>。
             </p>
           </template>
+
+          <div class="section-title">显示条件 · v-show</div>
+          <div class="visibility-row">
+            <span class="visibility-summary">{{ showIfSummary }}</span>
+            <el-button type="primary" link @click="openVisibilityDialog('show')">
+              配置
+            </el-button>
+          </div>
+          <p class="hint">
+            场景之间为「或」、场景内为「且」。不成立时隐藏但仍保留节点（类似
+            <code>v-show</code>）。
+          </p>
+
+          <div class="section-title">挂载条件 · v-if</div>
+          <div class="visibility-row">
+            <span class="visibility-summary">{{ mountIfSummary }}</span>
+            <el-button type="primary" link @click="openVisibilityDialog('mount')">
+              配置
+            </el-button>
+          </div>
+          <p class="hint">
+            场景之间为「或」、场景内为「且」。不成立时不渲染（类似
+            <code>v-if</code>）。
+          </p>
+
+          <div class="section-title">动态样式</div>
+          <div class="dyn-style-list">
+            <div
+              v-for="(state, index) in dynamicStylesConfig.states"
+              :key="state.id"
+              class="dyn-style-item"
+            >
+              <span class="dyn-style-name">状态{{ index + 1 }} · {{ state.name }}</span>
+              <div class="dyn-style-actions">
+                <el-button type="primary" link @click="openStyleState(state)">编辑</el-button>
+                <el-button type="danger" link :icon="Delete" @click="removeStyleState(state.id)" />
+              </div>
+            </div>
+            <el-button type="primary" plain :icon="Plus" class="add-state-btn" @click="addStyleState">
+              添加状态
+            </el-button>
+          </div>
+          <p class="hint">
+            按数据池字段与条件命中状态后，覆盖对应样式。样式编辑与「样式」页共用组件，仅填写需覆盖的属性。
+          </p>
         </div>
       </template>
     </div>
@@ -756,6 +1163,26 @@ function clearRepeatConfig() {
         <el-button type="primary" @click="saveRepeatConfig">确定</el-button>
       </template>
     </el-dialog>
+
+    <DynamicStyleStateDialog
+      v-model="styleStateDialogVisible"
+      :state="editingStyleState"
+      :node-tag="selectedNode?.tag"
+      :data-fields="dataFields"
+      :selected-node-id="selectedId"
+      :xml="xml"
+      @save="saveStyleState"
+    />
+
+    <VisibilityConditionDialog
+      v-model="visibilityDialogVisible"
+      :title="visibilityDialogTitle"
+      :config="editingVisibilityConfig"
+      :data-fields="dataFields"
+      :selected-node-id="selectedId"
+      :xml="xml"
+      @save="saveVisibilityConfig"
+    />
   </aside>
 </template>
 
@@ -803,7 +1230,8 @@ function clearRepeatConfig() {
   gap: 4px;
 }
 
-.repeat-row {
+.repeat-row,
+.event-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -811,6 +1239,17 @@ function clearRepeatConfig() {
   width: 100%;
 }
 
+.visibility-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  margin-bottom: 4px;
+}
+
+.visibility-summary,
+.event-summary,
 .repeat-summary {
   flex: 1;
   min-width: 0;
@@ -826,6 +1265,49 @@ function clearRepeatConfig() {
   font-size: 12px;
   line-height: 1.5;
   color: #94a3b8;
+}
+
+.prop-remark {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: #909399;
+}
+
+.dyn-style-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.dyn-style-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid #ebeef5;
+  border-radius: 6px;
+  background: #fafbfc;
+}
+
+.dyn-style-name {
+  min-width: 0;
+  flex: 1;
+  font-size: 13px;
+  color: #303133;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dyn-style-actions {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.add-state-btn {
+  width: 100%;
 }
 
 .node-brief {

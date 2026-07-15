@@ -128,7 +128,14 @@ async function readPageConfig(dir: string): Promise<PageConfig> {
   }
 }
 
-const DATA_FIELD_TYPES = new Set(['string', 'number', 'boolean', 'json', 'array'])
+const DATA_FIELD_TYPES = new Set([
+  'string',
+  'number',
+  'boolean',
+  'json',
+  'array',
+  'icon',
+])
 
 function defaultValue(type: DataField['type']) {
   switch (type) {
@@ -140,6 +147,8 @@ function defaultValue(type: DataField['type']) {
       return {}
     case 'array':
       return []
+    case 'icon':
+      return ''
     default:
       return ''
   }
@@ -280,15 +289,36 @@ function normalizeDataField(raw: unknown): DataField | null {
     objectFields?: unknown[]
   }
   if (typeof item.name !== 'string') return null
+  const name = item.name.trim()
+  // $props 为组件入参保留字，不允许进入数据池
+  if (!name || name === '$props') return null
   if (!item.type || !DATA_FIELD_TYPES.has(item.type)) return null
 
-  return {
-    name: item.name.trim(),
+  const field: DataField = {
+    name,
     type: item.type,
     remark: typeof item.remark === 'string' ? item.remark : '',
     value: resolveFieldValue(item),
     binding: typeof item.binding === 'string' ? item.binding : '',
   }
+
+  if (typeof item.computeBody === 'string') {
+    field.computeBody = item.computeBody
+  }
+
+  if (item.type === 'array' && Array.isArray(item.arrayFields)) {
+    field.arrayFields = item.arrayFields
+      .map((sub) => normalizeArraySubField(sub))
+      .filter((sub): sub is ArraySubField => sub !== null)
+  }
+
+  if (item.type === 'json' && Array.isArray(item.objectFields)) {
+    field.objectFields = item.objectFields
+      .map((sub) => normalizeObjectSubField(sub))
+      .filter((sub): sub is ObjectSubField => sub !== null)
+  }
+
+  return field
 }
 
 function normalizePageData(raw: unknown): PageData {
@@ -446,6 +476,7 @@ export async function createPage(options: {
       `${JSON.stringify(createDefaultPageData(), null, 2)}\n`,
       'utf-8',
     )
+    await mkdir(path.join(dir, 'function'), { recursive: true })
   } catch {
     throw new ProjectError('无法写入页面文件', 500)
   }

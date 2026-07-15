@@ -1,4 +1,7 @@
 import { request } from './index'
+import type { IconDefinition, IconLibrary } from '../types/icon-library'
+
+export type { IconDefinition, IconLibrary }
 
 export interface VoiderProjectConfig {
   name: string
@@ -61,6 +64,22 @@ export function openProject(projectPath: string) {
 export function createProject(payload: CreateProjectPayload) {
   return request<ProjectResult>('/api/projects/create', {
     method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export function getIconLibrary(projectPath: string) {
+  return request<IconLibrary>(
+    `/api/projects/icons?projectPath=${encodeURIComponent(projectPath)}`,
+  )
+}
+
+export function saveIconLibrary(payload: {
+  projectPath: string
+  icons: IconDefinition[]
+}) {
+  return request<IconLibrary>('/api/projects/icons', {
+    method: 'PUT',
     body: JSON.stringify(payload),
   })
 }

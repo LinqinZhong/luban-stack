@@ -1,15 +1,21 @@
 import type { XmlNode } from './xml'
 import { parsePageXml } from './xml'
+import { countNodeEventBindings } from '../types/page-method'
 
 export interface TreeNodeData {
   id: string
   label: string
   tag: string
   hasRepeat?: boolean
+  eventBindingCount?: number
   children?: TreeNodeData[]
 }
 
 function nodeLabel(node: XmlNode): string {
+  const name = node.attrs.name?.trim()
+  if (name) {
+    return name.length > 20 ? `${name.slice(0, 20)}…` : name
+  }
   const text = node.attrs.text || node.text
   if (text) {
     const short = text.length > 16 ? `${text.slice(0, 16)}…` : text
@@ -19,6 +25,20 @@ function nodeLabel(node: XmlNode): string {
     const label = node.attrs.alt || node.attrs.src
     if (label) {
       const short = label.length > 16 ? `${label.slice(0, 16)}…` : label
+      return `${node.tag} · ${short}`
+    }
+  }
+  if (node.tag === 'Icon') {
+    const iconId = node.attrs.iconId?.trim()
+    if (iconId) {
+      const short = iconId.length > 16 ? `${iconId.slice(0, 16)}…` : iconId
+      return `${node.tag} · ${short}`
+    }
+  }
+  if (node.tag === 'Component') {
+    const id = node.attrs.componentId?.trim() || node.attrs.name?.trim()
+    if (id) {
+      const short = id.length > 16 ? `${id.slice(0, 16)}…` : id
       return `${node.tag} · ${short}`
     }
   }
@@ -35,6 +55,7 @@ function toTreeNode(node: XmlNode, path: string): TreeNodeData {
     label: nodeLabel(node),
     tag: node.tag,
     hasRepeat: Boolean(node.attrs.repeat?.trim()),
+    eventBindingCount: countNodeEventBindings(node.attrs),
     children: node.children.map((child, index) =>
       toTreeNode(child, `${path}/${index}:${child.tag}`),
     ),

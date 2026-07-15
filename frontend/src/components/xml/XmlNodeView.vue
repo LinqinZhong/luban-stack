@@ -1,16 +1,41 @@
 <script setup lang="ts">
-import { computed, type CSSProperties } from 'vue'
+import { computed, onBeforeUnmount, onMounted, type CSSProperties } from 'vue'
+import type { IconLibrary } from '../../types/icon-library'
+import { findIcon, iconSymbolId } from '../../types/icon-library'
+import type { PageData } from '../../types/page-data'
+import type { ComponentRenderMap } from '../../types/component-render'
 import type { XmlNode } from '../../utils/xml'
+import type { PreviewEventKey, PreviewInteractPayload } from '../../utils/event-runtime'
 import {
   isSupportedTag,
   parseBool,
   parseNumber,
+  parsePageXml,
   parseSize,
   borderStyle,
   paddingStyle,
 } from '../../utils/xml'
+import { resolveMatchingStyleOverrides, evaluateScenarios } from '../../utils/dynamic-style-runtime'
+import {
+  buildDollarProps,
+  interpolateDollarProps,
+} from '../../utils/component-props'
+import {
+  DYNAMIC_STYLES_ATTR,
+  V_IF_ATTR,
+  V_SHOW_ATTR,
+  parseVisibilityConditions,
+} from '../../types/dynamic-styles'
+import { countEventBindings, countNodeEventBindings, INTERACTION_EVENT_KEYS } from '../../types/page-method'
 import WidgetSelectShell from './WidgetSelectShell.vue'
 import XmlNodeView from './XmlNodeView.vue'
+
+const SKIP_DOLLAR_PROPS_ATTRS = new Set<string>([
+  DYNAMIC_STYLES_ATTR,
+  V_SHOW_ATTR,
+  V_IF_ATTR,
+  ...INTERACTION_EVENT_KEYS,
+])
 
 const props = defineProps<{
   node: XmlNode
@@ -25,15 +50,80 @@ const props = defineProps<{
   isRoot?: boolean
   /** RelativeLayout 子节点定位样式 */
   extraStyle?: CSSProperties
+  iconLibrary?: IconLibrary
+  pageData?: PageData
+  /** 编辑态隐藏的节点（预览不传，不生效） */
+  hiddenNodeIds?: string[]
+  /** 页面中引用的组件渲染数据 */
+  componentMap?: ComponentRenderMap
+  /** 组件入参运行时对象（$props） */
+  dollarProps?: Record<string, unknown>
 }>()
 
 const emit = defineEmits<{
   select: [id: string]
   hover: [id: string]
   'open-repeat': [id: string]
+  interact: [payload: PreviewInteractPayload]
 }>()
 
-const attrs = computed(() => props.node.attrs)
+const isEditorHidden = computed(() =>
+  (props.hiddenNodeIds ?? []).includes(props.nodeId),
+)
+
+const runtimeScope = computed(() => ({
+  ...(props.node.scope ?? {}),
+  $props: props.dollarProps,
+}))
+
+const mountAllowed = computed(() => {
+  // 编辑态忽略 v-if，始终挂载（仅左侧眼睛可隐藏）
+  if (props.selectable) return true
+  const config = parseVisibilityConditions(props.node.attrs[V_IF_ATTR])
+  return evaluateScenarios(config.scenarios, props.pageData, runtimeScope.value)
+})
+
+const showAllowed = computed(() => {
+  // 编辑态忽略 v-show，始终显示
+  if (props.selectable) return true
+  const config = parseVisibilityConditions(props.node.attrs[V_SHOW_ATTR])
+  return evaluateScenarios(config.scenarios, props.pageData, runtimeScope.value)
+})
+
+/** v-show：条件为假时隐藏但仍挂载 */
+const visuallyHidden = computed(() => !showAllowed.value)
+
+const previewClickable = computed(
+  () => !props.selectable && countEventBindings(props.node.attrs.onClick) > 0,
+)
+const previewLongClickable = computed(
+  () => !props.selectable && countEventBindings(props.node.attrs.onLongClick) > 0,
+)
+const previewInteractive = computed(
+  () => previewClickable.value || previewLongClickable.value,
+)
+
+/** 基础 attrs + 按 scope / 数据池求值后的动态样式覆盖；预览态再替换 $props */
+const attrs = computed(() => {
+  const base = props.node.attrs
+  const overrides = resolveMatchingStyleOverrides(
+    base[DYNAMIC_STYLES_ATTR],
+    props.pageData,
+    runtimeScope.value,
+  )
+  let merged = Object.keys(overrides).length ? { ...base, ...overrides } : base
+
+  if (!props.selectable && props.dollarProps) {
+    const next: Record<string, string> = {}
+    for (const [key, value] of Object.entries(merged)) {
+      next[key] = SKIP_DOLLAR_PROPS_ATTRS.has(key)
+        ? value
+        : interpolateDollarProps(value, props.dollarProps)
+    }
+    merged = next
+  }
+  return merged
+})
 const width = computed(() => parseSize(attrs.value.width, 'wrap_content'))
 const height = computed(() => parseSize(attrs.value.height, 'wrap_content'))
 const isSelected = computed(() => props.selectable && props.selectedId === props.nodeId)
@@ -74,12 +164,17 @@ const layoutStyle = computed(() => ({
   ...innerSizeStyle.value,
   ...paddingStyle(attrs.value),
   boxSizing: 'border-box' as const,
-  ...(props.extraStyle ?? {}),
 }))
 
-const textContent = computed(
-  () => attrs.value.text || props.node.text || '',
-)
+const shellExtraStyle = computed(() => props.extraStyle)
+
+const textContent = computed(() => {
+  const raw = attrs.value.text || props.node.text || ''
+  if (props.selectable || !props.dollarProps) return raw
+  // attrs.text 已插值；裸 text 节点兜底
+  if (attrs.value.text) return attrs.value.text
+  return interpolateDollarProps(raw, props.dollarProps)
+})
 
 const textStyle = computed(() => ({
   ...layoutStyle.value,
@@ -94,6 +189,72 @@ const textStyle = computed(() => ({
   wordBreak: 'break-word' as const,
 }))
 
+const componentDetail = computed(() => {
+  const id = attrs.value.componentId?.trim()
+  if (!id || !props.componentMap) return null
+  return props.componentMap[id] ?? null
+})
+
+const instanceDollarProps = computed(() =>
+  buildDollarProps(componentDetail.value?.config, attrs.value),
+)
+
+const componentRoot = computed(() => {
+  const detail = componentDetail.value
+  if (!detail?.xml?.trim()) return null
+  try {
+    return parsePageXml(detail.xml)
+  } catch {
+    return null
+  }
+})
+
+const componentHostWidth = computed(() => {
+  const fromAttr = attrs.value.width?.trim()
+  if (fromAttr) return parseSize(fromAttr, 'wrap_content')
+  const fromConfig = componentDetail.value?.config.width
+  return parseSize(fromConfig, 'wrap_content')
+})
+
+const componentHostHeight = computed(() => {
+  const fromAttr = attrs.value.height?.trim()
+  if (fromAttr) return parseSize(fromAttr, 'wrap_content')
+  const fromConfig = componentDetail.value?.config.height
+  return parseSize(fromConfig, 'wrap_content')
+})
+
+const componentStyle = computed(() => ({
+  ...layoutStyle.value,
+  display: 'flex',
+  flexDirection: 'column' as const,
+  alignItems: 'stretch',
+  justifyContent: 'flex-start',
+  width: '100%',
+  height: '100%',
+  minHeight:
+    componentHostHeight.value === 'wrap_content' && !componentRoot.value
+      ? '48px'
+      : undefined,
+  boxSizing: 'border-box' as const,
+  overflow: 'hidden',
+}))
+
+const componentPlaceholderStyle = computed(() => ({
+  display: 'flex',
+  flexDirection: 'column' as const,
+  alignItems: 'flex-start',
+  justifyContent: 'center',
+  gap: '4px',
+  minHeight: '48px',
+  padding: '10px 12px',
+  border: '1px dashed #94a3b8',
+  borderRadius: '8px',
+  background: 'rgba(148, 163, 184, 0.12)',
+  color: '#334155',
+  boxSizing: 'border-box' as const,
+  width: '100%',
+}))
+
 const buttonStyle = computed(() => ({
   ...layoutStyle.value,
   display: 'inline-flex',
@@ -104,7 +265,7 @@ const buttonStyle = computed(() => ({
   background: attrs.value.background || '#409eff',
   color: attrs.value.textColor || '#ffffff',
   fontSize: `${parseNumber(attrs.value.textSize, 14)}px`,
-  cursor: props.selectable ? 'pointer' : 'default',
+  cursor: props.selectable || previewInteractive.value ? 'pointer' : 'default',
   minHeight: height.value === 'wrap_content' ? '36px' : undefined,
 }))
 
@@ -149,6 +310,45 @@ const imagePlaceholderStyle = computed(() => ({
   fontSize: '12px',
   minWidth: width.value === 'wrap_content' ? '80px' : undefined,
   minHeight: height.value === 'wrap_content' ? '60px' : undefined,
+}))
+
+/** 编辑态未展开的 {item.xxx} 等变量，不解析图标 */
+const iconIdRaw = computed(() => attrs.value.iconId?.trim() || '')
+const iconIsTemplate = computed(() => isTemplateSrc(iconIdRaw.value))
+const iconDef = computed(() =>
+  iconIsTemplate.value ? undefined : findIcon(props.iconLibrary, iconIdRaw.value),
+)
+const iconSize = computed(() => parseNumber(attrs.value.size, 24))
+const iconColor = computed(() => attrs.value.color || '#303133')
+const iconHref = computed(() =>
+  iconDef.value ? `#${iconSymbolId(iconDef.value.id)}` : '',
+)
+
+const iconStyle = computed(() => {
+  const size = iconSize.value
+  const hasFixedW = width.value !== 'wrap_content'
+  const hasFixedH = height.value !== 'wrap_content'
+  return {
+    ...layoutStyle.value,
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    color: iconColor.value,
+    fill: iconColor.value,
+    width: hasFixedW ? undefined : `${size}px`,
+    height: hasFixedH ? undefined : `${size}px`,
+    flexShrink: 0,
+    lineHeight: 0,
+  }
+})
+
+const iconPlaceholderStyle = computed(() => ({
+  ...iconStyle.value,
+  background: attrs.value.background || (iconIsTemplate.value ? 'transparent' : '#f2f3f5'),
+  color: iconIsTemplate.value ? iconColor.value : '#909399',
+  fontSize: '11px',
+  border: iconIsTemplate.value ? 'none' : '1px dashed #dcdfe6',
+  boxSizing: 'border-box' as const,
 }))
 
 const linearStyle = computed(() => {
@@ -269,25 +469,79 @@ const isHorizontalLinear = computed(
   () => props.node.tag === 'LinearLayout' && attrs.value.orientation === 'horizontal',
 )
 
-const isRelativeChild = computed(() => Boolean(props.extraStyle?.position === 'absolute'))
-
 const showRepeatBadge = computed(
   () => Boolean(props.selectable && attrs.value.repeat?.trim()),
+)
+
+const eventBadgeCount = computed(() =>
+  props.selectable ? countNodeEventBindings(attrs.value) : 0,
 )
 
 function childId(index: number, tag: string) {
   return `${props.nodeId}/${index}:${tag}`
 }
 
+function emitInteract(eventKey: PreviewEventKey) {
+  const raw = props.node.attrs[eventKey]
+  if (!raw?.trim()) return
+  emit('interact', {
+    eventKey,
+    raw,
+    scope: props.node.scope,
+  })
+}
+
 function handleSelect(event: MouseEvent) {
-  if (!props.selectable) return
+  if (props.selectable) {
+    event.stopPropagation()
+    emit('select', props.nodeId)
+    return
+  }
+  if (longPressFired) {
+    longPressFired = false
+    event.stopPropagation()
+    return
+  }
+  if (!previewClickable.value) return
   event.stopPropagation()
-  emit('select', props.nodeId)
+  emitInteract('onClick')
 }
 
 function handleMouseEnter() {
   if (!props.selectable) return
   emit('hover', props.nodeId)
+}
+
+let longPressTimer: ReturnType<typeof setTimeout> | null = null
+let longPressFired = false
+
+function clearLongPress() {
+  if (longPressTimer) {
+    clearTimeout(longPressTimer)
+    longPressTimer = null
+  }
+}
+
+function handlePointerDown() {
+  if (!previewLongClickable.value) return
+  longPressFired = false
+  clearLongPress()
+  longPressTimer = setTimeout(() => {
+    longPressFired = true
+    emitInteract('onLongClick')
+  }, 500)
+}
+
+function handlePointerUp(event: MouseEvent) {
+  clearLongPress()
+  if (longPressFired) {
+    event.preventDefault()
+    event.stopPropagation()
+  }
+}
+
+function handlePointerLeave() {
+  clearLongPress()
 }
 
 function forwardSelect(id: string) {
@@ -305,12 +559,28 @@ function handleOpenRepeat() {
 function forwardOpenRepeat(id: string) {
   emit('open-repeat', id)
 }
+
+function forwardInteract(payload: PreviewInteractPayload) {
+  emit('interact', payload)
+}
+
+onMounted(() => {
+  if (props.selectable) return
+  if (countEventBindings(props.node.attrs.onAppear) <= 0) return
+  emitInteract('onAppear')
+})
+
+onBeforeUnmount(() => {
+  clearLongPress()
+})
 </script>
 
 <template>
+  <template v-if="!isEditorHidden && mountAllowed">
   <div
     v-if="!isSupportedTag(node.tag)"
     class="unsupported"
+    :style="visuallyHidden ? { display: 'none' } : undefined"
   >
     不支持的控件：{{ node.tag }}
   </div>
@@ -324,10 +594,16 @@ function forwardOpenRepeat(id: string) {
     :height="height"
     :parent-horizontal="parentHorizontal"
     :parent-vertical="parentVertical"
-    :fill-parent="isRelativeChild"
+    :extra-style="shellExtraStyle"
     :repeat-badge="showRepeatBadge"
+    :event-badge-count="eventBadgeCount"
+    :visually-hidden="visuallyHidden"
+    :interactive="previewInteractive"
     @click="handleSelect"
     @mouseenter="handleMouseEnter"
+    @pointerdown="handlePointerDown"
+    @pointerup="handlePointerUp"
+    @pointerleave="handlePointerLeave"
     @open-repeat="handleOpenRepeat"
   >
     <div class="widget text" :style="textStyle">
@@ -344,10 +620,16 @@ function forwardOpenRepeat(id: string) {
     :height="height"
     :parent-horizontal="parentHorizontal"
     :parent-vertical="parentVertical"
-    :fill-parent="isRelativeChild"
+    :extra-style="shellExtraStyle"
     :repeat-badge="showRepeatBadge"
+    :event-badge-count="eventBadgeCount"
+    :visually-hidden="visuallyHidden"
+    :interactive="previewInteractive"
     @click="handleSelect"
     @mouseenter="handleMouseEnter"
+    @pointerdown="handlePointerDown"
+    @pointerup="handlePointerUp"
+    @pointerleave="handlePointerLeave"
     @open-repeat="handleOpenRepeat"
   >
     <button type="button" class="widget button" :style="buttonStyle">
@@ -364,10 +646,16 @@ function forwardOpenRepeat(id: string) {
     :height="height"
     :parent-horizontal="parentHorizontal"
     :parent-vertical="parentVertical"
-    :fill-parent="isRelativeChild"
+    :extra-style="shellExtraStyle"
     :repeat-badge="showRepeatBadge"
+    :event-badge-count="eventBadgeCount"
+    :visually-hidden="visuallyHidden"
+    :interactive="previewInteractive"
     @click="handleSelect"
     @mouseenter="handleMouseEnter"
+    @pointerdown="handlePointerDown"
+    @pointerup="handlePointerUp"
+    @pointerleave="handlePointerLeave"
     @open-repeat="handleOpenRepeat"
   >
     <img
@@ -391,6 +679,111 @@ function forwardOpenRepeat(id: string) {
   </WidgetSelectShell>
 
   <WidgetSelectShell
+    v-else-if="node.tag === 'Icon'"
+    :selected="isSelected"
+    :hovered="isHovered"
+    :margin-attrs="attrs"
+    :width="width"
+    :height="height"
+    :parent-horizontal="parentHorizontal"
+    :parent-vertical="parentVertical"
+    :extra-style="shellExtraStyle"
+    :repeat-badge="showRepeatBadge"
+    :event-badge-count="eventBadgeCount"
+    :visually-hidden="visuallyHidden"
+    :interactive="previewInteractive"
+    @click="handleSelect"
+    @mouseenter="handleMouseEnter"
+    @pointerdown="handlePointerDown"
+    @pointerup="handlePointerUp"
+    @pointerleave="handlePointerLeave"
+    @open-repeat="handleOpenRepeat"
+  >
+    <svg
+      v-if="iconHref"
+      class="widget icon"
+      :style="iconStyle"
+      :viewBox="iconDef?.viewBox || '0 0 24 24'"
+      aria-hidden="true"
+    >
+      <use :href="iconHref" />
+    </svg>
+    <!-- 变量绑定：编辑态用笑脸占位，预览展开后再显示真实图标 -->
+    <svg
+      v-else-if="iconIsTemplate"
+      class="widget icon icon-var-placeholder"
+      :style="iconStyle"
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+      aria-label="变量图标占位"
+    >
+      <circle
+        cx="12"
+        cy="12"
+        r="9"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.5"
+      />
+      <circle cx="9" cy="10" r="1.2" fill="currentColor" />
+      <circle cx="15" cy="10" r="1.2" fill="currentColor" />
+      <path
+        d="M8.5 14.5c1.2 1.4 2.6 2 3.5 2s2.3-.6 3.5-2"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.5"
+        stroke-linecap="round"
+      />
+    </svg>
+    <div
+      v-else
+      class="widget icon icon-placeholder"
+      :style="iconPlaceholderStyle"
+    >
+      {{ iconIdRaw || 'Icon' }}
+    </div>
+  </WidgetSelectShell>
+
+  <WidgetSelectShell
+    v-else-if="node.tag === 'Component'"
+    :selected="isSelected"
+    :hovered="isHovered"
+    :margin-attrs="attrs"
+    :width="componentHostWidth"
+    :height="componentHostHeight"
+    :parent-horizontal="parentHorizontal"
+    :parent-vertical="parentVertical"
+    :extra-style="shellExtraStyle"
+    :repeat-badge="showRepeatBadge"
+    :event-badge-count="eventBadgeCount"
+    :visually-hidden="visuallyHidden"
+    :interactive="previewInteractive"
+    @click="handleSelect"
+    @mouseenter="handleMouseEnter"
+    @pointerdown="handlePointerDown"
+    @pointerup="handlePointerUp"
+    @pointerleave="handlePointerLeave"
+    @open-repeat="handleOpenRepeat"
+  >
+    <div class="widget component-host" :style="componentStyle">
+      <XmlNodeView
+        v-if="componentRoot"
+        :node="componentRoot"
+        :node-id="`${nodeId}/c:0:${componentRoot.tag}`"
+        :selectable="false"
+        :icon-library="iconLibrary"
+        :page-data="componentDetail?.data ?? pageData"
+        :component-map="componentMap"
+        :dollar-props="instanceDollarProps"
+      />
+      <div v-else :style="componentPlaceholderStyle">
+        <div class="component-title">{{ attrs.name || attrs.componentId || 'Component' }}</div>
+        <div class="component-id">{{ attrs.componentId ? '组件未找到或 XML 为空' : '未指定组件' }}</div>
+      </div>
+    </div>
+  </WidgetSelectShell>
+
+  <WidgetSelectShell
     v-else-if="node.tag === 'LinearLayout'"
     :selected="isSelected"
     :hovered="isHovered"
@@ -399,10 +792,17 @@ function forwardOpenRepeat(id: string) {
     :height="height"
     :parent-horizontal="parentHorizontal"
     :parent-vertical="parentVertical"
-    :fill-parent="isRelativeChild || isRoot"
+    :fill-parent="isRoot"
+    :extra-style="shellExtraStyle"
     :repeat-badge="showRepeatBadge"
+    :event-badge-count="eventBadgeCount"
+    :visually-hidden="visuallyHidden"
+    :interactive="previewInteractive"
     @click="handleSelect"
     @mouseenter="handleMouseEnter"
+    @pointerdown="handlePointerDown"
+    @pointerup="handlePointerUp"
+    @pointerleave="handlePointerLeave"
     @open-repeat="handleOpenRepeat"
   >
     <div class="widget linear" :style="linearStyle">
@@ -416,9 +816,15 @@ function forwardOpenRepeat(id: string) {
         :selectable="selectable"
         :parent-horizontal="isHorizontalLinear"
         :parent-vertical="!isHorizontalLinear"
+        :icon-library="iconLibrary"
+        :page-data="pageData"
+        :hidden-node-ids="hiddenNodeIds"
+        :component-map="componentMap"
+        :dollar-props="dollarProps"
         @select="forwardSelect"
         @hover="forwardHover"
         @open-repeat="forwardOpenRepeat"
+        @interact="forwardInteract"
       />
     </div>
   </WidgetSelectShell>
@@ -432,10 +838,17 @@ function forwardOpenRepeat(id: string) {
     :height="height"
     :parent-horizontal="parentHorizontal"
     :parent-vertical="parentVertical"
-    :fill-parent="isRelativeChild || isRoot"
+    :fill-parent="isRoot"
+    :extra-style="shellExtraStyle"
     :repeat-badge="showRepeatBadge"
+    :event-badge-count="eventBadgeCount"
+    :visually-hidden="visuallyHidden"
+    :interactive="previewInteractive"
     @click="handleSelect"
     @mouseenter="handleMouseEnter"
+    @pointerdown="handlePointerDown"
+    @pointerup="handlePointerUp"
+    @pointerleave="handlePointerLeave"
     @open-repeat="handleOpenRepeat"
   >
     <div class="widget relative" :style="relativeStyle">
@@ -448,15 +861,33 @@ function forwardOpenRepeat(id: string) {
         :hovered-id="hoveredId"
         :selectable="selectable"
         :extra-style="childRelativeStyle(child)"
+        :icon-library="iconLibrary"
+        :page-data="pageData"
+        :hidden-node-ids="hiddenNodeIds"
+        :component-map="componentMap"
+        :dollar-props="dollarProps"
         @select="forwardSelect"
         @hover="forwardHover"
         @open-repeat="forwardOpenRepeat"
+        @interact="forwardInteract"
       />
     </div>
   </WidgetSelectShell>
+  </template>
 </template>
 
 <style scoped>
+.component-title {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.component-id {
+  font-size: 11px;
+  color: #64748b;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
 .unsupported {
   padding: 8px;
   color: #f56c6c;
@@ -478,6 +909,24 @@ function forwardOpenRepeat(id: string) {
   vertical-align: top;
   user-select: none;
   pointer-events: none;
+}
+
+.widget.icon {
+  vertical-align: top;
+  user-select: none;
+  pointer-events: none;
+  overflow: visible;
+}
+
+.widget.icon-var-placeholder {
+  opacity: 0.72;
+}
+
+.widget.icon-placeholder {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 2px;
 }
 
 .widget.image-placeholder {

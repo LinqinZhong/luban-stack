@@ -1,4 +1,10 @@
-export type DataFieldType = 'string' | 'number' | 'boolean' | 'json' | 'array'
+export type DataFieldType =
+  | 'string'
+  | 'number'
+  | 'boolean'
+  | 'json'
+  | 'array'
+  | 'icon'
 
 export type DataFieldValue =
   | string
@@ -24,12 +30,32 @@ export interface ArraySubField {
   objectFields?: ObjectSubField[]
 }
 
+/** 数据源绑定：接口暂未实现；计算 = 方法体 return 值 */
+export type DataSourceBinding = '' | 'api' | 'computed'
+
+export const DATA_SOURCE_BINDING_OPTIONS: {
+  label: string
+  value: DataSourceBinding
+  disabled?: boolean
+}[] = [
+  { label: '无', value: '' },
+  { label: '接口', value: 'api', disabled: true },
+  { label: '计算', value: 'computed' },
+]
+
 export interface DataField {
   name: string
   type: DataFieldType
   remark: string
   value: DataFieldValue
-  binding?: string
+  /** 绑定数据源类型 */
+  binding?: DataSourceBinding
+  /** binding === 'computed' 时的方法体；return 值即为字段计算值 */
+  computeBody?: string
+  /** 数组结构（含嵌套类型，用于保留 icon 等元数据） */
+  arrayFields?: ArraySubField[]
+  /** 对象结构（含嵌套类型，用于保留 icon 等元数据） */
+  objectFields?: ObjectSubField[]
 }
 
 export interface PageData {
@@ -40,16 +66,21 @@ export const DATA_FIELD_TYPE_OPTIONS: { label: string; value: DataFieldType }[] 
   { label: '字符串', value: 'string' },
   { label: '数值', value: 'number' },
   { label: '布尔值', value: 'boolean' },
+  { label: '图标', value: 'icon' },
   { label: '对象', value: 'json' },
   { label: '数组', value: 'array' },
 ]
 
-/** 对象编辑器内嵌套字段可选类型（不含对象） */
-export const NESTED_FIELD_TYPE_OPTIONS = DATA_FIELD_TYPE_OPTIONS.filter(
-  (item) => item.value !== 'json',
-)
+/** 对象字段可选类型（对象内不再嵌套「对象」） */
+export const NESTED_FIELD_TYPE_OPTIONS: { label: string; value: DataFieldType }[] = [
+  { label: '字符串', value: 'string' },
+  { label: '数值', value: 'number' },
+  { label: '布尔值', value: 'boolean' },
+  { label: '图标', value: 'icon' },
+  { label: '数组', value: 'array' },
+]
 
-/** 数组编辑器 / 数组项可选类型（含对象） */
+/** 数组项可选类型（含对象） */
 export const ARRAY_ITEM_TYPE_OPTIONS = DATA_FIELD_TYPE_OPTIONS
 
 export function createEmptyDataField(): DataField {
@@ -59,7 +90,23 @@ export function createEmptyDataField(): DataField {
     remark: '',
     value: '',
     binding: '',
+    computeBody: '',
   }
+}
+
+/** 计算绑定的默认方法体 */
+export function defaultComputeBody(type: DataFieldType): string {
+  const sample =
+    type === 'number'
+      ? '0'
+      : type === 'boolean'
+        ? 'false'
+        : type === 'array'
+          ? '[]'
+          : type === 'json'
+            ? '{}'
+            : "''"
+  return `// 可直接使用同级数据池字段名作为变量（无需形参）\n// return 的值即为该字段的计算值\nreturn ${sample}\n`
 }
 
 export function createEmptyObjectSubField(): ObjectSubField {
@@ -80,6 +127,8 @@ export function defaultValue(type: DataFieldType): DataFieldValue {
       return {}
     case 'array':
       return []
+    case 'icon':
+      return ''
     default:
       return ''
   }

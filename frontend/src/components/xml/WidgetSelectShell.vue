@@ -8,6 +8,7 @@ import {
   parseSize,
 } from '../../utils/xml'
 import RepeatBadge from './RepeatBadge.vue'
+import EventBadge from './EventBadge.vue'
 
 const props = defineProps<{
   selected?: boolean
@@ -17,9 +18,18 @@ const props = defineProps<{
   height?: ReturnType<typeof parseSize>
   parentHorizontal?: boolean
   parentVertical?: boolean
+  /** 根节点：填满画布；勿用于 RelativeLayout 子节点 */
   fillParent?: boolean
+  /** RelativeLayout 子节点的定位样式（position/top/left 等） */
+  extraStyle?: CSSProperties
   /** 编辑模式下，已配置 repeat 的指示角标 */
   repeatBadge?: boolean
+  /** 编辑模式下，已绑定事件方法的角标数量 */
+  eventBadgeCount?: number
+  /** 类似 v-show：保留节点但隐藏 */
+  visuallyHidden?: boolean
+  /** 预览态可点击（事件绑定） */
+  interactive?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -28,13 +38,9 @@ const emit = defineEmits<{
   'open-repeat': []
 }>()
 
-const matchParentWidth = computed(
-  () => props.fillParent || props.width === 'match_parent',
-)
-
-const matchParentHeight = computed(
-  () => props.fillParent || props.height === 'match_parent',
-)
+const matchParentWidth = computed(() => props.width === 'match_parent')
+const matchParentHeight = computed(() => props.height === 'match_parent')
+const isAbsolute = computed(() => props.extraStyle?.position === 'absolute')
 
 const shellStyle = computed<CSSProperties>(() => {
   const style: CSSProperties = {
@@ -42,22 +48,55 @@ const shellStyle = computed<CSSProperties>(() => {
     maxWidth: '100%',
     minWidth: 0,
     minHeight: 0,
-    display: 'flex',
+    display: props.visuallyHidden ? 'none' : 'flex',
     flexDirection: 'column',
     boxSizing: 'border-box',
+    cursor: props.interactive ? 'pointer' : undefined,
     ...marginStyle(props.marginAttrs),
+    ...(props.extraStyle ?? {}),
+  }
+
+  // 绝对定位子节点：按自身 width/height，勿强制撑满父级
+  if (isAbsolute.value) {
+    if (matchParentWidth.value) {
+      style.width = matchParentAxisSize('width', props.marginAttrs)
+    } else if (typeof props.width === 'number') {
+      style.width = `${props.width}px`
+      style.flexShrink = 0
+    } else {
+      style.width = 'fit-content'
+      style.maxWidth = '100%'
+    }
+
+    if (matchParentHeight.value) {
+      style.height = matchParentAxisSize('height', props.marginAttrs)
+    } else if (typeof props.height === 'number') {
+      style.height = `${props.height}px`
+      style.flexShrink = 0
+    } else {
+      style.height = 'fit-content'
+    }
+    return style
   }
 
   if (props.fillParent) {
     style.flex = '1 1 auto'
     style.alignSelf = 'stretch'
     style.minHeight = '0'
-    style.width = matchParentAxisSize('width', props.marginAttrs)
-    style.height = matchParentAxisSize('height', props.marginAttrs)
+    if (matchParentWidth.value || props.width === undefined) {
+      style.width = matchParentAxisSize('width', props.marginAttrs)
+    } else if (typeof props.width === 'number') {
+      style.width = `${props.width}px`
+    }
+    if (matchParentHeight.value || props.height === undefined) {
+      style.height = matchParentAxisSize('height', props.marginAttrs)
+    } else if (typeof props.height === 'number') {
+      style.height = `${props.height}px`
+    }
     return style
   }
 
-  if (props.width === 'match_parent') {
+  if (matchParentWidth.value) {
     if (props.parentHorizontal) {
       style.flex = '1 1 0%'
       style.minWidth = '0'
@@ -66,9 +105,12 @@ const shellStyle = computed<CSSProperties>(() => {
       style.alignSelf = 'stretch'
       style.width = 'auto'
     }
+  } else if (typeof props.width === 'number') {
+    style.width = `${props.width}px`
+    style.flexShrink = 0
   }
 
-  if (props.height === 'match_parent') {
+  if (matchParentHeight.value) {
     if (props.parentVertical) {
       style.flex = '1 1 0%'
       style.minHeight = '0'
@@ -77,6 +119,9 @@ const shellStyle = computed<CSSProperties>(() => {
       style.alignSelf = 'stretch'
       style.height = 'auto'
     }
+  } else if (typeof props.height === 'number') {
+    style.height = `${props.height}px`
+    style.flexShrink = 0
   }
 
   return style
@@ -88,19 +133,19 @@ const marginBoxStyle = computed(() => ({
   flexDirection: 'column' as const,
   minHeight: 0,
   minWidth: 0,
-  width: matchParentWidth.value ? '100%' : undefined,
-  height: matchParentHeight.value ? '100%' : undefined,
+  width: matchParentWidth.value || isAbsolute.value ? '100%' : undefined,
+  height: matchParentHeight.value || isAbsolute.value ? '100%' : undefined,
 }))
 
 const contentBoxStyle = computed<CSSProperties>(() => ({
   position: 'relative',
-  flex: matchParentHeight.value ? '1 1 auto' : undefined,
+  flex: matchParentHeight.value || isAbsolute.value ? '1 1 auto' : undefined,
   display: 'flex',
   flexDirection: 'column' as const,
   minHeight: 0,
   minWidth: 0,
-  width: matchParentWidth.value ? '100%' : undefined,
-  height: matchParentHeight.value ? '100%' : undefined,
+  width: matchParentWidth.value || isAbsolute.value ? '100%' : undefined,
+  height: matchParentHeight.value || isAbsolute.value ? '100%' : undefined,
 }))
 
 const showMarginFrame = computed(
@@ -152,12 +197,17 @@ function onClick(event: MouseEvent) {
       >
         <slot />
         <div v-if="showContentFrame" class="frame-content" :class="frameKind" />
-        <RepeatBadge
-          v-if="repeatBadge"
-          class="repeat-badge-corner"
-          clickable
-          @click="emit('open-repeat')"
-        />
+        <div v-if="repeatBadge || (eventBadgeCount ?? 0) > 0" class="badge-stack">
+          <EventBadge
+            v-if="(eventBadgeCount ?? 0) > 0"
+            :count="eventBadgeCount"
+          />
+          <RepeatBadge
+            v-if="repeatBadge"
+            clickable
+            @click="emit('open-repeat')"
+          />
+        </div>
       </div>
     </div>
   </div>
@@ -170,7 +220,6 @@ function onClick(event: MouseEvent) {
 
 .margin-box {
   position: relative;
-  height: 100%;
 }
 
 .content-box.selected {
@@ -220,5 +269,21 @@ function onClick(event: MouseEvent) {
   z-index: 25;
   /* 中心对齐控件右上角 */
   transform: translate(50%, -50%);
+}
+
+.badge-stack {
+  position: absolute;
+  top: 0;
+  right: 0;
+  z-index: 25;
+  transform: translate(50%, -50%);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  pointer-events: none;
+}
+
+.badge-stack > * {
+  pointer-events: auto;
 }
 </style>

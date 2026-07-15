@@ -1,5 +1,21 @@
 import type { PageData } from '../types/page-data'
+import {
+  DYNAMIC_STYLES_ATTR,
+  V_IF_ATTR,
+  V_SHOW_ATTR,
+} from '../types/dynamic-styles'
+import { INTERACTION_EVENT_KEYS } from '../types/page-method'
+import { applyDynamicStyleOverrides } from './dynamic-style-runtime'
 import type { XmlNode } from './xml'
+
+const SKIP_INTERPOLATE_ATTRS = new Set<string>([
+  'repeat',
+  'repeatIndex',
+  DYNAMIC_STYLES_ATTR,
+  V_SHOW_ATTR,
+  V_IF_ATTR,
+  ...INTERACTION_EVENT_KEYS,
+])
 
 function cloneNode(node: XmlNode): XmlNode {
   return {
@@ -7,6 +23,7 @@ function cloneNode(node: XmlNode): XmlNode {
     attrs: { ...node.attrs },
     text: node.text,
     children: node.children.map(cloneNode),
+    scope: node.scope ? { ...node.scope } : undefined,
   }
 }
 
@@ -23,7 +40,6 @@ function getByPath(source: unknown, path: string): unknown {
 
 /**
  * 仅替换 {item.xxx} / {item} / {index}；其他文本原样保留。
- * 示例：text="{item.name}" → "小明"；text="标题" → "标题"
  */
 export function interpolateTemplate(
   template: string,
@@ -45,23 +61,37 @@ export function interpolateTemplate(
       const value = getByPath(item, expr.slice('item.'.length))
       return value == null ? '' : String(value)
     }
-    // 未识别的 {xxx} 原样保留
     return match
   })
 }
 
-function applyItemScope(node: XmlNode, item: unknown, index: number): XmlNode {
+function applyItemScope(
+  node: XmlNode,
+  item: unknown,
+  index: number,
+  pageData: PageData | undefined,
+): XmlNode {
   const attrs: Record<string, string> = {}
   for (const [key, value] of Object.entries(node.attrs)) {
-    if (key === 'repeat' || key === 'repeatIndex') continue
+    if (SKIP_INTERPOLATE_ATTRS.has(key)) {
+      // 事件绑定等延迟到运行时按 scope 解析，避免破坏 JSON
+      attrs[key] = value
+      continue
+    }
     attrs[key] = interpolateTemplate(value, item, index)
   }
-  return {
+
+  const scoped: XmlNode = {
     tag: node.tag,
     attrs,
     text: interpolateTemplate(node.text, item, index),
-    children: node.children.map((child) => applyItemScope(child, item, index)),
+    scope: { item, index },
+    children: node.children.map((child) =>
+      applyItemScope(child, item, index, pageData),
+    ),
   }
+
+  return applyDynamicStyleOverrides(scoped, pageData, { item, index })
 }
 
 function resolveArrayValue(pageData: PageData | undefined, name: string): unknown[] {
@@ -72,9 +102,8 @@ function resolveArrayValue(pageData: PageData | undefined, name: string): unknow
 }
 
 /**
- * 按 repeat / repeatIndex 展开子树（预览用，类似 v-for）。
- * - repeat: 数据池数组字段名
- * - repeatIndex: 可选，填写数字时只渲染该项；不填则按数组顺序全部渲染
+ * 按 repeat / repeatIndex 展开子树（预览用）。
+ * 展开后写入 scope，并应用 dynamicStyles。
  */
 export function expandRepeatTree(
   root: XmlNode,
@@ -86,7 +115,7 @@ export function expandRepeatTree(
 function expandNode(node: XmlNode, pageData: PageData | undefined): XmlNode {
   const next = cloneNode(node)
   next.children = expandChildren(next.children, pageData)
-  return next
+  return applyDynamicStyleOverrides(next, pageData, next.scope)
 }
 
 function expandChildren(
@@ -105,18 +134,38 @@ function expandChildren(
     const items = resolveArrayValue(pageData, listName)
     const indexAttr = child.attrs.repeatIndex?.trim() ?? ''
 
+    // 模板：只克隆结构，不在此处套无 scope 的动态样式
+    const template = cloneNode(child)
+    // 子树若还有嵌套 repeat，先让子层在 applyItemScope 前展开
+    // 通过 expandNode 处理 template 的 children，但跳过自身的 dynamicStyles 无 scope 求值
+    const prepared = prepareRepeatTemplate(template, pageData)
+
     if (indexAttr !== '') {
       const fixed = Number(indexAttr)
       if (Number.isInteger(fixed) && fixed >= 0 && fixed < items.length) {
-        result.push(applyItemScope(expandNode(child, pageData), items[fixed], fixed))
+        result.push(applyItemScope(prepared, items[fixed], fixed, pageData))
       }
       continue
     }
 
     items.forEach((item, index) => {
-      result.push(applyItemScope(expandNode(child, pageData), item, index))
+      result.push(applyItemScope(clonePrepared(prepared), item, index, pageData))
     })
   }
 
   return result
+}
+
+/** 展开模板内部嵌套 repeat，但不对本节点做无 scope 的动态样式 */
+function prepareRepeatTemplate(
+  node: XmlNode,
+  pageData: PageData | undefined,
+): XmlNode {
+  const next = cloneNode(node)
+  next.children = expandChildren(next.children, pageData)
+  return next
+}
+
+function clonePrepared(node: XmlNode): XmlNode {
+  return cloneNode(node)
 }

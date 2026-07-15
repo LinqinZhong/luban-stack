@@ -8,6 +8,7 @@ import {
   VOIDER_CONFIG_FILE,
   type VoiderProjectConfig,
 } from '../types/voider-project.js'
+import { ensureIconLibraryFile } from './icons.js'
 
 export class ProjectError extends Error {
   status: number
@@ -137,6 +138,8 @@ export async function createProject(options: {
   try {
     await writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`, 'utf-8')
     await mkdir(path.join(projectPath, 'pages'), { recursive: true })
+    await mkdir(path.join(projectPath, 'components'), { recursive: true })
+    await ensureIconLibraryFile(projectPath)
   } catch {
     throw new ProjectError(`无法写入 ${VOIDER_CONFIG_FILE}`, 500)
   }

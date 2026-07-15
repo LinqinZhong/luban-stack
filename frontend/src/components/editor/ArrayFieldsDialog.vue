@@ -2,6 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import { Plus, Rank } from '@element-plus/icons-vue'
 import ArrayFieldsDialog from './ArrayFieldsDialog.vue'
+import IconValueSelect from './IconValueSelect.vue'
 import ObjectFieldsDialog from './ObjectFieldsDialog.vue'
 import {
   ARRAY_ITEM_TYPE_OPTIONS,
@@ -24,6 +25,7 @@ interface DraftItem {
 const props = defineProps<{
   modelValue: boolean
   fields: ArraySubField[]
+  iconOptions?: Array<{ id: string; label: string }>
 }>()
 
 const emit = defineEmits<{
@@ -242,6 +244,12 @@ function handleSave() {
             :model-value="Boolean(item.value)"
             @update:model-value="item.value = $event"
           />
+          <IconValueSelect
+            v-else-if="item.type === 'icon'"
+            :model-value="String(item.value ?? '')"
+            :options="iconOptions"
+            @update:model-value="item.value = $event"
+          />
           <div v-else-if="item.type === 'json'" class="complex-value">
             <span class="value-preview">{{ item.objectFields.length }} 个字段</span>
             <el-button type="primary" link @click="openObjectEditor(item.key)">编辑</el-button>
@@ -265,11 +273,13 @@ function handleSave() {
     <ObjectFieldsDialog
       v-model="objectDialogVisible"
       :fields="editingObjectFields"
+      :icon-options="iconOptions"
       @save="saveObjectFields"
     />
     <ArrayFieldsDialog
       v-model="nestedDialogVisible"
       :fields="editingNestedFields"
+      :icon-options="iconOptions"
       @save="saveNestedArrayFields"
     />
   </el-dialog>

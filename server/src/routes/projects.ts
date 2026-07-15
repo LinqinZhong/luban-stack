@@ -5,6 +5,7 @@ import {
   openProject,
   ProjectError,
 } from '../services/project.js'
+import { readIconLibrary, saveIconLibrary } from '../services/icons.js'
 import { DEFAULT_CANVAS_WIDTH, ENGINE_VERSION } from '../types/voider-project.js'
 
 const router = Router()
@@ -67,6 +68,34 @@ router.post('/create', async (req, res) => {
       canvasWidth,
     })
     res.json(result)
+  } catch (err) {
+    handleError(res, err)
+  }
+})
+
+router.get('/icons', async (req, res) => {
+  try {
+    const projectPath = typeof req.query.projectPath === 'string' ? req.query.projectPath : ''
+    if (!projectPath.trim()) {
+      res.status(400).json({ message: '请提供 projectPath' })
+      return
+    }
+    const library = await readIconLibrary(projectPath.trim())
+    res.json(library)
+  } catch (err) {
+    handleError(res, err)
+  }
+})
+
+router.put('/icons', async (req, res) => {
+  try {
+    const { projectPath, icons } = req.body ?? {}
+    if (!projectPath || typeof projectPath !== 'string' || !projectPath.trim()) {
+      res.status(400).json({ message: '请提供 projectPath' })
+      return
+    }
+    const library = await saveIconLibrary(projectPath.trim(), { icons })
+    res.json(library)
   } catch (err) {
     handleError(res, err)
   }

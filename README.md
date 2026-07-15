@@ -83,8 +83,11 @@ pages/
 | `Text` | 文本 |
 | `Button` | 按钮 |
 | `Image` | 图片（`src` / `alt` / `title` / `objectFit` / `loading`，尺寸用通用 `width` / `height`） |
+| `Icon` | 图标（`iconId` 引用项目 `icons.json`，`size` / `color`） |
 | `LinearLayout` | 线性布局（`orientation`: vertical / horizontal） |
 | `RelativeLayout` | 相对布局（`layout_alignParent*` / `layout_center*` 等） |
+
+项目根目录 `icons.json` 存放可复用 SVG 符号定义；画布通过 SVG sprite + `<use>` 渲染，页面 XML 不内联 SVG。
 
 ## API 接口
 
@@ -96,6 +99,8 @@ pages/
 | GET | `/api/projects/browse?path=` | 浏览本地文件夹（空 path 为磁盘根） |
 | POST | `/api/projects/open` | 打开项目（校验 voider.json） |
 | POST | `/api/projects/create` | 新建项目并写入 voider.json |
+| GET | `/api/projects/icons?projectPath=` | 获取项目图标库 |
+| PUT | `/api/projects/icons` | 保存项目图标库 |
 | GET | `/api/pages?projectPath=` | 列出项目 pages 下的页面 |
 | POST | `/api/pages` | 新建页面（写入 config.json + index.xml） |
 | GET | `/api/pages/:pageId?projectPath=` | 读取页面配置与 XML |

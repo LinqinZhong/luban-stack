@@ -1,7 +1,14 @@
 import type { XmlNode } from './xml'
 import { parsePageXml } from './xml'
 
-export type WidgetTag = 'Text' | 'Button' | 'Image' | 'LinearLayout' | 'RelativeLayout'
+export type WidgetTag =
+  | 'Text'
+  | 'Button'
+  | 'Image'
+  | 'Icon'
+  | 'LinearLayout'
+  | 'RelativeLayout'
+  | 'Component'
 
 export type MovePosition = 'before' | 'after' | 'inner'
 
@@ -19,6 +26,7 @@ export const WIDGET_OPTIONS: Array<{
   { tag: 'Text', label: '文本 Text', description: '显示一段文本' },
   { tag: 'Button', label: '按钮 Button', description: '可点击按钮' },
   { tag: 'Image', label: '图片 Image', description: '显示网络或本地图片' },
+  { tag: 'Icon', label: '图标 Icon', description: '引用图标库中的 SVG 符号' },
   { tag: 'LinearLayout', label: '线性布局 LinearLayout', description: '水平或垂直排列子控件' },
   { tag: 'RelativeLayout', label: '相对布局 RelativeLayout', description: '相对父容器定位子控件' },
 ]
@@ -171,6 +179,12 @@ function createWidgetElement(doc: Document, tag: WidgetTag): Element {
     el.setAttribute('objectFit', 'cover')
     el.setAttribute('width', '120')
     el.setAttribute('height', '80')
+  } else if (tag === 'Icon') {
+    el.setAttribute('iconId', 'home')
+    el.setAttribute('size', '24')
+    el.setAttribute('color', '#303133')
+    el.setAttribute('width', 'wrap_content')
+    el.setAttribute('height', 'wrap_content')
   } else if (tag === 'LinearLayout') {
     el.setAttribute('orientation', 'vertical')
     el.setAttribute('width', 'match_parent')
@@ -180,6 +194,10 @@ function createWidgetElement(doc: Document, tag: WidgetTag): Element {
     el.setAttribute('width', 'match_parent')
     el.setAttribute('height', '120')
     el.setAttribute('padding', '8')
+  } else if (tag === 'Component') {
+    el.setAttribute('componentId', '')
+    el.setAttribute('width', 'match_parent')
+    el.setAttribute('height', 'wrap_content')
   }
 
   return el
@@ -251,6 +269,27 @@ export function appendWidget(
     xml: serializeDoc(doc),
     newNodeId,
   }
+}
+
+/** 向页面插入组件实例节点 */
+export function appendComponent(
+  xml: string,
+  selectedId: string,
+  options: {
+    componentId: string
+    name?: string
+    width?: string
+    height?: string
+  },
+): { xml: string; newNodeId: string } {
+  const result = appendWidget(xml, selectedId, 'Component')
+  const patched = setNodeAttributes(result.xml, result.newNodeId, {
+    componentId: options.componentId,
+    name: options.name || options.componentId,
+    width: options.width || 'match_parent',
+    height: options.height || 'wrap_content',
+  })
+  return { xml: patched, newNodeId: result.newNodeId }
 }
 
 /** 是否允许删除（根节点不可删） */

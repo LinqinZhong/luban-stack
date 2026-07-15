@@ -78,3 +78,39 @@ export function savePageData(payload: {
     },
   )
 }
+
+export function listPageMethods(projectPath: string, pageId: string) {
+  return request<{ methods: import('../types/page-method').PageMethod[] }>(
+    `/api/pages/${encodeURIComponent(pageId)}/functions?projectPath=${encodeURIComponent(projectPath)}`,
+  )
+}
+
+export function savePageMethod(payload: {
+  projectPath: string
+  pageId: string
+  method: import('../types/page-method').PageMethod
+  previousName?: string
+}) {
+  return request<{ method: import('../types/page-method').PageMethod }>(
+    `/api/pages/${encodeURIComponent(payload.pageId)}/functions/${encodeURIComponent(payload.method.name)}`,
+    {
+      method: 'PUT',
+      body: JSON.stringify({
+        projectPath: payload.projectPath,
+        previousName: payload.previousName,
+        method: payload.method,
+      }),
+    },
+  )
+}
+
+export function deletePageMethod(payload: {
+  projectPath: string
+  pageId: string
+  name: string
+}) {
+  return request<{ ok: boolean }>(
+    `/api/pages/${encodeURIComponent(payload.pageId)}/functions/${encodeURIComponent(payload.name)}?projectPath=${encodeURIComponent(payload.projectPath)}`,
+    { method: 'DELETE' },
+  )
+}

@@ -2,23 +2,32 @@
 import { computed, ref } from 'vue'
 import { Delete, Plus } from '@element-plus/icons-vue'
 import ArrayFieldsDialog from './ArrayFieldsDialog.vue'
+import ComputedBindingDialog from './ComputedBindingDialog.vue'
+import IconValueSelect from './IconValueSelect.vue'
 import ObjectFieldsDialog from './ObjectFieldsDialog.vue'
 import {
   createEmptyDataField,
   DATA_FIELD_TYPE_OPTIONS,
+  DATA_SOURCE_BINDING_OPTIONS,
   buildArrayValue,
   buildObjectValue,
+  defaultComputeBody,
   defaultValue,
   resolveArrayFields,
   resolveObjectFields,
   type ArraySubField,
   type DataField,
+  type DataSourceBinding,
   type ObjectSubField,
   type PageData,
 } from '../../types/page-data'
+import { resolveComputedPageData } from '../../utils/compute-runtime'
+import { isReservedDataFieldName } from '../../utils/component-props'
+import { ElMessage } from 'element-plus'
 
 const props = defineProps<{
   data: PageData
+  iconOptions?: Array<{ id: string; label: string }>
 }>()
 
 const emit = defineEmits<{
@@ -34,9 +43,14 @@ const fields = computed({
 
 const objectDialogVisible = ref(false)
 const arrayDialogVisible = ref(false)
+const computeDialogVisible = ref(false)
 const editingIndex = ref(-1)
 
 function updateField(index: number, patch: Partial<DataField>) {
+  if (typeof patch.name === 'string' && isReservedDataFieldName(patch.name)) {
+    ElMessage.warning('字段名「$props」为组件入参保留字，请换用其他名称')
+    return
+  }
   const next = fields.value.map((item, i) =>
     i === index ? { ...item, ...patch } : item,
   )
@@ -47,6 +61,8 @@ function handleTypeChange(index: number, type: DataField['type']) {
   updateField(index, {
     type,
     value: defaultValue(type),
+    arrayFields: undefined,
+    objectFields: undefined,
   })
 }
 
@@ -72,6 +88,8 @@ function saveObjectFields(objectFields: ObjectSubField[]) {
   if (editingIndex.value < 0) return
   updateField(editingIndex.value, {
     value: buildObjectValue(objectFields),
+    objectFields,
+    arrayFields: undefined,
   })
 }
 
@@ -79,22 +97,25 @@ function saveArrayFields(arrayFields: ArraySubField[]) {
   if (editingIndex.value < 0) return
   updateField(editingIndex.value, {
     value: buildArrayValue(arrayFields ?? []),
+    arrayFields: arrayFields ?? [],
+    objectFields: undefined,
   })
 }
 
 const editingObjectFields = computed(() => {
   const field = fields.value[editingIndex.value]
   if (!field || field.type !== 'json') return []
-  return resolveObjectFields(undefined, field.value)
+  return resolveObjectFields(field.objectFields, field.value)
 })
 
 const editingArrayFields = computed(() => {
   const field = fields.value[editingIndex.value]
   if (!field || field.type !== 'array') return []
-  return resolveArrayFields(undefined, field.value)
+  return resolveArrayFields(field.arrayFields, field.value)
 })
 
 function objectFieldCount(row: DataField) {
+  if (row.objectFields?.length) return row.objectFields.length
   if (row.value && typeof row.value === 'object' && !Array.isArray(row.value)) {
     return Object.keys(row.value).length
   }
@@ -102,7 +123,71 @@ function objectFieldCount(row: DataField) {
 }
 
 function arrayItemCount(row: DataField) {
+  if (row.arrayFields?.length) return row.arrayFields.length
   return Array.isArray(row.value) ? row.value.length : 0
+}
+
+const resolvedData = computed(() => resolveComputedPageData(props.data))
+
+function resolvedField(row: DataField): DataField | undefined {
+  const name = row.name.trim()
+  if (!name) return undefined
+  return resolvedData.value.fields.find((item) => item.name.trim() === name)
+}
+
+function computedValueSummary(row: DataField): string {
+  const field = resolvedField(row)
+  if (!field) return '计算结果为空'
+  if (field.type === 'array' || Array.isArray(field.value)) {
+    return `${Array.isArray(field.value) ? field.value.length : 0} 项`
+  }
+  if (field.type === 'json' && field.value && typeof field.value === 'object') {
+    return `${Object.keys(field.value as object).length} 个字段`
+  }
+  if (field.type === 'boolean') return String(Boolean(field.value))
+  if (field.value == null || field.value === '') return '（空）'
+  return String(field.value)
+}
+
+const editingField = computed(() =>
+  editingIndex.value >= 0 ? fields.value[editingIndex.value] ?? null : null,
+)
+
+const siblingFieldsForCompute = computed(() => {
+  if (editingIndex.value < 0) return []
+  return fields.value.filter(
+    (item, i) => i !== editingIndex.value && item.name.trim(),
+  )
+})
+
+function openComputeEditor(index: number) {
+  editingIndex.value = index
+  computeDialogVisible.value = true
+}
+
+function handleBindingChange(index: number, binding: DataSourceBinding) {
+  if (binding === 'api') return
+  const field = fields.value[index]
+  if (!field) return
+  if (binding === 'computed') {
+    updateField(index, {
+      binding: 'computed',
+      computeBody: field.computeBody?.trim()
+        ? field.computeBody
+        : defaultComputeBody(field.type),
+    })
+    openComputeEditor(index)
+    return
+  }
+  updateField(index, { binding: '' })
+}
+
+function saveComputeBody(body: string) {
+  if (editingIndex.value < 0) return
+  updateField(editingIndex.value, {
+    binding: 'computed',
+    computeBody: body,
+  })
 }
 </script>
 
@@ -156,8 +241,14 @@ function arrayItemCount(row: DataField) {
 
         <el-table-column label="值" min-width="180">
           <template #default="{ row, $index }">
+            <div v-if="row.binding === 'computed'" class="complex-value">
+              <span class="value-preview">计算 · {{ computedValueSummary(row) }}</span>
+              <el-button type="primary" link @click="openComputeEditor($index)">
+                编辑逻辑
+              </el-button>
+            </div>
             <el-input
-              v-if="row.type === 'string'"
+              v-else-if="row.type === 'string'"
               :model-value="String(row.value ?? '')"
               placeholder="值"
               @update:model-value="updateField($index, { value: $event })"
@@ -173,6 +264,12 @@ function arrayItemCount(row: DataField) {
               :model-value="Boolean(row.value)"
               @update:model-value="updateField($index, { value: $event })"
             />
+            <IconValueSelect
+              v-else-if="row.type === 'icon'"
+              :model-value="String(row.value ?? '')"
+              :options="iconOptions"
+              @update:model-value="updateField($index, { value: $event })"
+            />
             <div v-else-if="row.type === 'json'" class="complex-value">
               <span class="value-preview">{{ objectFieldCount(row) }} 个字段</span>
               <el-button type="primary" link @click="openObjectEditor($index)">编辑</el-button>
@@ -184,9 +281,32 @@ function arrayItemCount(row: DataField) {
           </template>
         </el-table-column>
 
-        <el-table-column label="绑定数据源" min-width="140">
-          <template #default>
-            <el-input disabled placeholder="暂未实现" />
+        <el-table-column label="绑定数据源" min-width="180">
+          <template #default="{ row, $index }">
+            <div class="binding-cell">
+              <el-select
+                :model-value="row.binding || ''"
+                placeholder="无"
+                style="flex: 1; min-width: 0"
+                @update:model-value="handleBindingChange($index, $event)"
+              >
+                <el-option
+                  v-for="opt in DATA_SOURCE_BINDING_OPTIONS"
+                  :key="opt.value || 'none'"
+                  :label="opt.label"
+                  :value="opt.value"
+                  :disabled="opt.disabled"
+                />
+              </el-select>
+              <el-button
+                v-if="row.binding === 'computed'"
+                type="primary"
+                link
+                @click="openComputeEditor($index)"
+              >
+                编辑
+              </el-button>
+            </div>
           </template>
         </el-table-column>
 
@@ -206,12 +326,20 @@ function arrayItemCount(row: DataField) {
     <ObjectFieldsDialog
       v-model="objectDialogVisible"
       :fields="editingObjectFields"
+      :icon-options="iconOptions"
       @save="saveObjectFields"
     />
     <ArrayFieldsDialog
       v-model="arrayDialogVisible"
       :fields="editingArrayFields"
+      :icon-options="iconOptions"
       @save="saveArrayFields"
+    />
+    <ComputedBindingDialog
+      v-model="computeDialogVisible"
+      :field="editingField"
+      :sibling-fields="siblingFieldsForCompute"
+      @save="saveComputeBody"
     />
   </div>
 </template>
@@ -257,6 +385,12 @@ function arrayItemCount(row: DataField) {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.binding-cell {
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .value-preview {

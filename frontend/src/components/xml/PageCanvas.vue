@@ -1,10 +1,13 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { Delete, Plus } from '@element-plus/icons-vue'
+import { Box, Delete, Plus } from '@element-plus/icons-vue'
 import { colorPickState } from '../../composables/useColorPick'
+import type { IconLibrary } from '../../types/icon-library'
 import type { PageData } from '../../types/page-data'
+import type { ComponentRenderMap } from '../../types/component-render'
 import { expandRepeatTree } from '../../utils/repeat'
 import { parsePageXml, type XmlNode } from '../../utils/xml'
+import IconSprite from './IconSprite.vue'
 import XmlNodeView from './XmlNodeView.vue'
 
 const props = defineProps<{
@@ -13,17 +16,29 @@ const props = defineProps<{
   selectedId?: string
   selectable?: boolean
   showAddButton?: boolean
+  showAddComponentButton?: boolean
   showDeleteButton?: boolean
   /** 预览时展开 repeat（类似 v-for） */
   expandRepeat?: boolean
   pageData?: PageData
+  iconLibrary?: IconLibrary
+  /** 仅编辑态：画布上隐藏这些节点 */
+  hiddenNodeIds?: string[]
+  /** 页面中 Component 节点的渲染数据 */
+  componentMap?: ComponentRenderMap
+  /** 画布高度；不传则默认 min 667。传 auto 则按内容撑开 */
+  canvasHeight?: number | 'auto'
+  /** 编辑/预览组件自身时注入 $props（默认值） */
+  dollarProps?: Record<string, unknown>
 }>()
 
 const emit = defineEmits<{
   select: [id: string]
   add: []
+  'add-component': []
   delete: []
   'open-repeat': [id: string]
+  interact: [payload: import('../../utils/event-runtime').PreviewInteractPayload]
 }>()
 
 const parsed = computed<{ root: XmlNode | null; error: string }>(() => {
@@ -48,6 +63,24 @@ const rootId = computed(() =>
 )
 
 const hoveredNodeId = ref('')
+
+const phoneFrameStyle = computed(() => {
+  const style: Record<string, string> = {
+    width: `${props.canvasWidth}px`,
+  }
+  if (typeof props.canvasHeight === 'number' && Number.isFinite(props.canvasHeight)) {
+    style.height = `${props.canvasHeight}px`
+    style.minHeight = `${props.canvasHeight}px`
+  } else if (props.canvasHeight === 'auto') {
+    style.height = 'auto'
+    style.minHeight = '0'
+  }
+  return style
+})
+
+const phoneFitContent = computed(
+  () => props.canvasHeight === 'auto' || typeof props.canvasHeight === 'number',
+)
 
 watch(
   () => props.selectable,
@@ -75,9 +108,19 @@ function handlePhoneClick(event: MouseEvent) {
 
 <template>
   <div class="stage">
-    <div v-if="showAddButton || showDeleteButton" class="stage-toolbar color-pick-ignore">
+    <IconSprite
+      v-if="iconLibrary"
+      :library="iconLibrary"
+    />
+    <div
+      v-if="showAddButton || showAddComponentButton || showDeleteButton"
+      class="stage-toolbar color-pick-ignore"
+    >
       <el-tooltip v-if="showAddButton" content="添加控件" placement="left">
         <el-button type="primary" circle :icon="Plus" @click="emit('add')" />
+      </el-tooltip>
+      <el-tooltip v-if="showAddComponentButton" content="添加组件" placement="left">
+        <el-button type="success" circle :icon="Box" @click="emit('add-component')" />
       </el-tooltip>
       <el-tooltip v-if="showDeleteButton" content="删除控件" placement="left">
         <el-button type="danger" circle :icon="Delete" @click="emit('delete')" />
@@ -86,8 +129,11 @@ function handlePhoneClick(event: MouseEvent) {
 
     <div
       class="phone"
-      :class="{ 'is-picking': colorPickState.picking.value }"
-      :style="{ width: `${canvasWidth}px` }"
+      :class="{
+        'is-picking': colorPickState.picking.value,
+        'is-fit-content': phoneFitContent,
+      }"
+      :style="phoneFrameStyle"
       @click="handlePhoneClick"
       @mouseleave="clearHover"
     >
@@ -105,10 +151,16 @@ function handlePhoneClick(event: MouseEvent) {
         :selected-id="selectedId"
         :hovered-id="hoveredNodeId"
         :selectable="selectable"
+        :icon-library="iconLibrary"
+        :page-data="pageData"
+        :hidden-node-ids="hiddenNodeIds"
+        :component-map="componentMap"
+        :dollar-props="dollarProps"
         is-root
         @select="emit('select', $event)"
         @hover="handleHover"
         @open-repeat="emit('open-repeat', $event)"
+        @interact="emit('interact', $event)"
       />
     </div>
 
@@ -157,6 +209,14 @@ function handlePhoneClick(event: MouseEvent) {
   border: 1px solid #d0d7de;
   box-shadow: 0 12px 40px rgba(15, 23, 42, 0.08);
   overflow: hidden;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.phone.is-fit-content {
+  height: auto;
+  min-height: 0;
+  align-self: flex-start;
 }
 
 .phone.is-picking {

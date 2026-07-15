@@ -5,14 +5,18 @@ export interface XmlNode {
   attrs: Record<string, string>
   children: XmlNode[]
   text: string
+  /** 预览展开 repeat 时挂载的作用域（不写入 XML） */
+  scope?: { item: unknown; index: number }
 }
 
 const SUPPORTED_TAGS = new Set([
   'Text',
   'Button',
   'Image',
+  'Icon',
   'LinearLayout',
   'RelativeLayout',
+  'Component',
 ])
 
 export function parsePageXml(xml: string): XmlNode {

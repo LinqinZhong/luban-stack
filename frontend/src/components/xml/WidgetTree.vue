@@ -2,6 +2,7 @@
 import { nextTick, ref, watch } from 'vue'
 import type { AllowDropType, ElTree, NodeDropType, RenderContentContext } from 'element-plus'
 import { ElMessageBox } from 'element-plus'
+import { Hide, View } from '@element-plus/icons-vue'
 import { buildWidgetTree, type TreeNodeData } from '../../utils/widget-tree'
 import {
   canMoveWidget,
@@ -9,20 +10,24 @@ import {
   type MovePosition,
 } from '../../utils/xml-node'
 import RepeatBadge from './RepeatBadge.vue'
+import EventBadge from './EventBadge.vue'
 
 type TreeNode = RenderContentContext['node']
 
 const props = defineProps<{
   xml: string
   selectedId?: string
-  /** 编辑模式才允许拖拽 */
+  /** 编辑模式才允许拖拽 / 眼睛显隐 */
   editable?: boolean
+  /** 编辑态被隐藏的节点 id */
+  hiddenIds?: string[]
 }>()
 
 const emit = defineEmits<{
   select: [id: string]
   'open-repeat': [id: string]
   move: [payload: { sourceId: string; targetId: string; position: MovePosition }]
+  'toggle-hidden': [id: string]
 }>()
 
 const treeRef = ref<InstanceType<typeof ElTree>>()
@@ -53,12 +58,21 @@ function collectExpandedKeys(selectedId?: string): string[] {
   return Array.from(keys)
 }
 
+function isHidden(id: string) {
+  return (props.hiddenIds ?? []).includes(id)
+}
+
 function handleNodeClick(data: { id: string }) {
   emit('select', data.id)
 }
 
 function handleOpenRepeat(id: string) {
   emit('open-repeat', id)
+}
+
+function handleToggleHidden(event: MouseEvent, id: string) {
+  event.stopPropagation()
+  emit('toggle-hidden', id)
 }
 
 function allowDrag(node: TreeNode) {
@@ -208,6 +222,7 @@ watch(
         node-key="id"
         :props="{ label: 'label', children: 'children' }"
         :default-expanded-keys="collectExpandedKeys(selectedId)"
+        :expand-on-click-node="false"
         :draggable="editable"
         :allow-drag="allowDrag"
         :allow-drop="allowDrop"
@@ -216,14 +231,34 @@ watch(
         @node-drop="handleNodeDrop"
       >
         <template #default="{ data }">
-          <div class="tree-node">
+          <div
+            class="tree-node"
+            :class="{ 'is-hidden': isHidden((data as TreeNodeData).id) }"
+          >
             <span class="tree-label">{{ (data as TreeNodeData).label }}</span>
+            <EventBadge
+              v-if="((data as TreeNodeData).eventBindingCount ?? 0) > 0"
+              :size="14"
+              :count="(data as TreeNodeData).eventBindingCount"
+            />
             <RepeatBadge
               v-if="(data as TreeNodeData).hasRepeat"
               :size="14"
               clickable
               @click="handleOpenRepeat((data as TreeNodeData).id)"
             />
+            <button
+              v-if="editable"
+              type="button"
+              class="eye-btn"
+              :title="isHidden((data as TreeNodeData).id) ? '显示（仅编辑态）' : '隐藏（仅编辑态）'"
+              @click="handleToggleHidden($event, (data as TreeNodeData).id)"
+            >
+              <el-icon :size="14">
+                <Hide v-if="isHidden((data as TreeNodeData).id)" />
+                <View v-else />
+              </el-icon>
+            </button>
           </div>
         </template>
       </el-tree>
@@ -264,18 +299,53 @@ watch(
   gap: 6px;
   min-width: 0;
   flex: 1;
-  padding-right: 4px;
+  padding-right: 2px;
+}
+
+.tree-node.is-hidden .tree-label {
+  color: #c0c4cc;
+  text-decoration: line-through;
 }
 
 .tree-label {
   min-width: 0;
+  flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 13px;
 }
 
+.eye-btn {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  margin-left: auto;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: #909399;
+  cursor: pointer;
+}
+
+.eye-btn:hover {
+  color: #409eff;
+  background: #ecf5ff;
+}
+
+.tree-node.is-hidden .eye-btn {
+  color: #c0c4cc;
+}
+
 :deep(.el-tree-node__content) {
   height: 30px;
+}
+
+:deep(.el-tree-node__expand-icon) {
+  cursor: pointer;
 }
 </style>

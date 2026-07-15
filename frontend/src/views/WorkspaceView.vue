@@ -2,27 +2,63 @@
 import { computed, nextTick, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
+  Box,
   Coin,
   Document,
   EditPen,
+  Lightning,
+  Picture,
   Plus,
   View,
 } from '@element-plus/icons-vue'
 import {
   createPage,
+  deletePageMethod,
   getPage,
+  listPageMethods,
   listPages,
   savePageData,
+  savePageMethod,
   savePageXml,
   type PageDetail,
   type PageSummary,
 } from '../api/pages'
+import {
+  createComponent,
+  deleteComponentMethod,
+  getComponent,
+  listComponentMethods,
+  listComponents,
+  saveComponentConfig,
+  saveComponentData,
+  saveComponentMethod,
+  saveComponentXml,
+  type ComponentDetail,
+} from '../api/components'
+import {
+  getIconLibrary,
+  saveIconLibrary as saveIconLibraryApi,
+} from '../api/projects'
 import DataPoolPanel from '../components/editor/DataPoolPanel.vue'
+import IconLibraryPanel from '../components/editor/IconLibraryPanel.vue'
+import MethodEditDialog from '../components/editor/MethodEditDialog.vue'
+import MethodsPanel from '../components/editor/MethodsPanel.vue'
+import ComponentMetaPanel from '../components/editor/ComponentMetaPanel.vue'
 import PropsPanel, { type PropsTab } from '../components/editor/PropsPanel.vue'
 import PageCanvas from '../components/xml/PageCanvas.vue'
 import WidgetTree from '../components/xml/WidgetTree.vue'
 import { useProjectStore } from '../stores/project'
 import {
+  createEmptyMethod,
+  type PageMethod,
+} from '../types/page-method'
+import { runEventBindings } from '../utils/event-runtime'
+import type { PreviewInteractPayload } from '../utils/event-runtime'
+import { resolveComputedPageData } from '../utils/compute-runtime'
+import { buildDollarProps } from '../utils/component-props'
+import type { DataFieldValue } from '../types/page-data'
+import {
+  appendComponent,
   appendWidget,
   canDeleteNode,
   moveWidget,
@@ -31,17 +67,31 @@ import {
   type MovePosition,
   type WidgetTag,
 } from '../utils/xml-node'
+import type { ComponentConfig, ComponentSummary } from '../types/component'
+import type { ComponentRenderMap } from '../types/component-render'
 import type { PageData } from '../types/page-data'
+import {
+  createEmptyIconLibrary,
+  type IconLibrary,
+} from '../types/icon-library'
 
-type WorkspaceMode = 'preview' | 'edit' | 'datapool'
+type WorkspaceMode = 'preview' | 'edit' | 'datapool' | 'icons' | 'methods'
 
 const projectStore = useProjectStore()
 
+type ResourceKind = 'page' | 'component'
+
+const resourceKind = ref<ResourceKind>('page')
 const pages = ref<PageSummary[]>([])
+const components = ref<ComponentSummary[]>([])
 const activePageId = ref('')
+const activeComponentId = ref('')
 const activePage = ref<PageDetail | null>(null)
+const activeComponent = ref<ComponentDetail | null>(null)
 const selectedNodeId = ref('')
 const workspaceMode = ref<WorkspaceMode>('preview')
+const addComponentVisible = ref(false)
+const componentMap = ref<ComponentRenderMap>({})
 const propsTab = ref<PropsTab>('style')
 const openRepeatRequest = ref(0)
 const loadingPages = ref(false)
@@ -49,6 +99,14 @@ const loadingPage = ref(false)
 const createVisible = ref(false)
 const creating = ref(false)
 const addWidgetVisible = ref(false)
+const iconLibrary = ref<IconLibrary>(createEmptyIconLibrary())
+/** 编辑态临时隐藏，不写入 XML；预览模式不生效 */
+const editorHiddenNodeIds = ref<string[]>([])
+const pageMethods = ref<PageMethod[]>([])
+const methodDialogVisible = ref(false)
+const editingMethod = ref<PageMethod | null>(null)
+/** 预览态 navigateTo / navigateBack 历史 */
+const pageHistory = ref<string[]>([])
 
 const createForm = reactive({
   id: '',
@@ -74,61 +132,284 @@ const canvasWidth = computed(
   () => projectStore.config?.canvas.width ?? 375,
 )
 
+const isPageResource = computed(() => resourceKind.value === 'page')
+const isComponentResource = computed(() => resourceKind.value === 'component')
+const activeDoc = computed(() =>
+  isPageResource.value ? activePage.value : activeComponent.value,
+)
+
+/** 预览/画布使用：执行计算绑定后的数据池 */
+const resolvedPageData = computed(() =>
+  resolveComputedPageData(activeDoc.value?.data ?? { fields: [] }),
+)
+
+/** 编辑组件时：用 config.props 默认值作为 $props */
+const editorDollarProps = computed(() => {
+  if (!isComponentResource.value || !activeComponent.value) return undefined
+  return buildDollarProps(activeComponent.value.config)
+})
+
+function parseFrameSize(
+  value: string | undefined,
+  fallback: number,
+): number | 'auto' {
+  if (!value || value === 'wrap_content') return 'auto'
+  if (value === 'match_parent') return fallback
+  const n = Number(value)
+  // 0 / 非法固定值不应把画布压成空高度
+  return Number.isFinite(n) && n > 0 ? n : fallback
+}
+
+const canvasFrameWidth = computed(() => {
+  if (isComponentResource.value && activeComponent.value) {
+    const parsed = parseFrameSize(
+      activeComponent.value.config.width,
+      canvasWidth.value,
+    )
+    return parsed === 'auto' ? Math.min(canvasWidth.value, 320) : parsed
+  }
+  return canvasWidth.value
+})
+
+const canvasFrameHeight = computed(() => {
+  if (isComponentResource.value && activeComponent.value) {
+    return parseFrameSize(activeComponent.value.config.height, 667)
+  }
+  return undefined as number | 'auto' | undefined
+})
+const createDialogTitle = computed(() =>
+  isComponentResource.value ? '新建组件' : '新建页面',
+)
+
 const isEditMode = computed(() => workspaceMode.value === 'edit')
 const isDataPoolMode = computed(() => workspaceMode.value === 'datapool')
+const isIconsMode = computed(() => workspaceMode.value === 'icons')
+const isMethodsMode = computed(() => workspaceMode.value === 'methods')
+const hideWidgetTree = computed(
+  () => isDataPoolMode.value || isIconsMode.value || isMethodsMode.value,
+)
 
 const canDeleteSelected = computed(
-  () => isEditMode.value && canDeleteNode(selectedNodeId.value),
+  () =>
+    isEditMode.value &&
+    Boolean(activeDoc.value) &&
+    canDeleteNode(selectedNodeId.value),
+)
+
+const showAddComponentButton = computed(
+  () => isEditMode.value && isPageResource.value && Boolean(activePage.value),
+)
+
+const iconOptions = computed(() =>
+  iconLibrary.value.icons.map((item) => ({
+    id: item.id,
+    label: item.label,
+  })),
 )
 
 const modeTabs = [
   { key: 'preview' as const, label: '预览', icon: View },
   { key: 'edit' as const, label: '编辑', icon: EditPen },
   { key: 'datapool' as const, label: '数据池', icon: Coin },
+  { key: 'icons' as const, label: '图标库', icon: Picture },
+  { key: 'methods' as const, label: '方法', icon: Lightning },
 ]
+
+const centerFileLabel = computed(() => {
+  if (isDataPoolMode.value) return 'data.json'
+  if (isIconsMode.value) return 'icons.json'
+  if (isMethodsMode.value) return 'function/'
+  return 'index.xml'
+})
+
+const propsPlaceholderText = computed(() => {
+  if (!activePage.value && !isIconsMode.value) return '打开页面后可编辑'
+  if (isDataPoolMode.value) return '数据池模式下请在中间区域编辑'
+  if (isIconsMode.value) return '图标库模式下请在中间区域编辑'
+  if (isMethodsMode.value) return '方法模式下请在中间区域编辑'
+  if (isComponentResource.value && activeComponent.value && !selectedNodeId.value) {
+    return '选中控件可编辑样式，或查看组件设置'
+  }
+  return isComponentResource.value ? '打开组件后可编辑' : '打开页面后可编辑'
+})
 
 async function loadPages(selectId?: string) {
   if (!projectStore.path) return
 
   loadingPages.value = true
   try {
-    const result = await listPages(projectStore.path)
-    pages.value = result.pages
+    await loadIconLibrary()
+    const [pageResult, componentResult] = await Promise.all([
+      listPages(projectStore.path),
+      listComponents(projectStore.path),
+    ])
+    pages.value = pageResult.pages
+    components.value = componentResult.components
+    await refreshComponentMap()
 
-    const nextId =
-      selectId ||
-      (activePageId.value && result.pages.some((p) => p.id === activePageId.value)
-        ? activePageId.value
-        : result.pages[0]?.id)
-
-    if (nextId) {
-      await openPage(nextId)
+    if (resourceKind.value === 'component') {
+      const nextId =
+        selectId ||
+        (activeComponentId.value &&
+        componentResult.components.some((p) => p.id === activeComponentId.value)
+          ? activeComponentId.value
+          : componentResult.components[0]?.id)
+      if (nextId) await openComponent(nextId)
+      else {
+        activeComponentId.value = ''
+        activeComponent.value = null
+        selectedNodeId.value = ''
+      }
     } else {
-      activePageId.value = ''
-      activePage.value = null
-      selectedNodeId.value = ''
+      const nextId =
+        selectId ||
+        (activePageId.value && pageResult.pages.some((p) => p.id === activePageId.value)
+          ? activePageId.value
+          : pageResult.pages[0]?.id)
+      if (nextId) await openPage(nextId)
+      else {
+        activePageId.value = ''
+        activePage.value = null
+        selectedNodeId.value = ''
+      }
     }
   } catch (err) {
-    ElMessage.error(err instanceof Error ? err.message : '加载页面列表失败')
+    ElMessage.error(err instanceof Error ? err.message : '加载列表失败')
   } finally {
     loadingPages.value = false
   }
 }
 
-async function openPage(pageId: string) {
+async function loadIconLibrary() {
+  if (!projectStore.path) return
+  try {
+    iconLibrary.value = await getIconLibrary(projectStore.path)
+  } catch (err) {
+    iconLibrary.value = createEmptyIconLibrary()
+    console.error(err)
+  }
+}
+
+async function refreshComponentMap() {
+  if (!projectStore.path) {
+    componentMap.value = {}
+    return
+  }
+  try {
+    const { components: list } = await listComponents(projectStore.path)
+    const details = await Promise.all(
+      list.map((item) => getComponent(projectStore.path!, item.id)),
+    )
+    const next: ComponentRenderMap = {}
+    for (const detail of details) {
+      next[detail.id] = {
+        id: detail.id,
+        config: detail.config,
+        xml: detail.xml,
+        data: resolveComputedPageData(detail.data),
+      }
+    }
+    componentMap.value = next
+  } catch (err) {
+    console.error(err)
+  }
+}
+
+async function loadPageMethods(pageId?: string) {
+  if (!projectStore.path) return
+  const id =
+    pageId ||
+    (isComponentResource.value ? activeComponentId.value : activePageId.value)
+  if (!id) {
+    pageMethods.value = []
+    return
+  }
+  try {
+    const result = isComponentResource.value
+      ? await listComponentMethods(projectStore.path, id)
+      : await listPageMethods(projectStore.path, id)
+    pageMethods.value = result.methods
+  } catch (err) {
+    pageMethods.value = []
+    console.error(err)
+  }
+}
+
+async function openPage(pageId: string, options?: { keepHistory?: boolean }) {
   if (!projectStore.path) return
 
+  if (!options?.keepHistory) {
+    pageHistory.value = []
+  }
+
+  resourceKind.value = 'page'
   activePageId.value = pageId
+  activeComponentId.value = ''
+  activeComponent.value = null
   selectedNodeId.value = ''
+  editorHiddenNodeIds.value = []
   loadingPage.value = true
   try {
     activePage.value = await getPage(projectStore.path, pageId)
+    await loadPageMethods(pageId)
   } catch (err) {
     activePage.value = null
+    pageMethods.value = []
     ElMessage.error(err instanceof Error ? err.message : '打开页面失败')
   } finally {
     loadingPage.value = false
   }
+}
+
+async function openComponent(componentId: string) {
+  if (!projectStore.path) return
+  resourceKind.value = 'component'
+  activeComponentId.value = componentId
+  activePageId.value = ''
+  activePage.value = null
+  selectedNodeId.value = ''
+  editorHiddenNodeIds.value = []
+  pageHistory.value = []
+  loadingPage.value = true
+  try {
+    activeComponent.value = await getComponent(projectStore.path, componentId)
+    await loadPageMethods(componentId)
+  } catch (err) {
+    activeComponent.value = null
+    pageMethods.value = []
+    ElMessage.error(err instanceof Error ? err.message : '打开组件失败')
+  } finally {
+    loadingPage.value = false
+  }
+}
+
+function switchResourceKind(kind: ResourceKind) {
+  if (resourceKind.value === kind) return
+  resourceKind.value = kind
+  selectedNodeId.value = ''
+  workspaceMode.value = 'preview'
+  if (kind === 'page') {
+    const id = activePageId.value || pages.value[0]?.id
+    if (id) void openPage(id)
+    else {
+      activePage.value = null
+      pageMethods.value = []
+    }
+  } else {
+    const id = activeComponentId.value || components.value[0]?.id
+    if (id) void openComponent(id)
+    else {
+      activeComponent.value = null
+      pageMethods.value = []
+    }
+  }
+}
+
+function toggleEditorHidden(nodeId: string) {
+  const set = new Set(editorHiddenNodeIds.value)
+  if (set.has(nodeId)) set.delete(nodeId)
+  else set.add(nodeId)
+  editorHiddenNodeIds.value = Array.from(set)
 }
 
 function openCreateDialog() {
@@ -147,17 +428,29 @@ async function handleCreatePage() {
 
     creating.value = true
     try {
-      const page = await createPage({
-        projectPath: projectStore.path,
-        id: createForm.id.trim(),
-        name: createForm.name.trim(),
-        title: createForm.title.trim() || undefined,
-      })
-      ElMessage.success(`已创建页面：${page.config.name}`)
-      createVisible.value = false
-      await loadPages(page.id)
+      if (isComponentResource.value) {
+        const component = await createComponent({
+          projectPath: projectStore.path,
+          id: createForm.id.trim(),
+          name: createForm.name.trim(),
+          title: createForm.title.trim() || undefined,
+        })
+        ElMessage.success(`已创建组件：${component.config.name}`)
+        createVisible.value = false
+        await loadPages(component.id)
+      } else {
+        const page = await createPage({
+          projectPath: projectStore.path,
+          id: createForm.id.trim(),
+          name: createForm.name.trim(),
+          title: createForm.title.trim() || undefined,
+        })
+        ElMessage.success(`已创建页面：${page.config.name}`)
+        createVisible.value = false
+        await loadPages(page.id)
+      }
     } catch (err) {
-      ElMessage.error(err instanceof Error ? err.message : '创建页面失败')
+      ElMessage.error(err instanceof Error ? err.message : '创建失败')
     } finally {
       creating.value = false
     }
@@ -165,32 +458,104 @@ async function handleCreatePage() {
 }
 
 async function handleXmlUpdate(xml: string) {
-  if (!projectStore.path || !activePage.value) return
+  if (!projectStore.path || !activeDoc.value) return
 
-  activePage.value = {
-    ...activePage.value,
-    xml,
+  if (isComponentResource.value && activeComponent.value) {
+    activeComponent.value = { ...activeComponent.value, xml }
+    try {
+      activeComponent.value = await saveComponentXml({
+        projectPath: projectStore.path,
+        componentId: activeComponent.value.id,
+        xml,
+      })
+      await refreshComponentMap()
+    } catch (err) {
+      ElMessage.error(err instanceof Error ? err.message : '保存失败')
+    }
+    return
   }
 
+  if (!activePage.value) return
+  activePage.value = { ...activePage.value, xml }
   try {
-    const saved = await savePageXml({
+    activePage.value = await savePageXml({
       projectPath: projectStore.path,
       pageId: activePage.value.id,
       xml,
     })
-    activePage.value = saved
   } catch (err) {
     ElMessage.error(err instanceof Error ? err.message : '保存失败')
   }
 }
 
-async function handleDataUpdate(data: PageData) {
-  if (!projectStore.path || !activePage.value) return
+async function handlePreviewInteract(payload: PreviewInteractPayload) {
+  if (workspaceMode.value !== 'preview' || !activeDoc.value) return
 
-  activePage.value = {
-    ...activePage.value,
-    data,
+  await runEventBindings(payload.raw, {
+    pageData: resolvedPageData.value,
+    scope: payload.scope,
+    hasPage: (pageId) => pages.value.some((item) => item.id === pageId),
+    navigateTo: async (pageId) => {
+      if (activePageId.value && activePageId.value !== pageId) {
+        pageHistory.value.push(activePageId.value)
+      }
+      await openPage(pageId, { keepHistory: true })
+    },
+    navigateBack: async () => {
+      const prev = pageHistory.value.pop()
+      if (!prev) {
+        ElMessage.info('没有可返回的页面')
+        return
+      }
+      await openPage(prev, { keepHistory: true })
+    },
+    setData: (prop, value) => {
+      applyPreviewSetData(prop, value)
+    },
+    onUnknownMethod: (name) => {
+      if (name.startsWith('navigateTo:')) {
+        ElMessage.warning(name.replace(/^navigateTo:\s*/, ''))
+      }
+    },
+  })
+}
+
+function applyPreviewSetData(prop: string, value: import('../types/page-data').DataFieldValue) {
+  if (!activeDoc.value) return
+  const fields = [...(activeDoc.value.data?.fields ?? [])]
+  const index = fields.findIndex((item) => item.name === prop)
+  if (index < 0) {
+    ElMessage.warning(`数据池不存在字段：${prop}`)
+    return
   }
+  fields[index] = { ...fields[index], value }
+  void handleDataUpdate({ fields })
+}
+
+async function handleDataUpdate(data: import('../types/page-data').PageData) {
+  if (!projectStore.path || !activeDoc.value) return
+
+  if (isComponentResource.value && activeComponent.value) {
+    activeComponent.value = { ...activeComponent.value, data }
+    if (dataSaveTimer) clearTimeout(dataSaveTimer)
+    dataSaveTimer = setTimeout(async () => {
+      if (!projectStore.path || !activeComponent.value) return
+      try {
+        activeComponent.value = await saveComponentData({
+          projectPath: projectStore.path,
+          componentId: activeComponent.value.id,
+          data: activeComponent.value.data,
+        })
+        await refreshComponentMap()
+      } catch (err) {
+        ElMessage.error(err instanceof Error ? err.message : '保存数据池失败')
+      }
+    }, 400)
+    return
+  }
+
+  if (!activePage.value) return
+  activePage.value = { ...activePage.value, data }
 
   if (dataSaveTimer) clearTimeout(dataSaveTimer)
   dataSaveTimer = setTimeout(async () => {
@@ -208,11 +573,149 @@ async function handleDataUpdate(data: PageData) {
   }, 400)
 }
 
+async function handleComponentConfigUpdate(config: ComponentConfig) {
+  if (!projectStore.path || !activeComponent.value) return
+  activeComponent.value = { ...activeComponent.value, config }
+  try {
+    activeComponent.value = await saveComponentConfig({
+      projectPath: projectStore.path,
+      componentId: activeComponent.value.id,
+      config,
+    })
+    await refreshComponentMap()
+  } catch (err) {
+    ElMessage.error(err instanceof Error ? err.message : '保存组件配置失败')
+  }
+}
+
 let dataSaveTimer: ReturnType<typeof setTimeout> | null = null
+let iconSaveTimer: ReturnType<typeof setTimeout> | null = null
+
+async function handleIconLibraryUpdate(library: IconLibrary) {
+  if (!projectStore.path) return
+  iconLibrary.value = library
+
+  if (iconSaveTimer) clearTimeout(iconSaveTimer)
+  iconSaveTimer = setTimeout(async () => {
+    if (!projectStore.path) return
+    try {
+      iconLibrary.value = await saveIconLibraryApi({
+        projectPath: projectStore.path,
+        icons: iconLibrary.value.icons,
+      })
+    } catch (err) {
+      ElMessage.error(err instanceof Error ? err.message : '保存图标库失败')
+    }
+  }, 400)
+}
+
+function openAddMethod() {
+  editingMethod.value = createEmptyMethod()
+  methodDialogVisible.value = true
+}
+
+function openEditMethod(method: PageMethod) {
+  editingMethod.value = { ...method, params: method.params.map((p) => ({ ...p })) }
+  methodDialogVisible.value = true
+}
+
+async function handleSaveMethod(method: PageMethod, previousName?: string) {
+  if (!projectStore.path || !activeDoc.value) return
+  try {
+    const previous =
+      previousName && previousName !== method.name ? previousName : undefined
+    if (isComponentResource.value && activeComponent.value) {
+      await saveComponentMethod({
+        projectPath: projectStore.path,
+        componentId: activeComponent.value.id,
+        method,
+        previousName: previous,
+      })
+    } else if (activePage.value) {
+      await savePageMethod({
+        projectPath: projectStore.path,
+        pageId: activePage.value.id,
+        method,
+        previousName: previous,
+      })
+    }
+    ElMessage.success('方法已保存')
+    await loadPageMethods()
+  } catch (err) {
+    ElMessage.error(err instanceof Error ? err.message : '保存方法失败')
+  }
+}
+
+async function handleRemoveMethod(method: PageMethod) {
+  if (!projectStore.path || !activeDoc.value || method.builtin) return
+  try {
+    await ElMessageBox.confirm(
+      `确定删除方法「${method.name}」？对应 .ts 文件将一并删除。`,
+      '删除方法',
+      { type: 'warning' },
+    )
+    if (isComponentResource.value && activeComponent.value) {
+      await deleteComponentMethod({
+        projectPath: projectStore.path,
+        componentId: activeComponent.value.id,
+        name: method.name,
+      })
+    } else if (activePage.value) {
+      await deletePageMethod({
+        projectPath: projectStore.path,
+        pageId: activePage.value.id,
+        name: method.name,
+      })
+    }
+    ElMessage.success('已删除')
+    await loadPageMethods()
+  } catch (err) {
+    if (err === 'cancel' || err === 'close') return
+    ElMessage.error(err instanceof Error ? err.message : '删除方法失败')
+  }
+}
 
 function openAddWidgetDialog() {
-  if (!activePage.value) return
+  if (!activeDoc.value) return
   addWidgetVisible.value = true
+}
+
+function openAddComponentDialog() {
+  if (!activePage.value) return
+  addComponentVisible.value = true
+}
+
+async function handleAddComponentInstance(component: ComponentSummary) {
+  if (!activePage.value || !projectStore.path) return
+  try {
+    let width = 'match_parent'
+    let height = 'wrap_content'
+    let name = component.name
+    try {
+      const detail = await getComponent(projectStore.path, component.id)
+      width = detail.config.width || width
+      height = detail.config.height || height
+      name = detail.config.name || name
+    } catch {
+      // defaults
+    }
+    const { xml, newNodeId } = appendComponent(
+      activePage.value.xml,
+      selectedNodeId.value,
+      {
+        componentId: component.id,
+        name,
+        width,
+        height,
+      },
+    )
+    selectedNodeId.value = newNodeId
+    addComponentVisible.value = false
+    await handleXmlUpdate(xml)
+    ElMessage.success(`已添加组件 ${name}`)
+  } catch (err) {
+    ElMessage.error(err instanceof Error ? err.message : '添加组件失败')
+  }
 }
 
 async function handleOpenRepeatConfig(nodeId: string) {
@@ -224,11 +727,11 @@ async function handleOpenRepeatConfig(nodeId: string) {
 }
 
 async function handleAddWidget(tag: WidgetTag) {
-  if (!activePage.value) return
+  if (!activeDoc.value) return
 
   try {
     const { xml, newNodeId } = appendWidget(
-      activePage.value.xml,
+      activeDoc.value.xml,
       selectedNodeId.value,
       tag,
     )
@@ -242,7 +745,7 @@ async function handleAddWidget(tag: WidgetTag) {
 }
 
 async function handleDeleteWidget() {
-  if (!activePage.value || !canDeleteNode(selectedNodeId.value)) return
+  if (!activeDoc.value || !canDeleteNode(selectedNodeId.value)) return
 
   const node = selectedNodeId.value
   try {
@@ -260,7 +763,7 @@ async function handleDeleteWidget() {
   }
 
   try {
-    const { xml, parentId } = removeWidget(activePage.value.xml, node)
+    const { xml, parentId } = removeWidget(activeDoc.value.xml, node)
     selectedNodeId.value = parentId
     await handleXmlUpdate(xml)
     ElMessage.success('已删除控件')
@@ -274,11 +777,11 @@ async function handleMoveWidget(payload: {
   targetId: string
   position: MovePosition
 }) {
-  if (!activePage.value || !isEditMode.value) return
+  if (!activeDoc.value || !isEditMode.value) return
 
   try {
     const { xml, newNodeId } = moveWidget(
-      activePage.value.xml,
+      activeDoc.value.xml,
       payload.sourceId,
       payload.targetId,
       payload.position,
@@ -301,80 +804,150 @@ onMounted(() => {
     <aside class="side-panel">
       <div class="pages-section">
         <div class="section-header">
-          <span>页面</span>
+          <div class="resource-tabs">
+            <button
+              type="button"
+              class="resource-tab"
+              :class="{ active: isPageResource }"
+              @click="switchResourceKind('page')"
+            >
+              页面
+            </button>
+            <button
+              type="button"
+              class="resource-tab"
+              :class="{ active: isComponentResource }"
+              @click="switchResourceKind('component')"
+            >
+              组件
+            </button>
+          </div>
           <el-button type="primary" :icon="Plus" size="small" @click="openCreateDialog">
             新建
           </el-button>
         </div>
 
         <div class="pages-body">
-          <el-skeleton v-if="loadingPages && !pages.length" :rows="4" animated />
-          <el-empty v-else-if="!pages.length" description="暂无页面，点击新建" :image-size="64" />
-          <div v-else class="page-list">
-            <button
-              v-for="page in pages"
-              :key="page.id"
-              type="button"
-              class="page-item"
-              :class="{ active: page.id === activePageId }"
-              @click="openPage(page.id)"
-            >
-              <el-icon><Document /></el-icon>
-              <div class="page-meta">
-                <div class="page-name">{{ page.name }}</div>
-                <div class="page-id">{{ page.id }}</div>
-              </div>
-            </button>
-          </div>
+          <template v-if="isPageResource">
+            <el-skeleton v-if="loadingPages && !pages.length" :rows="4" animated />
+            <el-empty v-else-if="!pages.length" description="暂无页面，点击新建" :image-size="64" />
+            <div v-else class="page-list">
+              <button
+                v-for="page in pages"
+                :key="page.id"
+                type="button"
+                class="page-item"
+                :class="{ active: page.id === activePageId }"
+                @click="openPage(page.id)"
+              >
+                <el-icon><Document /></el-icon>
+                <div class="page-meta">
+                  <div class="page-name">{{ page.name }}</div>
+                  <div class="page-id">{{ page.id }}</div>
+                </div>
+              </button>
+            </div>
+          </template>
+          <template v-else>
+            <el-skeleton v-if="loadingPages && !components.length" :rows="4" animated />
+            <el-empty
+              v-else-if="!components.length"
+              description="暂无组件，点击新建"
+              :image-size="64"
+            />
+            <div v-else class="page-list">
+              <button
+                v-for="item in components"
+                :key="item.id"
+                type="button"
+                class="page-item"
+                :class="{ active: item.id === activeComponentId }"
+                @click="openComponent(item.id)"
+              >
+                <el-icon><Box /></el-icon>
+                <div class="page-meta">
+                  <div class="page-name">{{ item.name }}</div>
+                  <div class="page-id">{{ item.id }}</div>
+                </div>
+              </button>
+            </div>
+          </template>
         </div>
       </div>
 
       <WidgetTree
-        v-if="activePage && !isDataPoolMode"
-        :xml="activePage.xml"
+        v-if="activeDoc && !hideWidgetTree"
+        :xml="activeDoc.xml"
         :selected-id="selectedNodeId"
         :editable="isEditMode"
+        :hidden-ids="editorHiddenNodeIds"
         @select="selectedNodeId = $event"
         @open-repeat="handleOpenRepeatConfig"
         @move="handleMoveWidget"
+        @toggle-hidden="toggleEditorHidden"
       />
     </aside>
 
     <section class="center-panel">
       <div class="preview-header">
-        <template v-if="activePage">
-          <span class="preview-title">{{ activePage.config.title || activePage.config.name }}</span>
+        <template v-if="isIconsMode">
+          <span class="preview-title">图标库</span>
+          <span class="preview-sub">icons.json</span>
+        </template>
+        <template v-else-if="activeDoc">
+          <span class="preview-title">{{ activeDoc.config.title || activeDoc.config.name }}</span>
           <span class="preview-sub">
-            {{ activePage.id }}/{{ isDataPoolMode ? 'data.json' : 'index.xml' }}
+            {{ isComponentResource ? 'components' : 'pages' }}/{{ activeDoc.id }}/{{ centerFileLabel }}
           </span>
         </template>
-        <span v-else class="preview-title">页面预览</span>
+        <span v-else class="preview-title">{{ isComponentResource ? '组件预览' : '页面预览' }}</span>
       </div>
 
       <div class="preview-body">
         <el-skeleton v-if="loadingPage" :rows="8" animated />
+        <IconLibraryPanel
+          v-else-if="isIconsMode"
+          :library="iconLibrary"
+          @update:library="handleIconLibraryUpdate"
+        />
         <el-empty
-          v-else-if="!activePage"
-          description="请选择或新建一个页面"
+          v-else-if="!activeDoc"
+          :description="isComponentResource ? '请选择或新建一个组件' : '请选择或新建一个页面'"
         />
         <DataPoolPanel
           v-else-if="isDataPoolMode"
-          :data="activePage.data ?? { fields: [] }"
+          :data="activeDoc.data ?? { fields: [] }"
+          :icon-options="iconOptions"
           @update:data="handleDataUpdate"
+        />
+        <MethodsPanel
+          v-else-if="isMethodsMode"
+          :methods="pageMethods"
+          @add="openAddMethod"
+          @edit="openEditMethod"
+          @remove="handleRemoveMethod"
         />
         <PageCanvas
           v-else
-          :xml="activePage.xml"
-          :canvas-width="canvasWidth"
+          :xml="activeDoc.xml"
+          :canvas-width="canvasFrameWidth"
+          :canvas-height="canvasFrameHeight === undefined ? undefined : canvasFrameHeight"
           :selected-id="selectedNodeId"
           :selectable="isEditMode"
           :show-add-button="isEditMode"
+          :show-add-component-button="showAddComponentButton"
           :show-delete-button="canDeleteSelected"
           :expand-repeat="workspaceMode === 'preview'"
-          :page-data="activePage.data ?? { fields: [] }"
+          :page-data="resolvedPageData"
+          :icon-library="iconLibrary"
+          :component-map="componentMap"
+          :dollar-props="editorDollarProps"
+          :hidden-node-ids="isEditMode ? editorHiddenNodeIds : undefined"
           @select="selectedNodeId = $event"
           @open-repeat="handleOpenRepeatConfig"
+          @interact="handlePreviewInteract"
           @add="openAddWidgetDialog"
+          @add-component="openAddComponentDialog"
           @delete="handleDeleteWidget"
         />
       </div>
@@ -398,32 +971,72 @@ onMounted(() => {
       </div>
     </section>
 
+    <template v-if="activeDoc && isEditMode && isComponentResource">
+      <ComponentMetaPanel
+        v-if="!selectedNodeId"
+        :config="activeComponent!.config"
+        :methods="pageMethods"
+        :icon-options="iconOptions"
+        @update:config="handleComponentConfigUpdate"
+      />
+      <div v-else class="props-with-back">
+        <button type="button" class="back-component-meta" @click="selectedNodeId = ''">
+          ← 返回组件设置
+        </button>
+        <PropsPanel
+          v-model:tab="propsTab"
+          :xml="activeDoc.xml"
+          :selected-id="selectedNodeId"
+          :data-fields="activeDoc.data?.fields ?? []"
+          :icon-options="iconOptions"
+          :methods="pageMethods"
+          :component-map="componentMap"
+          :open-repeat-request="openRepeatRequest"
+          @update:xml="handleXmlUpdate"
+        />
+      </div>
+    </template>
     <PropsPanel
-      v-if="activePage && isEditMode"
+      v-else-if="activeDoc && isEditMode"
       v-model:tab="propsTab"
-      :xml="activePage.xml"
+      :xml="activeDoc.xml"
       :selected-id="selectedNodeId"
-      :data-fields="activePage.data?.fields ?? []"
+      :data-fields="activeDoc.data?.fields ?? []"
+      :icon-options="iconOptions"
+      :methods="pageMethods"
+      :component-map="componentMap"
       :open-repeat-request="openRepeatRequest"
       @update:xml="handleXmlUpdate"
     />
     <aside v-else class="props-placeholder">
       <div class="panel-header">属性</div>
       <el-empty
-        :description="activePage && isDataPoolMode ? '数据池模式下请在中间区域编辑' : '打开页面后可编辑'"
+        :description="propsPlaceholderText"
         :image-size="64"
       />
     </aside>
 
-    <el-dialog v-model="createVisible" title="新建页面" width="480px" destroy-on-close>
+    <MethodEditDialog
+      v-model="methodDialogVisible"
+      :method="editingMethod"
+      @save="handleSaveMethod"
+    />
+
+    <el-dialog v-model="createVisible" :title="createDialogTitle" width="480px" destroy-on-close>
       <el-form ref="createFormRef" :model="createForm" :rules="createRules" label-width="88px">
-        <el-form-item label="页面 ID" prop="id">
-          <el-input v-model="createForm.id" placeholder="例如：home" />
+        <el-form-item :label="isComponentResource ? '组件 ID' : '页面 ID'" prop="id">
+          <el-input
+            v-model="createForm.id"
+            :placeholder="isComponentResource ? '例如：nav-bar' : '例如：home'"
+          />
         </el-form-item>
-        <el-form-item label="页面名称" prop="name">
-          <el-input v-model="createForm.name" placeholder="例如：首页" />
+        <el-form-item :label="isComponentResource ? '组件名称' : '页面名称'" prop="name">
+          <el-input
+            v-model="createForm.name"
+            :placeholder="isComponentResource ? '例如：导航栏' : '例如：首页'"
+          />
         </el-form-item>
-        <el-form-item label="页面标题">
+        <el-form-item :label="isComponentResource ? '组件标题' : '页面标题'">
           <el-input v-model="createForm.title" placeholder="可选，默认与名称相同" />
         </el-form-item>
       </el-form>
@@ -431,6 +1044,32 @@ onMounted(() => {
         <el-button @click="createVisible = false">取消</el-button>
         <el-button type="primary" :loading="creating" @click="handleCreatePage">创建</el-button>
       </template>
+    </el-dialog>
+
+    <el-dialog
+      v-model="addComponentVisible"
+      title="添加组件"
+      width="480px"
+      destroy-on-close
+    >
+      <p class="add-hint">从组件列表选择，插入为 Component 节点。</p>
+      <el-empty
+        v-if="!components.length"
+        description="暂无组件，请先在「组件」中新建"
+        :image-size="64"
+      />
+      <div v-else class="widget-options">
+        <button
+          v-for="item in components"
+          :key="item.id"
+          type="button"
+          class="widget-option"
+          @click="handleAddComponentInstance(item)"
+        >
+          <div class="widget-option-title">{{ item.name }}</div>
+          <div class="widget-option-desc">{{ item.id }}</div>
+        </button>
+      </div>
     </el-dialog>
 
     <el-dialog
@@ -484,6 +1123,30 @@ onMounted(() => {
   min-height: 160px;
   max-height: 50%;
   overflow: hidden;
+}
+
+.resource-tabs {
+  display: inline-flex;
+  padding: 2px;
+  border-radius: 8px;
+  background: #f1f5f9;
+}
+
+.resource-tab {
+  border: none;
+  background: transparent;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 13px;
+  color: #64748b;
+  cursor: pointer;
+}
+
+.resource-tab.active {
+  background: #fff;
+  color: #303133;
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
 }
 
 .section-header {
@@ -621,6 +1284,38 @@ onMounted(() => {
 .mode-tab.active {
   background: #ecf5ff;
   color: #409eff;
+}
+
+.props-with-back {
+  width: 300px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+  background: #fff;
+  border-left: 1px solid #ebeef5;
+}
+
+.back-component-meta {
+  flex-shrink: 0;
+  border: none;
+  background: #f8fafc;
+  border-bottom: 1px solid #ebeef5;
+  text-align: left;
+  padding: 10px 14px;
+  font-size: 12px;
+  color: #409eff;
+  cursor: pointer;
+}
+
+.back-component-meta:hover {
+  background: #ecf5ff;
+}
+
+.props-with-back :deep(.props-panel) {
+  width: 100%;
+  border-left: none;
 }
 
 .props-placeholder {

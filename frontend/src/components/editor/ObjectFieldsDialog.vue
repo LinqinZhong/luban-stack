@@ -3,15 +3,25 @@ import { computed, ref, watch } from 'vue'
 import { Delete, Plus } from '@element-plus/icons-vue'
 import {
   ARRAY_ITEM_TYPE_OPTIONS,
-  NESTED_FIELD_TYPE_OPTIONS,
   createEditorNode,
   defaultValue,
   editorNodeTreeLabel,
   editorNodesToObjectFields,
   objectFieldsToEditorNodes,
+  type DataFieldType,
   type ObjectEditorNode,
   type ObjectSubField,
 } from '../../types/page-data'
+import IconValueSelect from './IconValueSelect.vue'
+
+/** 对象内字段类型（含图标；不含嵌套对象） */
+const OBJECT_FIELD_TYPE_OPTIONS: Array<{ label: string; value: DataFieldType }> = [
+  { label: '字符串', value: 'string' },
+  { label: '数值', value: 'number' },
+  { label: '布尔值', value: 'boolean' },
+  { label: '图标', value: 'icon' },
+  { label: '数组', value: 'array' },
+]
 
 interface TreeItem {
   key: string
@@ -22,6 +32,7 @@ interface TreeItem {
 const props = defineProps<{
   modelValue: boolean
   fields: ObjectSubField[]
+  iconOptions?: Array<{ id: string; label: string }>
 }>()
 
 const emit = defineEmits<{
@@ -80,9 +91,11 @@ function findParentInfo(
 
 const selectedNode = computed(() => (selectedKey.value ? findNode(selectedKey.value) : null))
 
-const typeOptions = computed(() =>
-  selectedNode.value?.isArrayItem ? ARRAY_ITEM_TYPE_OPTIONS : NESTED_FIELD_TYPE_OPTIONS,
-)
+/** 对象内字段 / 数组项各自的类型列表（显式含「图标」） */
+const typeOptions = computed(() => {
+  if (selectedNode.value?.isArrayItem) return ARRAY_ITEM_TYPE_OPTIONS
+  return OBJECT_FIELD_TYPE_OPTIONS
+})
 
 const canAddChild = computed(() => {
   const node = selectedNode.value
@@ -186,7 +199,11 @@ function handleSave() {
 
         <div class="field-row">
           <label>数据类型</label>
-          <el-select :model-value="selectedNode.type" @update:model-value="handleTypeChange">
+          <el-select
+            :model-value="selectedNode.type"
+            placeholder="选择类型"
+            @update:model-value="handleTypeChange"
+          >
             <el-option
               v-for="opt in typeOptions"
               :key="opt.value"
@@ -225,6 +242,14 @@ function handleSave() {
           <label>数据值</label>
           <el-switch
             :model-value="Boolean(selectedNode.value)"
+            @update:model-value="selectedNode.value = $event"
+          />
+        </div>
+        <div v-else-if="selectedNode.type === 'icon'" class="field-row">
+          <label>数据值</label>
+          <IconValueSelect
+            :model-value="String(selectedNode.value ?? '')"
+            :options="iconOptions"
             @update:model-value="selectedNode.value = $event"
           />
         </div>

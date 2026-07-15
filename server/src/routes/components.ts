@@ -1,12 +1,13 @@
 import { Router } from 'express'
 import { ProjectError } from '../services/project.js'
 import {
-  createPage,
-  getPage,
-  listPages,
-  savePageData,
-  savePageXml,
-} from '../services/pages.js'
+  createComponent,
+  getComponent,
+  listComponents,
+  saveComponentConfig,
+  saveComponentData,
+  saveComponentXml,
+} from '../services/components.js'
 import {
   deletePageMethod,
   listPageMethods,
@@ -14,13 +15,13 @@ import {
 } from '../services/functions.js'
 
 const router = Router()
+const ROOT = 'components'
 
 function handleError(res: import('express').Response, err: unknown) {
   if (err instanceof ProjectError) {
     res.status(err.status).json({ message: err.message })
     return
   }
-
   console.error(err)
   res.status(500).json({ message: '服务器内部错误' })
 }
@@ -33,8 +34,8 @@ function getProjectPath(req: import('express').Request): string {
 
 router.get('/', async (req, res) => {
   try {
-    const pages = await listPages(getProjectPath(req))
-    res.json({ pages })
+    const components = await listComponents(getProjectPath(req))
+    res.json({ components })
   } catch (err) {
     handleError(res, err)
   }
@@ -43,33 +44,38 @@ router.get('/', async (req, res) => {
 router.post('/', async (req, res) => {
   try {
     const { id, name, title } = req.body ?? {}
-    const page = await createPage({
+    const component = await createComponent({
       projectPath: getProjectPath(req),
       id,
       name,
       title,
     })
-    res.status(201).json(page)
+    res.status(201).json(component)
   } catch (err) {
     handleError(res, err)
   }
 })
 
-router.get('/:pageId/functions', async (req, res) => {
+router.get('/:componentId/functions', async (req, res) => {
   try {
-    const result = await listPageMethods(getProjectPath(req), req.params.pageId)
+    const result = await listPageMethods(
+      getProjectPath(req),
+      req.params.componentId,
+      ROOT,
+    )
     res.json(result)
   } catch (err) {
     handleError(res, err)
   }
 })
 
-router.put('/:pageId/functions/:name', async (req, res) => {
+router.put('/:componentId/functions/:name', async (req, res) => {
   try {
     const method = await savePageMethod({
       projectPath: getProjectPath(req),
-      pageId: req.params.pageId,
+      pageId: req.params.componentId,
       previousName: req.body?.previousName,
+      root: ROOT,
       method: {
         ...(req.body?.method ?? {}),
         name: req.params.name,
@@ -81,12 +87,13 @@ router.put('/:pageId/functions/:name', async (req, res) => {
   }
 })
 
-router.delete('/:pageId/functions/:name', async (req, res) => {
+router.delete('/:componentId/functions/:name', async (req, res) => {
   try {
     await deletePageMethod({
       projectPath: getProjectPath(req),
-      pageId: req.params.pageId,
+      pageId: req.params.componentId,
       name: req.params.name,
+      root: ROOT,
     })
     res.json({ ok: true })
   } catch (err) {
@@ -94,36 +101,49 @@ router.delete('/:pageId/functions/:name', async (req, res) => {
   }
 })
 
-router.get('/:pageId', async (req, res) => {
+router.get('/:componentId', async (req, res) => {
   try {
-    const page = await getPage(getProjectPath(req), req.params.pageId)
-    res.json(page)
+    const component = await getComponent(getProjectPath(req), req.params.componentId)
+    res.json(component)
   } catch (err) {
     handleError(res, err)
   }
 })
 
-router.put('/:pageId/xml', async (req, res) => {
+router.put('/:componentId/config', async (req, res) => {
   try {
-    const page = await savePageXml({
+    const component = await saveComponentConfig({
       projectPath: getProjectPath(req),
-      pageId: req.params.pageId,
+      id: req.params.componentId,
+      config: req.body?.config,
+    })
+    res.json(component)
+  } catch (err) {
+    handleError(res, err)
+  }
+})
+
+router.put('/:componentId/xml', async (req, res) => {
+  try {
+    const component = await saveComponentXml({
+      projectPath: getProjectPath(req),
+      id: req.params.componentId,
       xml: req.body?.xml,
     })
-    res.json(page)
+    res.json(component)
   } catch (err) {
     handleError(res, err)
   }
 })
 
-router.put('/:pageId/data', async (req, res) => {
+router.put('/:componentId/data', async (req, res) => {
   try {
-    const page = await savePageData({
+    const component = await saveComponentData({
       projectPath: getProjectPath(req),
-      pageId: req.params.pageId,
+      id: req.params.componentId,
       data: req.body?.data,
     })
-    res.json(page)
+    res.json(component)
   } catch (err) {
     handleError(res, err)
   }
