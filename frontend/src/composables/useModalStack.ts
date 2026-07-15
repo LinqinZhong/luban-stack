@@ -13,6 +13,8 @@ export interface ModalStackApi {
 
 export const MODAL_STACK_KEY: InjectionKey<ModalStackApi> = Symbol('voiderModalStack')
 export const MODAL_HOST_KEY: InjectionKey<Ref<HTMLElement | null>> = Symbol('voiderModalHost')
+/** 编辑态角标挂载层（需高于屏幕虚线框） */
+export const BADGE_HOST_KEY: InjectionKey<Ref<HTMLElement | null>> = Symbol('voiderBadgeHost')
 
 /**
  * 页面级 Modal 堆栈：同一时刻仅栈顶可见；

@@ -8,6 +8,7 @@ import type { XmlNode } from '../../utils/xml'
 import type { PreviewEventKey, PreviewInteractPayload } from '../../utils/event-runtime'
 import {
   isFragmentTag,
+  isOutOfFlowTree,
   isSupportedTag,
   parseBool,
   parseNumber,
@@ -305,7 +306,29 @@ const componentRoot = computed(() => {
   }
 })
 
+/** 组件内容仅 Modal（或 Fragment 内全是 Modal）时：不占文档流，避免挤开兄弟 */
+const componentOutOfFlow = computed(() =>
+  Boolean(componentRoot.value && isOutOfFlowTree(componentRoot.value)),
+)
+
+const fragmentOutOfFlow = computed(
+  () => isFragmentTag(props.node.tag) && isOutOfFlowTree(props.node),
+)
+
+/** 绝对铺满父级、不参与布局；pointer-events:none 让下方内容可点 */
+const outOfFlowHostStyle = computed<CSSProperties>(() => ({
+  position: 'absolute',
+  left: 0,
+  top: 0,
+  right: 0,
+  bottom: 0,
+  zIndex: 2,
+  pointerEvents: 'none',
+  margin: 0,
+}))
+
 const componentHostWidth = computed(() => {
+  if (componentOutOfFlow.value) return 'wrap_content' as const
   const fromAttr = attrs.value.width?.trim()
   if (fromAttr) return parseSize(fromAttr, 'wrap_content')
   const fromConfig = componentDetail.value?.config.width
@@ -313,13 +336,28 @@ const componentHostWidth = computed(() => {
 })
 
 const componentHostHeight = computed(() => {
+  if (componentOutOfFlow.value) return 'wrap_content' as const
   const fromAttr = attrs.value.height?.trim()
   if (fromAttr) return parseSize(fromAttr, 'wrap_content')
   const fromConfig = componentDetail.value?.config.height
   return parseSize(fromConfig, 'wrap_content')
 })
 
+const componentShellExtraStyle = computed<CSSProperties>(() => ({
+  ...(props.extraStyle ?? {}),
+  ...(componentOutOfFlow.value ? outOfFlowHostStyle.value : {}),
+}))
+
 const componentStyle = computed(() => {
+  if (componentOutOfFlow.value) {
+    return {
+      display: 'block' as const,
+      width: '100%',
+      height: '100%',
+      boxSizing: 'border-box' as const,
+      pointerEvents: 'none' as const,
+    }
+  }
   const stackHeight =
     insideScrollColumn.value || stackInVerticalParent.value
   return {
@@ -475,7 +513,7 @@ const injectedScrollColumn = inject<ComputedRef<boolean> | undefined>(
 const ancestorInScrollColumn = computed(() => Boolean(injectedScrollColumn?.value))
 
 /**
- * 向子孙声明「滚动内容列」：仅当自身/祖先带 overflow=scroll 的纵向布局。
+ * 向子孙声明「滚动内容列」：仅当自身/祖先为 overflow=scroll 的纵向布局。
  * 勿对所有纵向 LinearLayout 声明，否则内容区 RelativeLayout 会被当成堆叠而高度塌陷。
  */
 const inScrollColumn = computed(
@@ -484,6 +522,9 @@ const inScrollColumn = computed(
     (hasScrollAttr.value && attrs.value.orientation !== 'horizontal') ||
     Boolean(props.parentScrollable),
 )
+
+/** 预览态真正成为滚动容器：仅显式 overflow=scroll（根布局默认可滚会压垮绝对子项高度） */
+const isScrollLayout = computed(() => !props.selectable && hasScrollAttr.value)
 
 provide(
   SCROLL_COLUMN_KEY,
@@ -495,9 +536,6 @@ const layoutOverflowStyle = computed(() => {
   if (props.selectable) return { overflow: 'visible' as const }
   return overflowStyle(attrs.value, 'hidden')
 })
-
-/** 预览态真正成为滚动容器 */
-const isScrollLayout = computed(() => !props.selectable && hasScrollAttr.value)
 
 /** 作为子节点：处在祖先滚动列内时，高度按内容堆叠（勿包含普通 parentVertical） */
 const insideScrollColumn = computed(
@@ -941,8 +979,12 @@ onBeforeUnmount(() => {
     不支持的控件：{{ node.tag }}
   </div>
 
-  <!-- 历史 Fragment：透明渲染子节点（打开资源时会尽量卸壳写回） -->
-  <template v-else-if="isFragmentTag(node.tag)">
+  <!-- Fragment：多根透明容器；仅含 Modal 时脱离文档流 -->
+  <div
+    v-else-if="isFragmentTag(node.tag)"
+    class="fragment-host"
+    :class="{ 'is-root': isRoot, 'is-out-of-flow': fragmentOutOfFlow }"
+  >
     <XmlNodeView
       v-for="(child, index) in node.children"
       :key="childId(index, child.tag)"
@@ -952,10 +994,9 @@ onBeforeUnmount(() => {
       :hovered-id="hoveredId"
       :selectable="selectable"
       :interact-enabled="interactEnabled"
-      :parent-horizontal="parentHorizontal"
-      :parent-vertical="parentVertical"
+      :parent-horizontal="false"
+      :parent-vertical="true"
       :parent-scrollable="parentScrollable"
-      :is-root="isRoot"
       :icon-library="iconLibrary"
       :page-data="pageData"
       :hidden-node-ids="hiddenNodeIds"
@@ -967,7 +1008,7 @@ onBeforeUnmount(() => {
       @open-repeat="emit('open-repeat', $event)"
       @interact="emit('interact', $event)"
     />
-  </template>
+  </div>
 
   <WidgetSelectShell
     v-else-if="node.tag === 'Text'"
@@ -1144,18 +1185,18 @@ onBeforeUnmount(() => {
     v-else-if="node.tag === 'Component'"
     :selected="isSelected"
     :hovered="isHovered"
-    :margin-attrs="attrs"
+    :margin-attrs="componentOutOfFlow ? {} : attrs"
     :width="componentHostWidth"
     :height="componentHostHeight"
     :parent-horizontal="parentHorizontal"
     :parent-vertical="parentVertical"
-    :extra-style="shellExtraStyle"
+    :extra-style="componentShellExtraStyle"
     :repeat-badge="showRepeatBadge"
     :event-badge-count="eventBadgeCount"
     :visually-hidden="visuallyHidden"
     :interactive="previewInteractive"
     :inside-scroll-port="insideScrollColumn"
-    :fill-remaining-height="fillRemainingHeight"
+    :fill-remaining-height="componentOutOfFlow ? false : fillRemainingHeight"
     @click="handleSelect"
     @mouseenter="handleMouseEnter"
     @pointerdown="handlePointerDown"
@@ -1250,51 +1291,53 @@ onBeforeUnmount(() => {
     </div>
   </WidgetSelectShell>
 
-  <!-- Modal：Teleport 到手机层，铺满屏幕；内部为相对布局 -->
-  <Teleport
+  <!-- Modal：原树占位为 0；内容 Teleport 到手机层 -->
+  <div
     v-else-if="node.tag === 'Modal' && modalHostEl"
-    :to="modalHostEl"
+    class="modal-flow-anchor"
   >
-    <div
-      v-if="modalLayerVisible"
-      class="modal-overlay"
-      :class="{ 'is-edit': selectable, 'is-selected': isSelected }"
-      :style="modalOverlayStyle"
-      @click="handleModalBackdropClick"
-      @mouseenter="handleMouseEnter"
-    >
+    <Teleport :to="modalHostEl">
       <div
-        class="modal-panel"
-        :style="modalPanelStyle"
-        @click.stop="handleModalPanelClick"
+        v-if="modalLayerVisible"
+        class="modal-overlay"
+        :class="{ 'is-edit': selectable, 'is-selected': isSelected }"
+        :style="modalOverlayStyle"
+        @click="handleModalBackdropClick"
+        @mouseenter="handleMouseEnter"
       >
-        <XmlNodeView
-          v-for="(child, index) in node.children"
-          :key="childId(index, child.tag)"
-          :node="child"
-          :node-id="childId(index, child.tag)"
-          :selected-id="selectedId"
-          :hovered-id="hoveredId"
-          :selectable="selectable"
-          :interact-enabled="interactEnabled"
-          :extra-style="childRelativeStyle(child)"
-          :icon-library="iconLibrary"
-          :page-data="pageData"
-          :hidden-node-ids="hiddenNodeIds"
-          :component-map="componentMap"
-          :dollar-props="dollarProps"
-          :route-params="routeParams"
-          @select="forwardSelect"
-          @hover="forwardHover"
-          @open-repeat="forwardOpenRepeat"
-          @interact="forwardInteract"
-        />
-        <div v-if="selectable && !node.children.length" class="modal-empty">
-          向弹层添加内容 · name「{{ modalKey }}」
+        <div
+          class="modal-panel"
+          :style="modalPanelStyle"
+          @click.stop="handleModalPanelClick"
+        >
+          <XmlNodeView
+            v-for="(child, index) in node.children"
+            :key="childId(index, child.tag)"
+            :node="child"
+            :node-id="childId(index, child.tag)"
+            :selected-id="selectedId"
+            :hovered-id="hoveredId"
+            :selectable="selectable"
+            :interact-enabled="interactEnabled"
+            :extra-style="childRelativeStyle(child)"
+            :icon-library="iconLibrary"
+            :page-data="pageData"
+            :hidden-node-ids="hiddenNodeIds"
+            :component-map="componentMap"
+            :dollar-props="dollarProps"
+            :route-params="routeParams"
+            @select="forwardSelect"
+            @hover="forwardHover"
+            @open-repeat="forwardOpenRepeat"
+            @interact="forwardInteract"
+          />
+          <div v-if="selectable && !node.children.length" class="modal-empty">
+            向弹层添加内容 · name「{{ modalKey }}」
+          </div>
         </div>
       </div>
-    </div>
-  </Teleport>
+    </Teleport>
+  </div>
 
   <template v-else-if="node.tag === 'Modal'" />
 
@@ -1421,6 +1464,39 @@ onBeforeUnmount(() => {
   height: 100%;
   min-height: 0;
   box-sizing: border-box;
+}
+
+.fragment-host {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.fragment-host.is-root {
+  min-height: 100%;
+}
+
+/* 仅含 Modal：不占文档流 */
+.fragment-host.is-out-of-flow {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  min-height: 0;
+  overflow: visible;
+  pointer-events: none;
+}
+
+/* Modal 在原树中的锚点：独立出流，不挤开兄弟 */
+.modal-flow-anchor {
+  position: absolute;
+  width: 0;
+  height: 0;
+  overflow: visible;
+  pointer-events: none;
 }
 
 .modal-empty {

@@ -1,5 +1,16 @@
 <script setup lang="ts">
-import { computed, type CSSProperties } from 'vue'
+import {
+  computed,
+  inject,
+  nextTick,
+  onBeforeUnmount,
+  onMounted,
+  ref,
+  watch,
+  type CSSProperties,
+  type Ref,
+} from 'vue'
+import { BADGE_HOST_KEY } from '../../composables/useModalStack'
 import {
   hasMargin,
   marginStyle,
@@ -53,14 +64,16 @@ const emit = defineEmits<{
 const matchParentWidth = computed(() => props.width === 'match_parent')
 const matchParentHeight = computed(() => props.height === 'match_parent')
 const isAbsolute = computed(() => props.extraStyle?.position === 'absolute')
-const absoluteStretchedY = computed(() => {
-  if (!isAbsolute.value || !props.extraStyle) return false
-  return props.extraStyle.top != null && props.extraStyle.bottom != null
+/** 仅 width=match_parent 时，left+right 才拉伸；wrap_content 不跟对边拉满 */
+const absoluteStretchedX = computed(() => {
+  if (!isAbsolute.value || !props.extraStyle || !matchParentWidth.value) return false
+  return props.extraStyle.left != null && props.extraStyle.right != null
 })
 
-const absoluteStretchedX = computed(() => {
-  if (!isAbsolute.value || !props.extraStyle) return false
-  return props.extraStyle.left != null && props.extraStyle.right != null
+/** 仅 height=match_parent 时，top+bottom 才拉伸 */
+const absoluteStretchedY = computed(() => {
+  if (!isAbsolute.value || !props.extraStyle || !matchParentHeight.value) return false
+  return props.extraStyle.top != null && props.extraStyle.bottom != null
 })
 
 const shellStyle = computed<CSSProperties>(() => {
@@ -77,6 +90,14 @@ const shellStyle = computed<CSSProperties>(() => {
 
   // 绝对定位子节点：按自身 width/height，勿强制撑满父级
   if (isAbsolute.value) {
+    // wrap_content / 固定宽：去掉对边定位，避免 left+right 把盒子拉满
+    if (!matchParentWidth.value && style.left != null && style.right != null) {
+      style.right = undefined
+    }
+    if (!matchParentHeight.value && style.top != null && style.bottom != null) {
+      style.bottom = undefined
+    }
+
     if (absoluteStretchedX.value) {
       // left + right 已拉满，不要再写 width:100% 破坏约束
       style.width = undefined
@@ -178,13 +199,12 @@ const shellStyle = computed<CSSProperties>(() => {
   return style
 })
 
-const fillCrossAxis = computed(
-  () =>
-    matchParentWidth.value ||
-    matchParentHeight.value ||
-    isAbsolute.value ||
-    absoluteStretchedX.value ||
-    absoluteStretchedY.value,
+const fillWidth = computed(
+  () => matchParentWidth.value || absoluteStretchedX.value,
+)
+
+const fillHeight = computed(
+  () => matchParentHeight.value || absoluteStretchedY.value,
 )
 
 /** 纵向普通子项按内容堆叠；match_parent 撑满项除外 */
@@ -206,15 +226,8 @@ const marginBoxStyle = computed(() => ({
   flexDirection: 'column' as const,
   minHeight: allowShrinkBelowContent.value ? 0 : undefined,
   minWidth: allowShrinkBelowContent.value || props.parentHorizontal ? 0 : undefined,
-  width: fillCrossAxis.value || matchParentWidth.value ? '100%' : undefined,
-  height: stackByContent.value
-    ? 'auto'
-    : matchParentHeight.value ||
-        isAbsolute.value ||
-        absoluteStretchedX.value ||
-        absoluteStretchedY.value
-      ? '100%'
-      : undefined,
+  width: fillWidth.value ? '100%' : undefined,
+  height: stackByContent.value ? 'auto' : fillHeight.value ? '100%' : undefined,
   ...(props.scrollPort ? { overflow: 'hidden' as const } : {}),
 }))
 
@@ -225,15 +238,8 @@ const contentBoxStyle = computed<CSSProperties>(() => ({
   flexDirection: 'column' as const,
   minHeight: allowShrinkBelowContent.value ? 0 : undefined,
   minWidth: allowShrinkBelowContent.value || props.parentHorizontal ? 0 : undefined,
-  width: fillCrossAxis.value || matchParentWidth.value ? '100%' : undefined,
-  height: stackByContent.value
-    ? 'auto'
-    : matchParentHeight.value ||
-        isAbsolute.value ||
-        absoluteStretchedX.value ||
-        absoluteStretchedY.value
-      ? '100%'
-      : undefined,
+  width: fillWidth.value ? '100%' : undefined,
+  height: stackByContent.value ? 'auto' : fillHeight.value ? '100%' : undefined,
   ...(props.scrollPort ? { overflow: 'hidden' as const } : {}),
 }))
 
@@ -246,6 +252,61 @@ const showContentFrame = computed(() => props.selected || props.hovered)
 const hasBadges = computed(
   () => Boolean(props.repeatBadge) || (props.eventBadgeCount ?? 0) > 0,
 )
+
+const badgeHostRef = inject<Ref<HTMLElement | null> | null>(BADGE_HOST_KEY, null)
+const badgeHostEl = computed(() => badgeHostRef?.value ?? null)
+const contentBoxRef = ref<HTMLElement | null>(null)
+const badgeAnchorStyle = ref<CSSProperties>({ visibility: 'hidden' })
+let badgeSyncRaf = 0
+let badgeLiveRaf = 0
+let badgeResizeObserver: ResizeObserver | null = null
+
+const useBadgeTeleport = computed(
+  () => hasBadges.value && Boolean(badgeHostEl.value),
+)
+
+function syncBadgeAnchor() {
+  const host = badgeHostRef?.value
+  const box = contentBoxRef.value
+  if (!host || !box || !hasBadges.value) {
+    badgeAnchorStyle.value = { visibility: 'hidden' }
+    return
+  }
+  const hr = host.getBoundingClientRect()
+  const br = box.getBoundingClientRect()
+  // 锚定到 content-box 右上角，角标仍用 top/right + translate(50%,-50%)
+  badgeAnchorStyle.value = {
+    position: 'absolute',
+    top: `${br.top - hr.top}px`,
+    left: `${br.right - hr.left}px`,
+    width: 0,
+    height: 0,
+    overflow: 'visible',
+    pointerEvents: 'none',
+    visibility: 'visible',
+  }
+}
+
+function scheduleSyncBadgeAnchor() {
+  if (badgeSyncRaf) cancelAnimationFrame(badgeSyncRaf)
+  badgeSyncRaf = requestAnimationFrame(() => {
+    badgeSyncRaf = 0
+    syncBadgeAnchor()
+  })
+}
+
+function startBadgeLiveSync() {
+  if (badgeLiveRaf) return
+  const tick = () => {
+    if (!useBadgeTeleport.value) {
+      badgeLiveRaf = 0
+      return
+    }
+    syncBadgeAnchor()
+    badgeLiveRaf = requestAnimationFrame(tick)
+  }
+  badgeLiveRaf = requestAnimationFrame(tick)
+}
 
 const frameKind = computed(() => {
   if (props.selected) return 'selected'
@@ -267,6 +328,43 @@ const marginFrameStyle = computed<CSSProperties>(() => {
 function onClick(event: MouseEvent) {
   emit('click', event)
 }
+
+watch(
+  useBadgeTeleport,
+  async (enabled) => {
+    await nextTick()
+    scheduleSyncBadgeAnchor()
+    if (enabled) startBadgeLiveSync()
+  },
+  { flush: 'post', immediate: true },
+)
+
+onMounted(() => {
+  scheduleSyncBadgeAnchor()
+  window.addEventListener('resize', scheduleSyncBadgeAnchor)
+  window.addEventListener('scroll', scheduleSyncBadgeAnchor, true)
+  if (typeof ResizeObserver !== 'undefined') {
+    badgeResizeObserver = new ResizeObserver(() => scheduleSyncBadgeAnchor())
+    if (contentBoxRef.value) badgeResizeObserver.observe(contentBoxRef.value)
+    if (badgeHostEl.value) badgeResizeObserver.observe(badgeHostEl.value)
+  }
+})
+
+watch(contentBoxRef, (el, prev) => {
+  if (!badgeResizeObserver) return
+  if (prev) badgeResizeObserver.unobserve(prev)
+  if (el) badgeResizeObserver.observe(el)
+})
+
+onBeforeUnmount(() => {
+  if (badgeSyncRaf) cancelAnimationFrame(badgeSyncRaf)
+  if (badgeLiveRaf) cancelAnimationFrame(badgeLiveRaf)
+  badgeLiveRaf = 0
+  window.removeEventListener('resize', scheduleSyncBadgeAnchor)
+  window.removeEventListener('scroll', scheduleSyncBadgeAnchor, true)
+  badgeResizeObserver?.disconnect()
+  badgeResizeObserver = null
+})
 </script>
 
 <template>
@@ -284,13 +382,14 @@ function onClick(event: MouseEvent) {
     />
     <div class="margin-box" :style="marginBoxStyle">
       <div
+        ref="contentBoxRef"
         class="content-box"
         :class="{ selected, hovered: hovered && !selected }"
         :style="contentBoxStyle"
       >
         <slot />
         <div v-if="showContentFrame" class="frame-content" :class="frameKind" />
-        <div v-if="hasBadges" class="badge-stack">
+        <div v-if="hasBadges && !useBadgeTeleport" class="badge-stack">
           <EventBadge
             v-if="(eventBadgeCount ?? 0) > 0"
             :count="eventBadgeCount"
@@ -303,6 +402,21 @@ function onClick(event: MouseEvent) {
         </div>
       </div>
     </div>
+    <Teleport v-if="useBadgeTeleport && badgeHostEl" :to="badgeHostEl">
+      <div class="badge-anchor" :style="badgeAnchorStyle">
+        <div class="badge-stack">
+          <EventBadge
+            v-if="(eventBadgeCount ?? 0) > 0"
+            :count="eventBadgeCount"
+          />
+          <RepeatBadge
+            v-if="repeatBadge"
+            clickable
+            @click="emit('open-repeat')"
+          />
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 

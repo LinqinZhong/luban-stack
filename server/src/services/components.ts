@@ -67,19 +67,21 @@ async function ensureComponentsDir(projectPath: string): Promise<string> {
 
 export function createDefaultComponentXml(): string {
   return `<?xml version="1.0" encoding="utf-8"?>
-<LinearLayout
-  orientation="vertical"
-  width="match_parent"
-  height="wrap_content"
-  padding="12"
-  background="#ffffff">
-  <Text
-    text="组件内容"
-    textSize="14"
-    textColor="#303133"
-    width="wrap_content"
-    height="wrap_content" />
-</LinearLayout>
+<Fragment>
+  <LinearLayout
+    orientation="vertical"
+    width="match_parent"
+    height="wrap_content"
+    padding="12"
+    background="#ffffff">
+    <Text
+      text="组件内容"
+      textSize="14"
+      textColor="#303133"
+      width="wrap_content"
+      height="wrap_content" />
+  </LinearLayout>
+</Fragment>
 `
 }
 

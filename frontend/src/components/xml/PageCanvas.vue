@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, provide, ref, watch } from 'vue'
 import { Box, Delete, Plus, RefreshRight } from '@element-plus/icons-vue'
 import { colorPickState } from '../../composables/useColorPick'
 import {
+  BADGE_HOST_KEY,
   createModalStack,
   MODAL_HOST_KEY,
   MODAL_STACK_KEY,
@@ -55,9 +56,11 @@ const emit = defineEmits<{
 
 const fallbackModalStack = createModalStack()
 const modalHostRef = ref<HTMLElement | null>(null)
+const badgeHostRef = ref<HTMLElement | null>(null)
 
 provide(MODAL_STACK_KEY, props.modalStack ?? fallbackModalStack)
 provide(MODAL_HOST_KEY, modalHostRef)
+provide(BADGE_HOST_KEY, badgeHostRef)
 
 watch(
   () => props.selectable,
@@ -154,6 +157,65 @@ function handlePhoneClick(event: MouseEvent) {
   event.stopPropagation()
   colorPickState.pickFromPoint(event.clientX, event.clientY)
 }
+
+/** ??????????????????????????? */
+const phoneRef = ref<HTMLElement | null>(null)
+const touchCursorVisible = ref(false)
+const touchCursorPressed = ref(false)
+const touchCursorPos = ref({ x: 0, y: 0 })
+
+const showTouchCursor = computed(
+  () => !props.selectable && !colorPickState.picking.value,
+)
+
+const touchCursorStyle = computed(() => ({
+  left: `${touchCursorPos.value.x}px`,
+  top: `${touchCursorPos.value.y}px`,
+}))
+
+function updateTouchCursorPos(event: PointerEvent) {
+  const phone = phoneRef.value
+  if (!phone) return
+  const rect = phone.getBoundingClientRect()
+  if (rect.width < 1 || rect.height < 1) return
+  const scaleX = phone.offsetWidth / rect.width
+  const scaleY = phone.offsetHeight / rect.height
+  touchCursorPos.value = {
+    x: (event.clientX - rect.left) * scaleX,
+    y: (event.clientY - rect.top) * scaleY,
+  }
+}
+
+function onPhonePointerMove(event: PointerEvent) {
+  if (!showTouchCursor.value) return
+  touchCursorVisible.value = true
+  updateTouchCursorPos(event)
+}
+
+function onPhonePointerDown(event: PointerEvent) {
+  if (!showTouchCursor.value) return
+  if (event.pointerType === 'mouse' && event.button !== 0) return
+  touchCursorVisible.value = true
+  touchCursorPressed.value = true
+  updateTouchCursorPos(event)
+}
+
+function onPhonePointerUp() {
+  touchCursorPressed.value = false
+}
+
+function onPhonePointerLeave() {
+  touchCursorVisible.value = false
+  touchCursorPressed.value = false
+}
+
+watch(
+  () => props.selectable,
+  () => {
+    touchCursorVisible.value = false
+    touchCursorPressed.value = false
+  },
+)
 
 function resetView() {
   panX.value = 0
@@ -289,15 +351,22 @@ onBeforeUnmount(() => {
 
     <div class="stage-world" :style="worldStyle">
       <div
+        ref="phoneRef"
         class="phone"
         :class="{
           'is-picking': colorPickState.picking.value,
           'is-fit-content': phoneFitContent,
           'is-edit': selectable,
+          'is-preview': showTouchCursor,
         }"
         :style="phoneFrameStyle"
         @click="handlePhoneClick"
         @mouseleave="clearHover"
+        @pointermove="onPhonePointerMove"
+        @pointerdown="onPhonePointerDown"
+        @pointerup="onPhonePointerUp"
+        @pointercancel="onPhonePointerUp"
+        @pointerleave="onPhonePointerLeave"
       >
         <el-alert
           v-if="parsed.error"
@@ -327,6 +396,18 @@ onBeforeUnmount(() => {
           @interact="emit('interact', $event)"
         />
         <div ref="modalHostRef" class="phone-modal-host" />
+        <!-- ?????????????????/?????????? -->
+        <div
+          v-if="selectable"
+          class="phone-screen-frame"
+          aria-hidden="true"
+        />
+        <!-- ????????????????? -->
+        <div
+          v-if="selectable"
+          ref="badgeHostRef"
+          class="phone-badge-host"
+        />
         <Transition name="phone-toast">
           <div
             v-if="toast?.message"
@@ -337,6 +418,13 @@ onBeforeUnmount(() => {
             {{ toast.message }}
           </div>
         </Transition>
+        <div
+          v-if="showTouchCursor && touchCursorVisible"
+          class="phone-touch-cursor"
+          :class="{ 'is-pressed': touchCursorPressed }"
+          :style="touchCursorStyle"
+          aria-hidden="true"
+        />
       </div>
     </div>
 
@@ -457,6 +545,42 @@ onBeforeUnmount(() => {
   -webkit-user-select: none;
 }
 
+.phone.is-preview {
+  cursor: none;
+  /* ??????/?????? touch-action??????? */
+  touch-action: auto;
+}
+
+.phone.is-preview :deep(*) {
+  cursor: none;
+}
+
+.phone.is-preview :deep(.overlay-scroll-body.is-drag-scrolling),
+.phone.is-preview :deep(.overlay-scroll-body.is-drag-scrolling *) {
+  cursor: grabbing;
+}
+
+.phone-touch-cursor {
+  position: absolute;
+  z-index: 300;
+  width: 28px;
+  height: 28px;
+  margin: -14px 0 0 -14px;
+  border-radius: 50%;
+  background: rgba(64, 158, 255, 0.28);
+  border: 2px solid rgba(64, 158, 255, 0.55);
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.18);
+  pointer-events: none;
+  transform: scale(1);
+  transition: transform 0.08s ease, background 0.08s ease, border-color 0.08s ease;
+}
+
+.phone-touch-cursor.is-pressed {
+  background: rgba(64, 158, 255, 0.42);
+  border-color: rgba(64, 158, 255, 0.75);
+  transform: scale(1.2);
+}
+
 .phone-modal-host {
   position: absolute;
   inset: 0;
@@ -466,6 +590,27 @@ onBeforeUnmount(() => {
 }
 
 .phone-modal-host :deep(.modal-overlay) {
+  pointer-events: auto;
+}
+
+.phone-screen-frame {
+  position: absolute;
+  inset: 0;
+  z-index: 200;
+  pointer-events: none;
+  box-sizing: border-box;
+  border: 2px dashed #79bbff;
+}
+
+.phone-badge-host {
+  position: absolute;
+  inset: 0;
+  z-index: 210;
+  pointer-events: none;
+  overflow: visible;
+}
+
+.phone-badge-host :deep(.badge-stack) {
   pointer-events: auto;
 }
 

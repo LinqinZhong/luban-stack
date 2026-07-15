@@ -79,7 +79,7 @@ export function buildWidgetTree(xml: string): {
 
   try {
     const root = parsePageXml(xml)
-    // 历史 Fragment：树中平铺子节点，避免显示「不支持的控件」
+    // Fragment 多根：树中平铺顶层子节点
     if (isFragmentTag(root.tag)) {
       return {
         tree: root.children.map((child, index) =>

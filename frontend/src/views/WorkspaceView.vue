@@ -74,7 +74,6 @@ import {
   moveWidget,
   removeWidget,
   migrateLegacyMaskToModal,
-  unwrapLegacyFragmentRoot,
   WIDGET_OPTIONS,
   type MovePosition,
   type WidgetTag,
@@ -519,14 +518,11 @@ async function openComponent(componentId: string) {
   loadingPage.value = true
   try {
     const detail = await getComponent(projectStore.path, componentId)
-    const unwrapped = unwrapLegacyFragmentRoot(detail.xml)
-    const migrated = migrateLegacyMaskToModal(unwrapped.xml)
-    const nextXml = migrated.changed ? migrated.xml : unwrapped.xml
-    const changed = unwrapped.changed || migrated.changed
-    if (changed) {
-      activeComponent.value = { ...detail, xml: nextXml }
+    const migrated = migrateLegacyMaskToModal(detail.xml)
+    if (migrated.changed) {
+      activeComponent.value = { ...detail, xml: migrated.xml }
       await loadPageMethods(componentId)
-      await handleXmlUpdate(nextXml)
+      await handleXmlUpdate(migrated.xml)
     } else {
       activeComponent.value = detail
       await loadPageMethods(componentId)
@@ -1208,6 +1204,7 @@ async function handleAddWidget(tag: WidgetTag) {
       activeDoc.value.xml,
       selectedNodeId.value,
       tag,
+      { allowRootSiblings: resourceKind.value === 'component' },
     )
     addWidgetVisible.value = false
     selectedNodeId.value = newNodeId

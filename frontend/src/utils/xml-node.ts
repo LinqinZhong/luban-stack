@@ -1,5 +1,5 @@
 import type { XmlNode } from './xml'
-import { parsePageXml } from './xml'
+import { FRAGMENT_TAG, isFragmentTag, parsePageXml } from './xml'
 
 export type WidgetTag =
   | 'Text'
@@ -26,37 +26,30 @@ export function isContainerTag(tag: string): boolean {
 }
 
 /**
- * 兼容曾用 Fragment 包一层的 XML：
- * - 1 个子节点：卸掉 Fragment，子节点升为根
- * - 多个子节点：包进一层 vertical LinearLayout（保留全部内容）
+ * @deprecated 组件已正式支持 Fragment 多根，不再自动卸壳。
+ * 保留函数以免旧调用方报错；始终原样返回。
  */
 export function unwrapLegacyFragmentRoot(xml: string): {
   xml: string
   changed: boolean
 } {
-  if (!xml.trim()) return { xml, changed: false }
-  const parser = new DOMParser()
-  const doc = parser.parseFromString(xml, 'application/xml')
-  if (doc.querySelector('parsererror')) return { xml, changed: false }
+  return { xml, changed: false }
+}
+
+/** 将非 Fragment 根包进 Fragment，便于组件添加多个顶层节点 */
+function ensureFragmentRoot(doc: Document): Element {
   const root = doc.documentElement
-  if (!root || root.tagName !== 'Fragment') return { xml, changed: false }
-  const children = Array.from(root.children)
-  if (children.length === 0) return { xml, changed: false }
+  if (!root) throw new Error('XML 缺少根节点')
+  if (isFragmentTag(root.tagName)) return root
 
-  if (children.length === 1) {
-    doc.replaceChild(children[0], root)
-    return { xml: serializeDoc(doc), changed: true }
-  }
+  const fragment = doc.createElement(FRAGMENT_TAG)
+  doc.replaceChild(fragment, root)
+  fragment.appendChild(root)
+  return fragment
+}
 
-  const layout = doc.createElement('LinearLayout')
-  layout.setAttribute('orientation', 'vertical')
-  layout.setAttribute('width', 'match_parent')
-  layout.setAttribute('height', 'wrap_content')
-  for (const child of children) {
-    layout.appendChild(child)
-  }
-  doc.replaceChild(layout, root)
-  return { xml: serializeDoc(doc), changed: true }
+function isAppendParentAllowed(tag: string): boolean {
+  return isContainerTag(tag) || isFragmentTag(tag)
 }
 
 /**
@@ -364,11 +357,13 @@ function childPathId(parentId: string, index: number, tag: string): string {
  * - 选中布局容器：追加到该容器
  * - 选中叶子控件：追加到其父容器
  * - 未选中：追加到根（根必须是布局）
+ * - allowRootSiblings（组件）：未选中时追加为顶层根节点（必要时自动包 Fragment）
  */
 export function appendWidget(
   xml: string,
   selectedId: string,
   tag: WidgetTag,
+  options?: { allowRootSiblings?: boolean },
 ): { xml: string; newNodeId: string } {
   const parser = new DOMParser()
   const doc = parser.parseFromString(xml, 'application/xml')
@@ -384,7 +379,10 @@ export function appendWidget(
   let parentEl: Element | null = null
   let parentId = ''
 
-  if (!selectedId) {
+  if (!selectedId && options?.allowRootSiblings) {
+    parentEl = ensureFragmentRoot(doc)
+    parentId = `0:${FRAGMENT_TAG}`
+  } else if (!selectedId) {
     parentEl = root
     parentId = `0:${root.tagName}`
   } else {
@@ -393,12 +391,17 @@ export function appendWidget(
       throw new Error('未找到选中节点')
     }
 
-    if (isContainerTag(selected.tagName)) {
+    if (isAppendParentAllowed(selected.tagName) && !isFragmentTag(selected.tagName)) {
+      // Fragment 不在控件树中展示，不能作为「选中容器」追加；走子节点的父级逻辑
       parentEl = selected
       parentId = selectedId
     } else if (selectedId.includes('/')) {
       parentId = selectedId.slice(0, selectedId.lastIndexOf('/'))
       parentEl = elementAtPath(doc, parentId)
+    } else if (options?.allowRootSiblings) {
+      // 选中真实文档根时，改为新增顶层兄弟
+      parentEl = ensureFragmentRoot(doc)
+      parentId = `0:${FRAGMENT_TAG}`
     } else {
       throw new Error('根节点不是布局容器，无法添加子控件，请先选中布局节点')
     }
@@ -408,7 +411,7 @@ export function appendWidget(
     throw new Error('未找到可添加的父容器')
   }
 
-  if (!isContainerTag(parentEl.tagName)) {
+  if (!isAppendParentAllowed(parentEl.tagName)) {
     throw new Error('只能向 LinearLayout / RelativeLayout / Swiper / Modal 添加子控件')
   }
 
@@ -436,9 +439,12 @@ export function appendComponent(
     name?: string
     width?: string
     height?: string
+    allowRootSiblings?: boolean
   },
 ): { xml: string; newNodeId: string } {
-  const result = appendWidget(xml, selectedId, 'Component')
+  const result = appendWidget(xml, selectedId, 'Component', {
+    allowRootSiblings: options.allowRootSiblings,
+  })
   const patched = setNodeAttributes(result.xml, result.newNodeId, {
     componentId: options.componentId,
     name: options.name || options.componentId,
@@ -475,12 +481,27 @@ export function removeWidget(
     throw new Error('未找到要删除的节点')
   }
 
+  const parent = el.parentElement
   const parentId = nodeId.slice(0, nodeId.lastIndexOf('/'))
-  el.parentElement.removeChild(el)
+  const siblings = Array.from(parent.children)
+  const index = siblings.indexOf(el)
+  parent.removeChild(el)
+
+  // Fragment 不在控件树中：删顶层根后改选相邻兄弟，避免选中隐藏的 Fragment
+  let nextSelectedId = parentId
+  if (isFragmentTag(parent.tagName)) {
+    const left = Array.from(parent.children)
+    if (!left.length) {
+      nextSelectedId = ''
+    } else {
+      const pick = left[Math.min(index, left.length - 1)]!
+      nextSelectedId = pathIdForElement(pick)
+    }
+  }
 
   return {
     xml: serializeDoc(doc),
-    parentId,
+    parentId: nextSelectedId,
   }
 }
 
@@ -524,6 +545,7 @@ export function canMoveWidget(
       return `${targetTag} 不支持子节点`
     }
   } else if (!targetId.includes('/')) {
+    // 单根文档不可同级；组件 Fragment 下的顶层节点 id 含 /，可互为兄弟
     return '不能把控件放到根节点同级'
   }
   return null

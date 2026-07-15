@@ -9,7 +9,7 @@ export interface XmlNode {
   scope?: { item: unknown; index: number }
 }
 
-/** 历史兼容：曾用于组件多根的透明容器（勿新增；打开时尽量卸掉） */
+/** 组件多根：透明容器（控件树平铺子节点；不进控件面板） */
 export const FRAGMENT_TAG = 'Fragment'
 
 const SUPPORTED_TAGS = new Set([
@@ -27,6 +27,21 @@ const SUPPORTED_TAGS = new Set([
 
 export function isFragmentTag(tag: string): boolean {
   return tag === FRAGMENT_TAG
+}
+
+/**
+ * 整棵子树是否都应脱离文档流（不占位、不挤开兄弟）：
+ * - Modal（Teleport 全屏）
+ * - Fragment 且每个子节点也都是 out-of-flow
+ */
+export function isOutOfFlowTree(node: XmlNode): boolean {
+  if (node.tag === 'Modal') return true
+  if (isFragmentTag(node.tag)) {
+    return (
+      node.children.length > 0 && node.children.every((child) => isOutOfFlowTree(child))
+    )
+  }
+  return false
 }
 
 export function parsePageXml(xml: string): XmlNode {
