@@ -21,6 +21,7 @@ import {
   SIZE_OPTIONS,
   type InteractionEventKey,
 } from '../../utils/xml-node'
+import { OVERFLOW_OPTIONS } from '../../utils/xml'
 import type { DataField } from '../../types/page-data'
 import {
   DYNAMIC_STYLES_ATTR,
@@ -104,6 +105,7 @@ const layoutForm = reactive({
   borderRadius: '',
   borderWidth: '',
   borderColor: '',
+  overflow: 'hidden',
   gravity: '',
   orientation: 'vertical',
   gap: '',
@@ -177,6 +179,7 @@ function syncLayoutForm() {
   layoutForm.borderRadius = node.attrs.borderRadius ?? ''
   layoutForm.borderWidth = node.attrs.borderWidth ?? ''
   layoutForm.borderColor = node.attrs.borderColor ?? ''
+  layoutForm.overflow = node.attrs.overflow || 'hidden'
   layoutForm.gravity = node.attrs.gravity ?? ''
   layoutForm.orientation = node.attrs.orientation || 'vertical'
   layoutForm.gap = node.attrs.gap ?? ''
@@ -360,6 +363,13 @@ const showLayoutContainerProps = computed(
     selectedNode.value?.tag === 'LinearLayout' ||
     selectedNode.value?.tag === 'RelativeLayout' ||
     selectedNode.value?.tag === 'Image',
+)
+
+/** 溢出策略仅布局容器 */
+const showOverflowProps = computed(
+  () =>
+    selectedNode.value?.tag === 'LinearLayout' ||
+    selectedNode.value?.tag === 'RelativeLayout',
 )
 
 const arrayFieldOptions = computed(() =>
@@ -759,6 +769,19 @@ function saveVisibilityConfig(config: VisibilityConditionConfig) {
                 />
               </el-form-item>
             </template>
+            <el-form-item v-if="showOverflowProps" label="overflow 溢出">
+              <el-select
+                v-model="layoutForm.overflow"
+                @change="commitAttr('overflow', layoutForm.overflow === 'hidden' ? '' : layoutForm.overflow)"
+              >
+                <el-option
+                  v-for="opt in OVERFLOW_OPTIONS"
+                  :key="opt.value"
+                  :label="opt.label"
+                  :value="opt.value"
+                />
+              </el-select>
+            </el-form-item>
           </el-form>
 
           <template v-if="showTextProps">

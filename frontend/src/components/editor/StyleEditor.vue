@@ -6,6 +6,7 @@ import {
   GRAVITY_OPTIONS,
   SIZE_OPTIONS,
 } from '../../utils/xml-node'
+import { OVERFLOW_OPTIONS } from '../../utils/xml'
 import type { StyleOverrides } from '../../types/dynamic-styles'
 
 const props = defineProps<{
@@ -39,6 +40,7 @@ const form = reactive({
   borderRadius: '',
   borderWidth: '',
   borderColor: '',
+  overflow: '',
   text: '',
   textSize: '',
   textColor: '',
@@ -55,6 +57,9 @@ const showBorder = computed(
     (props.tag === 'LinearLayout' ||
       props.tag === 'RelativeLayout' ||
       props.tag === 'Image'),
+)
+const showOverflow = computed(
+  () => props.tag === 'LinearLayout' || props.tag === 'RelativeLayout',
 )
 
 function parseSizeMode(value: string | undefined, fallbackValue: number) {
@@ -99,6 +104,7 @@ function syncFromModel(styles: StyleOverrides) {
   form.borderRadius = styles.borderRadius ?? ''
   form.borderWidth = styles.borderWidth ?? ''
   form.borderColor = styles.borderColor ?? ''
+  form.overflow = styles.overflow ?? ''
   form.text = styles.text ?? ''
   form.textSize = styles.textSize ?? ''
   form.textColor = styles.textColor ?? ''
@@ -134,6 +140,7 @@ function emitStyles() {
   set('borderRadius', form.borderRadius)
   set('borderWidth', form.borderWidth)
   set('borderColor', form.borderColor)
+  set('overflow', form.overflow)
   set('text', form.text)
   set('textSize', form.textSize)
   set('textColor', form.textColor)
@@ -266,6 +273,21 @@ function onFieldChange() {
           <ColorPicker v-model="form.borderColor" @change="onFieldChange" />
         </el-form-item>
       </template>
+      <el-form-item v-if="showOverflow" label="overflow 溢出">
+        <el-select
+          v-model="form.overflow"
+          clearable
+          placeholder="默认隐藏"
+          @change="onFieldChange"
+        >
+          <el-option
+            v-for="opt in OVERFLOW_OPTIONS"
+            :key="opt.value"
+            :label="opt.label"
+            :value="opt.value"
+          />
+        </el-select>
+      </el-form-item>
     </el-form>
 
     <template v-if="showTextProps">

@@ -31,6 +31,7 @@ const COMPONENT_HOST_ATTRS = new Set([
   'borderRadius',
   'borderWidth',
   'borderColor',
+  'overflow',
   'repeat',
   'repeatIndex',
   'layout_marginLeft',

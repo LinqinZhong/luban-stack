@@ -387,7 +387,7 @@ function switchResourceKind(kind: ResourceKind) {
   if (resourceKind.value === kind) return
   resourceKind.value = kind
   selectedNodeId.value = ''
-  workspaceMode.value = 'preview'
+  // 切换页面/组件资源时保持当前工作模式（编辑/数据池等），不要强制回预览
   if (kind === 'page') {
     const id = activePageId.value || pages.value[0]?.id
     if (id) void openPage(id)
@@ -462,30 +462,38 @@ async function handleXmlUpdate(xml: string) {
 
   if (isComponentResource.value && activeComponent.value) {
     activeComponent.value = { ...activeComponent.value, xml }
-    try {
-      activeComponent.value = await saveComponentXml({
-        projectPath: projectStore.path,
-        componentId: activeComponent.value.id,
-        xml,
-      })
-      await refreshComponentMap()
-    } catch (err) {
-      ElMessage.error(err instanceof Error ? err.message : '保存失败')
-    }
+    if (xmlSaveTimer) clearTimeout(xmlSaveTimer)
+    xmlSaveTimer = setTimeout(async () => {
+      if (!projectStore.path || !activeComponent.value) return
+      try {
+        activeComponent.value = await saveComponentXml({
+          projectPath: projectStore.path,
+          componentId: activeComponent.value.id,
+          xml: activeComponent.value.xml,
+        })
+        await refreshComponentMap()
+      } catch (err) {
+        ElMessage.error(err instanceof Error ? err.message : '保存失败')
+      }
+    }, 280)
     return
   }
 
   if (!activePage.value) return
   activePage.value = { ...activePage.value, xml }
-  try {
-    activePage.value = await savePageXml({
-      projectPath: projectStore.path,
-      pageId: activePage.value.id,
-      xml,
-    })
-  } catch (err) {
-    ElMessage.error(err instanceof Error ? err.message : '保存失败')
-  }
+  if (xmlSaveTimer) clearTimeout(xmlSaveTimer)
+  xmlSaveTimer = setTimeout(async () => {
+    if (!projectStore.path || !activePage.value) return
+    try {
+      activePage.value = await savePageXml({
+        projectPath: projectStore.path,
+        pageId: activePage.value.id,
+        xml: activePage.value.xml,
+      })
+    } catch (err) {
+      ElMessage.error(err instanceof Error ? err.message : '保存失败')
+    }
+  }, 280)
 }
 
 async function handlePreviewInteract(payload: PreviewInteractPayload) {
@@ -535,17 +543,26 @@ function applyPreviewSetData(prop: string, value: import('../types/page-data').D
 async function handleDataUpdate(data: import('../types/page-data').PageData) {
   if (!projectStore.path || !activeDoc.value) return
 
+  /** 仅持久化已命名字段；空白草稿行留在本地，避免保存回写后被服务端过滤掉 */
+  const persistableData = (): import('../types/page-data').PageData => ({
+    fields: (activeDoc.value?.data.fields ?? []).filter((item) => {
+      const name = item.name.trim()
+      return Boolean(name) && name !== '$props'
+    }),
+  })
+
   if (isComponentResource.value && activeComponent.value) {
     activeComponent.value = { ...activeComponent.value, data }
     if (dataSaveTimer) clearTimeout(dataSaveTimer)
     dataSaveTimer = setTimeout(async () => {
       if (!projectStore.path || !activeComponent.value) return
       try {
-        activeComponent.value = await saveComponentData({
+        await saveComponentData({
           projectPath: projectStore.path,
           componentId: activeComponent.value.id,
-          data: activeComponent.value.data,
+          data: persistableData(),
         })
+        // 不把服务端结果写回 data：避免清空未命名的「添加字段」草稿行
         await refreshComponentMap()
       } catch (err) {
         ElMessage.error(err instanceof Error ? err.message : '保存数据池失败')
@@ -561,12 +578,11 @@ async function handleDataUpdate(data: import('../types/page-data').PageData) {
   dataSaveTimer = setTimeout(async () => {
     if (!projectStore.path || !activePage.value) return
     try {
-      const saved = await savePageData({
+      await savePageData({
         projectPath: projectStore.path,
         pageId: activePage.value.id,
-        data: activePage.value.data,
+        data: persistableData(),
       })
-      activePage.value = saved
     } catch (err) {
       ElMessage.error(err instanceof Error ? err.message : '保存数据池失败')
     }
@@ -590,6 +606,7 @@ async function handleComponentConfigUpdate(config: ComponentConfig) {
 
 let dataSaveTimer: ReturnType<typeof setTimeout> | null = null
 let iconSaveTimer: ReturnType<typeof setTimeout> | null = null
+let xmlSaveTimer: ReturnType<typeof setTimeout> | null = null
 
 async function handleIconLibraryUpdate(library: IconLibrary) {
   if (!projectStore.path) return

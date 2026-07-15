@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, type CSSProperties } from 'vue'
+import { computed, inject, onBeforeUnmount, onMounted, provide, type CSSProperties, type ComputedRef } from 'vue'
 import type { IconLibrary } from '../../types/icon-library'
 import { findIcon, iconSymbolId } from '../../types/icon-library'
 import type { PageData } from '../../types/page-data'
@@ -10,9 +10,11 @@ import {
   isSupportedTag,
   parseBool,
   parseNumber,
+  parseOverflow,
   parsePageXml,
   parseSize,
   borderStyle,
+  overflowStyle,
   paddingStyle,
 } from '../../utils/xml'
 import { resolveMatchingStyleOverrides, evaluateScenarios } from '../../utils/dynamic-style-runtime'
@@ -30,6 +32,9 @@ import { countEventBindings, countNodeEventBindings, INTERACTION_EVENT_KEYS } fr
 import WidgetSelectShell from './WidgetSelectShell.vue'
 import XmlNodeView from './XmlNodeView.vue'
 
+/** 纵向滚动列标记：子孙节点 match_parent 高度勿再 flex 抢视口 */
+const SCROLL_COLUMN_KEY = 'voiderVerticalScrollColumn'
+
 const SKIP_DOLLAR_PROPS_ATTRS = new Set<string>([
   DYNAMIC_STYLES_ATTR,
   V_SHOW_ATTR,
@@ -46,6 +51,8 @@ const props = defineProps<{
   parentHorizontal?: boolean
   /** 父级为纵向 LinearLayout */
   parentVertical?: boolean
+  /** 祖先纵向可滚动 LinearLayout（其子节点勿再用 flex:1 抢视口） */
+  parentScrollable?: boolean
   /** 页面根节点 */
   isRoot?: boolean
   /** RelativeLayout 子节点定位样式 */
@@ -129,8 +136,22 @@ const height = computed(() => parseSize(attrs.value.height, 'wrap_content'))
 const isSelected = computed(() => props.selectable && props.selectedId === props.nodeId)
 const isHovered = computed(() => props.selectable && props.hoveredId === props.nodeId)
 
+/** RelativeLayout 在纵向父布局中需占满剩余高度（绝对定位子节点依赖此盒子） */
+const fillRemainingHeight = computed(() => props.node.tag === 'RelativeLayout')
+
+/**
+ * 纵向父布局内的普通子项按内容堆叠；RelativeLayout / 滚动视口除外。
+ */
+const stackInVerticalParent = computed(
+  () =>
+    Boolean(props.parentVertical) &&
+    props.node.tag !== 'RelativeLayout',
+)
+
 const innerSizeStyle = computed(() => {
   const style: Record<string, string> = {}
+  const stackHeight =
+    insideScrollColumn.value || stackInVerticalParent.value
 
   if (width.value === 'match_parent') {
     style.width = '100%'
@@ -146,9 +167,15 @@ const innerSizeStyle = computed(() => {
   }
 
   if (height.value === 'match_parent') {
-    style.height = '100%'
-    style.maxHeight = '100%'
-    style.minHeight = '0'
+    if (stackHeight) {
+      style.height = 'auto'
+      style.maxHeight = 'none'
+      style.flexShrink = '0'
+    } else {
+      style.height = '100%'
+      style.maxHeight = '100%'
+      style.minHeight = '0'
+    }
   } else if (height.value === 'wrap_content') {
     style.height = 'fit-content'
     style.flexShrink = '0'
@@ -163,6 +190,7 @@ const innerSizeStyle = computed(() => {
 const layoutStyle = computed(() => ({
   ...innerSizeStyle.value,
   ...paddingStyle(attrs.value),
+  ...borderStyle(attrs.value),
   boxSizing: 'border-box' as const,
 }))
 
@@ -223,21 +251,26 @@ const componentHostHeight = computed(() => {
   return parseSize(fromConfig, 'wrap_content')
 })
 
-const componentStyle = computed(() => ({
-  ...layoutStyle.value,
-  display: 'flex',
-  flexDirection: 'column' as const,
-  alignItems: 'stretch',
-  justifyContent: 'flex-start',
-  width: '100%',
-  height: '100%',
-  minHeight:
-    componentHostHeight.value === 'wrap_content' && !componentRoot.value
-      ? '48px'
-      : undefined,
-  boxSizing: 'border-box' as const,
-  overflow: 'hidden',
-}))
+const componentStyle = computed(() => {
+  const stackHeight =
+    insideScrollColumn.value || stackInVerticalParent.value
+  return {
+    ...layoutStyle.value,
+    display: 'flex',
+    flexDirection: 'column' as const,
+    alignItems: 'stretch',
+    justifyContent: 'flex-start',
+    width: '100%',
+    height: stackHeight ? 'auto' : '100%',
+    maxHeight: stackHeight ? 'none' : undefined,
+    minHeight:
+      componentHostHeight.value === 'wrap_content' && !componentRoot.value
+        ? '48px'
+        : undefined,
+    boxSizing: 'border-box' as const,
+    overflow: stackHeight ? 'visible' : 'hidden',
+  }
+})
 
 const componentPlaceholderStyle = computed(() => ({
   display: 'flex',
@@ -293,15 +326,15 @@ const imagePlaceholderLabel = computed(() => {
 
 const imageStyle = computed(() => ({
   ...layoutStyle.value,
-  ...borderStyle(attrs.value),
   display: 'block',
   objectFit: (attrs.value.objectFit || 'cover') as CSSProperties['objectFit'],
   background: attrs.value.background || undefined,
+  // 图片自身圆角仍需裁切，不受布局 overflow 属性控制
+  ...(attrs.value.borderRadius ? { overflow: 'hidden' as const } : {}),
 }))
 
 const imagePlaceholderStyle = computed(() => ({
   ...layoutStyle.value,
-  ...borderStyle(attrs.value),
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'center',
@@ -310,6 +343,7 @@ const imagePlaceholderStyle = computed(() => ({
   fontSize: '12px',
   minWidth: width.value === 'wrap_content' ? '80px' : undefined,
   minHeight: height.value === 'wrap_content' ? '60px' : undefined,
+  ...(attrs.value.borderRadius ? { overflow: 'hidden' as const } : {}),
 }))
 
 /** 编辑态未展开的 {item.xxx} 等变量，不解析图标 */
@@ -351,13 +385,60 @@ const iconPlaceholderStyle = computed(() => ({
   boxSizing: 'border-box' as const,
 }))
 
+/**
+ * 布局溢出：编辑态一律 visible（完整展示、角标不被裁），
+ * 预览态才应用隐藏 / 滚动策略。
+ */
+const hasScrollAttr = computed(
+  () => parseOverflow(attrs.value.overflow, 'hidden') === 'scroll',
+)
+
+const injectedScrollColumn = inject<ComputedRef<boolean> | undefined>(
+  SCROLL_COLUMN_KEY,
+  undefined,
+)
+
+const ancestorInScrollColumn = computed(() => Boolean(injectedScrollColumn?.value))
+
+/**
+ * 向子孙声明「滚动内容列」：仅当自身/祖先带 overflow=scroll 的纵向布局。
+ * 勿对所有纵向 LinearLayout 声明，否则内容区 RelativeLayout 会被当成堆叠而高度塌陷。
+ */
+const inScrollColumn = computed(
+  () =>
+    ancestorInScrollColumn.value ||
+    (hasScrollAttr.value && attrs.value.orientation !== 'horizontal') ||
+    Boolean(props.parentScrollable),
+)
+
+provide(
+  SCROLL_COLUMN_KEY,
+  computed(() => inScrollColumn.value),
+)
+
+const layoutOverflowStyle = computed(() => {
+  if (props.selectable) return { overflow: 'visible' as const }
+  return overflowStyle(attrs.value, 'hidden')
+})
+
+/** 预览态真正成为滚动容器 */
+const isScrollLayout = computed(() => !props.selectable && hasScrollAttr.value)
+
+/** 作为子节点：处在祖先滚动列内时，高度按内容堆叠（勿包含普通 parentVertical） */
+const insideScrollColumn = computed(
+  () => ancestorInScrollColumn.value || Boolean(props.parentScrollable),
+)
+
 const linearStyle = computed(() => {
   const horizontal = attrs.value.orientation === 'horizontal'
   const matchHeight = height.value === 'match_parent'
   const matchWidth = width.value === 'match_parent'
+  const stackHeight =
+    insideScrollColumn.value || stackInVerticalParent.value
+
   return {
     ...layoutStyle.value,
-    ...borderStyle(attrs.value),
+    ...layoutOverflowStyle.value,
     display: 'flex',
     flexDirection: (horizontal ? 'row' : 'column') as 'row' | 'column',
     alignItems: mapGravityCross(attrs.value.gravity, horizontal),
@@ -367,21 +448,59 @@ const linearStyle = computed(() => {
     position: 'relative' as const,
     ...(matchWidth ? { width: '100%', minWidth: 0 } : {}),
     ...(matchHeight
-      ? { height: '100%', flex: '1 1 auto', minHeight: 0 }
-      : {}),
+      ? stackHeight
+        ? {
+            height: 'auto',
+            maxHeight: 'none',
+            flex: '0 0 auto',
+            alignSelf: 'stretch',
+          }
+        : isScrollLayout.value
+          ? {
+              flex: '1 1 0%',
+              minHeight: 0,
+              height: '100%',
+              maxHeight: '100%',
+              alignSelf: 'stretch',
+            }
+          : {
+              height: '100%',
+              flex: '1 1 auto',
+              minHeight: 0,
+              overflow: 'hidden',
+            }
+      : isScrollLayout.value
+        ? { maxHeight: '100%', minHeight: 0 }
+        : {}),
   }
 })
 
 const relativeStyle = computed(() => {
   const matchHeight = height.value === 'match_parent'
   const matchWidth = width.value === 'match_parent'
+  // RelativeLayout 不参与「纵向堆叠」；仅真正处于滚动列内才 auto
+  const stackHeight = insideScrollColumn.value
   return {
     ...layoutStyle.value,
-    ...borderStyle(attrs.value),
+    ...layoutOverflowStyle.value,
     position: 'relative' as const,
     background: attrs.value.background || 'transparent',
     ...(matchWidth ? { width: '100%' } : {}),
-    ...(matchHeight ? { height: '100%' } : {}),
+    ...(matchHeight
+      ? stackHeight
+        ? { height: 'auto', maxHeight: 'none', flex: '0 0 auto', alignSelf: 'stretch' }
+        : isScrollLayout.value
+          ? {
+              flex: '1 1 0%',
+              minHeight: 0,
+              height: '100%',
+              maxHeight: '100%',
+              alignSelf: 'stretch',
+            }
+          : { height: '100%', overflow: 'hidden' }
+      : isScrollLayout.value
+        ? { maxHeight: '100%', minHeight: 0 }
+        : {}),
     minHeight: height.value === 'wrap_content' ? '40px' : undefined,
   }
 })
@@ -599,6 +718,8 @@ onBeforeUnmount(() => {
     :event-badge-count="eventBadgeCount"
     :visually-hidden="visuallyHidden"
     :interactive="previewInteractive"
+    :inside-scroll-port="insideScrollColumn"
+    :fill-remaining-height="fillRemainingHeight"
     @click="handleSelect"
     @mouseenter="handleMouseEnter"
     @pointerdown="handlePointerDown"
@@ -625,6 +746,8 @@ onBeforeUnmount(() => {
     :event-badge-count="eventBadgeCount"
     :visually-hidden="visuallyHidden"
     :interactive="previewInteractive"
+    :inside-scroll-port="insideScrollColumn"
+    :fill-remaining-height="fillRemainingHeight"
     @click="handleSelect"
     @mouseenter="handleMouseEnter"
     @pointerdown="handlePointerDown"
@@ -651,6 +774,8 @@ onBeforeUnmount(() => {
     :event-badge-count="eventBadgeCount"
     :visually-hidden="visuallyHidden"
     :interactive="previewInteractive"
+    :inside-scroll-port="insideScrollColumn"
+    :fill-remaining-height="fillRemainingHeight"
     @click="handleSelect"
     @mouseenter="handleMouseEnter"
     @pointerdown="handlePointerDown"
@@ -692,6 +817,8 @@ onBeforeUnmount(() => {
     :event-badge-count="eventBadgeCount"
     :visually-hidden="visuallyHidden"
     :interactive="previewInteractive"
+    :inside-scroll-port="insideScrollColumn"
+    :fill-remaining-height="fillRemainingHeight"
     @click="handleSelect"
     @mouseenter="handleMouseEnter"
     @pointerdown="handlePointerDown"
@@ -758,6 +885,8 @@ onBeforeUnmount(() => {
     :event-badge-count="eventBadgeCount"
     :visually-hidden="visuallyHidden"
     :interactive="previewInteractive"
+    :inside-scroll-port="insideScrollColumn"
+    :fill-remaining-height="fillRemainingHeight"
     @click="handleSelect"
     @mouseenter="handleMouseEnter"
     @pointerdown="handlePointerDown"
@@ -771,6 +900,7 @@ onBeforeUnmount(() => {
         :node="componentRoot"
         :node-id="`${nodeId}/c:0:${componentRoot.tag}`"
         :selectable="false"
+        :parent-scrollable="inScrollColumn"
         :icon-library="iconLibrary"
         :page-data="componentDetail?.data ?? pageData"
         :component-map="componentMap"
@@ -798,6 +928,9 @@ onBeforeUnmount(() => {
     :event-badge-count="eventBadgeCount"
     :visually-hidden="visuallyHidden"
     :interactive="previewInteractive"
+    :scroll-port="isScrollLayout"
+    :inside-scroll-port="insideScrollColumn"
+    :fill-remaining-height="fillRemainingHeight"
     @click="handleSelect"
     @mouseenter="handleMouseEnter"
     @pointerdown="handlePointerDown"
@@ -805,7 +938,12 @@ onBeforeUnmount(() => {
     @pointerleave="handlePointerLeave"
     @open-repeat="handleOpenRepeat"
   >
-    <div class="widget linear" :style="linearStyle">
+    <div
+      class="widget linear"
+      :class="{ 'is-scrollable': isScrollLayout }"
+      :style="linearStyle"
+      @wheel="isScrollLayout ? $event.stopPropagation() : undefined"
+    >
       <XmlNodeView
         v-for="(child, index) in node.children"
         :key="childId(index, child.tag)"
@@ -816,6 +954,7 @@ onBeforeUnmount(() => {
         :selectable="selectable"
         :parent-horizontal="isHorizontalLinear"
         :parent-vertical="!isHorizontalLinear"
+        :parent-scrollable="inScrollColumn"
         :icon-library="iconLibrary"
         :page-data="pageData"
         :hidden-node-ids="hiddenNodeIds"
@@ -844,6 +983,9 @@ onBeforeUnmount(() => {
     :event-badge-count="eventBadgeCount"
     :visually-hidden="visuallyHidden"
     :interactive="previewInteractive"
+    :scroll-port="isScrollLayout"
+    :inside-scroll-port="insideScrollColumn"
+    :fill-remaining-height="fillRemainingHeight"
     @click="handleSelect"
     @mouseenter="handleMouseEnter"
     @pointerdown="handlePointerDown"
@@ -851,7 +993,12 @@ onBeforeUnmount(() => {
     @pointerleave="handlePointerLeave"
     @open-repeat="handleOpenRepeat"
   >
-    <div class="widget relative" :style="relativeStyle">
+    <div
+      class="widget relative"
+      :class="{ 'is-scrollable': isScrollLayout }"
+      :style="relativeStyle"
+      @wheel="isScrollLayout ? $event.stopPropagation() : undefined"
+    >
       <XmlNodeView
         v-for="(child, index) in node.children"
         :key="childId(index, child.tag)"
@@ -861,6 +1008,7 @@ onBeforeUnmount(() => {
         :hovered-id="hoveredId"
         :selectable="selectable"
         :extra-style="childRelativeStyle(child)"
+        :parent-scrollable="inScrollColumn"
         :icon-library="iconLibrary"
         :page-data="pageData"
         :hidden-node-ids="hiddenNodeIds"
@@ -895,10 +1043,43 @@ onBeforeUnmount(() => {
   border: 1px dashed #f56c6c;
 }
 
-.widget.linear,
-.widget.relative {
-  min-height: 0;
+.widget.linear.is-scrollable,
+.widget.relative.is-scrollable {
+  flex: 1 1 0% !important;
+  width: 100%;
+  min-height: 0 !important;
   min-width: 0;
+  align-self: stretch;
+  /* 移动端风格滚动条：细、圆角、半透明 */
+  scrollbar-width: thin;
+  scrollbar-color: rgba(15, 23, 42, 0.28) transparent;
+}
+
+.widget.linear.is-scrollable::-webkit-scrollbar,
+.widget.relative.is-scrollable::-webkit-scrollbar {
+  width: 3px;
+  height: 3px;
+}
+
+.widget.linear.is-scrollable::-webkit-scrollbar-track,
+.widget.relative.is-scrollable::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.widget.linear.is-scrollable::-webkit-scrollbar-thumb,
+.widget.relative.is-scrollable::-webkit-scrollbar-thumb {
+  background: rgba(15, 23, 42, 0.28);
+  border-radius: 999px;
+}
+
+.widget.linear.is-scrollable::-webkit-scrollbar-thumb:hover,
+.widget.relative.is-scrollable::-webkit-scrollbar-thumb:hover {
+  background: rgba(15, 23, 42, 0.42);
+}
+
+.widget.linear.is-scrollable::-webkit-scrollbar-corner,
+.widget.relative.is-scrollable::-webkit-scrollbar-corner {
+  background: transparent;
 }
 
 .widget.button {

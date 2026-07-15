@@ -171,3 +171,44 @@ export function borderStyle(attrs: Record<string, string>): Record<string, strin
 
   return style
 }
+
+/** 布局容器溢出策略：hidden | visible | scroll，默认 hidden */
+export type OverflowStrategy = 'hidden' | 'visible' | 'scroll'
+
+export const OVERFLOW_OPTIONS: Array<{ label: string; value: OverflowStrategy }> = [
+  { label: '隐藏', value: 'hidden' },
+  { label: '显示', value: 'visible' },
+  { label: '滚动', value: 'scroll' },
+]
+
+export function parseOverflow(
+  value: string | undefined,
+  fallback: OverflowStrategy = 'hidden',
+): OverflowStrategy {
+  const raw = value?.trim().toLowerCase()
+  if (raw === 'hidden' || raw === 'visible' || raw === 'scroll') return raw
+  return fallback
+}
+
+/** scroll → 纵向可滚（移动端手感），横轴默认不泄出 */
+export function overflowStyle(
+  attrs: Record<string, string>,
+  fallback: OverflowStrategy | null = 'hidden',
+): Record<string, string> {
+  const raw = attrs.overflow?.trim().toLowerCase()
+  const strategy =
+    raw === 'hidden' || raw === 'visible' || raw === 'scroll'
+      ? raw
+      : fallback
+  if (!strategy) return {}
+  if (strategy === 'scroll') {
+    return {
+      overflowX: 'hidden',
+      overflowY: 'auto',
+      overscrollBehavior: 'contain',
+      WebkitOverflowScrolling: 'touch',
+      touchAction: 'pan-y',
+    }
+  }
+  return { overflow: strategy }
+}

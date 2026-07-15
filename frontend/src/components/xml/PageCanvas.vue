@@ -217,6 +217,10 @@ function handlePhoneClick(event: MouseEvent) {
   height: auto;
   min-height: 0;
   align-self: flex-start;
+  /* 组件画布：透明底，白底卡片圆角才可见 */
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
 }
 
 .phone.is-picking {

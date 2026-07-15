@@ -39,6 +39,14 @@ function handleChange(value: number | undefined) {
   const next = value === undefined ? '' : String(value)
   emit('change', next)
 }
+
+/** 阻止方向键冒泡到控件树，长按时不会清掉/切走选中节点 */
+function handleKeydown(event: Event) {
+  const key = (event as KeyboardEvent).key
+  if (key === 'ArrowUp' || key === 'ArrowDown') {
+    event.stopPropagation()
+  }
+}
 </script>
 
 <template>
@@ -51,6 +59,7 @@ function handleChange(value: number | undefined) {
     :placeholder="placeholder"
     controls-position="right"
     @change="handleChange"
+    @keydown="handleKeydown"
   />
 </template>
 

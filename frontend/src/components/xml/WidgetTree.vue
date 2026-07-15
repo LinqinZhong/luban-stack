@@ -179,13 +179,24 @@ async function restoreSelectionAndExpand() {
   }
 }
 
+function treeHasId(nodes: TreeNodeData[], id: string): boolean {
+  for (const node of nodes) {
+    if (node.id === id) return true
+    if (node.children?.length && treeHasId(node.children, id)) return true
+  }
+  return false
+}
+
 watch(
   () => props.xml,
   () => {
     syncTreeFromXml()
     if (!props.selectedId) return
-    const exists = JSON.stringify(treeData.value).includes(`"id":"${props.selectedId}"`)
-    if (!exists) emit('select', '')
+    // 解析失败时保留选中，避免属性连续改写时误清空
+    if (treeError.value) return
+    if (!treeHasId(treeData.value, props.selectedId)) {
+      emit('select', '')
+    }
   },
   { immediate: true },
 )

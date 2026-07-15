@@ -250,6 +250,7 @@ export const STYLE_OVERRIDE_KEYS = [
   'borderRadius',
   'borderWidth',
   'borderColor',
+  'overflow',
   'text',
   'textSize',
   'textColor',
