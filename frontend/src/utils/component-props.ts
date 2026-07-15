@@ -13,7 +13,8 @@ export function isReservedDataFieldName(name: string): boolean {
 }
 
 function coercePropValue(type: DataFieldType, raw: string): DataFieldValue {
-  if (type === 'string' || type === 'icon' || type === 'color') return raw
+  if (type === 'string' || type === 'icon' || type === 'color' || type === 'ref')
+    return raw
   if (type === 'number') {
     const n = Number(raw)
     return Number.isFinite(n) ? n : 0

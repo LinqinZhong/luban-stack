@@ -86,6 +86,7 @@ pages/
 | `Icon` | 图标（`iconId` 引用项目 `icons.json`，`size` / `color`） |
 | `LinearLayout` | 线性布局（`orientation`: vertical / horizontal） |
 | `RelativeLayout` | 相对布局（`layout_alignParent*` / `layout_center*` 等） |
+| `Modal` | 全屏弹层（相对布局定位子控件；数据池引用 `.show()` / `.hide()`） |
 
 项目根目录 `icons.json` 存放可复用 SVG 符号定义；画布通过 SVG sprite + `<use>` 渲染，页面 XML 不内联 SVG。
 

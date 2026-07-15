@@ -138,6 +138,7 @@ const DATA_FIELD_TYPES = new Set([
   'array',
   'icon',
   'color',
+  'ref',
 ])
 
 function defaultValue(type: DataField['type']) {
@@ -152,6 +153,7 @@ function defaultValue(type: DataField['type']) {
       return []
     case 'icon':
     case 'color':
+    case 'ref':
       return ''
     default:
       return ''
@@ -196,6 +198,8 @@ function normalizeObjectSubField(raw: unknown): ObjectSubField | null {
   const s = raw as Partial<ObjectSubField>
   if (typeof s.name !== 'string') return null
   if (!s.type || !DATA_FIELD_TYPES.has(s.type)) return null
+  // 引用仅允许数据池顶层
+  if (s.type === 'ref') return null
 
   if (s.type === 'array') {
     const arrayFields = Array.isArray(s.arrayFields)
@@ -226,6 +230,8 @@ function normalizeArraySubField(raw: unknown): ArraySubField | null {
   if (!raw || typeof raw !== 'object') return null
   const s = raw as Partial<ArraySubField>
   if (!s.type || !DATA_FIELD_TYPES.has(s.type)) return null
+  // 引用仅允许数据池顶层
+  if (s.type === 'ref') return null
 
   if (s.type === 'array') {
     const arrayFields = Array.isArray(s.arrayFields)
@@ -320,6 +326,14 @@ function normalizeDataField(raw: unknown): DataField | null {
     field.objectFields = item.objectFields
       .map((sub) => normalizeObjectSubField(sub))
       .filter((sub): sub is ObjectSubField => sub !== null)
+  }
+
+  // 引用类型存节点 path，不可绑定数据源
+  if (field.type === 'ref') {
+    field.binding = ''
+    delete field.computeBody
+    field.value =
+      typeof field.value === 'string' ? field.value : String(field.value ?? '')
   }
 
   return field

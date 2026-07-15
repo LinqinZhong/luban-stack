@@ -1,3 +1,5 @@
+import type { DataField, DataFieldType } from './page-data'
+
 export type MethodParamType =
   | 'string'
   | 'number'
@@ -11,6 +13,37 @@ export type MethodReturnType = MethodParamType | 'void'
 export interface MethodParam {
   name: string
   type: MethodParamType
+}
+
+/** 数据池字段类型 → 方法 ambient / 形参类型 */
+export function dataFieldToMethodParamType(type: DataFieldType): MethodParamType {
+  switch (type) {
+    case 'number':
+      return 'number'
+    case 'boolean':
+      return 'boolean'
+    case 'array':
+      return 'array'
+    case 'json':
+      return 'object'
+    default:
+      // string / icon / color / ref
+      return 'string'
+  }
+}
+
+/** 数据池字段 → Monaco ambient 变量（合法标识符；ref 见 buildRefAmbientDeclarations） */
+export function dataFieldsToAmbientVars(fields: DataField[] | undefined): MethodParam[] {
+  const result: MethodParam[] = []
+  const seen = new Set<string>()
+  for (const field of fields ?? []) {
+    if (field.type === 'ref') continue
+    const name = field.name.trim()
+    if (!name || seen.has(name) || !/^[A-Za-z_$][\w$]*$/.test(name)) continue
+    seen.add(name)
+    result.push({ name, type: dataFieldToMethodParamType(field.type) })
+  }
+  return result
 }
 
 export interface PageMethod {
@@ -83,32 +116,6 @@ export const BUILTIN_METHODS: PageMethod[] = [
       '// 弹出 Toast 提示\n' +
       "// message: 提示内容\n" +
       "// duration: 'short'（短，默认）或 'long'（长）",
-    builtin: true,
-  },
-  {
-    name: 'openMask',
-    params: [{ name: 'name', type: 'string' }],
-    returnType: 'void',
-    body:
-      '// 打开遮罩（按 name 入栈）\n' +
-      '// 同一页面同时只显示栈顶遮罩；打开新遮罩时先前遮罩会暂时关闭，关闭后可恢复',
-    builtin: true,
-  },
-  {
-    name: 'closeMask',
-    params: [{ name: 'name', type: 'string' }],
-    returnType: 'void',
-    body:
-      '// 关闭遮罩\n' +
-      '// 不传 name：关闭当前栈顶\n' +
-      '// 传入 name：关闭该层及其之上的遮罩',
-    builtin: true,
-  },
-  {
-    name: 'closeAllMasks',
-    params: [],
-    returnType: 'void',
-    body: '// 关闭页面上所有遮罩并清空堆栈',
     builtin: true,
   },
 ]
@@ -364,7 +371,7 @@ export function countEventBindings(raw: string | undefined): number {
   return parseEventBindings(raw).length
 }
 
-export const INTERACTION_EVENT_KEYS = ['onClick', 'onLongClick', 'onAppear'] as const
+export const INTERACTION_EVENT_KEYS = ['onClick', 'onLongClick', 'onScroll'] as const
 
 export function countNodeEventBindings(
   attrs: Record<string, string | undefined>,

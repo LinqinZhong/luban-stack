@@ -6,6 +6,8 @@ export type DataFieldType =
   | 'array'
   | 'icon'
   | 'color'
+  /** 引用当前页面/组件控件树节点（值为节点 path id） */
+  | 'ref'
 
 export type DataFieldValue =
   | string

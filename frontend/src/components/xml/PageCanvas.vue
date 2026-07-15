@@ -3,11 +3,11 @@ import { computed, onBeforeUnmount, onMounted, provide, ref, watch } from 'vue'
 import { Box, Delete, Plus, RefreshRight } from '@element-plus/icons-vue'
 import { colorPickState } from '../../composables/useColorPick'
 import {
-  createMaskStack,
-  MASK_HOST_KEY,
-  MASK_STACK_KEY,
-  type MaskStackApi,
-} from '../../composables/useMaskStack'
+  createModalStack,
+  MODAL_HOST_KEY,
+  MODAL_STACK_KEY,
+  type ModalStackApi,
+} from '../../composables/useModalStack'
 import type { IconLibrary } from '../../types/icon-library'
 import type { PageData } from '../../types/page-data'
 import type { ComponentRenderMap } from '../../types/component-render'
@@ -24,24 +24,24 @@ const props = defineProps<{
   showAddButton?: boolean
   showAddComponentButton?: boolean
   showDeleteButton?: boolean
-  /** 预览时展开 repeat（类似 v-for） */
+  /** ????? repeat??? v-for? */
   expandRepeat?: boolean
   pageData?: PageData
   iconLibrary?: IconLibrary
-  /** 仅编辑态：画布上隐藏这些节点 */
+  /** ?????????????? */
   hiddenNodeIds?: string[]
-  /** 页面中 Component 节点的渲染数据 */
+  /** ??? Component ??????? */
   componentMap?: ComponentRenderMap
-  /** 画布高度；不传则默认 min 667。传 auto 则按内容撑开 */
+  /** ?????????? min 667?? auto ?????? */
   canvasHeight?: number | 'auto'
-  /** 编辑/预览组件自身时注入 $props（默认值） */
+  /** ??/????????? $props????? */
   dollarProps?: Record<string, unknown>
-  /** 预览态路由参数（$route） */
+  /** ????????$route? */
   routeParams?: Record<string, unknown>
-  /** 预览态 Toast（显示在手机框内） */
+  /** ??? Toast????????? */
   toast?: { message: string; id: number } | null
-  /** 页面级遮罩堆栈（工作区持有，切页可清空） */
-  maskStack?: MaskStackApi
+  /** ??? Modal ??????????????? */
+  modalStack?: ModalStackApi
 }>()
 
 const emit = defineEmits<{
@@ -53,21 +53,21 @@ const emit = defineEmits<{
   interact: [payload: import('../../utils/event-runtime').PreviewInteractPayload]
 }>()
 
-const fallbackMaskStack = createMaskStack()
-const maskHostRef = ref<HTMLElement | null>(null)
+const fallbackModalStack = createModalStack()
+const modalHostRef = ref<HTMLElement | null>(null)
 
-provide(MASK_STACK_KEY, props.maskStack ?? fallbackMaskStack)
-provide(MASK_HOST_KEY, maskHostRef)
+provide(MODAL_STACK_KEY, props.modalStack ?? fallbackModalStack)
+provide(MODAL_HOST_KEY, modalHostRef)
 
 watch(
   () => props.selectable,
   (selectable) => {
-    if (selectable) (props.maskStack ?? fallbackMaskStack).closeAll()
+    if (selectable) (props.modalStack ?? fallbackModalStack).closeAll()
   },
 )
 const parsed = computed<{ root: XmlNode | null; error: string }>(() => {
   if (!props.xml.trim()) {
-    return { root: null, error: '页面 XML 为空' }
+    return { root: null, error: '?? XML ??' }
   }
   try {
     const root = parsePageXml(props.xml)
@@ -77,7 +77,7 @@ const parsed = computed<{ root: XmlNode | null; error: string }>(() => {
   } catch (err) {
     return {
       root: null,
-      error: err instanceof Error ? err.message : 'XML 解析失败',
+      error: err instanceof Error ? err.message : 'XML ????',
     }
   }
 })
@@ -106,7 +106,7 @@ const phoneFitContent = computed(
   () => props.canvasHeight === 'auto' || typeof props.canvasHeight === 'number',
 )
 
-/** 画布平移 / 缩放由父组件持有，切换页面时保持 */
+/** ???? / ???????????????? */
 const panX = defineModel<number>('panX', { default: 0 })
 const panY = defineModel<number>('panY', { default: 0 })
 const zoom = defineModel<number>('zoom', { default: 1 })
@@ -168,7 +168,7 @@ function clampZoom(value: number) {
 function onStageWheel(event: WheelEvent) {
   if (!event.ctrlKey && !event.metaKey) return
   event.preventDefault()
-  // 以光标位置为缩放锚点，同步调整平移
+  // ?????????????????
   const stage = stageRef.value
   if (!stage) {
     const factor = event.deltaY > 0 ? 0.9 : 1 / 0.9
@@ -183,10 +183,10 @@ function onStageWheel(event: WheelEvent) {
   const nextZoom = clampZoom(oldZoom * factor)
   if (nextZoom === oldZoom) return
 
-  // world 以 center top 为原点：内容中心 x = stageWidth/2，顶端 y = 0（再加 padding 影响较小）
+  // world ? center top ???????? x = stageWidth/2??? y = 0??? padding ?????
   const ox = rect.width / 2
   const oy = 0
-  // 光标相对缩放原点的向量，缩放前后保持屏幕位置不变
+  // ????????????????????????
   const dx = cx - ox - panX.value
   const dy = cy - oy - panY.value
   const ratio = nextZoom / oldZoom
@@ -209,7 +209,7 @@ function endPan(target?: HTMLElement | null) {
 }
 
 function onStagePointerDown(event: PointerEvent) {
-  // 仅中键拖动画布
+  // ???????
   if (event.button !== 1) return
   event.preventDefault()
   event.stopPropagation()
@@ -233,7 +233,7 @@ function onStagePointerUp(event: PointerEvent) {
   endPan(event.currentTarget as HTMLElement)
 }
 
-/** 阻止中键默认自动滚动等行为 */
+/** ????????????? */
 function onStageMouseDown(event: MouseEvent) {
   if (event.button === 1) {
     event.preventDefault()
@@ -276,13 +276,13 @@ onBeforeUnmount(() => {
       v-if="showAddButton || showAddComponentButton || showDeleteButton"
       class="stage-toolbar color-pick-ignore"
     >
-      <el-tooltip v-if="showAddButton" content="添加控件" placement="left">
+      <el-tooltip v-if="showAddButton" content="????" placement="left">
         <el-button type="primary" circle :icon="Plus" @click="emit('add')" />
       </el-tooltip>
-      <el-tooltip v-if="showAddComponentButton" content="添加组件" placement="left">
+      <el-tooltip v-if="showAddComponentButton" content="????" placement="left">
         <el-button type="success" circle :icon="Box" @click="emit('add-component')" />
       </el-tooltip>
-      <el-tooltip v-if="showDeleteButton" content="删除控件" placement="left">
+      <el-tooltip v-if="showDeleteButton" content="????" placement="left">
         <el-button type="danger" circle :icon="Delete" @click="emit('delete')" />
       </el-tooltip>
     </div>
@@ -326,7 +326,7 @@ onBeforeUnmount(() => {
           @open-repeat="emit('open-repeat', $event)"
           @interact="emit('interact', $event)"
         />
-        <div ref="maskHostRef" class="phone-mask-host" />
+        <div ref="modalHostRef" class="phone-modal-host" />
         <Transition name="phone-toast">
           <div
             v-if="toast?.message"
@@ -341,8 +341,8 @@ onBeforeUnmount(() => {
     </div>
 
     <div class="stage-status color-pick-ignore">
-      <span class="zoom-label" title="Ctrl + 滚轮缩放">{{ zoomPercent }}%</span>
-      <el-tooltip content="复位画布（中键拖拽平移 · Ctrl+滚轮缩放）" placement="left">
+      <span class="zoom-label" title="Ctrl + ????">{{ zoomPercent }}%</span>
+      <el-tooltip content="??????????? ? Ctrl+?????" placement="left">
         <el-button
           class="pan-reset"
           :class="{ visible: viewMoved }"
@@ -359,7 +359,7 @@ onBeforeUnmount(() => {
       class="pick-overlay color-pick-ignore"
       @click="colorPickState.cancelPick()"
     >
-      <span>点击画布取色，点击空白处取消</span>
+      <span>??????????????</span>
     </div>
   </div>
 </template>
@@ -377,7 +377,7 @@ onBeforeUnmount(() => {
     linear-gradient(rgba(15, 23, 42, 0.04) 1px, transparent 1px);
   background-size: 16px 16px;
   background-color: #e8edf3;
-  /* 提示可用中键拖拽 */
+  /* ???????? */
   cursor: default;
 }
 
@@ -457,7 +457,7 @@ onBeforeUnmount(() => {
   -webkit-user-select: none;
 }
 
-.phone-mask-host {
+.phone-modal-host {
   position: absolute;
   inset: 0;
   z-index: 40;
@@ -465,11 +465,11 @@ onBeforeUnmount(() => {
   overflow: hidden;
 }
 
-.phone-mask-host :deep(.mask-overlay) {
+.phone-modal-host :deep(.modal-overlay) {
   pointer-events: auto;
 }
 
-/* 编辑态允许子控件（如 Swiper 多页）溢出手机框显示 */
+/* ?????????? Swiper ?????????? */
 .phone.is-edit {
   overflow: visible;
 }
@@ -508,7 +508,7 @@ onBeforeUnmount(() => {
   height: auto;
   min-height: 0;
   align-self: flex-start;
-  /* 组件画布：透明底，白底卡片圆角才可见 */
+  /* ?????????????????? */
   background: transparent;
   border-color: transparent;
   box-shadow: none;

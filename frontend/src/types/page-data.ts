@@ -6,6 +6,8 @@ export type DataFieldType =
   | 'array'
   | 'icon'
   | 'color'
+  /** 引用当前页面/组件控件树节点（值为节点 path id） */
+  | 'ref'
 
 export type DataFieldValue =
   | string
@@ -71,7 +73,13 @@ export const DATA_FIELD_TYPE_OPTIONS: { label: string; value: DataFieldType }[] 
   { label: '颜色', value: 'color' },
   { label: '对象', value: 'json' },
   { label: '数组', value: 'array' },
+  { label: '引用', value: 'ref' },
 ]
+
+/** 组件参数 / 数组项等：不含「引用」（引用仅数据池顶层） */
+export const COMPOSABLE_FIELD_TYPE_OPTIONS = DATA_FIELD_TYPE_OPTIONS.filter(
+  (item) => item.value !== 'ref',
+)
 
 /** 对象字段可选类型（对象内不再嵌套「对象」） */
 export const NESTED_FIELD_TYPE_OPTIONS: { label: string; value: DataFieldType }[] = [
@@ -83,8 +91,8 @@ export const NESTED_FIELD_TYPE_OPTIONS: { label: string; value: DataFieldType }[
   { label: '数组', value: 'array' },
 ]
 
-/** 数组项可选类型（含对象） */
-export const ARRAY_ITEM_TYPE_OPTIONS = DATA_FIELD_TYPE_OPTIONS
+/** 数组项可选类型（含对象，不含引用） */
+export const ARRAY_ITEM_TYPE_OPTIONS = COMPOSABLE_FIELD_TYPE_OPTIONS
 
 export function createEmptyDataField(): DataField {
   return {
@@ -131,8 +139,8 @@ export function defaultValue(type: DataFieldType): DataFieldValue {
     case 'array':
       return []
     case 'icon':
-      return ''
     case 'color':
+    case 'ref':
       return ''
     default:
       return ''

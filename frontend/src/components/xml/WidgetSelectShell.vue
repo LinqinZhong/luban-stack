@@ -58,6 +58,11 @@ const absoluteStretchedY = computed(() => {
   return props.extraStyle.top != null && props.extraStyle.bottom != null
 })
 
+const absoluteStretchedX = computed(() => {
+  if (!isAbsolute.value || !props.extraStyle) return false
+  return props.extraStyle.left != null && props.extraStyle.right != null
+})
+
 const shellStyle = computed<CSSProperties>(() => {
   const style: CSSProperties = {
     position: 'relative',
@@ -72,7 +77,11 @@ const shellStyle = computed<CSSProperties>(() => {
 
   // 绝对定位子节点：按自身 width/height，勿强制撑满父级
   if (isAbsolute.value) {
-    if (matchParentWidth.value) {
+    if (absoluteStretchedX.value) {
+      // left + right 已拉满，不要再写 width:100% 破坏约束
+      style.width = undefined
+      style.minWidth = 0
+    } else if (matchParentWidth.value) {
       style.width = matchParentAxisSize('width', props.marginAttrs)
       style.minWidth = 0
     } else if (typeof props.width === 'number') {
@@ -174,6 +183,7 @@ const fillCrossAxis = computed(
     matchParentWidth.value ||
     matchParentHeight.value ||
     isAbsolute.value ||
+    absoluteStretchedX.value ||
     absoluteStretchedY.value,
 )
 
@@ -199,7 +209,10 @@ const marginBoxStyle = computed(() => ({
   width: fillCrossAxis.value || matchParentWidth.value ? '100%' : undefined,
   height: stackByContent.value
     ? 'auto'
-    : matchParentHeight.value || isAbsolute.value || absoluteStretchedY.value
+    : matchParentHeight.value ||
+        isAbsolute.value ||
+        absoluteStretchedX.value ||
+        absoluteStretchedY.value
       ? '100%'
       : undefined,
   ...(props.scrollPort ? { overflow: 'hidden' as const } : {}),
@@ -215,7 +228,10 @@ const contentBoxStyle = computed<CSSProperties>(() => ({
   width: fillCrossAxis.value || matchParentWidth.value ? '100%' : undefined,
   height: stackByContent.value
     ? 'auto'
-    : matchParentHeight.value || isAbsolute.value || absoluteStretchedY.value
+    : matchParentHeight.value ||
+        isAbsolute.value ||
+        absoluteStretchedX.value ||
+        absoluteStretchedY.value
       ? '100%'
       : undefined,
   ...(props.scrollPort ? { overflow: 'hidden' as const } : {}),

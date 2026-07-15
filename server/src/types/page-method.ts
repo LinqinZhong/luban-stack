@@ -62,32 +62,6 @@ export const BUILTIN_METHODS: PageMethod[] = [
       "// duration: 'short'（短，默认）或 'long'（长）",
     builtin: true,
   },
-  {
-    name: 'openMask',
-    params: [{ name: 'name', type: 'string' }],
-    returnType: 'void',
-    body:
-      '// 打开遮罩（按 name 入栈）\n' +
-      '// 同一页面同时只显示栈顶遮罩；打开新遮罩时先前遮罩会暂时关闭，关闭后可恢复',
-    builtin: true,
-  },
-  {
-    name: 'closeMask',
-    params: [{ name: 'name', type: 'string' }],
-    returnType: 'void',
-    body:
-      '// 关闭遮罩\n' +
-      '// 不传 name：关闭当前栈顶\n' +
-      '// 传入 name：关闭该层及其之上的遮罩',
-    builtin: true,
-  },
-  {
-    name: 'closeAllMasks',
-    params: [],
-    returnType: 'void',
-    body: '// 关闭页面上所有遮罩并清空堆栈',
-    builtin: true,
-  },
 ]
 
 /** 仅组件 function 目录注入的预置方法 */

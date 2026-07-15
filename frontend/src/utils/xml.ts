@@ -9,6 +9,9 @@ export interface XmlNode {
   scope?: { item: unknown; index: number }
 }
 
+/** 历史兼容：曾用于组件多根的透明容器（勿新增；打开时尽量卸掉） */
+export const FRAGMENT_TAG = 'Fragment'
+
 const SUPPORTED_TAGS = new Set([
   'Text',
   'Button',
@@ -17,9 +20,14 @@ const SUPPORTED_TAGS = new Set([
   'LinearLayout',
   'RelativeLayout',
   'Swiper',
-  'Mask',
+  'Modal',
   'Component',
+  FRAGMENT_TAG,
 ])
+
+export function isFragmentTag(tag: string): boolean {
+  return tag === FRAGMENT_TAG
+}
 
 export function parsePageXml(xml: string): XmlNode {
   const parser = new DOMParser()
@@ -156,11 +164,46 @@ export function matchParentAxisSize(
   return offset > 0 ? `calc(100% - ${offset}px)` : '100%'
 }
 
+const BORDER_CORNER_ATTRS = [
+  'borderTopLeftRadius',
+  'borderTopRightRadius',
+  'borderBottomRightRadius',
+  'borderBottomLeftRadius',
+] as const
+
+/** 任一圆角属性有值时裁切内容（含四角独立圆角） */
+export function hasBorderRadius(attrs: Record<string, string>): boolean {
+  if (attrs.borderRadius != null && attrs.borderRadius !== '') return true
+  return BORDER_CORNER_ATTRS.some(
+    (key) => attrs[key] != null && attrs[key] !== '',
+  )
+}
+
 export function borderStyle(attrs: Record<string, string>): Record<string, string> {
   const style: Record<string, string> = {}
 
-  if (attrs.borderRadius) {
-    style.borderRadius = `${parseNumber(attrs.borderRadius)}px`
+  const uniform =
+    attrs.borderRadius != null && attrs.borderRadius !== ''
+      ? parseNumber(attrs.borderRadius)
+      : null
+
+  const corner = (key: (typeof BORDER_CORNER_ATTRS)[number]) => {
+    const raw = attrs[key]
+    if (raw != null && raw !== '') return parseNumber(raw)
+    return uniform
+  }
+
+  const tl = corner('borderTopLeftRadius')
+  const tr = corner('borderTopRightRadius')
+  const br = corner('borderBottomRightRadius')
+  const bl = corner('borderBottomLeftRadius')
+
+  if (tl != null || tr != null || br != null || bl != null) {
+    // 分角优先；未单独设置的角回退到统一 borderRadius，再回退 0
+    style.borderTopLeftRadius = `${tl ?? 0}px`
+    style.borderTopRightRadius = `${tr ?? 0}px`
+    style.borderBottomRightRadius = `${br ?? 0}px`
+    style.borderBottomLeftRadius = `${bl ?? 0}px`
   }
 
   if (attrs.borderWidth) {

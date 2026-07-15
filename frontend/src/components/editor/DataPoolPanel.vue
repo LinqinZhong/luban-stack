@@ -24,10 +24,13 @@ import {
 } from '../../types/page-data'
 import { resolveComputedPageData } from '../../utils/compute-runtime'
 import { isReservedDataFieldName } from '../../utils/component-props'
+import { buildWidgetTreeSelectData } from '../../utils/widget-tree'
 import { ElMessage } from 'element-plus'
 
 const props = defineProps<{
   data: PageData
+  /** 当前页面/组件 XML，供「引用」类型选择控件节点 */
+  xml?: string
   iconOptions?: Array<{ id: string; label: string }>
 }>()
 
@@ -64,8 +67,14 @@ function handleTypeChange(index: number, type: DataField['type']) {
     value: defaultValue(type),
     arrayFields: undefined,
     objectFields: undefined,
+    // 引用类型不可绑定数据源
+    ...(type === 'ref' ? { binding: '' as const, computeBody: '' } : {}),
   })
 }
+
+const widgetRefOptions = computed(() =>
+  buildWidgetTreeSelectData(props.xml ?? ''),
+)
 
 /** 颜色/字符串类展示用：避免对象被 String() 成 [object Object] */
 function colorSafeString(value: unknown): string {
@@ -177,7 +186,7 @@ function openComputeEditor(index: number) {
 function handleBindingChange(index: number, binding: DataSourceBinding) {
   if (binding === 'api') return
   const field = fields.value[index]
-  if (!field) return
+  if (!field || field.type === 'ref') return
   if (binding === 'computed') {
     updateField(index, {
       binding: 'computed',
@@ -285,6 +294,21 @@ function saveComputeBody(body: string) {
               placeholder="#409eff / rgba(...)"
               @update:model-value="updateField($index, { value: $event })"
             />
+            <el-tree-select
+              v-else-if="row.type === 'ref'"
+              :model-value="colorSafeString(row.value) || undefined"
+              :data="widgetRefOptions"
+              filterable
+              clearable
+              check-strictly
+              default-expand-all
+              :render-after-expand="false"
+              placeholder="选择控件节点"
+              style="width: 100%"
+              @update:model-value="
+                updateField($index, { value: $event == null ? '' : String($event) })
+              "
+            />
             <div v-else-if="row.type === 'json'" class="complex-value">
               <span class="value-preview">{{ objectFieldCount(row) }} 个字段</span>
               <el-button type="primary" link @click="openObjectEditor($index)">编辑</el-button>
@@ -304,7 +328,8 @@ function saveComputeBody(body: string) {
 
         <el-table-column label="绑定数据源" min-width="180">
           <template #default="{ row, $index }">
-            <div class="binding-cell">
+            <div v-if="row.type === 'ref'" class="binding-disabled">不可绑定</div>
+            <div v-else class="binding-cell">
               <el-select
                 :model-value="row.binding || ''"
                 placeholder="无"
@@ -412,6 +437,11 @@ function saveComputeBody(body: string) {
   display: flex;
   align-items: center;
   gap: 6px;
+}
+
+.binding-disabled {
+  font-size: 13px;
+  color: #94a3b8;
 }
 
 .value-preview {

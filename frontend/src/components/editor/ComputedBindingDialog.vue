@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import TsCodeEditor from './TsCodeEditor.vue'
+import { defaultComputeBody, type DataField } from '../../types/page-data'
 import {
-  defaultComputeBody,
-  type DataField,
-  type DataFieldType,
-} from '../../types/page-data'
-import type { MethodParam, MethodReturnType } from '../../types/page-method'
+  dataFieldToMethodParamType,
+  dataFieldsToAmbientVars,
+  type MethodParam,
+  type MethodReturnType,
+} from '../../types/page-method'
 
 const props = defineProps<{
   modelValue: boolean
@@ -32,37 +33,13 @@ const visible = computed({
 
 const fieldName = computed(() => props.field?.name.trim() || '未命名字段')
 
-function fieldToParamType(type: DataFieldType): MethodParam['type'] {
-  switch (type) {
-    case 'number':
-      return 'number'
-    case 'boolean':
-      return 'boolean'
-    case 'array':
-      return 'array'
-    case 'json':
-      return 'object'
-    default:
-      return 'string'
-  }
-}
-
-function fieldToReturnType(type: DataFieldType): MethodReturnType {
-  return fieldToParamType(type)
-}
-
 /** 同级字段 → ambient，方法签名无入参 */
 const ambientVars = computed<MethodParam[]>(() =>
-  (props.siblingFields ?? [])
-    .filter((item) => item.name.trim())
-    .map((item) => ({
-      name: item.name.trim(),
-      type: fieldToParamType(item.type),
-    })),
+  dataFieldsToAmbientVars(props.siblingFields),
 )
 
 const returnType = computed<MethodReturnType>(() =>
-  fieldToReturnType(props.field?.type ?? 'string'),
+  dataFieldToMethodParamType(props.field?.type ?? 'string'),
 )
 
 const functionName = computed(() =>

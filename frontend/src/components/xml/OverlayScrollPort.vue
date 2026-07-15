@@ -17,6 +17,16 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   wheel: [event: WheelEvent]
+  scroll: [
+    detail: {
+      scrollTop: number
+      scrollLeft: number
+      scrollHeight: number
+      scrollWidth: number
+      clientHeight: number
+      clientWidth: number
+    },
+  ]
 }>()
 
 const bodyRef = ref<HTMLElement | null>(null)
@@ -82,6 +92,16 @@ function revealThumb() {
 function onScroll() {
   if (!props.enabled) return
   revealThumb()
+  const el = bodyRef.value
+  if (!el) return
+  emit('scroll', {
+    scrollTop: el.scrollTop,
+    scrollLeft: el.scrollLeft,
+    scrollHeight: el.scrollHeight,
+    scrollWidth: el.scrollWidth,
+    clientHeight: el.clientHeight,
+    clientWidth: el.clientWidth,
+  })
 }
 
 function onWheel(event: WheelEvent) {

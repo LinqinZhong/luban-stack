@@ -1,5 +1,5 @@
 import type { XmlNode } from './xml'
-import { parsePageXml } from './xml'
+import { FRAGMENT_TAG, isFragmentTag, parsePageXml } from './xml'
 import { countNodeEventBindings } from '../types/page-method'
 
 export interface TreeNodeData {
@@ -50,8 +50,8 @@ function nodeLabel(node: XmlNode): string {
     const n = node.children.length
     return n ? `${node.tag} · ${n}页` : node.tag
   }
-  if (node.tag === 'Mask') {
-    return '遮罩 Mask'
+  if (node.tag === 'Modal') {
+    return '弹层 Modal'
   }
   return node.tag
 }
@@ -79,6 +79,15 @@ export function buildWidgetTree(xml: string): {
 
   try {
     const root = parsePageXml(xml)
+    // 历史 Fragment：树中平铺子节点，避免显示「不支持的控件」
+    if (isFragmentTag(root.tag)) {
+      return {
+        tree: root.children.map((child, index) =>
+          toTreeNode(child, `0:${FRAGMENT_TAG}/${index}:${child.tag}`),
+        ),
+        error: '',
+      }
+    }
     return {
       tree: [toTreeNode(root, `0:${root.tag}`)],
       error: '',
@@ -89,4 +98,27 @@ export function buildWidgetTree(xml: string): {
       error: err instanceof Error ? err.message : 'XML 解析失败',
     }
   }
+}
+
+/** el-tree-select / 级联选择用 */
+export interface WidgetTreeSelectNode {
+  value: string
+  label: string
+  children?: WidgetTreeSelectNode[]
+}
+
+function toSelectNode(node: TreeNodeData): WidgetTreeSelectNode {
+  return {
+    value: node.id,
+    label: node.label,
+    children: node.children?.length
+      ? node.children.map(toSelectNode)
+      : undefined,
+  }
+}
+
+/** 将控件树转为 TreeSelect 数据；值为节点 path id */
+export function buildWidgetTreeSelectData(xml: string): WidgetTreeSelectNode[] {
+  const { tree } = buildWidgetTree(xml)
+  return tree.map(toSelectNode)
 }

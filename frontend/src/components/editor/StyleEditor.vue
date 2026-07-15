@@ -38,6 +38,10 @@ const form = reactive({
   background: '',
   gravity: '',
   borderRadius: '',
+  borderTopLeftRadius: '',
+  borderTopRightRadius: '',
+  borderBottomRightRadius: '',
+  borderBottomLeftRadius: '',
   borderWidth: '',
   borderColor: '',
   overflow: '',
@@ -51,13 +55,16 @@ const showTextProps = computed(
   () => props.tag === 'Text' || props.tag === 'Button',
 )
 const showIconColor = computed(() => props.tag === 'Icon')
+/** Modal 始终全屏，无宽高 / margin */
+const showSizeProps = computed(() => props.tag !== 'Modal')
+const showMarginProps = computed(() => props.tag !== 'Modal')
 const showBorder = computed(
   () =>
     props.showBorder ??
     (props.tag === 'LinearLayout' ||
       props.tag === 'RelativeLayout' ||
       props.tag === 'Swiper' ||
-      props.tag === 'Mask' ||
+      props.tag === 'Modal' ||
       props.tag === 'Image'),
 )
 const showOverflow = computed(
@@ -104,6 +111,10 @@ function syncFromModel(styles: StyleOverrides) {
   form.background = styles.background ?? ''
   form.gravity = styles.gravity ?? ''
   form.borderRadius = styles.borderRadius ?? ''
+  form.borderTopLeftRadius = styles.borderTopLeftRadius ?? ''
+  form.borderTopRightRadius = styles.borderTopRightRadius ?? ''
+  form.borderBottomRightRadius = styles.borderBottomRightRadius ?? ''
+  form.borderBottomLeftRadius = styles.borderBottomLeftRadius ?? ''
   form.borderWidth = styles.borderWidth ?? ''
   form.borderColor = styles.borderColor ?? ''
   form.overflow = styles.overflow ?? ''
@@ -120,26 +131,34 @@ function emitStyles() {
     if (trimmed) next[key] = trimmed
   }
 
-  // wrap_content 表示「不覆盖尺寸」，不写入 overrides
-  if (form.widthMode === 'match_parent' || form.widthMode === 'fixed') {
-    set('width', sizeToAttr(form.widthMode, form.widthValue))
+  // wrap_content 表示「不覆盖尺寸」，不写入 overrides；Modal 永不写宽高 / margin
+  if (showSizeProps.value) {
+    if (form.widthMode === 'match_parent' || form.widthMode === 'fixed') {
+      set('width', sizeToAttr(form.widthMode, form.widthValue))
+    }
+    if (form.heightMode === 'match_parent' || form.heightMode === 'fixed') {
+      set('height', sizeToAttr(form.heightMode, form.heightValue))
+    }
   }
-  if (form.heightMode === 'match_parent' || form.heightMode === 'fixed') {
-    set('height', sizeToAttr(form.heightMode, form.heightValue))
+  if (showMarginProps.value) {
+    set('margin', form.margin)
+    set('marginLeft', form.marginLeft)
+    set('marginRight', form.marginRight)
+    set('marginTop', form.marginTop)
+    set('marginBottom', form.marginBottom)
   }
-  set('margin', form.margin)
-  set('marginLeft', form.marginLeft)
-  set('marginRight', form.marginRight)
-  set('marginTop', form.marginTop)
-  set('marginBottom', form.marginBottom)
   set('padding', form.padding)
   set('paddingLeft', form.paddingLeft)
   set('paddingRight', form.paddingRight)
   set('paddingTop', form.paddingTop)
   set('paddingBottom', form.paddingBottom)
   set('background', form.background)
-  set('gravity', form.gravity)
+  if (props.tag !== 'Modal') set('gravity', form.gravity)
   set('borderRadius', form.borderRadius)
+  set('borderTopLeftRadius', form.borderTopLeftRadius)
+  set('borderTopRightRadius', form.borderTopRightRadius)
+  set('borderBottomRightRadius', form.borderBottomRightRadius)
+  set('borderBottomLeftRadius', form.borderBottomLeftRadius)
   set('borderWidth', form.borderWidth)
   set('borderColor', form.borderColor)
   set('overflow', form.overflow)
@@ -164,47 +183,49 @@ function onFieldChange() {
 
 <template>
   <div class="style-editor">
-    <div class="section-title">尺寸</div>
-    <el-form label-position="top" size="small">
-      <el-form-item label="宽度 width">
-        <div class="size-row">
-          <el-select v-model="form.widthMode" @change="onFieldChange">
-            <el-option
-              v-for="opt in SIZE_OPTIONS"
-              :key="opt.value"
-              :label="opt.label"
-              :value="opt.value"
+    <template v-if="showSizeProps">
+      <div class="section-title">尺寸</div>
+      <el-form label-position="top" size="small">
+        <el-form-item label="宽度 width">
+          <div class="size-row">
+            <el-select v-model="form.widthMode" @change="onFieldChange">
+              <el-option
+                v-for="opt in SIZE_OPTIONS"
+                :key="opt.value"
+                :label="opt.label"
+                :value="opt.value"
+              />
+            </el-select>
+            <NumericInput
+              v-if="form.widthMode === 'fixed'"
+              v-model="form.widthValue"
+              :min="1"
+              :max="5000"
+              @change="onFieldChange"
             />
-          </el-select>
-          <NumericInput
-            v-if="form.widthMode === 'fixed'"
-            v-model="form.widthValue"
-            :min="1"
-            :max="5000"
-            @change="onFieldChange"
-          />
-        </div>
-      </el-form-item>
-      <el-form-item label="高度 height">
-        <div class="size-row">
-          <el-select v-model="form.heightMode" @change="onFieldChange">
-            <el-option
-              v-for="opt in SIZE_OPTIONS"
-              :key="opt.value"
-              :label="opt.label"
-              :value="opt.value"
+          </div>
+        </el-form-item>
+        <el-form-item label="高度 height">
+          <div class="size-row">
+            <el-select v-model="form.heightMode" @change="onFieldChange">
+              <el-option
+                v-for="opt in SIZE_OPTIONS"
+                :key="opt.value"
+                :label="opt.label"
+                :value="opt.value"
+              />
+            </el-select>
+            <NumericInput
+              v-if="form.heightMode === 'fixed'"
+              v-model="form.heightValue"
+              :min="1"
+              :max="5000"
+              @change="onFieldChange"
             />
-          </el-select>
-          <NumericInput
-            v-if="form.heightMode === 'fixed'"
-            v-model="form.heightValue"
-            :min="1"
-            :max="5000"
-            @change="onFieldChange"
-          />
-        </div>
-      </el-form-item>
-    </el-form>
+          </div>
+        </el-form-item>
+      </el-form>
+    </template>
 
     <div class="section-title">间距</div>
     <el-form label-position="top" size="small">
@@ -225,23 +246,25 @@ function onFieldChange() {
           <NumericInput v-model="form.paddingLeft" @change="onFieldChange" />
         </el-form-item>
       </div>
-      <el-form-item label="margin">
-        <NumericInput v-model="form.margin" @change="onFieldChange" />
-      </el-form-item>
-      <div class="quad-grid">
-        <el-form-item label="上">
-          <NumericInput v-model="form.marginTop" @change="onFieldChange" />
+      <template v-if="showMarginProps">
+        <el-form-item label="margin">
+          <NumericInput v-model="form.margin" @change="onFieldChange" />
         </el-form-item>
-        <el-form-item label="右">
-          <NumericInput v-model="form.marginRight" @change="onFieldChange" />
-        </el-form-item>
-        <el-form-item label="下">
-          <NumericInput v-model="form.marginBottom" @change="onFieldChange" />
-        </el-form-item>
-        <el-form-item label="左">
-          <NumericInput v-model="form.marginLeft" @change="onFieldChange" />
-        </el-form-item>
-      </div>
+        <div class="quad-grid">
+          <el-form-item label="上">
+            <NumericInput v-model="form.marginTop" @change="onFieldChange" />
+          </el-form-item>
+          <el-form-item label="右">
+            <NumericInput v-model="form.marginRight" @change="onFieldChange" />
+          </el-form-item>
+          <el-form-item label="下">
+            <NumericInput v-model="form.marginBottom" @change="onFieldChange" />
+          </el-form-item>
+          <el-form-item label="左">
+            <NumericInput v-model="form.marginLeft" @change="onFieldChange" />
+          </el-form-item>
+        </div>
+      </template>
     </el-form>
 
     <div class="section-title">外观</div>
@@ -249,7 +272,7 @@ function onFieldChange() {
       <el-form-item label="background">
         <ColorPicker v-model="form.background" @change="onFieldChange" />
       </el-form-item>
-      <el-form-item label="gravity">
+      <el-form-item v-if="tag !== 'Modal'" label="gravity">
         <el-select
           v-model="form.gravity"
           clearable
@@ -265,9 +288,39 @@ function onFieldChange() {
         </el-select>
       </el-form-item>
       <template v-if="showBorder">
-        <el-form-item label="borderRadius">
-          <NumericInput v-model="form.borderRadius" @change="onFieldChange" />
+        <el-form-item label="borderRadius 统一圆角">
+          <NumericInput
+            v-model="form.borderRadius"
+            placeholder="四角共用；分角优先"
+            @change="onFieldChange"
+          />
         </el-form-item>
+        <div class="quad-grid">
+          <el-form-item label="上左">
+            <NumericInput
+              v-model="form.borderTopLeftRadius"
+              @change="onFieldChange"
+            />
+          </el-form-item>
+          <el-form-item label="上右">
+            <NumericInput
+              v-model="form.borderTopRightRadius"
+              @change="onFieldChange"
+            />
+          </el-form-item>
+          <el-form-item label="下右">
+            <NumericInput
+              v-model="form.borderBottomRightRadius"
+              @change="onFieldChange"
+            />
+          </el-form-item>
+          <el-form-item label="下左">
+            <NumericInput
+              v-model="form.borderBottomLeftRadius"
+              @change="onFieldChange"
+            />
+          </el-form-item>
+        </div>
         <el-form-item label="borderWidth">
           <NumericInput v-model="form.borderWidth" @change="onFieldChange" />
         </el-form-item>

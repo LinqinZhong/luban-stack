@@ -4,6 +4,7 @@ import { Delete, Plus } from '@element-plus/icons-vue'
 import {
   CUSTOM_EVENT_METHOD,
   buildEmitAmbientDeclarations,
+  dataFieldsToAmbientVars,
   isCustomEventMethod,
   parseEventBindings,
   serializeEventBindings,
@@ -25,11 +26,14 @@ import {
   type DataFieldType,
   type ObjectSubField,
 } from '../../types/page-data'
-import IconValueSelect from './IconValueSelect.vue'
-import ColorPicker from './ColorPicker.vue'
 import ObjectFieldsDialog from './ObjectFieldsDialog.vue'
 import ArrayFieldsDialog from './ArrayFieldsDialog.vue'
 import TsCodeEditor from './TsCodeEditor.vue'
+import type { ComponentRenderMap } from '../../types/component-render'
+import {
+  buildRefAmbientDeclarations,
+  type ComponentMethodsMap,
+} from '../../utils/widget-ref'
 
 const props = defineProps<{
   modelValue: boolean
@@ -37,6 +41,10 @@ const props = defineProps<{
   rawValue: string
   methods: PageMethod[]
   dataFields?: DataField[]
+  /** 当前页面/组件 XML，用于解析「引用」节点 */
+  xml?: string
+  componentMap?: ComponentRenderMap
+  componentMethodsMap?: ComponentMethodsMap
   iconOptions?: Array<{ id: string; label: string }>
   /** 组件「事件方法」定义，用于绑定 emit 时选择事件名与参数 */
   emitEvents?: ComponentEventDef[]
@@ -169,20 +177,32 @@ const customParams = computed<MethodParam[]>(() =>
     .map((item) => ({ name: item.name.trim(), type: item.type })),
 )
 
+const eventParamHints = computed(() =>
+  customParams.value.map((item) => ({
+    name: item.name,
+    type: item.type,
+    sample: `{${item.name}}`,
+  })),
+)
+
+const customAmbientVars = computed(() => dataFieldsToAmbientVars(props.dataFields))
+
 const customAmbientExtra = computed(() => {
   const lines = [
     'declare function navigateTo(to: string, params?: Record<string, unknown>): void;',
     'declare function navigateBack(): void;',
     'declare function setData(prop: string, value: any): void;',
     "declare function showToast(message: string, duration?: 'short' | 'long'): void;",
-    'declare function openMask(name: string): void;',
-    'declare function closeMask(name?: string): void;',
-    'declare function closeAllMasks(): void;',
   ]
-  if (props.emitEvents?.length) {
-    return `${lines.join('\n')}\n${buildEmitAmbientDeclarations(props.emitEvents)}`
-  }
-  return `${lines.join('\n')}\n`
+  const base = props.emitEvents?.length
+    ? `${lines.join('\n')}\n${buildEmitAmbientDeclarations(props.emitEvents)}`
+    : `${lines.join('\n')}\n`
+  return `${buildRefAmbientDeclarations(
+    props.dataFields,
+    props.xml,
+    props.componentMap,
+    props.componentMethodsMap,
+  )}${base}`
 })
 
 function paramsOf(methodName: string, binding?: EventMethodBinding) {
@@ -322,21 +342,13 @@ function fieldType(propName: string | undefined): DataFieldType {
   return findField(propName)?.type ?? 'string'
 }
 
-function isTemplateExpr(value: string | undefined): boolean {
-  return /\{[^{}]+\}/.test(value ?? '')
-}
-
-/** 含 {item.xxx}/{index} 时用文本编辑，便于写变量 */
-function useValueExpression(binding: EventMethodBinding): boolean {
-  return isTemplateExpr(binding.args.value)
-}
-
 function fieldTypeLabel(type: DataFieldType) {
   return typeLabelMap.value.get(type) ?? type
 }
 
 function serializeArgValue(type: DataFieldType, value: unknown): string {
-  if (type === 'string' || type === 'icon' || type === 'color') return String(value ?? '')
+  if (type === 'string' || type === 'icon' || type === 'color' || type === 'ref')
+    return String(value ?? '')
   if (type === 'number') {
     const n = Number(value)
     return Number.isFinite(n) ? String(n) : '0'
@@ -351,7 +363,8 @@ function serializeArgValue(type: DataFieldType, value: unknown): string {
 
 function parseArgValue(type: DataFieldType, raw: string | undefined): unknown {
   const text = raw ?? ''
-  if (type === 'string' || type === 'icon' || type === 'color') return text
+  if (type === 'string' || type === 'icon' || type === 'color' || type === 'ref')
+    return text
   if (type === 'number') {
     const n = Number(text)
     return Number.isFinite(n) ? n : 0
@@ -378,14 +391,6 @@ function onPropChange(binding: EventMethodBinding) {
 
 function getStringValue(binding: EventMethodBinding) {
   return binding.args.value ?? ''
-}
-
-function getNumberValue(binding: EventMethodBinding) {
-  return Number(parseArgValue('number', binding.args.value) as number)
-}
-
-function getBooleanValue(binding: EventMethodBinding) {
-  return Boolean(parseArgValue('boolean', binding.args.value))
 }
 
 function complexPreview(binding: EventMethodBinding) {
@@ -462,6 +467,19 @@ function handleClear() {
   >
     <p class="hint">可绑定多个方法，按列表顺序触发；可为目标方法填写参数。末尾「自定义」可直接编写方法体。</p>
 
+    <div v-if="eventParamHints.length" class="event-params">
+      <span class="event-params-label">事件形参</span>
+      <div class="event-params-list">
+        <code
+          v-for="item in eventParamHints"
+          :key="item.name"
+          class="event-param-chip"
+          :title="`${item.name}: ${item.type}`"
+        >{{ item.sample }}<span class="event-param-type">{{ item.type }}</span></code>
+      </div>
+      <p class="event-params-hint">参数值中可直接写形参，例如 <code>{{ eventParamHints[0]?.sample }}</code></p>
+    </div>
+
     <div class="bind-list">
       <div v-for="(binding, index) in draft" :key="binding.id" class="bind-card">
         <div class="bind-header">
@@ -492,12 +510,16 @@ function handleClear() {
         </div>
 
           <div v-if="isCustom(binding.method)" class="custom-body">
-          <p class="arg-hint">编写 TypeScript 方法体；可直接调用 navigateTo / setData / showToast 等预置方法。</p>
+          <p class="arg-hint">
+            编写 TypeScript 方法体；可调用 navigateTo / setData / showToast；数据池字段可按名引用。Modal 引用
+            .show()/.hide()，组件引用为其「暴露方法」。
+          </p>
           <TsCodeEditor
             :model-value="binding.body ?? ''"
             :function-name="customFnName"
             :params="customParams"
             return-type="void"
+            :ambient-vars="customAmbientVars"
             :ambient-extra="customAmbientExtra"
             @update:model-value="binding.body = $event"
           />
@@ -532,76 +554,58 @@ function handleClear() {
             <div class="arg-row">
               <label>
                 value
-                <span class="type">{{ fieldTypeLabel(fieldType(binding.args.prop)) }}</span>
+                <span class="type">{{ fieldTypeLabel(fieldType(binding.args.prop)) }} · 支持变量</span>
               </label>
 
-              <el-input
-                v-if="
-                  useValueExpression(binding) ||
-                  fieldType(binding.args.prop) === 'string'
-                "
-                :model-value="getStringValue(binding)"
-                placeholder="值，或变量如 {item.key}"
-                @update:model-value="setArg(binding, 'value', $event ?? '')"
-              />
-              <el-input-number
-                v-else-if="fieldType(binding.args.prop) === 'number'"
-                :model-value="getNumberValue(binding)"
-                controls-position="right"
-                style="width: 100%"
-                @update:model-value="
-                  setArg(
-                    binding,
-                    'value',
-                    serializeArgValue('number', Number($event ?? 0)),
-                  )
-                "
-              />
-              <el-switch
-                v-else-if="fieldType(binding.args.prop) === 'boolean'"
-                :model-value="getBooleanValue(binding)"
-                @update:model-value="
-                  setArg(binding, 'value', serializeArgValue('boolean', $event))
-                "
-              />
-              <IconValueSelect
-                v-else-if="fieldType(binding.args.prop) === 'icon'"
-                :model-value="getStringValue(binding)"
-                :options="iconOptions"
-                allow-create
-                @update:model-value="setArg(binding, 'value', $event ?? '')"
-              />
-              <ColorPicker
-                v-else-if="fieldType(binding.args.prop) === 'color'"
-                :model-value="getStringValue(binding)"
-                placeholder="#409eff / rgba(...)"
-                @change="setArg(binding, 'value', $event ?? '')"
-              />
-              <div
-                v-else-if="fieldType(binding.args.prop) === 'json'"
-                class="complex-value"
-              >
-                <span class="value-preview">{{ complexPreview(binding) }}</span>
-                <el-button type="primary" link @click="openObjectEditor(binding)">
-                  编辑
-                </el-button>
-              </div>
-              <div
-                v-else-if="fieldType(binding.args.prop) === 'array'"
-                class="complex-value"
-              >
-                <span class="value-preview">{{ complexPreview(binding) }}</span>
-                <el-button type="primary" link @click="openArrayEditor(binding)">
-                  编辑
-                </el-button>
-              </div>
+              <template v-if="fieldType(binding.args.prop) === 'json'">
+                <div class="complex-value">
+                  <span class="value-preview">{{ complexPreview(binding) }}</span>
+                  <el-button type="primary" link @click="openObjectEditor(binding)">
+                    编辑对象
+                  </el-button>
+                </div>
+                <el-input
+                  class="expr-input"
+                  :model-value="getStringValue(binding)"
+                  placeholder="或写变量 / 表达式，如 {scrollTop}"
+                  @update:model-value="setArg(binding, 'value', $event ?? '')"
+                />
+              </template>
+              <template v-else-if="fieldType(binding.args.prop) === 'array'">
+                <div class="complex-value">
+                  <span class="value-preview">{{ complexPreview(binding) }}</span>
+                  <el-button type="primary" link @click="openArrayEditor(binding)">
+                    编辑数组
+                  </el-button>
+                </div>
+                <el-input
+                  class="expr-input"
+                  :model-value="getStringValue(binding)"
+                  placeholder="或写变量 / 表达式，如 {item.list}"
+                  @update:model-value="setArg(binding, 'value', $event ?? '')"
+                />
+              </template>
               <el-input
                 v-else
                 :model-value="getStringValue(binding)"
-                placeholder="值，或变量如 {item.key}"
+                :placeholder="
+                  eventParamHints.length
+                    ? `值或变量，如 ${eventParamHints[0].sample} / {item.xxx}`
+                    : '值或变量，如 {item.xxx} / {index}'
+                "
                 @update:model-value="setArg(binding, 'value', $event ?? '')"
               />
-              <p class="arg-hint">支持变量：<code>{'{item.字段}'}</code>、<code>{'{index}'}</code></p>
+              <p class="arg-hint">
+                支持变量：
+                <template v-if="eventParamHints.length">
+                  <code
+                    v-for="item in eventParamHints"
+                    :key="item.name"
+                  >{{ item.sample }}</code>
+                  、
+                </template>
+                <code>{'{item.字段}'}</code>、<code>{'{index}'}</code>
+              </p>
             </div>
           </template>
 
@@ -765,6 +769,60 @@ function handleClear() {
   margin: 0 0 12px;
   font-size: 12px;
   color: #909399;
+}
+
+.event-params {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border: 1px solid #e4e7ed;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.event-params-label {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #475569;
+}
+
+.event-params-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.event-param-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #eef2ff;
+  color: #3730a3;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+
+.event-param-type {
+  color: #64748b;
+  font-weight: 400;
+}
+
+.event-params-hint {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: #94a3b8;
+}
+
+.event-params-hint code {
+  font-size: 12px;
+  color: #64748b;
+}
+
+.expr-input {
+  margin-top: 8px;
 }
 
 .bind-list {

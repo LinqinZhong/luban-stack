@@ -29,7 +29,7 @@ const props = defineProps<{
    */
   ambientVars?: MethodParam[]
   /**
-   * 额外 ambient 声明（如 declare function emit...），原样注入 Monaco ExtraLib
+   * 额外 ambient 声明（如 declare function emit... / 引用类型）
    */
   ambientExtra?: string
   returnType?: MethodReturnType
@@ -45,8 +45,12 @@ let model: monaco.editor.ITextModel | null = null
 let syncing = false
 let lastValidFull = ''
 let lastSignature = ''
+let lastAmbientHeader = ''
 let shellDecorations: string[] = []
-const ambientUri = 'inmemory://voider/ambient-vars.d.ts'
+let ambientLineCount = 0
+
+const AMBIENT_START = '/* __VOIDER_AMBIENT__ */'
+const AMBIENT_END = '/* __VOIDER_AMBIENT_END__ */'
 
 function mapTsType(type: string): string {
   switch (type) {
@@ -76,14 +80,25 @@ function buildSignature(): string {
   const paramList = (props.params ?? [])
     .filter((item) => item.name.trim())
     .map((item) => {
-      const raw = item.name.trim()
-      const rest = raw.startsWith('...')
-      const name = rest ? raw : raw
+      const name = item.name.trim()
       return `${name}: ${mapTsType(item.type)}`
     })
     .join(', ')
   const ret = mapTsType(props.returnType || 'void')
   return `function ${sanitizeName(props.functionName)}(${paramList}): ${ret} {`
+}
+
+function buildAmbientHeader(): string {
+  const varLines = (props.ambientVars ?? [])
+    .filter((item) => item.name.trim())
+    .map((item) => `declare const ${item.name.trim()}: ${mapTsType(item.type)};`)
+  const extra = (props.ambientExtra ?? '').trim()
+  const parts = [...varLines, ...(extra ? extra.split('\n') : [])].filter(
+    (line) => line.trim().length > 0,
+  )
+  // 始终写入标记块，保证壳结构稳定；无内容时放一条空注释
+  const body = parts.length ? parts.join('\n') : '/* no ambient */'
+  return `${AMBIENT_START}\n${body}\n${AMBIENT_END}`
 }
 
 function indentBody(body: string): string {
@@ -92,40 +107,58 @@ function indentBody(body: string): string {
   return lines.map((line) => (line.length ? `  ${line}` : '')).join('\n')
 }
 
+function composeFull(body: string): string {
+  const ambient = buildAmbientHeader()
+  lastAmbientHeader = ambient
+  ambientLineCount = ambient.split('\n').length
+  return `${ambient}\n${buildSignature()}\n${indentBody(body)}\n}`
+}
+
+function signatureLineIndex(full: string): number {
+  const lines = full.replace(/\r\n/g, '\n').split('\n')
+  const endIdx = lines.findIndex((line) => line.trim() === AMBIENT_END)
+  if (endIdx >= 0 && endIdx + 1 < lines.length) return endIdx + 1
+  return 0
+}
+
 function extractBody(full: string): string {
   const lines = full.replace(/\r\n/g, '\n').split('\n')
   if (lines.length < 2) return ''
+  const sigIdx = signatureLineIndex(full)
+  // 正文：签名行下一行 … 最后一行 `}` 之前
   return lines
-    .slice(1, -1)
+    .slice(sigIdx + 1, -1)
     .map((line) => (line.startsWith('  ') ? line.slice(2) : line))
     .join('\n')
 }
 
-function composeFull(body: string): string {
-  return `${buildSignature()}\n${indentBody(body)}\n}`
-}
-
 function shellIntact(full: string): boolean {
   const lines = full.replace(/\r\n/g, '\n').split('\n')
-  if (lines.length < 2) return false
-  return lines[0] === buildSignature() && lines[lines.length - 1] === '}'
+  if (lines.length < 3) return false
+  if (lines[lines.length - 1] !== '}') return false
+  const sigIdx = signatureLineIndex(full)
+  if (sigIdx < 0 || sigIdx >= lines.length) return false
+  if (lines[sigIdx] !== buildSignature()) return false
+  // ambient 头允许被我们重写，但不能被用户破坏标记
+  if (lines[0]?.trim() !== AMBIENT_START) return false
+  const endIdx = lines.findIndex((line) => line.trim() === AMBIENT_END)
+  return endIdx > 0 && endIdx === sigIdx - 1
 }
 
-function refreshAmbient() {
-  const lines = (props.ambientVars ?? [])
-    .filter((item) => item.name.trim())
-    .map((item) => `declare const ${item.name.trim()}: ${mapTsType(item.type)};`)
-  const extra = (props.ambientExtra ?? '').trim()
-  const source = `${lines.join('\n')}${lines.length && extra ? '\n' : ''}${extra}\n`
-  monaco.languages.typescript.typescriptDefaults.addExtraLib(source, ambientUri)
+function applyHiddenAmbient() {
+  if (!editor || ambientLineCount < 1) return
+  editor.setHiddenAreas([
+    new monaco.Range(1, 1, ambientLineCount, Number.MAX_SAFE_INTEGER),
+  ])
 }
 
 function applyShellDecorations() {
   if (!editor || !model) return
   const last = model.getLineCount()
+  const sigIdx = signatureLineIndex(model.getValue()) + 1 // 1-based
   const ranges: monaco.editor.IModelDeltaDecoration[] = [
     {
-      range: new monaco.Range(1, 1, 1, Number.MAX_SAFE_INTEGER),
+      range: new monaco.Range(sigIdx, 1, sigIdx, Number.MAX_SAFE_INTEGER),
       options: {
         isWholeLine: true,
         className: 'ts-shell-readonly',
@@ -134,7 +167,7 @@ function applyShellDecorations() {
       },
     },
   ]
-  if (last >= 2) {
+  if (last >= sigIdx + 1) {
     ranges.push({
       range: new monaco.Range(last, 1, last, Number.MAX_SAFE_INTEGER),
       options: {
@@ -146,6 +179,7 @@ function applyShellDecorations() {
     })
   }
   shellDecorations = editor.deltaDecorations(shellDecorations, ranges)
+  applyHiddenAmbient()
 }
 
 function restoreShell(body?: string, preserveCursor = true) {
@@ -155,11 +189,12 @@ function restoreShell(body?: string, preserveCursor = true) {
   if (full === model.getValue()) {
     lastValidFull = full
     lastSignature = buildSignature()
+    applyHiddenAmbient()
     return
   }
 
   const pos = preserveCursor ? editor.getPosition() : null
-  const lastLineBefore = model.getLineCount()
+  const oldSigIdx = signatureLineIndex(model.getValue())
 
   syncing = true
   model.setValue(full)
@@ -170,12 +205,13 @@ function restoreShell(body?: string, preserveCursor = true) {
 
   if (pos) {
     const last = model.getLineCount()
-    const bodyLast = Math.max(2, last - 1)
-    let line = pos.lineNumber
-    // 签名变化时尽量保持在正文区的相对行
-    if (line < 2) line = 2
-    if (line >= lastLineBefore) line = bodyLast
-    line = Math.min(Math.max(line, 2), bodyLast)
+    const newSigIdx = signatureLineIndex(full)
+    const bodyFirst = newSigIdx + 2 // 1-based first body line
+    const bodyLast = Math.max(bodyFirst, last - 1)
+    // 尽量保持相对正文位置
+    const rel = pos.lineNumber - (oldSigIdx + 2)
+    let line = bodyFirst + Math.max(0, rel)
+    line = Math.min(Math.max(line, bodyFirst), bodyLast)
     const maxCol = model.getLineMaxColumn(line)
     editor.setPosition({ lineNumber: line, column: Math.min(pos.column, maxCol) })
   }
@@ -183,29 +219,32 @@ function restoreShell(body?: string, preserveCursor = true) {
 
 function clampSelectionToBody() {
   if (!editor || !model || props.readonly || syncing) return
+  const full = model.getValue()
   const last = model.getLineCount()
-  if (last < 3) return
+  const sigIdx = signatureLineIndex(full) + 1 // 1-based
+  const bodyFirst = sigIdx + 1
+  const bodyLast = last - 1
+  if (bodyLast < bodyFirst) return
   const sel = editor.getSelection()
   if (!sel) return
 
-  // 只在真的落到壳行时才纠正，避免打断正常输入
-  const startOut = sel.startLineNumber < 2 || sel.startLineNumber > last - 1
-  const endOut = sel.endLineNumber < 2 || sel.endLineNumber > last - 1
+  const startOut = sel.startLineNumber < bodyFirst || sel.startLineNumber > bodyLast
+  const endOut = sel.endLineNumber < bodyFirst || sel.endLineNumber > bodyLast
   if (!startOut && !endOut) return
 
-  const clampLine = (line: number) => Math.min(Math.max(line, 2), last - 1)
+  const clampLine = (line: number) => Math.min(Math.max(line, bodyFirst), bodyLast)
   const startLine = clampLine(sel.startLineNumber)
   const endLine = clampLine(sel.endLineNumber)
   const startCol =
-    sel.startLineNumber < 2
+    sel.startLineNumber < bodyFirst
       ? 1
-      : sel.startLineNumber > last - 1
+      : sel.startLineNumber > bodyLast
         ? model.getLineMaxColumn(startLine)
         : sel.startColumn
   const endCol =
-    sel.endLineNumber < 2
+    sel.endLineNumber < bodyFirst
       ? 1
-      : sel.endLineNumber > last - 1
+      : sel.endLineNumber > bodyLast
         ? model.getLineMaxColumn(endLine)
         : sel.endColumn
 
@@ -239,8 +278,6 @@ onMounted(() => {
     noSyntaxValidation: false,
   })
 
-  refreshAmbient()
-
   const initial = composeFull(props.modelValue ?? '')
   lastValidFull = initial
   lastSignature = buildSignature()
@@ -262,6 +299,9 @@ onMounted(() => {
     tabSize: 2,
     wordWrap: 'on',
     theme: 'vs',
+    quickSuggestions: { other: true, comments: false, strings: false },
+    suggestOnTriggerCharacters: true,
+    snippetSuggestions: 'inline',
   })
 
   applyShellDecorations()
@@ -276,7 +316,6 @@ onMounted(() => {
     }
 
     lastValidFull = full
-    // 仅正文行数变化时更新壳装饰（首行/末行位置可能变）
     applyShellDecorations()
     emit('update:modelValue', extractBody(full))
   })
@@ -319,7 +358,10 @@ watch(
       props.ambientExtra ?? '',
     ].join('##'),
   () => {
-    refreshAmbient()
+    if (!model) return
+    const nextHeader = buildAmbientHeader()
+    if (nextHeader === lastAmbientHeader) return
+    restoreShell(extractBody(model.getValue()))
   },
 )
 

@@ -1,7 +1,7 @@
 import { computed, ref, type ComputedRef, type InjectionKey, type Ref } from 'vue'
 
-export interface MaskStackApi {
-  /** 遮罩打开栈（栈顶为当前可见） */
+export interface ModalStackApi {
+  /** Modal 打开栈（栈顶为当前可见） */
   stack: Ref<string[]>
   top: ComputedRef<string | null>
   open: (name: string) => void
@@ -11,14 +11,14 @@ export interface MaskStackApi {
   isTop: (name: string) => boolean
 }
 
-export const MASK_STACK_KEY: InjectionKey<MaskStackApi> = Symbol('voiderMaskStack')
-export const MASK_HOST_KEY: InjectionKey<Ref<HTMLElement | null>> = Symbol('voiderMaskHost')
+export const MODAL_STACK_KEY: InjectionKey<ModalStackApi> = Symbol('voiderModalStack')
+export const MODAL_HOST_KEY: InjectionKey<Ref<HTMLElement | null>> = Symbol('voiderModalHost')
 
 /**
- * 页面级遮罩堆栈：同一时刻仅栈顶可见；
+ * 页面级 Modal 堆栈：同一时刻仅栈顶可见；
  * open 会将同名项移到栈顶（其余层暂隐，关闭时可恢复）。
  */
-export function createMaskStack(): MaskStackApi {
+export function createModalStack(): ModalStackApi {
   const stack = ref<string[]>([])
 
   const top = computed(() => {

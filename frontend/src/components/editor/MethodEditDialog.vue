@@ -7,18 +7,47 @@ import {
   METHOD_PARAM_TYPE_OPTIONS,
   METHOD_RETURN_TYPE_OPTIONS,
   createEmptyMethod,
+  dataFieldsToAmbientVars,
   isValidMethodName,
   type MethodParam,
   type MethodReturnType,
   type PageMethod,
 } from '../../types/page-method'
+import type { DataField } from '../../types/page-data'
+import type { ComponentRenderMap } from '../../types/component-render'
+import {
+  buildRefAmbientDeclarations,
+  type ComponentMethodsMap,
+} from '../../utils/widget-ref'
 
 const props = defineProps<{
   modelValue: boolean
   method: PageMethod | null
+  /** 当前页面/组件数据池，注入方法体变量提示 */
+  dataFields?: DataField[]
+  /** 当前 XML，用于解析「引用」指向的节点 */
+  xml?: string
+  componentMap?: ComponentRenderMap
+  componentMethodsMap?: ComponentMethodsMap
   /** 组件方法体可用的 emit 等 ambient 声明 */
   ambientExtra?: string
 }>()
+
+const ambientVars = computed(() =>
+  draft.builtin ? [] : dataFieldsToAmbientVars(props.dataFields),
+)
+
+const mergedAmbientExtra = computed(() => {
+  if (draft.builtin) return ''
+  const refAmbient = buildRefAmbientDeclarations(
+    props.dataFields,
+    props.xml,
+    props.componentMap,
+    props.componentMethodsMap,
+  )
+  const extra = (props.ambientExtra ?? '').trim()
+  return `${refAmbient}${extra ? `${extra}\n` : ''}`
+})
 
 const emit = defineEmits<{
   'update:modelValue': [visible: boolean]
@@ -197,7 +226,10 @@ function handleSave() {
       </el-form-item>
 
       <el-form-item label="方法体">
-        <p class="hint">语法 TypeScript：顶部方法声明只读，只需编写方法体内部代码。</p>
+        <p class="hint">
+          语法 TypeScript：顶部方法声明只读，只需编写方法体内部代码。数据池字段可按名字直接引用；Modal 引用
+          <code>.show()</code>/<code>.hide()</code>，组件引用为其「暴露方法」。
+        </p>
         <TsCodeEditor
           ref="editorRef"
           v-model="draft.body"
@@ -205,7 +237,8 @@ function handleSave() {
           :readonly="draft.builtin"
           :params="draft.params"
           :return-type="draft.returnType"
-          :ambient-extra="draft.builtin ? '' : ambientExtra"
+          :ambient-vars="ambientVars"
+          :ambient-extra="mergedAmbientExtra"
         />
       </el-form-item>
     </el-form>

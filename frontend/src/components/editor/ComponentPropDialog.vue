@@ -2,7 +2,7 @@
 import { computed, reactive, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import {
-  DATA_FIELD_TYPE_OPTIONS,
+  COMPOSABLE_FIELD_TYPE_OPTIONS,
   defaultValue,
   type DataFieldType,
   type DataFieldValue,
@@ -191,7 +191,7 @@ function handleSave() {
           @update:model-value="onTypeChange"
         >
           <el-option
-            v-for="opt in DATA_FIELD_TYPE_OPTIONS"
+            v-for="opt in COMPOSABLE_FIELD_TYPE_OPTIONS"
             :key="opt.value"
             :label="opt.label"
             :value="opt.value"

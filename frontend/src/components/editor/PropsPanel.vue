@@ -16,10 +16,12 @@ import {
   INTERACTION_EVENTS,
   ORIENTATION_OPTIONS,
   RELATIVE_BOOL_ATTRS,
+  SCROLL_INTERACTION_EVENT,
   setNodeAttribute,
   setNodeAttributes,
   SIZE_OPTIONS,
 } from '../../utils/xml-node'
+import { ElMessage } from 'element-plus'
 import { OVERFLOW_OPTIONS } from '../../utils/xml'
 import type { DataField } from '../../types/page-data'
 import {
@@ -62,6 +64,8 @@ const props = defineProps<{
   routeParams?: Record<string, unknown> | null
   /** 页面中引用的组件（用于配置组件入参） */
   componentMap?: ComponentRenderMap
+  /** 各组件方法列表（引用类型 ambient / 暴露方法签名） */
+  componentMethodsMap?: import('../../utils/widget-ref').ComponentMethodsMap
   /** 自增请求：切换到动态并打开重复弹窗 */
   openRepeatRequest?: number
 }>()
@@ -82,7 +86,11 @@ const parentTag = computed(() =>
   props.selectedId ? findParentTagFromXml(props.xml, props.selectedId) : null,
 )
 
-const isRelativeChild = computed(() => parentTag.value === 'RelativeLayout')
+const isRelativeChild = computed(
+  () =>
+    (parentTag.value === 'RelativeLayout' || parentTag.value === 'Modal') &&
+    selectedNode.value?.tag !== 'Modal',
+)
 
 const isComponentNode = computed(() => selectedNode.value?.tag === 'Component')
 
@@ -112,10 +120,23 @@ const selectableEvents = computed(() => {
       })
       .filter((item): item is { key: string; label: string } => Boolean(item))
   }
-  return INTERACTION_EVENTS.map((item) => ({
+  const list = INTERACTION_EVENTS.map((item) => ({
     key: item.key,
     label: item.label,
   }))
+  // 可滚动布局才展示滚动事件
+  const overflow = selectedNode.value?.attrs.overflow?.trim().toLowerCase()
+  const tag = selectedNode.value?.tag
+  if (
+    overflow === 'scroll' &&
+    (tag === 'LinearLayout' || tag === 'RelativeLayout')
+  ) {
+    list.push({
+      key: SCROLL_INTERACTION_EVENT.key,
+      label: SCROLL_INTERACTION_EVENT.label,
+    })
+  }
+  return list
 })
 
 const eventForm = reactive<Record<string, string>>({})
@@ -149,6 +170,10 @@ const layoutForm = reactive({
   paddingBottom: '',
   background: '',
   borderRadius: '',
+  borderTopLeftRadius: '',
+  borderTopRightRadius: '',
+  borderBottomRightRadius: '',
+  borderBottomLeftRadius: '',
   borderWidth: '',
   borderColor: '',
   overflow: 'hidden',
@@ -232,6 +257,10 @@ function syncLayoutForm() {
   layoutForm.paddingBottom = node.attrs.paddingBottom ?? ''
   layoutForm.background = node.attrs.background ?? ''
   layoutForm.borderRadius = node.attrs.borderRadius ?? ''
+  layoutForm.borderTopLeftRadius = node.attrs.borderTopLeftRadius ?? ''
+  layoutForm.borderTopRightRadius = node.attrs.borderTopRightRadius ?? ''
+  layoutForm.borderBottomRightRadius = node.attrs.borderBottomRightRadius ?? ''
+  layoutForm.borderBottomLeftRadius = node.attrs.borderBottomLeftRadius ?? ''
   layoutForm.borderWidth = node.attrs.borderWidth ?? ''
   layoutForm.borderColor = node.attrs.borderColor ?? ''
   layoutForm.overflow = node.attrs.overflow || 'hidden'
@@ -282,6 +311,7 @@ watch(
   () => {
     syncEventForm()
     syncLayoutForm()
+    void nextTick(() => stripModalLayoutAttrsIfNeeded())
   },
   { immediate: true },
 )
@@ -325,6 +355,15 @@ function openEventBind(key: string, label: string) {
     eventBindParams.value = (def?.params ?? [])
       .filter((item) => item.name.trim())
       .map((item) => ({ name: item.name.trim(), type: item.type }))
+  } else if (key === 'onScroll') {
+    eventBindParams.value = [
+      { name: 'scrollTop', type: 'number' },
+      { name: 'scrollLeft', type: 'number' },
+      { name: 'scrollHeight', type: 'number' },
+      { name: 'scrollWidth', type: 'number' },
+      { name: 'clientHeight', type: 'number' },
+      { name: 'clientWidth', type: 'number' },
+    ]
   } else {
     eventBindParams.value = []
   }
@@ -365,7 +404,34 @@ const showImageProps = computed(() => selectedNode.value?.tag === 'Image')
 const showIconProps = computed(() => selectedNode.value?.tag === 'Icon')
 
 const showSwiperProps = computed(() => selectedNode.value?.tag === 'Swiper')
-const showMaskProps = computed(() => selectedNode.value?.tag === 'Mask')
+const showModalProps = computed(() => selectedNode.value?.tag === 'Modal')
+
+/** Modal 始终全屏，不展示也不写入宽高 / margin */
+const showSizeProps = computed(() => selectedNode.value?.tag !== 'Modal')
+const showMarginProps = computed(() => selectedNode.value?.tag !== 'Modal')
+
+const MODAL_IGNORED_LAYOUT_ATTRS = [
+  'width',
+  'height',
+  'margin',
+  'marginLeft',
+  'marginRight',
+  'marginTop',
+  'marginBottom',
+  'gravity',
+] as const
+
+function stripModalLayoutAttrsIfNeeded() {
+  const node = selectedNode.value
+  if (!node || node.tag !== 'Modal' || !props.selectedId) return
+  const stale = MODAL_IGNORED_LAYOUT_ATTRS.filter((key) => node.attrs[key])
+  if (!stale.length) return
+  let next = props.xml
+  for (const key of stale) {
+    next = setNodeAttribute(next, props.selectedId, key, '')
+  }
+  emit('update:xml', next)
+}
 
 /** 在线组件可配置的参数定义（过滤空名） */
 const componentPropDefs = computed(() =>
@@ -444,7 +510,7 @@ const showLayoutContainerProps = computed(
     selectedNode.value?.tag === 'LinearLayout' ||
     selectedNode.value?.tag === 'RelativeLayout' ||
     selectedNode.value?.tag === 'Swiper' ||
-    selectedNode.value?.tag === 'Mask' ||
+    selectedNode.value?.tag === 'Modal' ||
     selectedNode.value?.tag === 'Image',
 )
 
@@ -691,48 +757,50 @@ function saveVisibilityConfig(config: VisibilityConditionConfig) {
             </el-form-item>
           </el-form>
 
-          <div class="section-title">尺寸</div>
-          <el-form label-position="top" size="small">
-            <el-form-item label="宽度 width">
-              <div class="size-row">
-                <el-select v-model="layoutForm.widthMode" @change="commitWidth">
-                  <el-option
-                    v-for="opt in SIZE_OPTIONS"
-                    :key="opt.value"
-                    :label="opt.label"
-                    :value="opt.value"
+          <template v-if="showSizeProps">
+            <div class="section-title">尺寸</div>
+            <el-form label-position="top" size="small">
+              <el-form-item label="宽度 width">
+                <div class="size-row">
+                  <el-select v-model="layoutForm.widthMode" @change="commitWidth">
+                    <el-option
+                      v-for="opt in SIZE_OPTIONS"
+                      :key="opt.value"
+                      :label="opt.label"
+                      :value="opt.value"
+                    />
+                  </el-select>
+                  <NumericInput
+                    v-if="layoutForm.widthMode === 'fixed'"
+                    v-model="layoutForm.widthValue"
+                    :min="1"
+                    :max="5000"
+                    @change="commitWidth"
                   />
-                </el-select>
-                <NumericInput
-                  v-if="layoutForm.widthMode === 'fixed'"
-                  v-model="layoutForm.widthValue"
-                  :min="1"
-                  :max="5000"
-                  @change="commitWidth"
-                />
-              </div>
-            </el-form-item>
+                </div>
+              </el-form-item>
 
-            <el-form-item label="高度 height">
-              <div class="size-row">
-                <el-select v-model="layoutForm.heightMode" @change="commitHeight">
-                  <el-option
-                    v-for="opt in SIZE_OPTIONS"
-                    :key="opt.value"
-                    :label="opt.label"
-                    :value="opt.value"
+              <el-form-item label="高度 height">
+                <div class="size-row">
+                  <el-select v-model="layoutForm.heightMode" @change="commitHeight">
+                    <el-option
+                      v-for="opt in SIZE_OPTIONS"
+                      :key="opt.value"
+                      :label="opt.label"
+                      :value="opt.value"
+                    />
+                  </el-select>
+                  <NumericInput
+                    v-if="layoutForm.heightMode === 'fixed'"
+                    v-model="layoutForm.heightValue"
+                    :min="1"
+                    :max="5000"
+                    @change="commitHeight"
                   />
-                </el-select>
-                <NumericInput
-                  v-if="layoutForm.heightMode === 'fixed'"
-                  v-model="layoutForm.heightValue"
-                  :min="1"
-                  :max="5000"
-                  @change="commitHeight"
-                />
-              </div>
-            </el-form-item>
-          </el-form>
+                </div>
+              </el-form-item>
+            </el-form>
+          </template>
 
           <div class="section-title">间距</div>
           <el-form label-position="top" size="small">
@@ -770,39 +838,41 @@ function saveVisibilityConfig(config: VisibilityConditionConfig) {
               </el-form-item>
             </div>
 
-            <el-form-item label="margin">
-              <NumericInput
-                v-model="layoutForm.margin"
-                placeholder="例如：8"
-                @change="commitAttr('margin', layoutForm.margin)"
-              />
-            </el-form-item>
-            <div class="quad-grid">
-              <el-form-item label="上">
+            <template v-if="showMarginProps">
+              <el-form-item label="margin">
                 <NumericInput
-                  v-model="layoutForm.marginTop"
-                  @change="commitAttr('marginTop', layoutForm.marginTop)"
+                  v-model="layoutForm.margin"
+                  placeholder="例如：8"
+                  @change="commitAttr('margin', layoutForm.margin)"
                 />
               </el-form-item>
-              <el-form-item label="右">
-                <NumericInput
-                  v-model="layoutForm.marginRight"
-                  @change="commitAttr('marginRight', layoutForm.marginRight)"
-                />
-              </el-form-item>
-              <el-form-item label="下">
-                <NumericInput
-                  v-model="layoutForm.marginBottom"
-                  @change="commitAttr('marginBottom', layoutForm.marginBottom)"
-                />
-              </el-form-item>
-              <el-form-item label="左">
-                <NumericInput
-                  v-model="layoutForm.marginLeft"
-                  @change="commitAttr('marginLeft', layoutForm.marginLeft)"
-                />
-              </el-form-item>
-            </div>
+              <div class="quad-grid">
+                <el-form-item label="上">
+                  <NumericInput
+                    v-model="layoutForm.marginTop"
+                    @change="commitAttr('marginTop', layoutForm.marginTop)"
+                  />
+                </el-form-item>
+                <el-form-item label="右">
+                  <NumericInput
+                    v-model="layoutForm.marginRight"
+                    @change="commitAttr('marginRight', layoutForm.marginRight)"
+                  />
+                </el-form-item>
+                <el-form-item label="下">
+                  <NumericInput
+                    v-model="layoutForm.marginBottom"
+                    @change="commitAttr('marginBottom', layoutForm.marginBottom)"
+                  />
+                </el-form-item>
+                <el-form-item label="左">
+                  <NumericInput
+                    v-model="layoutForm.marginLeft"
+                    @change="commitAttr('marginLeft', layoutForm.marginLeft)"
+                  />
+                </el-form-item>
+              </div>
+            </template>
           </el-form>
 
           <div class="section-title">外观</div>
@@ -814,7 +884,7 @@ function saveVisibilityConfig(config: VisibilityConditionConfig) {
                 @change="commitAttr('background', layoutForm.background)"
               />
             </el-form-item>
-            <el-form-item label="gravity">
+            <el-form-item v-if="!showModalProps" label="gravity">
               <el-select
                 v-model="layoutForm.gravity"
                 clearable
@@ -830,13 +900,53 @@ function saveVisibilityConfig(config: VisibilityConditionConfig) {
               </el-select>
             </el-form-item>
             <template v-if="showLayoutContainerProps">
-              <el-form-item label="borderRadius">
+              <el-form-item label="borderRadius 统一圆角">
                 <NumericInput
                   v-model="layoutForm.borderRadius"
-                  placeholder="圆角"
+                  placeholder="四角共用；分角优先"
                   @change="commitAttr('borderRadius', layoutForm.borderRadius)"
                 />
               </el-form-item>
+              <div class="quad-grid">
+                <el-form-item label="上左">
+                  <NumericInput
+                    v-model="layoutForm.borderTopLeftRadius"
+                    @change="
+                      commitAttr('borderTopLeftRadius', layoutForm.borderTopLeftRadius)
+                    "
+                  />
+                </el-form-item>
+                <el-form-item label="上右">
+                  <NumericInput
+                    v-model="layoutForm.borderTopRightRadius"
+                    @change="
+                      commitAttr('borderTopRightRadius', layoutForm.borderTopRightRadius)
+                    "
+                  />
+                </el-form-item>
+                <el-form-item label="下右">
+                  <NumericInput
+                    v-model="layoutForm.borderBottomRightRadius"
+                    @change="
+                      commitAttr(
+                        'borderBottomRightRadius',
+                        layoutForm.borderBottomRightRadius,
+                      )
+                    "
+                  />
+                </el-form-item>
+                <el-form-item label="下左">
+                  <NumericInput
+                    v-model="layoutForm.borderBottomLeftRadius"
+                    @change="
+                      commitAttr(
+                        'borderBottomLeftRadius',
+                        layoutForm.borderBottomLeftRadius,
+                      )
+                    "
+                  />
+                </el-form-item>
+              </div>
               <el-form-item label="borderWidth">
                 <NumericInput
                   v-model="layoutForm.borderWidth"
@@ -1084,10 +1194,10 @@ function saveVisibilityConfig(config: VisibilityConditionConfig) {
             </el-form>
           </template>
 
-          <template v-if="showMaskProps">
-            <div class="section-title">遮罩</div>
+          <template v-if="showModalProps">
+            <div class="section-title">弹层 Modal</div>
             <el-form label-position="top" size="small">
-              <el-form-item label="closeOnClick 点击遮罩关闭">
+              <el-form-item label="closeOnClick 点击空白关闭">
                 <el-switch
                   v-model="layoutForm.closeOnClick"
                   @change="
@@ -1096,8 +1206,9 @@ function saveVisibilityConfig(config: VisibilityConditionConfig) {
                 />
               </el-form-item>
               <p class="hint">
-                用上方 name 作为标识。预览态调用 openMask(name) 入栈打开，一屏仅显示栈顶；closeMask /
-                closeAllMasks 关闭。多个遮罩请使用不同 name。
+                全屏弹层，子控件使用相对布局定位。用上方 name 作为标识；数据池「引用」指向本弹层后可
+                <code>.show()</code> / <code>.hide()</code>。一屏仅显示栈顶；开启
+                closeOnClick 后点击空白可关闭。
               </p>
             </el-form>
           </template>
@@ -1105,6 +1216,10 @@ function saveVisibilityConfig(config: VisibilityConditionConfig) {
           <template v-if="isRelativeChild">
             <div class="section-title">相对布局定位</div>
             <el-form label-position="top" size="small">
+              <p v-if="parentTag === 'Modal'" class="hint">
+                贴边：贴父底/顶 + 宽度 match_parent；侧栏：贴父左/右 + 高度 match_parent。
+                抽屉圆角用外观里的「上左/上右/下左/下右」分角。
+              </p>
               <el-form-item
                 v-for="item in RELATIVE_BOOL_ATTRS"
                 :key="item.key"
@@ -1193,7 +1308,10 @@ function saveVisibilityConfig(config: VisibilityConditionConfig) {
             :raw-value="eventForm[eventBindKey]"
             :methods="methods ?? []"
             :emit-events="emitEvents"
-            :data-fields="dataFields"
+            :data-fields="props.dataFields ?? []"
+            :xml="xml"
+            :component-map="componentMap"
+            :component-methods-map="componentMethodsMap"
             :icon-options="iconOptions"
             @save="handleEventBindSave"
           />

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, inject, onBeforeUnmount, onMounted, provide, type CSSProperties, type ComputedRef } from 'vue'
+import { computed, inject, onBeforeUnmount, provide, type CSSProperties, type ComputedRef } from 'vue'
 import type { IconLibrary } from '../../types/icon-library'
 import { findIcon, iconSymbolId } from '../../types/icon-library'
 import type { PageData } from '../../types/page-data'
@@ -7,6 +7,7 @@ import type { ComponentRenderMap } from '../../types/component-render'
 import type { XmlNode } from '../../utils/xml'
 import type { PreviewEventKey, PreviewInteractPayload } from '../../utils/event-runtime'
 import {
+  isFragmentTag,
   isSupportedTag,
   parseBool,
   parseNumber,
@@ -14,6 +15,7 @@ import {
   parsePageXml,
   parseSize,
   borderStyle,
+  hasBorderRadius,
   overflowStyle,
   paddingStyle,
 } from '../../utils/xml'
@@ -29,7 +31,7 @@ import {
   parseVisibilityConditions,
 } from '../../types/dynamic-styles'
 import { countEventBindings, countNodeEventBindings, INTERACTION_EVENT_KEYS } from '../../types/page-method'
-import { MASK_HOST_KEY, MASK_STACK_KEY } from '../../composables/useMaskStack'
+import { MODAL_HOST_KEY, MODAL_STACK_KEY } from '../../composables/useModalStack'
 import WidgetSelectShell from './WidgetSelectShell.vue'
 import OverlayScrollPort from './OverlayScrollPort.vue'
 import SwiperPort from './SwiperPort.vue'
@@ -71,7 +73,7 @@ const props = defineProps<{
   /** 路由参数运行时对象（$route） */
   routeParams?: Record<string, unknown>
   /**
-   * 是否执行 onClick / onLongClick / onAppear。
+   * 是否执行 onClick / onLongClick / onScroll。
    * 编辑态为 false（含 Component 内部 selectable=false 的节点），避免抢走选中。
    */
   interactEnabled?: boolean
@@ -84,8 +86,8 @@ const emit = defineEmits<{
   interact: [payload: PreviewInteractPayload]
 }>()
 
-const maskStack = inject(MASK_STACK_KEY, null)
-const maskHostRef = inject(MASK_HOST_KEY, null)
+const modalStack = inject(MODAL_STACK_KEY, null)
+const modalHostRef = inject(MODAL_HOST_KEY, null)
 
 const isEditorHidden = computed(() =>
   (props.hiddenNodeIds ?? []).includes(props.nodeId),
@@ -111,20 +113,28 @@ const showAllowed = computed(() => {
   return evaluateScenarios(config.scenarios, props.pageData, runtimeScope.value)
 })
 
-/** 遮罩 id：优先 name，否则用节点路径 */
-const maskKey = computed(
+/** Modal id：优先 name，否则用节点路径 */
+const modalKey = computed(
   () => props.node.attrs.name?.trim() || props.nodeId,
 )
 
-const maskIsOpen = computed(() => {
-  if (props.node.tag !== 'Mask') return true
+const modalIsOpen = computed(() => {
+  if (props.node.tag !== 'Modal') return true
   if (props.selectable) return true
-  return Boolean(maskStack?.isTop(maskKey.value))
+  return Boolean(modalStack?.isTop(modalKey.value))
 })
 
-/** v-show / 遮罩栈：条件为假时隐藏但仍挂载 */
+/** 编辑态：始终全屏展示；预览态：仅栈顶打开 */
+const modalLayerVisible = computed(() => {
+  if (props.node.tag !== 'Modal') return false
+  if (isEditorHidden.value || !mountAllowed.value) return false
+  if (props.selectable) return true
+  return showAllowed.value && modalIsOpen.value
+})
+
+/** v-show / Modal 栈：条件为假时隐藏但仍挂载 */
 const visuallyHidden = computed(
-  () => !showAllowed.value || (props.node.tag === 'Mask' && !maskIsOpen.value),
+  () => !showAllowed.value || (props.node.tag === 'Modal' && !modalIsOpen.value),
 )
 
 const previewClickable = computed(
@@ -391,7 +401,7 @@ const imageStyle = computed(() => ({
     ? { width: '100%', height: '100%', minHeight: 0, flex: '1 1 auto' }
     : {}),
   // 图片自身圆角仍需裁切，不受布局 overflow 属性控制
-  ...(attrs.value.borderRadius ? { overflow: 'hidden' as const } : {}),
+  ...(hasBorderRadius(attrs.value) ? { overflow: 'hidden' as const } : {}),
 }))
 
 const imagePlaceholderStyle = computed(() => ({
@@ -407,7 +417,7 @@ const imagePlaceholderStyle = computed(() => ({
   ...(height.value === 'match_parent'
     ? { width: '100%', height: '100%', minHeight: 0, flex: '1 1 auto' }
     : {}),
-  ...(attrs.value.borderRadius ? { overflow: 'hidden' as const } : {}),
+  ...(hasBorderRadius(attrs.value) ? { overflow: 'hidden' as const } : {}),
 }))
 
 /** 编辑态未展开的 {item.xxx} 等变量，不解析图标 */
@@ -657,52 +667,52 @@ function mapGravityCross(gravity: string | undefined, horizontal: boolean) {
   return 'stretch'
 }
 
-const maskHostEl = computed(() => maskHostRef?.value ?? null)
+const modalHostEl = computed(() => modalHostRef?.value ?? null)
 
-const maskSurfaceStyle = computed(() => ({
-  display: 'flex' as const,
-  flexDirection: 'column' as const,
-  alignItems: mapGravityCross(attrs.value.gravity, false),
-  justifyContent: mapGravityMain(attrs.value.gravity, false),
+const modalSurfaceStyle = computed(() => ({
   ...paddingStyle(attrs.value),
   ...borderStyle(attrs.value),
   background: attrs.value.background || 'rgba(0,0,0,0.45)',
   boxSizing: 'border-box' as const,
 }))
 
-/** 编辑态：树内预览占位，便于编排子控件 */
-const maskEditStyle = computed(() => ({
-  ...maskSurfaceStyle.value,
-  position: 'relative' as const,
-  width: '100%',
-  minHeight: '120px',
-  border: '1px dashed #909399',
-  borderRadius: '8px',
-}))
-
-/** 预览态：挂到手机框遮罩层，铺满屏幕 */
-const maskOverlayStyle = computed(() => ({
-  ...maskSurfaceStyle.value,
+/** Modal 始终 Teleport 全屏 */
+const modalOverlayStyle = computed(() => ({
+  ...modalSurfaceStyle.value,
   position: 'absolute' as const,
   inset: '0',
   width: '100%',
   height: '100%',
-  zIndex: 1,
+  zIndex: props.selectable && isSelected.value ? 3 : 1,
+  outline:
+    props.selectable && isSelected.value
+      ? '2px solid #e6a23c'
+      : props.selectable && isHovered.value
+        ? '1px dashed #409eff'
+        : undefined,
+  outlineOffset: '-2px',
 }))
 
-const maskCloseOnClick = computed(
+/**
+ * 内容面板铺满弹层（相对布局根）：子项经 childRelativeStyle 绝对定位。
+ * 点到面板空白仍关闭（见 handleModalPanelClick）。
+ */
+const modalPanelStyle = computed(() => ({
+  position: 'relative' as const,
+  width: '100%',
+  height: '100%',
+  minWidth: 0,
+  minHeight: 0,
+  maxWidth: '100%',
+  maxHeight: '100%',
+  boxSizing: 'border-box' as const,
+}))
+
+const modalCloseOnClick = computed(
   () =>
     attrs.value.closeOnClick == null ||
     attrs.value.closeOnClick === '' ||
     parseBool(attrs.value.closeOnClick),
-)
-
-const maskPreviewVisible = computed(
-  () =>
-    !props.selectable &&
-    mountAllowed.value &&
-    showAllowed.value &&
-    maskIsOpen.value,
 )
 
 function childRelativeStyle(child: XmlNode): CSSProperties {
@@ -777,7 +787,10 @@ function childId(index: number, tag: string) {
   return `${props.nodeId}/${index}:${tag}`
 }
 
-function emitInteract(eventKey: PreviewEventKey) {
+function emitInteract(
+  eventKey: PreviewEventKey,
+  eventArgs?: Record<string, unknown>,
+) {
   const raw = props.node.attrs[eventKey]
   if (!raw?.trim()) return
   emit('interact', {
@@ -785,7 +798,21 @@ function emitInteract(eventKey: PreviewEventKey) {
     raw,
     scope: props.node.scope,
     dollarProps: props.dollarProps,
+    ...(eventArgs ? { eventArgs } : {}),
   })
+}
+
+function handleScroll(detail: {
+  scrollTop: number
+  scrollLeft: number
+  scrollHeight: number
+  scrollWidth: number
+  clientHeight: number
+  clientWidth: number
+}) {
+  if (!props.interactEnabled || props.selectable) return
+  if (countEventBindings(props.node.attrs.onScroll) <= 0) return
+  emitInteract('onScroll', { ...detail })
 }
 
 function handleSelect(event: MouseEvent) {
@@ -804,9 +831,29 @@ function handleSelect(event: MouseEvent) {
   emitInteract('onClick')
 }
 
-function handleMaskBackdropClick() {
-  if (props.selectable || !maskCloseOnClick.value) return
-  maskStack?.close(maskKey.value)
+function closeModalIfAllowed() {
+  if (!modalCloseOnClick.value) return
+  modalStack?.close(modalKey.value)
+}
+
+function handleModalBackdropClick(event?: MouseEvent) {
+  if (props.selectable) {
+    if (event) handleSelect(event)
+    return
+  }
+  // 点到半透明背景（非弹层内容）时关闭
+  closeModalIfAllowed()
+}
+
+function handleModalPanelClick(event: MouseEvent) {
+  if (props.selectable) {
+    handleSelect(event)
+    return
+  }
+  // 面板铺满时仅「点到面板自身」算点空白；点到子弹窗子控件不关闭
+  if (event.target === event.currentTarget) {
+    closeModalIfAllowed()
+  }
 }
 
 function handleMouseEnter() {
@@ -879,12 +926,6 @@ function forwardComponentInteract(payload: PreviewInteractPayload) {
   })
 }
 
-onMounted(() => {
-  if (!props.interactEnabled || props.selectable) return
-  if (countEventBindings(props.node.attrs.onAppear) <= 0) return
-  emitInteract('onAppear')
-})
-
 onBeforeUnmount(() => {
   clearLongPress()
 })
@@ -900,6 +941,34 @@ onBeforeUnmount(() => {
     不支持的控件：{{ node.tag }}
   </div>
 
+  <!-- 历史 Fragment：透明渲染子节点（打开资源时会尽量卸壳写回） -->
+  <template v-else-if="isFragmentTag(node.tag)">
+    <XmlNodeView
+      v-for="(child, index) in node.children"
+      :key="childId(index, child.tag)"
+      :node="child"
+      :node-id="childId(index, child.tag)"
+      :selected-id="selectedId"
+      :hovered-id="hoveredId"
+      :selectable="selectable"
+      :interact-enabled="interactEnabled"
+      :parent-horizontal="parentHorizontal"
+      :parent-vertical="parentVertical"
+      :parent-scrollable="parentScrollable"
+      :is-root="isRoot"
+      :icon-library="iconLibrary"
+      :page-data="pageData"
+      :hidden-node-ids="hiddenNodeIds"
+      :component-map="componentMap"
+      :dollar-props="dollarProps"
+      :route-params="routeParams"
+      @select="emit('select', $event)"
+      @hover="emit('hover', $event)"
+      @open-repeat="emit('open-repeat', $event)"
+      @interact="emit('interact', $event)"
+    />
+  </template>
+
   <WidgetSelectShell
     v-else-if="node.tag === 'Text'"
     :selected="isSelected"
@@ -909,6 +978,7 @@ onBeforeUnmount(() => {
     :height="height"
     :parent-horizontal="parentHorizontal"
     :parent-vertical="parentVertical"
+    :fill-parent="isRoot"
     :extra-style="shellExtraStyle"
     :repeat-badge="showRepeatBadge"
     :event-badge-count="eventBadgeCount"
@@ -937,6 +1007,7 @@ onBeforeUnmount(() => {
     :height="height"
     :parent-horizontal="parentHorizontal"
     :parent-vertical="parentVertical"
+    :fill-parent="isRoot"
     :extra-style="shellExtraStyle"
     :repeat-badge="showRepeatBadge"
     :event-badge-count="eventBadgeCount"
@@ -965,6 +1036,7 @@ onBeforeUnmount(() => {
     :height="height"
     :parent-horizontal="parentHorizontal"
     :parent-vertical="parentVertical"
+    :fill-parent="isRoot"
     :extra-style="shellExtraStyle"
     :repeat-badge="showRepeatBadge"
     :event-badge-count="eventBadgeCount"
@@ -1008,6 +1080,7 @@ onBeforeUnmount(() => {
     :height="height"
     :parent-horizontal="parentHorizontal"
     :parent-vertical="parentVertical"
+    :fill-parent="isRoot"
     :extra-style="shellExtraStyle"
     :repeat-badge="showRepeatBadge"
     :event-badge-count="eventBadgeCount"
@@ -1177,71 +1250,24 @@ onBeforeUnmount(() => {
     </div>
   </WidgetSelectShell>
 
-  <WidgetSelectShell
-    v-else-if="node.tag === 'Mask' && selectable"
-    :selected="isSelected"
-    :hovered="isHovered"
-    :margin-attrs="attrs"
-    :width="width"
-    :height="height"
-    :parent-horizontal="parentHorizontal"
-    :parent-vertical="parentVertical"
-    :fill-parent="isRoot"
-    :extra-style="shellExtraStyle"
-    :repeat-badge="showRepeatBadge"
-    :event-badge-count="eventBadgeCount"
-    :visually-hidden="visuallyHidden"
-    :interactive="previewInteractive"
-    :inside-scroll-port="insideScrollColumn"
-    :fill-remaining-height="fillRemainingHeight"
-    @click="handleSelect"
-    @mouseenter="handleMouseEnter"
-    @pointerdown="handlePointerDown"
-    @pointerup="handlePointerUp"
-    @pointerleave="handlePointerLeave"
-    @open-repeat="handleOpenRepeat"
-  >
-    <div class="widget mask mask-edit" :style="maskEditStyle">
-      <XmlNodeView
-        v-for="(child, index) in node.children"
-        :key="childId(index, child.tag)"
-        :node="child"
-        :node-id="childId(index, child.tag)"
-        :selected-id="selectedId"
-        :hovered-id="hoveredId"
-        :selectable="selectable"
-        :interact-enabled="interactEnabled"
-        :parent-horizontal="false"
-        :parent-vertical="true"
-        :parent-scrollable="inScrollColumn"
-        :icon-library="iconLibrary"
-        :page-data="pageData"
-        :hidden-node-ids="hiddenNodeIds"
-        :component-map="componentMap"
-        :dollar-props="dollarProps"
-        :route-params="routeParams"
-        @select="forwardSelect"
-        @hover="forwardHover"
-        @open-repeat="forwardOpenRepeat"
-        @interact="forwardInteract"
-      />
-      <div v-if="!node.children.length" class="mask-empty">
-        向遮罩添加子弹窗等内容 · name「{{ maskKey }}」
-      </div>
-    </div>
-  </WidgetSelectShell>
-
+  <!-- Modal：Teleport 到手机层，铺满屏幕；内部为相对布局 -->
   <Teleport
-    v-else-if="node.tag === 'Mask' && maskHostEl"
-    :to="maskHostEl"
+    v-else-if="node.tag === 'Modal' && modalHostEl"
+    :to="modalHostEl"
   >
     <div
-      v-if="maskPreviewVisible"
-      class="mask-overlay"
-      :style="maskOverlayStyle"
-      @click="handleMaskBackdropClick"
+      v-if="modalLayerVisible"
+      class="modal-overlay"
+      :class="{ 'is-edit': selectable, 'is-selected': isSelected }"
+      :style="modalOverlayStyle"
+      @click="handleModalBackdropClick"
+      @mouseenter="handleMouseEnter"
     >
-      <div class="mask-panel" @click.stop>
+      <div
+        class="modal-panel"
+        :style="modalPanelStyle"
+        @click.stop="handleModalPanelClick"
+      >
         <XmlNodeView
           v-for="(child, index) in node.children"
           :key="childId(index, child.tag)"
@@ -1251,8 +1277,7 @@ onBeforeUnmount(() => {
           :hovered-id="hoveredId"
           :selectable="selectable"
           :interact-enabled="interactEnabled"
-          :parent-horizontal="false"
-          :parent-vertical="true"
+          :extra-style="childRelativeStyle(child)"
           :icon-library="iconLibrary"
           :page-data="pageData"
           :hidden-node-ids="hiddenNodeIds"
@@ -1264,12 +1289,14 @@ onBeforeUnmount(() => {
           @open-repeat="forwardOpenRepeat"
           @interact="forwardInteract"
         />
+        <div v-if="selectable && !node.children.length" class="modal-empty">
+          向弹层添加内容 · name「{{ modalKey }}」
+        </div>
       </div>
     </div>
   </Teleport>
 
-  <!-- 预览且宿主未就绪时占位，避免落入 unsupported -->
-  <template v-else-if="node.tag === 'Mask'" />
+  <template v-else-if="node.tag === 'Modal'" />
 
   <WidgetSelectShell
     v-else-if="node.tag === 'LinearLayout'"
@@ -1301,6 +1328,7 @@ onBeforeUnmount(() => {
       content-class="widget linear"
       :content-style="linearStyle"
       @wheel="$event.stopPropagation()"
+      @scroll="handleScroll"
     >
       <XmlNodeView
         v-for="(child, index) in node.children"
@@ -1358,6 +1386,7 @@ onBeforeUnmount(() => {
       content-class="widget relative"
       :content-style="relativeStyle"
       @wheel="$event.stopPropagation()"
+      @scroll="handleScroll"
     >
       <XmlNodeView
         v-for="(child, index) in node.children"
@@ -1394,7 +1423,7 @@ onBeforeUnmount(() => {
   box-sizing: border-box;
 }
 
-.mask-empty {
+.modal-empty {
   width: 100%;
   padding: 16px 8px;
   font-size: 12px;
@@ -1403,15 +1432,9 @@ onBeforeUnmount(() => {
   pointer-events: none;
 }
 
-.mask-panel {
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  max-width: 100%;
-  max-height: 100%;
-  min-width: 0;
-  min-height: 0;
-  box-sizing: border-box;
+/* 尺寸由 modalPanelStyle 控制（铺满弹层，相对布局根） */
+.modal-panel {
+  position: relative;
 }
 
 .component-title {

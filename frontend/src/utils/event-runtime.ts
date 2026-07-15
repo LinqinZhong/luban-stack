@@ -3,6 +3,7 @@ import {
   isCustomEventMethod,
   parseEventBindings,
   type EventMethodBinding,
+  type PageMethod,
 } from '../types/page-method'
 import {
   defaultValue,
@@ -14,8 +15,14 @@ import {
 import { interpolateTemplate } from './repeat'
 import { runComputeBody } from './compute-runtime'
 import { interpolateDollarProps } from './component-props'
+import type { ComponentRenderMap } from '../types/component-render'
+import {
+  resolveRefFieldValue,
+  type ComponentMethodsMap,
+  type ModalStackLike,
+} from './widget-ref'
 
-export type PreviewEventKey = 'onClick' | 'onLongClick' | 'onAppear'
+export type PreviewEventKey = 'onClick' | 'onLongClick' | 'onScroll'
 
 export interface EventScope {
   item?: unknown
@@ -43,6 +50,25 @@ export interface PreviewInteractPayload {
 
 export interface RunEventBindingsContext {
   pageData: PageData
+  /** 当前页面/组件 XML，用于解析数据池「引用」字段 */
+  xml?: string
+  /** Modal 堆栈（引用字段 .show / .hide） */
+  modalStack?: ModalStackLike
+  /** 页面内嵌组件详情（引用指向 Component 时解析暴露方法） */
+  componentMap?: ComponentRenderMap
+  /** 各组件的方法列表 */
+  componentMethodsMap?: ComponentMethodsMap
+  /**
+   * 执行组件暴露方法（父页/组件引用 xxx.open()）。
+   * 应在目标组件自身数据池与方法作用域内运行。
+   */
+  runComponentMethod?: (
+    componentId: string,
+    methodName: string,
+    args: unknown[],
+  ) => void
+  /** 查找页面/组件自定义方法（按方法名） */
+  resolveMethod?: (name: string) => PageMethod | undefined
   scope?: EventScope | null
   eventArgs?: Record<string, unknown>
   /** 组件实例 $props */
@@ -54,12 +80,6 @@ export interface RunEventBindingsContext {
   setData: (prop: string, value: DataFieldValue) => void
   /** Toast 提示 */
   showToast?: (message: string, duration: 'short' | 'long') => void
-  /** 打开遮罩（按 name 入栈，仅栈顶可见） */
-  openMask?: (name: string) => void
-  /** 关闭遮罩；不传 name 关闭栈顶 */
-  closeMask?: (name?: string) => void
-  /** 清空遮罩堆栈 */
-  closeAllMasks?: () => void
   /** 组件内向父级抛事件（自定义方法体里的 emit(...)） */
   emit?: (event: string, ...args: unknown[]) => void
   /**
@@ -151,7 +171,8 @@ export function coerceFieldValue(
   type: DataFieldType,
   raw: string,
 ): DataFieldValue {
-  if (type === 'string' || type === 'icon' || type === 'color') return raw
+  if (type === 'string' || type === 'icon' || type === 'color' || type === 'ref')
+    return raw
   if (type === 'number') {
     const n = Number(raw)
     return Number.isFinite(n) ? n : 0
@@ -235,24 +256,6 @@ async function runBuiltin(
     ctx.showToast?.(message, duration)
     return true
   }
-  if (name === 'openMask') {
-    const maskName = (args.name ?? '').trim()
-    if (!maskName) {
-      ctx.onUnknownMethod?.('openMask: 请传入遮罩 name')
-      return true
-    }
-    ctx.openMask?.(maskName)
-    return true
-  }
-  if (name === 'closeMask') {
-    const maskName = (args.name ?? '').trim()
-    ctx.closeMask?.(maskName || undefined)
-    return true
-  }
-  if (name === 'closeAllMasks') {
-    ctx.closeAllMasks?.()
-    return true
-  }
   if (name === 'emit') {
     const eventName = (args.event ?? '').trim()
     if (!eventName) return true
@@ -276,13 +279,35 @@ async function runBuiltin(
   return false
 }
 
+function isValidIdent(name: string): boolean {
+  return /^[A-Za-z_$][\w$]*$/.test(name)
+}
+
 function buildCustomScope(ctx: RunEventBindingsContext): Record<string, unknown> {
   const item =
     ctx.scope?.item && typeof ctx.scope.item === 'object' && !Array.isArray(ctx.scope.item)
       ? (ctx.scope.item as Record<string, unknown>)
       : {}
 
+  /** 数据池字段作为自由变量（引用 → Modal.show/hide 或组件暴露方法） */
+  const dataVars: Record<string, unknown> = {}
+  for (const field of ctx.pageData.fields ?? []) {
+    const name = field.name.trim()
+    if (!name || !isValidIdent(name)) continue
+    dataVars[name] =
+      field.type === 'ref'
+        ? resolveRefFieldValue(field, {
+            xml: ctx.xml,
+            modalStack: ctx.modalStack,
+            componentMap: ctx.componentMap,
+            componentMethodsMap: ctx.componentMethodsMap,
+            runComponentMethod: ctx.runComponentMethod,
+          })
+        : field.value
+  }
+
   const scope: Record<string, unknown> = {
+    ...dataVars,
     ...item,
     ...(ctx.eventArgs ?? {}),
     item: ctx.scope?.item,
@@ -305,16 +330,6 @@ function buildCustomScope(ctx: RunEventBindingsContext): Record<string, unknown>
       const d = String(duration ?? 'short').toLowerCase() === 'long' ? 'long' : 'short'
       ctx.showToast?.(String(message ?? ''), d)
     },
-    openMask: (name?: string) => {
-      ctx.openMask?.(String(name ?? '').trim())
-    },
-    closeMask: (name?: string) => {
-      const id = name == null ? '' : String(name).trim()
-      ctx.closeMask?.(id || undefined)
-    },
-    closeAllMasks: () => {
-      ctx.closeAllMasks?.()
-    },
   }
 
   if (ctx.emit) {
@@ -324,21 +339,36 @@ function buildCustomScope(ctx: RunEventBindingsContext): Record<string, unknown>
   return scope
 }
 
-function runCustomBinding(
-  binding: EventMethodBinding,
+function runCustomBody(
+  body: string,
   ctx: RunEventBindingsContext,
+  extraScope?: Record<string, unknown>,
 ): void {
-  const body = (binding.body ?? '').trim()
-  if (!body) return
+  const trimmed = body.trim()
+  if (!trimmed) return
   try {
-    runComputeBody(body, buildCustomScope(ctx))
+    runComputeBody(trimmed, { ...buildCustomScope(ctx), ...extraScope })
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     ctx.onUnknownMethod?.(`自定义方法执行失败：${msg}`)
   }
 }
 
-/** 按顺序执行事件绑定：预置方法 + 内联自定义方法体 */
+function runPageMethod(
+  method: PageMethod,
+  args: Record<string, string>,
+  ctx: RunEventBindingsContext,
+): void {
+  const extra: Record<string, unknown> = {}
+  for (const param of method.params ?? []) {
+    const name = param.name.trim()
+    if (!name || name.startsWith('...')) continue
+    extra[name] = args[name] ?? ''
+  }
+  runCustomBody(method.body ?? '', ctx, extra)
+}
+
+/** 按顺序执行事件绑定：预置方法 + 页面方法 + 内联自定义方法体 */
 export async function runEventBindings(
   raw: string | undefined,
   ctx: RunEventBindingsContext,
@@ -346,7 +376,7 @@ export async function runEventBindings(
   const list = parseEventBindings(raw)
   for (const binding of list) {
     if (isCustomEventMethod(binding.method)) {
-      runCustomBinding(binding, ctx)
+      runCustomBody(binding.body ?? '', ctx)
       continue
     }
     const args = resolveBindingArgs(
@@ -356,9 +386,13 @@ export async function runEventBindings(
       ctx.dollarProps,
     )
     const handled = await runBuiltin(binding.method, args, ctx)
-    if (!handled) {
-      ctx.onUnknownMethod?.(binding.method)
+    if (handled) continue
+    const pageMethod = ctx.resolveMethod?.(binding.method)
+    if (pageMethod && !pageMethod.builtin) {
+      runPageMethod(pageMethod, args, ctx)
+      continue
     }
+    ctx.onUnknownMethod?.(binding.method)
   }
 }
 

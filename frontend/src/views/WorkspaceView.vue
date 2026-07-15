@@ -26,7 +26,7 @@ import {
   type PageDetail,
   type PageSummary,
 } from '../api/pages'
-import { createMaskStack } from '../composables/useMaskStack'
+import { createModalStack } from '../composables/useModalStack'
 import {
   createComponent,
   deleteComponentMethod,
@@ -57,6 +57,8 @@ import {
   buildEmitAmbientDeclarations,
   builtinsForRoot,
   createEmptyMethod,
+  CUSTOM_EVENT_METHOD,
+  serializeEventBindings,
   type PageMethod,
 } from '../types/page-method'
 import { runEventBindings } from '../utils/event-runtime'
@@ -71,6 +73,8 @@ import {
   canDeleteNode,
   moveWidget,
   removeWidget,
+  migrateLegacyMaskToModal,
+  unwrapLegacyFragmentRoot,
   WIDGET_OPTIONS,
   type MovePosition,
   type WidgetTag,
@@ -100,6 +104,8 @@ const selectedNodeId = ref('')
 const workspaceMode = ref<WorkspaceMode>('preview')
 const addComponentVisible = ref(false)
 const componentMap = ref<ComponentRenderMap>({})
+/** 各组件方法（含暴露方法签名 / 预览调用） */
+const componentMethodsMap = ref<Record<string, PageMethod[]>>({})
 const propsTab = ref<PropsTab>('style')
 const openRepeatRequest = ref(0)
 const loadingPages = ref(false)
@@ -124,8 +130,8 @@ let previewToastTimer: ReturnType<typeof setTimeout> | null = null
 const canvasPanX = ref(0)
 const canvasPanY = ref(0)
 const canvasZoom = ref(1)
-/** 预览态遮罩堆栈（一屏仅栈顶可见） */
-const maskStack = createMaskStack()
+/** 预览态 Modal 堆栈（一屏仅栈顶可见） */
+const modalStack = createModalStack()
 
 function showPreviewToast(message: string, duration: 'short' | 'long' = 'short') {
   const text = String(message ?? '').trim() || ' '
@@ -191,11 +197,14 @@ const methodAmbientExtra = computed(() => {
   return buildEmitAmbientDeclarations(activeComponent.value.config.events ?? [])
 })
 
-/** 展示用方法列表（保证含最新预置方法，兼容未重启服务端） */
+/** 展示用方法列表（保证含最新预置方法；剔除已废弃的内置方法） */
 const editorMethods = computed(() => {
-  const list = pageMethods.value
   const expected = builtinsForRoot(
     isComponentResource.value ? 'components' : 'pages',
+  )
+  const expectedNames = new Set(expected.map((item) => item.name))
+  const list = pageMethods.value.filter(
+    (item) => !item.builtin || expectedNames.has(item.name),
   )
   const names = new Set(list.map((item) => item.name))
   const missing = expected.filter((item) => !names.has(item.name))
@@ -374,6 +383,7 @@ async function loadIconLibrary() {
 async function refreshComponentMap() {
   if (!projectStore.path) {
     componentMap.value = {}
+    componentMethodsMap.value = {}
     return
   }
   try {
@@ -391,6 +401,21 @@ async function refreshComponentMap() {
       }
     }
     componentMap.value = next
+
+    const methodEntries = await Promise.all(
+      details.map(async (detail) => {
+        try {
+          const { methods } = await listComponentMethods(
+            projectStore.path!,
+            detail.id,
+          )
+          return [detail.id, methods] as const
+        } catch {
+          return [detail.id, [] as PageMethod[]] as const
+        }
+      }),
+    )
+    componentMethodsMap.value = Object.fromEntries(methodEntries)
   } catch (err) {
     console.error(err)
   }
@@ -458,11 +483,19 @@ async function openPage(
   activeComponent.value = null
   selectedNodeId.value = ''
   editorHiddenNodeIds.value = []
-  maskStack.closeAll()
+  modalStack.closeAll()
   loadingPage.value = true
   try {
-    activePage.value = await getPage(projectStore.path, pageId)
-    await loadPageMethods(pageId)
+    const detail = await getPage(projectStore.path, pageId)
+    const migrated = migrateLegacyMaskToModal(detail.xml)
+    if (migrated.changed) {
+      activePage.value = { ...detail, xml: migrated.xml }
+      await loadPageMethods(pageId)
+      await handleXmlUpdate(migrated.xml)
+    } else {
+      activePage.value = detail
+      await loadPageMethods(pageId)
+    }
   } catch (err) {
     activePage.value = null
     pageMethods.value = []
@@ -482,11 +515,22 @@ async function openComponent(componentId: string) {
   editorHiddenNodeIds.value = []
   pageHistory.value = []
   routeParams.value = {}
-  maskStack.closeAll()
+  modalStack.closeAll()
   loadingPage.value = true
   try {
-    activeComponent.value = await getComponent(projectStore.path, componentId)
-    await loadPageMethods(componentId)
+    const detail = await getComponent(projectStore.path, componentId)
+    const unwrapped = unwrapLegacyFragmentRoot(detail.xml)
+    const migrated = migrateLegacyMaskToModal(unwrapped.xml)
+    const nextXml = migrated.changed ? migrated.xml : unwrapped.xml
+    const changed = unwrapped.changed || migrated.changed
+    if (changed) {
+      activeComponent.value = { ...detail, xml: nextXml }
+      await loadPageMethods(componentId)
+      await handleXmlUpdate(nextXml)
+    } else {
+      activeComponent.value = detail
+      await loadPageMethods(componentId)
+    }
   } catch (err) {
     activeComponent.value = null
     pageMethods.value = []
@@ -725,6 +769,103 @@ async function handleXmlUpdate(xml: string) {
   }, 280)
 }
 
+function applyComponentPreviewSetData(
+  componentId: string,
+  prop: string,
+  value: DataFieldValue,
+) {
+  const info = componentMap.value[componentId]
+  if (!info) {
+    ElMessage.warning(`组件不存在：${componentId}`)
+    return
+  }
+  const fields = [...(info.data.fields ?? [])]
+  const index = fields.findIndex((item) => item.name === prop)
+  if (index < 0) {
+    ElMessage.warning(`组件数据池不存在字段：${prop}`)
+    return
+  }
+  fields[index] = { ...fields[index], value }
+  componentMap.value = {
+    ...componentMap.value,
+    [componentId]: {
+      ...info,
+      data: resolveComputedPageData({ fields }),
+    },
+  }
+}
+
+/** 父页通过引用调用组件「暴露方法」 */
+function runComponentExposedMethod(
+  componentId: string,
+  methodName: string,
+  args: unknown[],
+) {
+  const info = componentMap.value[componentId]
+  if (!info) {
+    ElMessage.warning(`组件不存在：${componentId}`)
+    return
+  }
+  const exposed = info.config.exposedMethods ?? []
+  if (!exposed.includes(methodName)) {
+    ElMessage.warning(`方法「${methodName}」未在组件中暴露`)
+    return
+  }
+  const method = (componentMethodsMap.value[componentId] ?? []).find(
+    (item) => item.name === methodName && !item.builtin,
+  )
+  if (!method?.body?.trim()) {
+    ElMessage.warning(`找不到方法「${methodName}」的实现`)
+    return
+  }
+
+  const eventArgs: Record<string, unknown> = {}
+  ;(method.params ?? []).forEach((param, index) => {
+    const key = param.name.trim()
+    if (!key || key.startsWith('...')) return
+    eventArgs[key] = args[index]
+  })
+
+  const raw = serializeEventBindings([
+    {
+      id: `exposed_${methodName}`,
+      method: CUSTOM_EVENT_METHOD,
+      args: {},
+      body: method.body,
+    },
+  ])
+
+  void runEventBindings(raw, {
+    pageData: info.data,
+    xml: info.xml,
+    modalStack,
+    componentMap: componentMap.value,
+    componentMethodsMap: componentMethodsMap.value,
+    runComponentMethod: runComponentExposedMethod,
+    resolveMethod: (name) =>
+      (componentMethodsMap.value[componentId] ?? []).find(
+        (item) => item.name === name && !item.builtin,
+      ),
+    eventArgs,
+    hasPage: (pageId) => pages.value.some((item) => item.id === pageId),
+    navigateTo: async () => {
+      ElMessage.info('组件内暂不支持 navigateTo')
+    },
+    navigateBack: async () => {
+      ElMessage.info('组件内暂不支持 navigateBack')
+    },
+    setData: (prop, value) => {
+      applyComponentPreviewSetData(componentId, prop, value)
+    },
+    showToast: (message, duration) => {
+      showPreviewToast(message, duration)
+    },
+    onUnknownMethod: (name) => {
+      if (name.startsWith('自定义方法')) ElMessage.error(name)
+    },
+  })
+}
+
 async function handlePreviewInteract(payload: PreviewInteractPayload) {
   if (workspaceMode.value !== 'preview' || !activeDoc.value) return
 
@@ -740,6 +881,15 @@ async function handlePreviewInteract(payload: PreviewInteractPayload) {
   ) => {
     await runEventBindings(raw, {
       pageData: resolvedPageData.value,
+      xml: activeDoc.value?.xml,
+      modalStack,
+      componentMap: componentMap.value,
+      componentMethodsMap: componentMethodsMap.value,
+      runComponentMethod: runComponentExposedMethod,
+      resolveMethod: (name) =>
+        pageMethods.value.find(
+          (item) => item.name === name && !item.builtin,
+        ),
       scope: options?.scope ?? payload.scope,
       eventArgs: options?.eventArgs ?? payload.eventArgs,
       dollarProps: options?.dollarProps ?? payload.dollarProps,
@@ -777,15 +927,6 @@ async function handlePreviewInteract(payload: PreviewInteractPayload) {
       },
       showToast: (message, duration) => {
         showPreviewToast(message, duration)
-      },
-      openMask: (name) => {
-        maskStack.open(name)
-      },
-      closeMask: (name) => {
-        maskStack.close(name)
-      },
-      closeAllMasks: () => {
-        maskStack.closeAll()
       },
       onUnknownMethod: (name) => {
         if (name.startsWith('navigateTo:')) {
@@ -968,6 +1109,12 @@ async function handleSaveMethod(method: PageMethod, previousName?: string) {
     }
     ElMessage.success('方法已保存')
     await loadPageMethods()
+    if (isComponentResource.value && activeComponent.value) {
+      componentMethodsMap.value = {
+        ...componentMethodsMap.value,
+        [activeComponent.value.id]: [...pageMethods.value],
+      }
+    }
   } catch (err) {
     ElMessage.error(err instanceof Error ? err.message : '保存方法失败')
   }
@@ -1266,6 +1413,7 @@ onMounted(() => {
         <DataPoolPanel
           v-else-if="isDataPoolMode"
           :data="activeDoc.data ?? { fields: [] }"
+          :xml="activeDoc.xml"
           :icon-options="iconOptions"
           @update:data="handleDataUpdate"
         />
@@ -1282,7 +1430,7 @@ onMounted(() => {
           v-model:pan-x="canvasPanX"
           v-model:pan-y="canvasPanY"
           v-model:zoom="canvasZoom"
-          :mask-stack="maskStack"
+          :modal-stack="modalStack"
           :xml="activeDoc.xml"
           :canvas-width="canvasFrameWidth"
           :canvas-height="canvasFrameHeight === undefined ? undefined : canvasFrameHeight"
@@ -1350,6 +1498,7 @@ onMounted(() => {
           :component-props="editorConditionComponentProps"
           :route-params="null"
           :component-map="componentMap"
+          :component-methods-map="componentMethodsMap"
           :open-repeat-request="openRepeatRequest"
           @update:xml="handleXmlUpdate"
         />
@@ -1366,6 +1515,7 @@ onMounted(() => {
       :component-props="null"
       :route-params="routeParams"
       :component-map="componentMap"
+      :component-methods-map="componentMethodsMap"
       :open-repeat-request="openRepeatRequest"
       @update:xml="handleXmlUpdate"
     />
@@ -1380,6 +1530,10 @@ onMounted(() => {
     <MethodEditDialog
       v-model="methodDialogVisible"
       :method="editingMethod"
+      :data-fields="activeDoc?.data?.fields ?? []"
+      :xml="activeDoc?.xml"
+      :component-map="componentMap"
+      :component-methods-map="componentMethodsMap"
       :ambient-extra="methodAmbientExtra"
       @save="handleSaveMethod"
     />
