@@ -273,8 +273,8 @@ function bindingToExpr(
     if (inner.startsWith('item.') && inRepeat) return `item.${inner.slice(5)}`
     if (inner.startsWith('item.') && !inRepeat) return 'undefined'
     if (/^[A-Za-z_][\w]*$/.test(inner)) {
-      // 模板中 ref/computed 自动解包；组件仍用 store
-      if (ctx.kind === 'page') return inner
+      // 模板中 ref/computed 自动解包（页面与组件本地数据池）
+      if (ctx.kind === 'page' || ctx.dataFieldNames.includes(inner)) return inner
       return `store.${inner}`
     }
     const scopeExpr = inRepeat ? '{ item, index }' : 'undefined'
@@ -603,7 +603,7 @@ function visibilityFieldExpr(
     const path = raw.replace(/^\$?route\./, '')
     return `route.params.${path}`
   }
-  if (ctx.kind === 'page') return raw
+  if (ctx.kind === 'page' || ctx.dataFieldNames.includes(raw)) return raw
   return `store.${raw}`
 }
 
@@ -854,7 +854,7 @@ function templateToExpr(raw: string, inRepeat: boolean, hasPayload: boolean, ctx
       const parts: string[] = []
       if (hasPayload) parts.push(`payload?.${inner}`)
       if (inRepeat) parts.push(`item?.${inner}`)
-      if (ctx.kind === 'page' && ctx.dataFieldNames.includes(root)) {
+      if (ctx.dataFieldNames.includes(root)) {
         parts.push(
           inner.includes('.')
             ? `${root}.value.${inner.slice(root.length + 1)}`
@@ -1164,7 +1164,6 @@ function emitBindingStatements(
 
     // 静态字段名 → xxx.value = ...
     if (
-      ctx.kind === 'page' &&
       propRaw &&
       !propRaw.includes('{') &&
       ctx.dataFieldNames.includes(propRaw)
@@ -1174,7 +1173,7 @@ function emitBindingStatements(
     }
 
     // `{prop}` 形式
-    if (ctx.kind === 'page' && /^\{([A-Za-z_][\w]*)\}$/.test(propRaw)) {
+    if (/^\{([A-Za-z_][\w]*)\}$/.test(propRaw)) {
       const name = propRaw.slice(1, -1)
       if (ctx.dataFieldNames.includes(name)) {
         lines.push(`  ${name}.value = ${valueExpr}`)
@@ -1193,7 +1192,9 @@ function emitBindingStatements(
 
   if (method === 'showToast') {
     const msg = templateToExpr(binding.args.message ?? '', inRepeat, hasPayload, ctx)
-    lines.push(`  showToast(String(${msg}))`)
+    const duration = (binding.args.duration ?? 'short').trim() || 'short'
+    const durLit = duration === 'long' ? "'long'" : "'short'"
+    lines.push(`  showToast(String(${msg}), ${durLit})`)
     return lines
   }
 
@@ -1401,7 +1402,9 @@ function renderNode(
       inScrollColumn,
       parentOrientation,
     )
-    return `${pad}<template v-for="(item, index) in ${ctx.kind === 'page' ? field : `store.${field}`}" :key="index">
+    return `${pad}<template v-for="(item, index) in ${
+      ctx.kind === 'page' || ctx.dataFieldNames.includes(field) ? field : `store.${field}`
+    }" :key="index">
 ${inner}
 ${pad}</template>`
   }
@@ -1651,6 +1654,9 @@ ${pad}</template>`
   if (tag === 'Image') {
     const srcRaw = attrs.src ?? ''
     const srcAttr = attrBinding('src', srcRaw, ctx, inRepeat)
+    const events = [...INTERACTION_ATTRS]
+      .map((k) => eventHandler(k, attrs[k], inRepeat, ctx))
+      .filter(Boolean)
     const extra: string[] = []
     if (attrs.objectFit && attrs.objectFit !== 'null') {
       const fit = attrs.objectFit.trim()
@@ -1660,12 +1666,13 @@ ${pad}</template>`
       else if (fit === 'none') extra.push('object-none')
       else extra.push(`object-[${fit}]`)
     }
+    if (attrs.onClick?.trim()) extra.push('cursor-pointer')
     const tw = twWithRelative(attrs, parentTag, extra, twOpts)
     const alt = attrs.alt ? `alt="${escapeHtmlAttr(attrs.alt)}"` : ''
     return formatVueElement({
       pad,
       tag: 'img',
-      attrs: [srcAttr, alt, classAttr(tw), ...visibilityAttrs(attrs, ctx, inRepeat)],
+      attrs: [srcAttr, alt, classAttr(tw), ...visibilityAttrs(attrs, ctx, inRepeat), ...events],
       selfClosing: true,
     })
   }
@@ -1931,13 +1938,13 @@ export function generateComponentSfc(options: {
   componentRoots?: Map<string, XmlNode>
   rootNodes: XmlNode[]
 }): string {
-  const storeName = pageIdToStoreName(options.componentId)
-  const hasStore = options.data.fields.some((f) => f.type !== 'ref')
+  const pageData = generatePageDataSource(options.data.fields)
+  const hasLocalData = pageData.fieldNames.length > 0
   const ctx: CodegenContext = {
     kind: 'component',
     id: options.componentId,
-    storeName,
-    dataFieldNames: [],
+    storeName: pageIdToStoreName(options.componentId),
+    dataFieldNames: pageData.fieldNames,
     componentImports: new Map(),
     componentConfigs: options.componentConfigs,
     componentRoots: options.componentRoots ?? new Map(),
@@ -1993,17 +2000,24 @@ export function generateComponentSfc(options: {
     .join('\n')
 
   const methodsSource = renderGeneratedMethods(ctx.methods)
-  const scriptAndTemplate = `${methodsSource}\n${templateBody}`
+  const scriptAndTemplate = `${methodsSource}\n${templateBody}\n${pageData.source}`
   const needsNavigateTo = /\bnavigateTo\s*\(/.test(scriptAndTemplate)
   const needsNavigateBack = /\bnavigateBack\s*\(/.test(scriptAndTemplate)
   const needsNavigation = needsNavigateTo || needsNavigateBack
   const needsShowToast = /\bshowToast\s*\(/.test(scriptAndTemplate)
-  const needsGetDeviceInfo = /\bgetDeviceInfo\s*\(/.test(scriptAndTemplate)
-  const needsStore =
-    hasStore || /\bstore\./.test(scriptAndTemplate)
+  const needsGetDeviceInfo =
+    /\bgetDeviceInfo\s*\(/.test(scriptAndTemplate) ||
+    /\bgetDeviceInfo\s*\(/.test(pageData.source)
   const needsInterpolate = /\binterpolate\s*\(/.test(scriptAndTemplate)
   const needsModal = ctx.modalNames.size > 0
+  const needsStoreAdapter =
+    hasLocalData &&
+    (needsInterpolate ||
+      /\bstore\./.test(scriptAndTemplate) ||
+      /\bstore\b/.test(methodsSource))
   const needsReactive = needsModal
+  const needsVueComputed = pageData.needsComputed
+  const needsVueRef = pageData.needsRef
 
   const exposedMethods = options.config.exposedMethods.filter(Boolean)
   const exposeBlock = exposedMethods.length
@@ -2032,23 +2046,24 @@ defineExpose({ ${exposedMethods.join(', ')} })
     .filter(Boolean)
     .join(', ')
 
+  const vueImports = [
+    needsReactive ? 'reactive' : '',
+    needsVueRef ? 'ref' : '',
+    needsVueComputed ? 'computed' : '',
+  ]
+    .filter(Boolean)
+    .join(', ')
+
   const importLines = [
-    needsReactive ? `import { reactive } from 'vue'` : '',
+    vueImports ? `import { ${vueImports} } from 'vue'` : '',
     helperImports ? `import { ${helperImports} } from '../runtime/helpers'` : '',
-    needsStore
-      ? `import { ${storeName} } from '../stores/${pageIdToStoreFile(options.componentId)}'`
-      : '',
     needsInterpolate ? `import { interpolate } from '../runtime/voider'` : '',
     imports,
   ]
     .filter(Boolean)
     .join('\n')
 
-  return `<script setup lang="ts">
-${importLines}
-
-${
-  defaultEntries.length
+  const propsBlock = defaultEntries.length
     ? `const props = withDefaults(
   defineProps<{
 ${propsLines.join('\n')}
@@ -2060,13 +2075,35 @@ ${defaultEntries.join('\n')}
     : `const props = defineProps<{
 ${propsLines.join('\n')}
 }>()`
-}
 
-const emit = defineEmits<{
+  const setupLines = [
+    propsBlock,
+    `const emit = defineEmits<{
 ${emitLines || '  // no events'}
-}>()
+}>()`,
+    hasLocalData ? 'const $props = props' : '',
+    pageData.source.trimEnd(),
+    needsStoreAdapter
+      ? generatePageStoreAdapter(
+          pageData.fieldNames,
+          pageData.writableFieldNames,
+          'store',
+        ).trimEnd()
+      : '',
+    needsNavigation ? `const { ${navBindings} } = useNavigation()` : '',
+    needsModal
+      ? `const modalVisible = reactive<Record<string, boolean>>({\n${modalInit}\n})`
+      : '',
+    methodsSource.trimEnd(),
+    exposeBlock.trimEnd(),
+  ]
+    .filter(Boolean)
+    .join('\n\n')
 
-${needsStore ? `const store = ${storeName}()\n` : ''}${needsNavigation ? `const { ${navBindings} } = useNavigation()\n` : ''}${needsModal ? `const modalVisible = reactive<Record<string, boolean>>({\n${modalInit}\n})\n` : ''}${methodsSource}${exposeBlock}
+  return `<script setup lang="ts">
+${importLines}
+
+${setupLines}
 </script>
 
 <template>

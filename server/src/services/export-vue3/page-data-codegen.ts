@@ -31,9 +31,12 @@ export function rewriteComputeBody(
   const sorted = [...fieldNames].sort((a, b) => b.length - a.length)
   for (const name of sorted) {
     const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-    // 勿用 (?!\.)：会把 goodsList.filter 误判为已带点访问而不改写
+    // 勿改写 $props.xxx；勿用 (?!\.)：会把 goodsList.filter 误判为已带点访问而不改写
     result = result.replace(
-      new RegExp(`(?<!\\.)\\b${escaped}\\b(?!\\s*\\.value\\b)(?!\\s*=)`, 'g'),
+      new RegExp(
+        `(?<!\\$)(?<!\\.)\\b${escaped}\\b(?!\\s*\\.value\\b)(?!\\s*=)`,
+        'g',
+      ),
       `${name}.value`,
     )
   }
@@ -83,7 +86,7 @@ export function generatePageDataSource(fields: DataField[]): {
     fieldNames,
     writableFieldNames,
     needsComputed: computedFields.length > 0,
-    needsRef: plain.length > 0 || computedFields.length > 0,
+    needsRef: plain.length > 0,
   }
 }
 
@@ -91,9 +94,10 @@ export function generatePageDataSource(fields: DataField[]): {
 export function generatePageStoreAdapter(
   fieldNames: string[],
   writableFieldNames: string[],
+  varName = 'pageStore',
 ): string {
   if (!fieldNames.length) {
-    return `const pageStore = {
+    return `const ${varName} = {
   get $state(): Record<string, any> {
     return {}
   },
@@ -105,7 +109,7 @@ export function generatePageStoreAdapter(
   const setCases = writableFieldNames
     .map((n) => `    if (prop === '${n}') { ${n}.value = value as typeof ${n}.value; return }`)
     .join('\n')
-  return `const pageStore = {
+  return `const ${varName} = {
   get $state(): Record<string, any> {
     return {
 ${stateEntries}

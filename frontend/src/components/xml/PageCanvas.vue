@@ -157,14 +157,31 @@ const statusBarSelected = computed(
   () => props.selectedId === STATUS_BAR_NODE_ID,
 )
 
-const statusBarStyle = computed(() => {
-  const bg = props.statusBarBackground?.trim() || '#ffffff'
-  const light = props.statusBarTextStyle === 'white'
+/** H5 场景固定白底黑字、无沉浸；小程序场景用页面配置 */
+const effectiveStatusBar = computed(() => {
+  if (scene.value !== 'miniprogram') {
+    return {
+      background: '#ffffff',
+      textStyle: 'black' as const,
+      cover: false,
+    }
+  }
   return {
-    background: bg,
+    background: props.statusBarBackground?.trim() || '#ffffff',
+    textStyle: props.statusBarTextStyle === 'white' ? ('white' as const) : ('black' as const),
+    cover: Boolean(props.statusBarCover),
+  }
+})
+
+const statusBarStyle = computed(() => {
+  const light = effectiveStatusBar.value.textStyle === 'white'
+  return {
+    background: effectiveStatusBar.value.background,
     color: light ? '#ffffff' : '#111111',
   }
 })
+
+const statusBarCover = computed(() => effectiveStatusBar.value.cover)
 
 function handleStatusBarSelect(event: MouseEvent) {
   if (!props.statusBarSelectable) return
@@ -624,16 +641,8 @@ onBeforeUnmount(() => {
   gap: 8px;
 }
 
-.pan-reset {
-  opacity: 0.35;
-  transition: opacity 0.15s ease;
-}
-
-.pan-reset.visible {
-  opacity: 1;
-}
-
 .stage-status {
+  --ctrl-h: 28px;
   position: absolute;
   right: 16px;
   bottom: 16px;
@@ -646,6 +655,8 @@ onBeforeUnmount(() => {
 .scene-tabs {
   display: inline-flex;
   align-items: stretch;
+  box-sizing: border-box;
+  height: var(--ctrl-h);
   padding: 2px;
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.92);
@@ -654,12 +665,17 @@ onBeforeUnmount(() => {
 }
 
 .scene-tab {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
   border: none;
   background: transparent;
   color: #606266;
   font-size: 12px;
-  line-height: 1.4;
-  padding: 4px 10px;
+  line-height: 1;
+  padding: 0 10px;
   border-radius: 6px;
   cursor: pointer;
   user-select: none;
@@ -677,18 +693,36 @@ onBeforeUnmount(() => {
 }
 
 .zoom-label {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: var(--ctrl-h);
   min-width: 48px;
-  padding: 4px 8px;
-  border-radius: 6px;
+  padding: 0 10px;
+  border-radius: 8px;
   background: rgba(255, 255, 255, 0.92);
   border: 1px solid #e4e7ed;
   color: #606266;
   font-size: 12px;
   font-variant-numeric: tabular-nums;
-  text-align: center;
-  line-height: 1.4;
+  line-height: 1;
   user-select: none;
   box-shadow: 0 2px 8px rgba(15, 23, 42, 0.06);
+}
+
+.stage-status :deep(.pan-reset) {
+  box-sizing: border-box;
+  width: var(--ctrl-h);
+  height: var(--ctrl-h);
+  min-height: var(--ctrl-h);
+  padding: 0;
+  opacity: 0.35;
+  transition: opacity 0.15s ease;
+}
+
+.stage-status :deep(.pan-reset.visible) {
+  opacity: 1;
 }
 
 /* 系统状态栏：时间 · 信号 · Wi‑Fi · 电量 */

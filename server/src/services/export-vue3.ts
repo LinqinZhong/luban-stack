@@ -8,7 +8,6 @@ import type { ComponentConfig } from '../types/component.js'
 import type { DataField } from '../types/page-data.js'
 import { parseXml, findRootNode, type XmlNode } from './export-vue3/xml-parser.js'
 import { scaffoldFiles } from './export-vue3/scaffold.js'
-import { generateStoreFileName, generateStoreSource } from './export-vue3/store-codegen.js'
 import {
   generateViewSfc,
   generateComponentSfc,
@@ -165,14 +164,7 @@ export async function exportVue3Project(projectPathInput: string): Promise<Expor
   }
 
   for (const component of componentDetails) {
-    if (component.data.fields.some((f) => f.type !== 'ref')) {
-      const storeFile = `src/stores/${generateStoreFileName(component.id)}`
-      await writeProjectFile(
-        outputPath,
-        storeFile,
-        generateStoreSource(component.id, component.data.fields),
-      )
-    }
+    // 组件数据池改为 SFC 内 ref/computed，不再生成 Pinia store
 
     const rootNodes = parseXml(component.xml)
     const sfc = generateComponentSfc({

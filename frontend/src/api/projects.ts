@@ -1,7 +1,9 @@
 import { request } from './index'
 import type { IconDefinition, IconLibrary } from '../types/icon-library'
+import type { DataTypeGroup, DataTypeLibrary } from '../types/data-types'
 
 export type { IconDefinition, IconLibrary }
+export type { DataTypeGroup, DataTypeLibrary }
 
 export interface VoiderProjectConfig {
   name: string
@@ -81,6 +83,22 @@ export function saveIconLibrary(payload: {
   icons: IconDefinition[]
 }) {
   return request<IconLibrary>('/api/projects/icons', {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  })
+}
+
+export function getDataTypeLibrary(projectPath: string) {
+  return request<DataTypeLibrary>(
+    `/api/projects/types?projectPath=${encodeURIComponent(projectPath)}`,
+  )
+}
+
+export function saveDataTypeLibrary(payload: {
+  projectPath: string
+  groups: DataTypeGroup[]
+}) {
+  return request<DataTypeLibrary>('/api/projects/types', {
     method: 'PUT',
     body: JSON.stringify(payload),
   })

@@ -45,6 +45,7 @@ let lockAxis: 'x' | 'y' | null = null
 let timer: ReturnType<typeof setInterval> | null = null
 let suppressClickUntil = 0
 let resizeObserver: ResizeObserver | null = null
+let pointerCaptured = false
 
 const count = computed(() => Math.max(0, props.slideCount))
 
@@ -151,12 +152,13 @@ function onPointerDown(event: PointerEvent) {
   if (!el) return
   dragging.value = true
   lockAxis = null
+  pointerCaptured = false
   startX = event.clientX
   startY = event.clientY
   startOffset = 0
   dragOffset.value = 0
   clearTimer()
-  el.setPointerCapture?.(event.pointerId)
+  // 勿在此处 capture：否则 click 会落到 viewport，子控件 onClick 失效
 }
 
 function onPointerMove(event: PointerEvent) {
@@ -171,6 +173,13 @@ function onPointerMove(event: PointerEvent) {
       dragOffset.value = 0
       restartTimer()
       return
+    }
+    // 确认横向滑动后再 capture，保证轻点仍落到子控件
+    try {
+      viewportRef.value?.setPointerCapture?.(event.pointerId)
+      pointerCaptured = true
+    } catch {
+      // ignore
     }
   }
   if (lockAxis !== 'x') return
@@ -194,13 +203,17 @@ function onPointerUp(event: PointerEvent) {
   const dx = startOffset
   dragging.value = false
   dragOffset.value = 0
+  const wasSwipe = lockAxis === 'x' && Math.abs(dx) > width * 0.18
   lockAxis = null
-  try {
-    viewportRef.value?.releasePointerCapture?.(event.pointerId)
-  } catch {
-    // ignore
+  if (pointerCaptured) {
+    try {
+      viewportRef.value?.releasePointerCapture?.(event.pointerId)
+    } catch {
+      // ignore
+    }
+    pointerCaptured = false
   }
-  if (Math.abs(dx) > width * 0.18) {
+  if (wasSwipe) {
     if (dx < 0) goNext()
     else goPrev()
     suppressClickUntil = Date.now() + 280

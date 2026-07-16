@@ -4,6 +4,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   Box,
   Coin,
+  Collection,
   Document,
   EditPen,
   Lightning,
@@ -44,11 +45,14 @@ import {
   type ComponentDetail,
 } from '../api/components'
 import {
+  getDataTypeLibrary,
   getIconLibrary,
+  saveDataTypeLibrary as saveDataTypeLibraryApi,
   saveIconLibrary as saveIconLibraryApi,
   setProjectEntryPage,
 } from '../api/projects'
 import DataPoolPanel from '../components/editor/DataPoolPanel.vue'
+import DataTypesPanel from '../components/editor/DataTypesPanel.vue'
 import IconLibraryPanel from '../components/editor/IconLibraryPanel.vue'
 import MethodEditDialog from '../components/editor/MethodEditDialog.vue'
 import MethodsPanel from '../components/editor/MethodsPanel.vue'
@@ -105,11 +109,16 @@ import {
   createEmptyIconLibrary,
   type IconLibrary,
 } from '../types/icon-library'
+import {
+  createEmptyDataTypeLibrary,
+  type DataTypeLibrary,
+} from '../types/data-types'
 
 type WorkspaceMode =
   | 'preview'
   | 'edit'
   | 'datapool'
+  | 'datatypes'
   | 'icons'
   | 'methods'
   | 'lifecycle'
@@ -139,6 +148,7 @@ const createVisible = ref(false)
 const creating = ref(false)
 const addWidgetVisible = ref(false)
 const iconLibrary = ref<IconLibrary>(createEmptyIconLibrary())
+const dataTypeLibrary = ref<DataTypeLibrary>(createEmptyDataTypeLibrary())
 /** 编辑态临时隐藏，不写入 XML；预览模式不生效 */
 const editorHiddenNodeIds = ref<string[]>([])
 const pageMethods = ref<PageMethod[]>([])
@@ -346,12 +356,14 @@ const createDialogTitle = computed(() =>
 
 const isEditMode = computed(() => workspaceMode.value === 'edit')
 const isDataPoolMode = computed(() => workspaceMode.value === 'datapool')
+const isDataTypesMode = computed(() => workspaceMode.value === 'datatypes')
 const isIconsMode = computed(() => workspaceMode.value === 'icons')
 const isMethodsMode = computed(() => workspaceMode.value === 'methods')
 const isLifecycleMode = computed(() => workspaceMode.value === 'lifecycle')
 const hideWidgetTree = computed(
   () =>
     isDataPoolMode.value ||
+    isDataTypesMode.value ||
     isIconsMode.value ||
     isMethodsMode.value ||
     isLifecycleMode.value,
@@ -379,6 +391,7 @@ const modeTabs = [
   { key: 'preview' as const, label: '预览', icon: View },
   { key: 'edit' as const, label: '编辑', icon: EditPen },
   { key: 'datapool' as const, label: '数据池', icon: Coin },
+  { key: 'datatypes' as const, label: '数据类型', icon: Collection },
   { key: 'icons' as const, label: '图标库', icon: Picture },
   { key: 'methods' as const, label: '方法', icon: Lightning },
   { key: 'lifecycle' as const, label: '生命周期', icon: LeafIcon },
@@ -386,6 +399,7 @@ const modeTabs = [
 
 const centerFileLabel = computed(() => {
   if (isDataPoolMode.value) return 'data.json'
+  if (isDataTypesMode.value) return 'types/'
   if (isIconsMode.value) return 'icons.json'
   if (isMethodsMode.value) return 'function/'
   if (isLifecycleMode.value) return 'lifecycle.json'
@@ -418,8 +432,11 @@ const centerPathQuery = computed(() => {
 })
 
 const propsPlaceholderText = computed(() => {
-  if (!activePage.value && !isIconsMode.value) return '打开页面后可编辑'
+  if (!activePage.value && !isIconsMode.value && !isDataTypesMode.value) {
+    return '打开页面后可编辑'
+  }
   if (isDataPoolMode.value) return '数据池模式下请在中间区域编辑'
+  if (isDataTypesMode.value) return '数据类型模式下请在中间区域编辑'
   if (isIconsMode.value) return '图标库模式下请在中间区域编辑'
   if (isMethodsMode.value) return '方法模式下请在中间区域编辑'
   if (isLifecycleMode.value) return '生命周期模式下请在中间区域编辑'
@@ -434,7 +451,7 @@ async function loadPages(selectId?: string) {
 
   loadingPages.value = true
   try {
-    await loadIconLibrary()
+    await Promise.all([loadIconLibrary(), loadDataTypeLibrary()])
     const [pageResult, componentResult] = await Promise.all([
       listPages(projectStore.path),
       listComponents(projectStore.path),
@@ -482,6 +499,16 @@ async function loadIconLibrary() {
     iconLibrary.value = await getIconLibrary(projectStore.path)
   } catch (err) {
     iconLibrary.value = createEmptyIconLibrary()
+    console.error(err)
+  }
+}
+
+async function loadDataTypeLibrary() {
+  if (!projectStore.path) return
+  try {
+    dataTypeLibrary.value = await getDataTypeLibrary(projectStore.path)
+  } catch (err) {
+    dataTypeLibrary.value = createEmptyDataTypeLibrary()
     console.error(err)
   }
 }
@@ -1340,6 +1367,7 @@ async function handleComponentConfigUpdate(config: ComponentConfig) {
 
 let dataSaveTimer: ReturnType<typeof setTimeout> | null = null
 let iconSaveTimer: ReturnType<typeof setTimeout> | null = null
+let dataTypeSaveTimer: ReturnType<typeof setTimeout> | null = null
 let xmlSaveTimer: ReturnType<typeof setTimeout> | null = null
 
 async function handleIconLibraryUpdate(library: IconLibrary) {
@@ -1356,6 +1384,24 @@ async function handleIconLibraryUpdate(library: IconLibrary) {
       })
     } catch (err) {
       ElMessage.error(err instanceof Error ? err.message : '保存图标库失败')
+    }
+  }, 400)
+}
+
+async function handleDataTypeLibraryUpdate(library: DataTypeLibrary) {
+  if (!projectStore.path) return
+  dataTypeLibrary.value = library
+
+  if (dataTypeSaveTimer) clearTimeout(dataTypeSaveTimer)
+  dataTypeSaveTimer = setTimeout(async () => {
+    if (!projectStore.path) return
+    try {
+      dataTypeLibrary.value = await saveDataTypeLibraryApi({
+        projectPath: projectStore.path,
+        groups: dataTypeLibrary.value.groups,
+      })
+    } catch (err) {
+      ElMessage.error(err instanceof Error ? err.message : '保存数据类型失败')
     }
   }, 400)
 }
@@ -1675,6 +1721,10 @@ onMounted(() => {
           <span class="preview-title">图标库</span>
           <span class="preview-sub">icons.json</span>
         </template>
+        <template v-else-if="isDataTypesMode">
+          <span class="preview-title">数据类型</span>
+          <span class="preview-sub">types/</span>
+        </template>
         <template v-else-if="activeDoc">
           <span class="preview-title">{{ activeDoc.config.title || activeDoc.config.name }}</span>
           <span class="preview-sub">
@@ -1690,6 +1740,11 @@ onMounted(() => {
           v-else-if="isIconsMode"
           :library="iconLibrary"
           @update:library="handleIconLibraryUpdate"
+        />
+        <DataTypesPanel
+          v-else-if="isDataTypesMode"
+          :library="dataTypeLibrary"
+          @update:library="handleDataTypeLibraryUpdate"
         />
         <el-empty
           v-else-if="!activeDoc"

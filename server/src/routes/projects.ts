@@ -7,6 +7,10 @@ import {
   setEntryPage,
 } from '../services/project.js'
 import { readIconLibrary, saveIconLibrary } from '../services/icons.js'
+import {
+  readDataTypeLibrary,
+  saveDataTypeLibrary,
+} from '../services/data-types.js'
 import { exportVue3Project } from '../services/export-vue3.js'
 import { DEFAULT_CANVAS_WIDTH, ENGINE_VERSION } from '../types/voider-project.js'
 
@@ -131,6 +135,34 @@ router.put('/icons', async (req, res) => {
       return
     }
     const library = await saveIconLibrary(projectPath.trim(), { icons })
+    res.json(library)
+  } catch (err) {
+    handleError(res, err)
+  }
+})
+
+router.get('/types', async (req, res) => {
+  try {
+    const projectPath = typeof req.query.projectPath === 'string' ? req.query.projectPath : ''
+    if (!projectPath.trim()) {
+      res.status(400).json({ message: '请提供 projectPath' })
+      return
+    }
+    const library = await readDataTypeLibrary(projectPath.trim())
+    res.json(library)
+  } catch (err) {
+    handleError(res, err)
+  }
+})
+
+router.put('/types', async (req, res) => {
+  try {
+    const { projectPath, groups } = req.body ?? {}
+    if (!projectPath || typeof projectPath !== 'string' || !projectPath.trim()) {
+      res.status(400).json({ message: '请提供 projectPath' })
+      return
+    }
+    const library = await saveDataTypeLibrary(projectPath.trim(), { groups })
     res.json(library)
   } catch (err) {
     handleError(res, err)

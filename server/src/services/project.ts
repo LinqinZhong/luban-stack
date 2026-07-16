@@ -9,6 +9,7 @@ import {
   type VoiderProjectConfig,
 } from '../types/voider-project.js'
 import { ensureIconLibraryFile } from './icons.js'
+import { ensureDataTypeLibraryFile } from './data-types.js'
 
 export class ProjectError extends Error {
   status: number
@@ -204,6 +205,7 @@ export async function createProject(options: {
     await mkdir(path.join(projectPath, 'pages'), { recursive: true })
     await mkdir(path.join(projectPath, 'components'), { recursive: true })
     await ensureIconLibraryFile(projectPath)
+    await ensureDataTypeLibraryFile(projectPath)
   } catch {
     throw new ProjectError(`无法写入 ${VOIDER_CONFIG_FILE}`, 500)
   }

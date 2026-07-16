@@ -258,6 +258,32 @@ html, body, #app {
   overflow: hidden;
   font-size: 14px;
 }
+
+.voider-toast {
+  position: absolute;
+  left: 50%;
+  bottom: 72px;
+  z-index: 1000;
+  transform: translateX(-50%) translateY(8px);
+  max-width: calc(100% - 48px);
+  padding: 10px 16px;
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.86);
+  color: #fff;
+  font-size: 14px;
+  line-height: 1.4;
+  text-align: center;
+  word-break: break-word;
+  pointer-events: none;
+  opacity: 0;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.2);
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.voider-toast.is-visible {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
 `
 
   files['src/env.d.ts'] = `/// <reference types="vite/client" />
@@ -361,6 +387,7 @@ let startY = 0
 let startOffset = 0
 let lockAxis: 'x' | 'y' | null = null
 let timer: ReturnType<typeof setInterval> | null = null
+let pointerCaptured = false
 
 const count = computed(() => Math.max(0, props.slideCount))
 const clampedIndex = computed(() => {
@@ -423,12 +450,13 @@ function onPointerDown(event: PointerEvent) {
   if (!el) return
   dragging.value = true
   lockAxis = null
+  pointerCaptured = false
   startX = event.clientX
   startY = event.clientY
   startOffset = 0
   dragOffset.value = 0
   clearTimer()
-  el.setPointerCapture?.(event.pointerId)
+  // 勿在此处 capture：否则 click 会落到 viewport，子控件 onClick 失效
 }
 
 function onPointerMove(event: PointerEvent) {
@@ -443,6 +471,12 @@ function onPointerMove(event: PointerEvent) {
       dragOffset.value = 0
       restartTimer()
       return
+    }
+    try {
+      viewportRef.value?.setPointerCapture?.(event.pointerId)
+      pointerCaptured = true
+    } catch {
+      // ignore
     }
   }
   if (lockAxis !== 'x') return
@@ -466,13 +500,17 @@ function onPointerUp(event: PointerEvent) {
   const dx = startOffset
   dragging.value = false
   dragOffset.value = 0
+  const wasSwipe = lockAxis === 'x' && Math.abs(dx) > width * 0.18
   lockAxis = null
-  try {
-    viewportRef.value?.releasePointerCapture?.(event.pointerId)
-  } catch {
-    // ignore
+  if (pointerCaptured) {
+    try {
+      viewportRef.value?.releasePointerCapture?.(event.pointerId)
+    } catch {
+      // ignore
+    }
+    pointerCaptured = false
   }
-  if (Math.abs(dx) > width * 0.18) {
+  if (wasSwipe) {
     if (dx < 0) goNext()
     else goPrev()
   }
@@ -614,9 +652,46 @@ export default router
 
   files['src/runtime/helpers.ts'] = `import { useRouter } from 'vue-router'
 
-/** 简易 toast（可按需替换为 UI 库） */
-export function showToast(message?: string) {
-  alert(String(message ?? ''))
+let toastTimer: ReturnType<typeof setTimeout> | null = null
+let toastEl: HTMLDivElement | null = null
+
+function ensureToastHost(): HTMLElement {
+  if (typeof document === 'undefined') {
+    throw new Error('showToast requires DOM')
+  }
+  const page = document.querySelector('.voider-page') as HTMLElement | null
+  return page ?? document.body
+}
+
+/** 页面内 Toast（对齐编辑器预览；挂在 .voider-page 上随设计稿缩放） */
+export function showToast(message?: string, duration: 'short' | 'long' = 'short') {
+  if (typeof document === 'undefined') return
+  const text = String(message ?? '').trim() || ' '
+  const host = ensureToastHost()
+  if (getComputedStyle(host).position === 'static') {
+    host.style.position = 'relative'
+  }
+  if (!toastEl) {
+    toastEl = document.createElement('div')
+    toastEl.className = 'voider-toast'
+    toastEl.setAttribute('role', 'status')
+  }
+  toastEl.textContent = text
+  if (toastEl.parentElement !== host) {
+    host.appendChild(toastEl)
+  }
+  // 触发重排以便重复弹出时重新播放过渡
+  toastEl.classList.remove('is-visible')
+  void toastEl.offsetWidth
+  toastEl.classList.add('is-visible')
+  if (toastTimer) clearTimeout(toastTimer)
+  toastTimer = setTimeout(
+    () => {
+      toastEl?.classList.remove('is-visible')
+      toastTimer = null
+    },
+    duration === 'long' ? 4500 : 2000,
+  )
 }
 
 export interface MenuButtonBoundingClientRect {
@@ -791,7 +866,7 @@ function escapeHtml(value: string): string {
 }
 
 const RUNTIME_VOIDER_TS = `import type { Router } from 'vue-router'
-import { getDeviceInfo } from './helpers'
+import { getDeviceInfo, showToast as defaultShowToast } from './helpers'
 
 export interface EventScope {
   item?: any
@@ -813,7 +888,7 @@ export interface EventContext {
   eventArgs?: Record<string, any>
   componentRefs?: Record<string, { open?: () => void; hide?: () => void; show?: () => void }>
   emit?: (event: string, payload?: Record<string, any>) => void
-  showToast?: (message: string) => void
+  showToast?: (message: string, duration?: 'short' | 'long') => void
 }
 
 export interface VisibilityConfig {
@@ -1041,7 +1116,11 @@ export async function runEventBindings(
           },
           navigateBack: () => ctx.router.back(),
           setData: (prop: string, value: any) => ctx.store.setData(prop, value),
-          showToast: (msg?: string) => ctx.showToast?.(String(msg ?? '')),
+          showToast: (msg?: string, duration?: string) => {
+            const d = duration === 'long' ? 'long' : 'short'
+            if (ctx.showToast) ctx.showToast(String(msg ?? ''), d)
+            else defaultShowToast(String(msg ?? ''), d)
+          },
           getDeviceInfo,
           emit: ctx.emit,
         }
@@ -1081,7 +1160,9 @@ export async function runEventBindings(
       continue
     }
     if (binding.method === 'showToast') {
-      ctx.showToast?.(args.message ?? '')
+      const d = args.duration === 'long' ? 'long' : 'short'
+      if (ctx.showToast) ctx.showToast(args.message ?? '', d)
+      else defaultShowToast(args.message ?? '', d)
       continue
     }
     if (binding.method === 'emit') {
