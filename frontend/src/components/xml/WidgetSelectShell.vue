@@ -274,11 +274,18 @@ function syncBadgeAnchor() {
   }
   const hr = host.getBoundingClientRect()
   const br = box.getBoundingClientRect()
+  if (hr.width < 1 || hr.height < 1) {
+    badgeAnchorStyle.value = { visibility: 'hidden' }
+    return
+  }
+  // 画布 scale 后 getBoundingClientRect 是视口坐标，角标 host 在 phone 本地坐标系
+  const scaleX = host.offsetWidth / hr.width
+  const scaleY = host.offsetHeight / hr.height
   // 锚定到 content-box 右上角，角标仍用 top/right + translate(50%,-50%)
   badgeAnchorStyle.value = {
     position: 'absolute',
-    top: `${br.top - hr.top}px`,
-    left: `${br.right - hr.left}px`,
+    top: `${(br.top - hr.top) * scaleY}px`,
+    left: `${(br.right - hr.left) * scaleX}px`,
     width: 0,
     height: 0,
     overflow: 'visible',

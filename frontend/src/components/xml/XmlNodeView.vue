@@ -588,6 +588,17 @@ const linearStyle = computed(() => {
   }
 })
 
+const swiperOverflowStyle = computed(() => {
+  // 编辑态始终露出相邻页；预览态才用 overflow（默认 hidden）
+  if (props.selectable) return { overflow: 'visible' as const }
+  const strategy = parseOverflow(attrs.value.overflow, 'hidden')
+  return {
+    overflow: (strategy === 'visible' ? 'visible' : 'hidden') as
+      | 'visible'
+      | 'hidden',
+  }
+})
+
 const swiperStyle = computed(() => {
   const matchHeight = height.value === 'match_parent'
   const matchWidth = width.value === 'match_parent'
@@ -595,10 +606,9 @@ const swiperStyle = computed(() => {
     insideScrollColumn.value || stackInVerticalParent.value
   return {
     ...layoutStyle.value,
+    ...swiperOverflowStyle.value,
     position: 'relative' as const,
     background: attrs.value.background || 'transparent',
-    // 编辑态让后续页可溢出显示；预览态裁切以保证轮播
-    overflow: (props.selectable ? 'visible' : 'hidden') as 'visible' | 'hidden',
     ...(matchWidth ? { width: '100%', minWidth: 0 } : {}),
     ...(matchHeight
       ? stackHeight
@@ -1253,6 +1263,7 @@ onBeforeUnmount(() => {
     <div class="widget swiper" :style="swiperStyle">
       <SwiperPort
         :editable="selectable"
+        :overflow="parseOverflow(attrs.overflow, 'hidden')"
         :slide-count="node.children.length"
         :autoplay="!selectable && swiperAutoplay"
         :interval="swiperInterval"

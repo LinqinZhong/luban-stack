@@ -72,7 +72,7 @@ import { createComponentEmit } from '../utils/component-emit'
 import type { PreviewInteractPayload } from '../utils/event-runtime'
 import { resolveComputedPageData } from '../utils/compute-runtime'
 import { buildDollarProps } from '../utils/component-props'
-import type { DataFieldValue } from '../types/page-data'
+import { clonePageData, type DataFieldValue } from '../types/page-data'
 import {
   createEmptyLifecycleConfig,
   LIFECYCLE_MOUNT_KEYS,
@@ -199,9 +199,50 @@ const activeDoc = computed(() =>
   isPageResource.value ? activePage.value : activeComponent.value,
 )
 
-/** 预览/画布使用：执行计算绑定后的数据池 */
+/** 预览态运行时数据副本（与数据池隔离，setData 只改这里） */
+const previewRuntimeData = ref<import('../types/page-data').PageData | null>(null)
+const previewComponentMap = ref<ComponentRenderMap | null>(null)
+
+function cloneComponentRenderMap(map: ComponentRenderMap): ComponentRenderMap {
+  const next: ComponentRenderMap = {}
+  for (const [id, info] of Object.entries(map)) {
+    next[id] = {
+      ...info,
+      config: { ...info.config },
+      data: clonePageData(info.data),
+    }
+  }
+  return next
+}
+
+function resetPreviewRuntime() {
+  if (!activeDoc.value) {
+    previewRuntimeData.value = null
+    previewComponentMap.value = null
+    return
+  }
+  previewRuntimeData.value = clonePageData(activeDoc.value.data ?? { fields: [] })
+  previewComponentMap.value = cloneComponentRenderMap(componentMap.value)
+}
+
+function clearPreviewRuntime() {
+  previewRuntimeData.value = null
+  previewComponentMap.value = null
+}
+
+/** 画布/预览运行时使用：预览走副本，编辑走数据池 */
 const resolvedPageData = computed(() =>
-  resolveComputedPageData(activeDoc.value?.data ?? { fields: [] }),
+  resolveComputedPageData(
+    workspaceMode.value === 'preview' && previewRuntimeData.value
+      ? previewRuntimeData.value
+      : (activeDoc.value?.data ?? { fields: [] }),
+  ),
+)
+
+const canvasComponentMap = computed(() =>
+  workspaceMode.value === 'preview' && previewComponentMap.value
+    ? previewComponentMap.value
+    : componentMap.value,
 )
 
 const editorConditionComponentProps = computed(() =>
@@ -577,6 +618,11 @@ async function openPage(
       activePage.value = detail
       await Promise.all([loadPageMethods(pageId), loadLifecycle(pageId)])
     }
+    if (workspaceMode.value === 'preview') {
+      resetPreviewRuntime()
+    } else {
+      clearPreviewRuntime()
+    }
     await syncLifecycleSession()
   } catch (err) {
     activePage.value = null
@@ -612,6 +658,11 @@ async function openComponent(componentId: string) {
     } else {
       activeComponent.value = detail
       await Promise.all([loadPageMethods(componentId), loadLifecycle(componentId)])
+    }
+    if (workspaceMode.value === 'preview') {
+      resetPreviewRuntime()
+    } else {
+      clearPreviewRuntime()
     }
     await syncLifecycleSession()
   } catch (err) {
@@ -860,7 +911,11 @@ function applyComponentPreviewSetData(
   prop: string,
   value: DataFieldValue,
 ) {
-  const info = componentMap.value[componentId]
+  if (workspaceMode.value !== 'preview') return
+  if (!previewComponentMap.value) resetPreviewRuntime()
+  const map = previewComponentMap.value
+  if (!map) return
+  const info = map[componentId]
   if (!info) {
     ElMessage.warning(`组件不存在：${componentId}`)
     return
@@ -872,8 +927,8 @@ function applyComponentPreviewSetData(
     return
   }
   fields[index] = { ...fields[index], value }
-  componentMap.value = {
-    ...componentMap.value,
+  previewComponentMap.value = {
+    ...map,
     [componentId]: {
       ...info,
       data: resolveComputedPageData({ fields }),
@@ -887,7 +942,7 @@ function runComponentExposedMethod(
   methodName: string,
   args: unknown[],
 ) {
-  const info = componentMap.value[componentId]
+  const info = canvasComponentMap.value[componentId]
   if (!info) {
     ElMessage.warning(`组件不存在：${componentId}`)
     return
@@ -925,7 +980,7 @@ function runComponentExposedMethod(
     pageData: info.data,
     xml: info.xml,
     modalStack,
-    componentMap: componentMap.value,
+    componentMap: canvasComponentMap.value,
     componentMethodsMap: componentMethodsMap.value,
     runComponentMethod: runComponentExposedMethod,
     resolveMethod: (name) =>
@@ -963,11 +1018,11 @@ async function runPreviewBindings(
   },
 ) {
   if (!activeDoc.value) return
-  await runEventBindings(raw, {
+    await runEventBindings(raw, {
     pageData: resolvedPageData.value,
     xml: activeDoc.value.xml,
     modalStack,
-    componentMap: componentMap.value,
+    componentMap: canvasComponentMap.value,
     componentMethodsMap: componentMethodsMap.value,
     runComponentMethod: runComponentExposedMethod,
     resolveMethod: (name) =>
@@ -1059,9 +1114,11 @@ async function runLifecycleUpdateSequence() {
 watch(workspaceMode, async (mode, prev) => {
   if (prev === 'preview' && mode !== 'preview') {
     await teardownLifecycleSession()
+    clearPreviewRuntime()
     return
   }
   if (mode === 'preview' && prev !== 'preview') {
+    resetPreviewRuntime()
     await nextTick()
     await syncLifecycleSession()
   }
@@ -1118,18 +1175,17 @@ async function handlePreviewInteract(payload: PreviewInteractPayload) {
 }
 
 function applyPreviewSetData(prop: string, value: import('../types/page-data').DataFieldValue) {
-  if (!activeDoc.value) return
-  const fields = [...(activeDoc.value.data?.fields ?? [])]
+  if (!activeDoc.value || workspaceMode.value !== 'preview') return
+  if (!previewRuntimeData.value) resetPreviewRuntime()
+  const fields = [...(previewRuntimeData.value?.fields ?? [])]
   const index = fields.findIndex((item) => item.name === prop)
   if (index < 0) {
     ElMessage.warning(`数据池不存在字段：${prop}`)
     return
   }
   fields[index] = { ...fields[index], value }
-  void (async () => {
-    await handleDataUpdate({ fields })
-    await runLifecycleUpdateSequence()
-  })()
+  previewRuntimeData.value = { fields }
+  void runLifecycleUpdateSequence()
 }
 
 async function handleDataUpdate(data: import('../types/page-data').PageData) {
@@ -1597,7 +1653,7 @@ onMounted(() => {
           :expand-repeat="workspaceMode === 'preview'"
           :page-data="resolvedPageData"
           :icon-library="iconLibrary"
-          :component-map="componentMap"
+          :component-map="canvasComponentMap"
           :dollar-props="editorDollarProps"
           :route-params="routeParams"
           :hidden-node-ids="isEditMode ? editorHiddenNodeIds : undefined"

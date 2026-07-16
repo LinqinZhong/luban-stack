@@ -514,12 +514,20 @@ const showLayoutContainerProps = computed(
     selectedNode.value?.tag === 'Image',
 )
 
-/** 溢出策略仅布局容器 */
+/** 溢出策略：布局容器 + Swiper（Swiper 无 scroll） */
 const showOverflowProps = computed(
   () =>
     selectedNode.value?.tag === 'LinearLayout' ||
-    selectedNode.value?.tag === 'RelativeLayout',
+    selectedNode.value?.tag === 'RelativeLayout' ||
+    selectedNode.value?.tag === 'Swiper',
 )
+
+const overflowOptionsForNode = computed(() => {
+  if (selectedNode.value?.tag === 'Swiper') {
+    return OVERFLOW_OPTIONS.filter((item) => item.value !== 'scroll')
+  }
+  return OVERFLOW_OPTIONS
+})
 
 const arrayFieldOptions = computed(() =>
   (props.dataFields ?? [])
@@ -968,7 +976,7 @@ function saveVisibilityConfig(config: VisibilityConditionConfig) {
                 @change="commitAttr('overflow', layoutForm.overflow === 'hidden' ? '' : layoutForm.overflow)"
               >
                 <el-option
-                  v-for="opt in OVERFLOW_OPTIONS"
+                  v-for="opt in overflowOptionsForNode"
                   :key="opt.value"
                   :label="opt.label"
                   :value="opt.value"

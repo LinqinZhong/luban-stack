@@ -65,6 +65,16 @@ export interface PageData {
   fields: DataField[]
 }
 
+/** 深拷贝数据池（预览态与编辑态隔离） */
+export function clonePageData(data: PageData | undefined | null): PageData {
+  const fields = data?.fields ?? []
+  try {
+    return structuredClone({ fields })
+  } catch {
+    return JSON.parse(JSON.stringify({ fields })) as PageData
+  }
+}
+
 export const DATA_FIELD_TYPE_OPTIONS: { label: string; value: DataFieldType }[] = [
   { label: '字符串', value: 'string' },
   { label: '数值', value: 'number' },

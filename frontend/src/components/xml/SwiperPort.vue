@@ -1,10 +1,13 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import type { OverflowStrategy } from '../../utils/xml'
 
 const props = withDefaults(
   defineProps<{
     /** 编辑态：横滑浏览全部页，便于点选子控件 */
     editable?: boolean
+    /** 预览态溢出策略（默认 hidden）；编辑态忽略，始终露出相邻页 */
+    overflow?: OverflowStrategy
     slideCount: number
     autoplay?: boolean
     interval?: number
@@ -18,6 +21,7 @@ const props = withDefaults(
   }>(),
   {
     editable: false,
+    overflow: 'hidden',
     autoplay: false,
     interval: 3000,
     circular: true,
@@ -45,10 +49,15 @@ let resizeObserver: ResizeObserver | null = null
 const count = computed(() => Math.max(0, props.slideCount))
 
 const viewportStyle = computed(() => {
-  if (!props.editable || !slideWidthPx.value) return undefined
-  return {
-    ['--slide-w' as string]: `${slideWidthPx.value}px`,
+  const style: Record<string, string> = {}
+  if (props.editable && slideWidthPx.value) {
+    style['--slide-w'] = `${slideWidthPx.value}px`
   }
+  // 预览态才应用 overflow；编辑态始终 visible（见 CSS）
+  if (!props.editable) {
+    style.overflow = props.overflow === 'visible' ? 'visible' : 'hidden'
+  }
+  return Object.keys(style).length ? style : undefined
 })
 
 const clampedIndex = computed(() => {
@@ -60,7 +69,7 @@ const EDIT_GAP_PX = 8
 
 const trackStyle = computed(() => {
   if (props.editable) {
-    // 按 current 把对应页对齐到视口（手机框）中间；两侧页溢出可见
+    // 编辑态：按 current 对齐当前页，两侧页溢出可见便于点选
     const w = slideWidthPx.value
     const offset =
       w > 0 && count.value > 0
@@ -323,7 +332,7 @@ onBeforeUnmount(() => {
 }
 
 .swiper-viewport.editable {
-  /* 编辑态：溢出可见，方便看到右侧后续页 */
+  /* 编辑态：始终露出相邻页，便于点选 */
   overflow: visible;
   touch-action: none;
   user-select: auto;
@@ -353,7 +362,7 @@ onBeforeUnmount(() => {
 }
 
 .swiper-slide.editable {
-  /* 每页与窗口同宽；由 --slide-w 锁定（相对视口），后续页溢出仍可见 */
+  /* 每页与窗口同宽；由 --slide-w 锁定，后续页溢出仍可见 */
   flex: 0 0 var(--slide-w, 100%);
   width: var(--slide-w, 100%);
   min-width: var(--slide-w, 100%);

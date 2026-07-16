@@ -68,8 +68,18 @@ const showBorder = computed(
       props.tag === 'Image'),
 )
 const showOverflow = computed(
-  () => props.tag === 'LinearLayout' || props.tag === 'RelativeLayout',
+  () =>
+    props.tag === 'LinearLayout' ||
+    props.tag === 'RelativeLayout' ||
+    props.tag === 'Swiper',
 )
+
+const overflowOptionsForTag = computed(() => {
+  if (props.tag === 'Swiper') {
+    return OVERFLOW_OPTIONS.filter((item) => item.value !== 'scroll')
+  }
+  return OVERFLOW_OPTIONS
+})
 
 function parseSizeMode(value: string | undefined, fallbackValue: number) {
   if (!value || value === 'wrap_content') {
@@ -336,7 +346,7 @@ function onFieldChange() {
           @change="onFieldChange"
         >
           <el-option
-            v-for="opt in OVERFLOW_OPTIONS"
+            v-for="opt in overflowOptionsForTag"
             :key="opt.value"
             :label="opt.label"
             :value="opt.value"
