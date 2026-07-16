@@ -71,7 +71,13 @@ import { runEventBindings } from '../utils/event-runtime'
 import { createComponentEmit } from '../utils/component-emit'
 import type { PreviewInteractPayload } from '../utils/event-runtime'
 import { resolveComputedPageData } from '../utils/compute-runtime'
-import { buildDollarProps } from '../utils/component-props'
+import {
+  normalizeStatusBarConfig,
+  resolveStatusBarConfig,
+  type StatusBarConfig,
+} from '../utils/status-bar'
+import { buildDollarProps, buildDollarPropsAmbientDeclaration } from '../utils/component-props'
+import { getDeviceInfo } from '../utils/device-info'
 import { clonePageData, type DataFieldValue } from '../types/page-data'
 import {
   createEmptyLifecycleConfig,
@@ -153,6 +159,8 @@ let previewToastTimer: ReturnType<typeof setTimeout> | null = null
 const canvasPanX = ref(0)
 const canvasPanY = ref(0)
 const canvasZoom = ref(1)
+/** 画布场景：H5 / 小程序 */
+const canvasScene = ref<'h5' | 'miniprogram'>('h5')
 /** 预览态 Modal 堆栈（一屏仅栈顶可见） */
 const modalStack = createModalStack()
 
@@ -236,6 +244,10 @@ const resolvedPageData = computed(() =>
     workspaceMode.value === 'preview' && previewRuntimeData.value
       ? previewRuntimeData.value
       : (activeDoc.value?.data ?? { fields: [] }),
+    {
+      getDeviceInfo: previewGetDeviceInfo,
+      dollarProps: editorDollarProps.value ?? {},
+    },
   ),
 )
 
@@ -255,10 +267,32 @@ const editorDollarProps = computed(() => {
   return buildDollarProps(activeComponent.value.config)
 })
 
-/** 组件方法体 ambient：内置 emit，参数签名跟「事件方法」对齐 */
+function previewGetDeviceInfo() {
+  return getDeviceInfo({
+    platform: canvasScene.value,
+    windowWidth: canvasFrameWidth.value,
+  })
+}
+
+/** 组件方法体 ambient：内置 emit + getDeviceInfo + $props 等 */
 const methodAmbientExtra = computed(() => {
-  if (!isComponentResource.value || !activeComponent.value) return ''
-  return buildEmitAmbientDeclarations(activeComponent.value.config.events ?? [])
+  const deviceAmbient = [
+    'interface MenuButtonBoundingClientRect { width: number; height: number; top: number; right: number; bottom: number; left: number }',
+    'interface DeviceInfo { statusBarHeight: number; userAgent: string; menuButton: MenuButtonBoundingClientRect | null; platform: \'h5\' | \'miniprogram\' }',
+    'declare function navigateTo(to: string, params?: Record<string, unknown>): void;',
+    'declare function navigateBack(): void;',
+    'declare function setData(prop: string, value: any): void;',
+    "declare function showToast(message: string, duration?: 'short' | 'long'): void;",
+    'declare function getDeviceInfo(): DeviceInfo;',
+  ].join('\n')
+  const propsAmbient = buildDollarPropsAmbientDeclaration(
+    isComponentResource.value ? activeComponent.value?.config.props : null,
+  )
+  const base = `${deviceAmbient}\n${propsAmbient}\n`
+  if (!isComponentResource.value || !activeComponent.value) {
+    return base
+  }
+  return `${base}${buildEmitAmbientDeclarations(activeComponent.value.config.events ?? [])}`
 })
 
 /** 展示用方法列表（保证含最新预置方法；剔除已废弃的内置方法） */
@@ -469,7 +503,10 @@ async function refreshComponentMap() {
         id: detail.id,
         config: detail.config,
         xml: detail.xml,
-        data: resolveComputedPageData(detail.data),
+        data: resolveComputedPageData(detail.data, {
+          getDeviceInfo: previewGetDeviceInfo,
+          dollarProps: buildDollarProps(detail.config),
+        }),
       }
     }
     componentMap.value = next
@@ -906,6 +943,47 @@ async function handleXmlUpdate(xml: string) {
   }, 280)
 }
 
+async function handleStatusBarUpdate(config: StatusBarConfig) {
+  if (!projectStore.path || !activePage.value || isComponentResource.value) return
+  const next = normalizeStatusBarConfig(config)
+  activePage.value = {
+    ...activePage.value,
+    config: {
+      ...activePage.value.config,
+      statusBar: next,
+    },
+  }
+  try {
+    const saved = await savePageConfig({
+      projectPath: projectStore.path,
+      pageId: activePage.value.id,
+      name: activePage.value.config.name,
+      title: activePage.value.config.title,
+      statusBar: next,
+    })
+    activePage.value = {
+      ...activePage.value,
+      config: saved.config,
+    }
+  } catch (err) {
+    ElMessage.error(err instanceof Error ? err.message : '保存状态栏失败')
+  }
+}
+
+const pageStatusBarConfig = computed(() =>
+  normalizeStatusBarConfig(
+    isPageResource.value ? activePage.value?.config.statusBar : null,
+  ),
+)
+
+/** 画布渲染：解析数据池绑定后的状态栏样式 */
+const resolvedPageStatusBar = computed(() =>
+  resolveStatusBarConfig(
+    isPageResource.value ? activePage.value?.config.statusBar : null,
+    resolvedPageData.value,
+  ),
+)
+
 function applyComponentPreviewSetData(
   componentId: string,
   prop: string,
@@ -931,7 +1009,13 @@ function applyComponentPreviewSetData(
     ...map,
     [componentId]: {
       ...info,
-      data: resolveComputedPageData({ fields }),
+      data: resolveComputedPageData(
+        { fields },
+        {
+          getDeviceInfo: previewGetDeviceInfo,
+          dollarProps: buildDollarProps(info.config),
+        },
+      ),
     },
   }
 }
@@ -1001,6 +1085,7 @@ function runComponentExposedMethod(
     showToast: (message, duration) => {
       showPreviewToast(message, duration)
     },
+    getDeviceInfo: previewGetDeviceInfo,
     onUnknownMethod: (name) => {
       if (name.startsWith('自定义方法')) ElMessage.error(name)
     },
@@ -1065,6 +1150,7 @@ async function runPreviewBindings(
     showToast: (message, duration) => {
       showPreviewToast(message, duration)
     },
+    getDeviceInfo: previewGetDeviceInfo,
     onUnknownMethod: (name) => {
       if (name.startsWith('navigateTo:')) {
         ElMessage.warning(name.replace(/^navigateTo:\s*/, ''))
@@ -1575,6 +1661,7 @@ onMounted(() => {
         :selected-id="selectedNodeId"
         :editable="isEditMode"
         :hidden-ids="editorHiddenNodeIds"
+        :include-status-bar="isPageResource"
         @select="selectedNodeId = $event"
         @open-repeat="handleOpenRepeatConfig"
         @move="handleMoveWidget"
@@ -1613,6 +1700,9 @@ onMounted(() => {
           :data="activeDoc.data ?? { fields: [] }"
           :xml="activeDoc.xml"
           :icon-options="iconOptions"
+          :get-device-info="previewGetDeviceInfo"
+          :component-props="editorConditionComponentProps"
+          :dollar-props="editorDollarProps"
           @update:data="handleDataUpdate"
         />
         <MethodsPanel
@@ -1641,6 +1731,7 @@ onMounted(() => {
           v-model:pan-x="canvasPanX"
           v-model:pan-y="canvasPanY"
           v-model:zoom="canvasZoom"
+          v-model:scene="canvasScene"
           :modal-stack="modalStack"
           :xml="activeDoc.xml"
           :canvas-width="canvasFrameWidth"
@@ -1658,6 +1749,11 @@ onMounted(() => {
           :route-params="routeParams"
           :hidden-node-ids="isEditMode ? editorHiddenNodeIds : undefined"
           :toast="workspaceMode === 'preview' ? previewToast : null"
+          :show-device-chrome="!isComponentResource"
+          :status-bar-selectable="isEditMode && isPageResource"
+          :status-bar-background="resolvedPageStatusBar.backgroundColor"
+          :status-bar-text-style="resolvedPageStatusBar.textStyle"
+          :status-bar-cover="resolvedPageStatusBar.cover"
           @select="selectedNodeId = $event"
           @open-repeat="handleOpenRepeatConfig"
           @interact="handlePreviewInteract"
@@ -1728,7 +1824,10 @@ onMounted(() => {
       :component-map="componentMap"
       :component-methods-map="componentMethodsMap"
       :open-repeat-request="openRepeatRequest"
+      :status-bar-config="isPageResource ? pageStatusBarConfig : null"
+      :canvas-scene="canvasScene"
       @update:xml="handleXmlUpdate"
+      @update:status-bar="handleStatusBarUpdate"
     />
     <aside v-else class="props-placeholder">
       <div class="panel-header">属性</div>

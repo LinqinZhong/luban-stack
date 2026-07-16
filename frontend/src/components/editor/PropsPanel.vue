@@ -46,6 +46,12 @@ import IconValueSelect from './IconValueSelect.vue'
 import type { ComponentRenderMap } from '../../types/component-render'
 import type { ComponentPropDef } from '../../types/component'
 import { DATA_FIELD_TYPE_OPTIONS } from '../../types/page-data'
+import {
+  isStatusBarNodeId,
+  normalizeStatusBarConfig,
+  statusBarCoverIsOn,
+  type StatusBarConfig,
+} from '../../utils/status-bar'
 
 export type PropsTab = 'style' | 'event' | 'dynamic'
 
@@ -68,15 +74,74 @@ const props = defineProps<{
   componentMethodsMap?: import('../../utils/widget-ref').ComponentMethodsMap
   /** 自增请求：切换到动态并打开重复弹窗 */
   openRepeatRequest?: number
+  /** 页面状态栏配置 */
+  statusBarConfig?: Partial<StatusBarConfig> | null
+  /** 画布场景：H5 下提示状态栏不可控 */
+  canvasScene?: 'h5' | 'miniprogram'
 }>()
 
 const emit = defineEmits<{
   'update:xml': [xml: string]
   'update:tab': [tab: PropsTab]
+  'update:status-bar': [config: StatusBarConfig]
 }>()
 
+const isStatusBarSelected = computed(() => isStatusBarNodeId(props.selectedId))
+
+const statusBarForm = reactive({
+  textStyle: 'black',
+  backgroundColor: '#ffffff',
+  cover: 'false',
+})
+
+watch(
+  () => props.statusBarConfig,
+  (cfg) => {
+    const next = normalizeStatusBarConfig(cfg)
+    statusBarForm.textStyle = next.textStyle
+    statusBarForm.backgroundColor = next.backgroundColor
+    statusBarForm.cover =
+      typeof next.cover === 'boolean' ? (next.cover ? 'true' : 'false') : String(next.cover)
+  },
+  { immediate: true, deep: true },
+)
+
+function commitStatusBar() {
+  const coverRaw = statusBarForm.cover.trim()
+  let cover: boolean | string = false
+  if (looksLikeDataBinding(coverRaw)) cover = coverRaw
+  else if (coverRaw === 'true' || coverRaw === '1') cover = true
+  else if (coverRaw === 'false' || coverRaw === '0' || !coverRaw) cover = false
+  else cover = coverRaw
+
+  emit('update:status-bar', {
+    textStyle: statusBarForm.textStyle.trim() || 'black',
+    backgroundColor: statusBarForm.backgroundColor.trim() || '#ffffff',
+    cover,
+  })
+}
+
+function commitStatusBarTextStyleStatic(value: string) {
+  statusBarForm.textStyle = value
+  commitStatusBar()
+}
+
+function commitStatusBarCoverSwitch(on: boolean) {
+  statusBarForm.cover = on ? 'true' : 'false'
+  commitStatusBar()
+}
+
+const statusBarTextStyleIsBinding = computed(() =>
+  looksLikeDataBinding(statusBarForm.textStyle),
+)
+const statusBarCoverIsBinding = computed(() =>
+  looksLikeDataBinding(statusBarForm.cover),
+)
+
 const selectedNode = computed(() =>
-  props.selectedId ? findNodeFromXml(props.xml, props.selectedId) : null,
+  props.selectedId && !isStatusBarSelected.value
+    ? findNodeFromXml(props.xml, props.selectedId)
+    : null,
 )
 
 /** 根节点不可配置重复（v-for） */
@@ -155,9 +220,9 @@ function syncEventForm() {
 const layoutForm = reactive({
   name: '',
   widthMode: 'wrap_content' as string,
-  widthValue: 100,
+  widthValue: '100' as string,
   heightMode: 'wrap_content' as string,
-  heightValue: 40,
+  heightValue: '40' as string,
   margin: '',
   marginLeft: '',
   marginRight: '',
@@ -176,7 +241,7 @@ const layoutForm = reactive({
   borderBottomLeftRadius: '',
   borderWidth: '',
   borderColor: '',
-  overflow: 'hidden',
+  overflow: 'visible',
   gravity: '',
   orientation: 'vertical',
   gap: '',
@@ -215,22 +280,25 @@ const layoutForm = reactive({
 
 function parseSizeMode(value: string | undefined, fallbackValue: number) {
   if (!value || value === 'wrap_content') {
-    return { mode: 'wrap_content', value: fallbackValue }
+    return { mode: 'wrap_content', value: String(fallbackValue) }
   }
   if (value === 'match_parent') {
-    return { mode: 'match_parent', value: fallbackValue }
+    return { mode: 'match_parent', value: String(fallbackValue) }
   }
-  const num = Number(String(value).replace(/px$/i, ''))
+  // 固定值：保留原始字符串（支持 {offsetTop} 等变量）
   return {
     mode: 'fixed',
-    value: Number.isFinite(num) ? num : fallbackValue,
+    value: String(value).replace(/px$/i, ''),
   }
 }
 
 function sizeToAttr(mode: string, value: number | string): string {
   if (mode === 'match_parent' || mode === 'wrap_content') return mode
-  const num = Number(value)
-  return Number.isFinite(num) ? String(num) : '0'
+  const raw = String(value ?? '').trim()
+  if (!raw) return '0'
+  if (/\{[^{}]+\}/.test(raw)) return raw
+  const num = Number(raw.replace(/px$/i, ''))
+  return Number.isFinite(num) ? String(num) : raw
 }
 
 function syncLayoutForm() {
@@ -263,7 +331,7 @@ function syncLayoutForm() {
   layoutForm.borderBottomLeftRadius = node.attrs.borderBottomLeftRadius ?? ''
   layoutForm.borderWidth = node.attrs.borderWidth ?? ''
   layoutForm.borderColor = node.attrs.borderColor ?? ''
-  layoutForm.overflow = node.attrs.overflow || 'hidden'
+  layoutForm.overflow = node.attrs.overflow || 'visible'
   layoutForm.gravity = node.attrs.gravity ?? ''
   layoutForm.orientation = node.attrs.orientation || 'vertical'
   layoutForm.gap = node.attrs.gap ?? ''
@@ -327,7 +395,8 @@ watch(
 function commitAttr(name: string, value: string) {
   if (!props.selectedId || !selectedNode.value) return
   try {
-    const next = setNodeAttribute(props.xml, props.selectedId, name, value.trim())
+    const text = value == null ? '' : String(value).trim()
+    const next = setNodeAttribute(props.xml, props.selectedId, name, text)
     emit('update:xml', next)
   } catch (err) {
     console.error(err)
@@ -375,20 +444,14 @@ function handleEventBindSave(value: string) {
   commitAttr(eventBindKey.value, value)
 }
 
-function commitWidth() {
-  const value = Number(layoutForm.widthValue)
-  commitAttr(
-    'width',
-    sizeToAttr(layoutForm.widthMode, Number.isFinite(value) ? value : 100),
-  )
+function commitWidth(value?: string) {
+  if (value !== undefined) layoutForm.widthValue = value
+  commitAttr('width', sizeToAttr(layoutForm.widthMode, layoutForm.widthValue))
 }
 
-function commitHeight() {
-  const value = Number(layoutForm.heightValue)
-  commitAttr(
-    'height',
-    sizeToAttr(layoutForm.heightMode, Number.isFinite(value) ? value : 40),
-  )
+function commitHeight(value?: string) {
+  if (value !== undefined) layoutForm.heightValue = value
+  commitAttr('height', sizeToAttr(layoutForm.heightMode, layoutForm.heightValue))
 }
 
 function commitRelativeBool(key: (typeof RELATIVE_BOOL_ATTRS)[number]['key']) {
@@ -486,6 +549,24 @@ function looksLikeDataBinding(raw: string | undefined): boolean {
 
 function commitComponentProp(name: string) {
   commitAttr(name, componentPropForm[name] ?? '')
+}
+
+function boolPropModel(def: { name: string; defaultValue?: unknown }): boolean {
+  const raw = (componentPropForm[def.name] ?? '').trim()
+  if (raw === 'true' || raw === '1') return true
+  if (raw === 'false' || raw === '0') return false
+  // 留空：展示组件默认值
+  return def.defaultValue === true || def.defaultValue === 'true' || def.defaultValue === 1
+}
+
+function commitComponentBoolProp(name: string, checked: boolean) {
+  componentPropForm[name] = checked ? 'true' : 'false'
+  commitComponentProp(name)
+}
+
+function clearComponentProp(name: string) {
+  componentPropForm[name] = ''
+  commitComponentProp(name)
 }
 
 const iconSelectOptions = computed(() => {
@@ -742,8 +823,82 @@ function saveVisibilityConfig(config: VisibilityConditionConfig) {
 
     <div class="panel-body">
       <template v-if="tab === 'style'">
+        <div v-if="isStatusBarSelected" class="layout-form">
+          <div class="node-brief">
+            <div class="node-tag">StatusBar</div>
+            <div class="node-id">系统状态栏</div>
+          </div>
+
+          <el-alert
+            v-if="canvasScene !== 'miniprogram'"
+            class="status-bar-tip"
+            type="warning"
+            show-icon
+            :closable="false"
+            title="H5 场景不支持控制状态栏"
+            description="状态栏样式参考微信小程序（navigationBarTextStyle / 背景色），仅在「微信小程序」场景下生效。请切换到右下角「微信小程序」预览。"
+          />
+
+          <div class="section-title">风格</div>
+          <el-form label-position="top" size="small" :disabled="canvasScene !== 'miniprogram'">
+            <el-form-item label="文字样式 textStyle">
+              <el-radio-group
+                v-if="!statusBarTextStyleIsBinding"
+                :model-value="
+                  statusBarForm.textStyle === 'white' ? 'white' : 'black'
+                "
+                @change="commitStatusBarTextStyleStatic(String($event))"
+              >
+                <el-radio-button value="black">black 黑字</el-radio-button>
+                <el-radio-button value="white">white 白字</el-radio-button>
+              </el-radio-group>
+              <el-input
+                v-model="statusBarForm.textStyle"
+                clearable
+                placeholder="black / white，或 {数据池字段}"
+                style="margin-top: 8px"
+                @change="commitStatusBar"
+              />
+              <p class="hint">可填 black / white，或绑定数据池：<code>{'{titleTextStyle}'}</code></p>
+            </el-form-item>
+            <el-form-item label="背景色 backgroundColor">
+              <ColorPicker
+                v-if="!looksLikeDataBinding(statusBarForm.backgroundColor)"
+                v-model="statusBarForm.backgroundColor"
+                placeholder="#ffffff / transparent"
+                @change="commitStatusBar"
+              />
+              <el-input
+                v-else
+                v-model="statusBarForm.backgroundColor"
+                clearable
+                placeholder="色值或 {数据池字段}"
+                @change="commitStatusBar"
+              />
+              <p class="hint">可填色值，或绑定数据池：<code>{'{titleBarColor}'}</code></p>
+            </el-form-item>
+            <el-form-item label="与页面重叠 cover">
+              <div v-if="!statusBarCoverIsBinding" class="bool-prop-row">
+                <el-switch
+                  :model-value="statusBarCoverIsOn(statusBarForm.cover)"
+                  @update:model-value="commitStatusBarCoverSwitch"
+                />
+              </div>
+              <el-input
+                v-model="statusBarForm.cover"
+                clearable
+                placeholder="true / false，或 {数据池字段}"
+                :style="statusBarCoverIsBinding ? undefined : { marginTop: '8px' }"
+                @change="commitStatusBar"
+              />
+              <p class="hint">
+                开启后状态栏浮在页面之上（沉浸式）。可绑定：<code>{'{immersive}'}</code>
+              </p>
+            </el-form-item>
+          </el-form>
+        </div>
         <el-empty
-          v-if="!selectedNode"
+          v-else-if="!selectedNode"
           description="请在控件树中选择节点"
           :image-size="64"
         />
@@ -770,7 +925,7 @@ function saveVisibilityConfig(config: VisibilityConditionConfig) {
             <el-form label-position="top" size="small">
               <el-form-item label="宽度 width">
                 <div class="size-row">
-                  <el-select v-model="layoutForm.widthMode" @change="commitWidth">
+                  <el-select v-model="layoutForm.widthMode" @change="() => commitWidth()">
                     <el-option
                       v-for="opt in SIZE_OPTIONS"
                       :key="opt.value"
@@ -781,8 +936,7 @@ function saveVisibilityConfig(config: VisibilityConditionConfig) {
                   <NumericInput
                     v-if="layoutForm.widthMode === 'fixed'"
                     v-model="layoutForm.widthValue"
-                    :min="1"
-                    :max="5000"
+                    placeholder="数字或 {变量}"
                     @change="commitWidth"
                   />
                 </div>
@@ -790,7 +944,7 @@ function saveVisibilityConfig(config: VisibilityConditionConfig) {
 
               <el-form-item label="高度 height">
                 <div class="size-row">
-                  <el-select v-model="layoutForm.heightMode" @change="commitHeight">
+                  <el-select v-model="layoutForm.heightMode" @change="() => commitHeight()">
                     <el-option
                       v-for="opt in SIZE_OPTIONS"
                       :key="opt.value"
@@ -801,8 +955,7 @@ function saveVisibilityConfig(config: VisibilityConditionConfig) {
                   <NumericInput
                     v-if="layoutForm.heightMode === 'fixed'"
                     v-model="layoutForm.heightValue"
-                    :min="1"
-                    :max="5000"
+                    placeholder="数字或 {变量}"
                     @change="commitHeight"
                   />
                 </div>
@@ -815,7 +968,7 @@ function saveVisibilityConfig(config: VisibilityConditionConfig) {
             <el-form-item label="padding">
               <NumericInput
                 v-model="layoutForm.padding"
-                placeholder="例如：16"
+                placeholder="例如：16 或 {padding}"
                 @change="commitAttr('padding', layoutForm.padding)"
               />
             </el-form-item>
@@ -850,7 +1003,7 @@ function saveVisibilityConfig(config: VisibilityConditionConfig) {
               <el-form-item label="margin">
                 <NumericInput
                   v-model="layoutForm.margin"
-                  placeholder="例如：8"
+                  placeholder="例如：8 或 {margin}"
                   @change="commitAttr('margin', layoutForm.margin)"
                 />
               </el-form-item>
@@ -973,7 +1126,7 @@ function saveVisibilityConfig(config: VisibilityConditionConfig) {
             <el-form-item v-if="showOverflowProps" label="overflow 溢出">
               <el-select
                 v-model="layoutForm.overflow"
-                @change="commitAttr('overflow', layoutForm.overflow === 'hidden' ? '' : layoutForm.overflow)"
+                @change="commitAttr('overflow', layoutForm.overflow === 'visible' ? '' : layoutForm.overflow)"
               >
                 <el-option
                   v-for="opt in overflowOptionsForNode"
@@ -1272,7 +1425,12 @@ function saveVisibilityConfig(config: VisibilityConditionConfig) {
 
       <template v-else-if="tab === 'event'">
         <el-empty
-          v-if="!selectedNode"
+          v-if="isStatusBarSelected"
+          description="状态栏不支持事件绑定"
+          :image-size="64"
+        />
+        <el-empty
+          v-else-if="!selectedNode"
           description="请在控件树中选择节点"
           :image-size="64"
         />
@@ -1328,7 +1486,12 @@ function saveVisibilityConfig(config: VisibilityConditionConfig) {
 
       <template v-else>
         <el-empty
-          v-if="!selectedNode"
+          v-if="isStatusBarSelected"
+          description="状态栏不支持动态样式"
+          :image-size="64"
+        />
+        <el-empty
+          v-else-if="!selectedNode"
           description="请在控件树中选择节点"
           :image-size="64"
         />
@@ -1385,6 +1548,30 @@ function saveVisibilityConfig(config: VisibilityConditionConfig) {
                       @change="commitComponentProp(def.name)"
                     />
                     <p class="hint">可填色值，或绑定数据池：<code>{'{titleBarColor}'}</code></p>
+                  </template>
+                  <template v-else-if="def.type === 'boolean'">
+                    <div class="bool-prop-row">
+                      <el-switch
+                        :model-value="boolPropModel(def)"
+                        @update:model-value="commitComponentBoolProp(def.name, $event)"
+                      />
+                      <el-button
+                        v-if="(componentPropForm[def.name] ?? '').trim()"
+                        type="primary"
+                        link
+                        @click="clearComponentProp(def.name)"
+                      >
+                        恢复默认（{{ propDefaultPreview(def) }}）
+                      </el-button>
+                      <span v-else class="bool-prop-hint">当前用默认：{{ propDefaultPreview(def) }}</span>
+                    </div>
+                    <el-input
+                      v-model="componentPropForm[def.name]"
+                      clearable
+                      placeholder="也可填 true / false，或 {数据池字段}"
+                      style="margin-top: 8px"
+                      @change="commitComponentProp(def.name)"
+                    />
                   </template>
                   <el-input
                     v-else
@@ -1586,6 +1773,10 @@ function saveVisibilityConfig(config: VisibilityConditionConfig) {
   gap: 4px;
 }
 
+.status-bar-tip {
+  margin-bottom: 12px;
+}
+
 .repeat-row,
 .event-row {
   display: flex;
@@ -1620,6 +1811,18 @@ function saveVisibilityConfig(config: VisibilityConditionConfig) {
   margin: 4px 0 0;
   font-size: 12px;
   line-height: 1.5;
+  color: #94a3b8;
+}
+
+.bool-prop-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 24px;
+}
+
+.bool-prop-hint {
+  font-size: 12px;
   color: #94a3b8;
 }
 

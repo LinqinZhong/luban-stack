@@ -62,6 +62,20 @@ export const BUILTIN_METHODS: PageMethod[] = [
       "// duration: 'short'（短，默认）或 'long'（长）",
     builtin: true,
   },
+  {
+    name: 'getDeviceInfo',
+    params: [],
+    returnType: 'object',
+    body:
+      '// 获取设备信息\n' +
+      '// 返回：\n' +
+      '// - statusBarHeight: 状态栏高度（px）\n' +
+      '// - userAgent: 手机 UA\n' +
+      '// - menuButton: 微信小程序胶囊位置与大小（H5 为 null）\n' +
+      '// - platform: \'h5\' | \'miniprogram\'\n' +
+      '// 用法：const info = getDeviceInfo()',
+    builtin: true,
+  },
 ]
 
 /** 仅组件 function 目录注入的预置方法 */

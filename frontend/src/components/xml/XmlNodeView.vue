@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, inject, onBeforeUnmount, provide, type CSSProperties, type ComputedRef } from 'vue'
+import { computed, inject, onBeforeUnmount, provide, shallowRef, watch, type CSSProperties, type ComputedRef } from 'vue'
 import type { IconLibrary } from '../../types/icon-library'
 import { findIcon, iconSymbolId } from '../../types/icon-library'
 import type { PageData } from '../../types/page-data'
@@ -25,6 +25,8 @@ import {
   buildDollarProps,
   interpolateDollarProps,
 } from '../../utils/component-props'
+import { resolveComputedPageData, buildComputeDepsKey } from '../../utils/compute-runtime'
+import { CANVAS_RUNTIME_KEY } from '../../composables/useCanvasRuntime'
 import {
   DYNAMIC_STYLES_ATTR,
   V_IF_ATTR,
@@ -89,6 +91,7 @@ const emit = defineEmits<{
 
 const modalStack = inject(MODAL_STACK_KEY, null)
 const modalHostRef = inject(MODAL_HOST_KEY, null)
+const canvasRuntime = inject(CANVAS_RUNTIME_KEY, null)
 
 const isEditorHidden = computed(() =>
   (props.hiddenNodeIds ?? []).includes(props.nodeId),
@@ -296,6 +299,40 @@ const instanceDollarProps = computed(() => {
   return buildDollarProps(config, resolved)
 })
 
+/**
+ * 仅当计算体真正用到的 $props / 设备信息变化时才变。
+ * 滚动改 titleBarColor 不会让只依赖 isFillScreen 的计算字段重跑。
+ */
+const componentComputeDepsKey = computed(() => {
+  const detail = componentDetail.value
+  if (!detail) return ''
+  return buildComputeDepsKey(
+    detail.data,
+    instanceDollarProps.value,
+    canvasRuntime?.getDeviceInfo() ?? null,
+  )
+})
+
+/** 用实例 $props 重新求值组件数据池（避免只用 config 默认值） */
+const componentPageData = shallowRef<PageData | undefined>(undefined)
+
+watch(
+  componentComputeDepsKey,
+  () => {
+    const detail = componentDetail.value
+    if (!detail) {
+      componentPageData.value = props.pageData
+      return
+    }
+    // 仅在 depsKey 变化时求值；此处读 instanceDollarProps 不会额外建依赖
+    componentPageData.value = resolveComputedPageData(detail.data, {
+      getDeviceInfo: canvasRuntime?.getDeviceInfo,
+      dollarProps: instanceDollarProps.value,
+    })
+  },
+  { immediate: true },
+)
+
 const componentRoot = computed(() => {
   const detail = componentDetail.value
   if (!detail?.xml?.trim()) return null
@@ -502,7 +539,7 @@ const iconPlaceholderStyle = computed(() => ({
  * 预览态才应用隐藏 / 滚动策略。
  */
 const hasScrollAttr = computed(
-  () => parseOverflow(attrs.value.overflow, 'hidden') === 'scroll',
+  () => parseOverflow(attrs.value.overflow, 'visible') === 'scroll',
 )
 
 const injectedScrollColumn = inject<ComputedRef<boolean> | undefined>(
@@ -534,7 +571,7 @@ provide(
 const layoutOverflowStyle = computed(() => {
   // 编辑态始终 visible，避免选中框角标/绝对定位子项被裁切
   if (props.selectable) return { overflow: 'visible' as const }
-  return overflowStyle(attrs.value, 'hidden')
+  return overflowStyle(attrs.value, 'visible')
 })
 
 /** 作为子节点：处在祖先滚动列内时，高度按内容堆叠（勿包含普通 parentVertical） */
@@ -589,11 +626,11 @@ const linearStyle = computed(() => {
 })
 
 const swiperOverflowStyle = computed(() => {
-  // 编辑态始终露出相邻页；预览态才用 overflow（默认 hidden）
+  // 编辑态始终露出相邻页；预览态才用 overflow（默认 visible）
   if (props.selectable) return { overflow: 'visible' as const }
-  const strategy = parseOverflow(attrs.value.overflow, 'hidden')
+  const strategy = parseOverflow(attrs.value.overflow, 'visible')
   return {
-    overflow: (strategy === 'visible' ? 'visible' : 'hidden') as
+    overflow: (strategy === 'hidden' ? 'hidden' : 'visible') as
       | 'visible'
       | 'hidden',
   }
@@ -1223,7 +1260,7 @@ onBeforeUnmount(() => {
         :interact-enabled="interactEnabled"
         :parent-scrollable="inScrollColumn"
         :icon-library="iconLibrary"
-        :page-data="componentDetail?.data ?? pageData"
+        :page-data="componentPageData ?? pageData"
         :component-map="componentMap"
         :dollar-props="instanceDollarProps"
         :route-params="routeParams"
@@ -1263,7 +1300,7 @@ onBeforeUnmount(() => {
     <div class="widget swiper" :style="swiperStyle">
       <SwiperPort
         :editable="selectable"
-        :overflow="parseOverflow(attrs.overflow, 'hidden')"
+        :overflow="parseOverflow(attrs.overflow, 'visible')"
         :slide-count="node.children.length"
         :autoplay="!selectable && swiperAutoplay"
         :interval="swiperInterval"
@@ -1442,28 +1479,34 @@ onBeforeUnmount(() => {
       @wheel="$event.stopPropagation()"
       @scroll="handleScroll"
     >
-      <XmlNodeView
-        v-for="(child, index) in node.children"
-        :key="childId(index, child.tag)"
-        :node="child"
-        :node-id="childId(index, child.tag)"
-        :selected-id="selectedId"
-        :hovered-id="hoveredId"
-        :selectable="selectable"
-        :interact-enabled="interactEnabled"
-        :extra-style="childRelativeStyle(child)"
-        :parent-scrollable="inScrollColumn"
-        :icon-library="iconLibrary"
-        :page-data="pageData"
-        :hidden-node-ids="hiddenNodeIds"
-        :component-map="componentMap"
-        :dollar-props="dollarProps"
-        :route-params="routeParams"
-        @select="forwardSelect"
-        @hover="forwardHover"
-        @open-repeat="forwardOpenRepeat"
-        @interact="forwardInteract"
-      />
+      <!--
+        绝对定位子节点相对 padding edge 定位、不受父级 padding 影响。
+        内层再开一层 relative，使 padding 能像 Android 一样压缩内容区。
+      -->
+      <div class="relative-content">
+        <XmlNodeView
+          v-for="(child, index) in node.children"
+          :key="childId(index, child.tag)"
+          :node="child"
+          :node-id="childId(index, child.tag)"
+          :selected-id="selectedId"
+          :hovered-id="hoveredId"
+          :selectable="selectable"
+          :interact-enabled="interactEnabled"
+          :extra-style="childRelativeStyle(child)"
+          :parent-scrollable="inScrollColumn"
+          :icon-library="iconLibrary"
+          :page-data="pageData"
+          :hidden-node-ids="hiddenNodeIds"
+          :component-map="componentMap"
+          :dollar-props="dollarProps"
+          :route-params="routeParams"
+          @select="forwardSelect"
+          @hover="forwardHover"
+          @open-repeat="forwardOpenRepeat"
+          @interact="forwardInteract"
+        />
+      </div>
     </OverlayScrollPort>
   </WidgetSelectShell>
   </template>
@@ -1473,6 +1516,16 @@ onBeforeUnmount(() => {
 .widget.swiper {
   width: 100%;
   height: 100%;
+  min-height: 0;
+  box-sizing: border-box;
+}
+
+/* RelativeLayout：承载绝对定位子节点；高度跟父内容区（已扣 padding） */
+.relative-content {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
   min-height: 0;
   box-sizing: border-box;
 }

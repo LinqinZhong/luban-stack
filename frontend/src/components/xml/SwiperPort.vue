@@ -6,7 +6,7 @@ const props = withDefaults(
   defineProps<{
     /** 编辑态：横滑浏览全部页，便于点选子控件 */
     editable?: boolean
-    /** 预览态溢出策略（默认 hidden）；编辑态忽略，始终露出相邻页 */
+    /** 预览态溢出策略（默认 visible）；编辑态忽略，始终露出相邻页 */
     overflow?: OverflowStrategy
     slideCount: number
     autoplay?: boolean
@@ -21,7 +21,7 @@ const props = withDefaults(
   }>(),
   {
     editable: false,
-    overflow: 'hidden',
+    overflow: 'visible',
     autoplay: false,
     interval: 3000,
     circular: true,

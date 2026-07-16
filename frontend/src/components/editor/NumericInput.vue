@@ -4,6 +4,7 @@ import { computed } from 'vue'
 const props = withDefaults(
   defineProps<{
     modelValue: string | number
+    /** 保留兼容：文本模式下不强制校验范围 */
     min?: number
     max?: number
     step?: number
@@ -12,7 +13,7 @@ const props = withDefaults(
   {
     min: 0,
     step: 1,
-    placeholder: '',
+    placeholder: '数字或 {变量}',
   },
 )
 
@@ -23,22 +24,16 @@ const emit = defineEmits<{
 
 const innerValue = computed({
   get() {
-    if (props.modelValue === '' || props.modelValue === undefined || props.modelValue === null) {
-      return undefined
-    }
-    const num = Number(String(props.modelValue).replace(/px$/i, ''))
-    return Number.isFinite(num) ? num : undefined
+    if (props.modelValue === undefined || props.modelValue === null) return ''
+    return String(props.modelValue)
   },
-  set(value: number | undefined) {
-    const next = value === undefined ? '' : String(value)
+  set(value: string) {
+    const next = value ?? ''
     emit('update:modelValue', next)
+    // 立即提交：el-input 的 change 仅在失焦/回车触发，切节点会丢未提交内容
+    emit('change', next)
   },
 })
-
-function handleChange(value: number | undefined) {
-  const next = value === undefined ? '' : String(value)
-  emit('change', next)
-}
 
 /** 阻止方向键冒泡到控件树，长按时不会清掉/切走选中节点 */
 function handleKeydown(event: Event) {
@@ -50,15 +45,11 @@ function handleKeydown(event: Event) {
 </script>
 
 <template>
-  <el-input-number
+  <el-input
     v-model="innerValue"
     class="numeric-input"
-    :min="min"
-    :max="max"
-    :step="step"
+    clearable
     :placeholder="placeholder"
-    controls-position="right"
-    @change="handleChange"
     @keydown="handleKeydown"
   />
 </template>
@@ -66,10 +57,5 @@ function handleKeydown(event: Event) {
 <style scoped>
 .numeric-input {
   width: 100%;
-}
-
-:deep(.el-input__wrapper) {
-  padding-left: 8px;
-  padding-right: 36px;
 }
 </style>

@@ -22,9 +22,9 @@ const emit = defineEmits<{
 
 const form = reactive({
   widthMode: 'wrap_content' as string,
-  widthValue: 100,
+  widthValue: '100' as string,
   heightMode: 'wrap_content' as string,
-  heightValue: 40,
+  heightValue: '40' as string,
   margin: '',
   marginLeft: '',
   marginRight: '',
@@ -83,22 +83,24 @@ const overflowOptionsForTag = computed(() => {
 
 function parseSizeMode(value: string | undefined, fallbackValue: number) {
   if (!value || value === 'wrap_content') {
-    return { mode: 'wrap_content', value: fallbackValue }
+    return { mode: 'wrap_content', value: String(fallbackValue) }
   }
   if (value === 'match_parent') {
-    return { mode: 'match_parent', value: fallbackValue }
+    return { mode: 'match_parent', value: String(fallbackValue) }
   }
-  const num = Number(String(value).replace(/px$/i, ''))
   return {
     mode: 'fixed',
-    value: Number.isFinite(num) ? num : fallbackValue,
+    value: String(value).replace(/px$/i, ''),
   }
 }
 
 function sizeToAttr(mode: string, value: number | string): string {
   if (mode === 'match_parent' || mode === 'wrap_content') return mode
-  const num = Number(value)
-  return Number.isFinite(num) ? String(num) : '0'
+  const raw = String(value ?? '').trim()
+  if (!raw) return '0'
+  if (/\{[^{}]+\}/.test(raw)) return raw
+  const num = Number(raw.replace(/px$/i, ''))
+  return Number.isFinite(num) ? String(num) : raw
 }
 
 function syncFromModel(styles: StyleOverrides) {
@@ -209,8 +211,7 @@ function onFieldChange() {
             <NumericInput
               v-if="form.widthMode === 'fixed'"
               v-model="form.widthValue"
-              :min="1"
-              :max="5000"
+              placeholder="数字或 {变量}"
               @change="onFieldChange"
             />
           </div>
@@ -228,8 +229,7 @@ function onFieldChange() {
             <NumericInput
               v-if="form.heightMode === 'fixed'"
               v-model="form.heightValue"
-              :min="1"
-              :max="5000"
+              placeholder="数字或 {变量}"
               @change="onFieldChange"
             />
           </div>
@@ -342,7 +342,7 @@ function onFieldChange() {
         <el-select
           v-model="form.overflow"
           clearable
-          placeholder="默认隐藏"
+          placeholder="默认显示"
           @change="onFieldChange"
         >
           <el-option

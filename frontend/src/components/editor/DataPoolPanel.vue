@@ -23,7 +23,9 @@ import {
   type PageData,
 } from '../../types/page-data'
 import { resolveComputedPageData } from '../../utils/compute-runtime'
+import type { DeviceInfo } from '../../utils/device-info'
 import { isReservedDataFieldName } from '../../utils/component-props'
+import type { ComponentPropDef } from '../../types/component'
 import { buildWidgetTreeSelectData } from '../../utils/widget-tree'
 import { ElMessage } from 'element-plus'
 
@@ -32,6 +34,12 @@ const props = defineProps<{
   /** 当前页面/组件 XML，供「引用」类型选择控件节点 */
   xml?: string
   iconOptions?: Array<{ id: string; label: string }>
+  /** 计算字段求值时的 getDeviceInfo（与画布场景对齐） */
+  getDeviceInfo?: () => DeviceInfo
+  /** 编辑组件时的参数定义（$props 提示与求值） */
+  componentProps?: ComponentPropDef[] | null
+  /** 计算字段求值时的 $props */
+  dollarProps?: Record<string, unknown>
 }>()
 
 const emit = defineEmits<{
@@ -145,7 +153,12 @@ function arrayItemCount(row: DataField) {
   return Array.isArray(row.value) ? row.value.length : 0
 }
 
-const resolvedData = computed(() => resolveComputedPageData(props.data))
+const resolvedData = computed(() =>
+  resolveComputedPageData(props.data, {
+    getDeviceInfo: props.getDeviceInfo,
+    dollarProps: props.dollarProps,
+  }),
+)
 
 function resolvedField(row: DataField): DataField | undefined {
   const name = row.name.trim()
@@ -385,6 +398,7 @@ function saveComputeBody(body: string) {
       v-model="computeDialogVisible"
       :field="editingField"
       :sibling-fields="siblingFieldsForCompute"
+      :component-props="componentProps"
       @save="saveComputeBody"
     />
   </div>

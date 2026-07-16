@@ -7,6 +7,7 @@ import {
   setEntryPage,
 } from '../services/project.js'
 import { readIconLibrary, saveIconLibrary } from '../services/icons.js'
+import { exportVue3Project } from '../services/export-vue3.js'
 import { DEFAULT_CANVAS_WIDTH, ENGINE_VERSION } from '../types/voider-project.js'
 
 const router = Router()
@@ -102,6 +103,21 @@ router.get('/icons', async (req, res) => {
     }
     const library = await readIconLibrary(projectPath.trim())
     res.json(library)
+  } catch (err) {
+    handleError(res, err)
+  }
+})
+
+router.post('/export/vue3', async (req, res) => {
+  try {
+    const projectPath =
+      typeof req.body?.projectPath === 'string' ? req.body.projectPath : ''
+    if (!projectPath.trim()) {
+      res.status(400).json({ message: '请提供 projectPath' })
+      return
+    }
+    const result = await exportVue3Project(projectPath.trim())
+    res.json(result)
   } catch (err) {
     handleError(res, err)
   }

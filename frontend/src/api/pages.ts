@@ -4,6 +4,14 @@ import type { PageData } from '../types/page-data'
 export interface PageConfig {
   name: string
   title?: string
+  /** 系统状态栏样式（小程序场景生效） */
+  statusBar?: {
+    /** black / white，或数据池绑定如 {textStyle} */
+    textStyle?: string
+    backgroundColor?: string
+    /** 是否重叠；也可为 'true'/'false' 或 {字段} */
+    cover?: boolean | string
+  }
 }
 
 export interface PageSummary {
@@ -51,6 +59,7 @@ export function savePageConfig(payload: {
   pageId: string
   name: string
   title?: string
+  statusBar?: PageConfig['statusBar']
 }) {
   return request<PageDetail>(
     `/api/pages/${encodeURIComponent(payload.pageId)}/config`,
@@ -60,6 +69,7 @@ export function savePageConfig(payload: {
         projectPath: payload.projectPath,
         name: payload.name,
         title: payload.title,
+        statusBar: payload.statusBar,
       }),
     },
   )

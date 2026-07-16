@@ -21,6 +21,7 @@ import {
   type ComponentMethodsMap,
   type ModalStackLike,
 } from './widget-ref'
+import { getDeviceInfo as defaultGetDeviceInfo, type DeviceInfo } from './device-info'
 
 export type PreviewEventKey = 'onClick' | 'onLongClick' | 'onScroll'
 
@@ -80,6 +81,8 @@ export interface RunEventBindingsContext {
   setData: (prop: string, value: DataFieldValue) => void
   /** Toast 提示 */
   showToast?: (message: string, duration: 'short' | 'long') => void
+  /** 设备信息（状态栏高度 / UA / 小程序胶囊） */
+  getDeviceInfo?: () => DeviceInfo
   /** 组件内向父级抛事件（自定义方法体里的 emit(...)） */
   emit?: (event: string, ...args: unknown[]) => void
   /**
@@ -330,6 +333,8 @@ function buildCustomScope(ctx: RunEventBindingsContext): Record<string, unknown>
       const d = String(duration ?? 'short').toLowerCase() === 'long' ? 'long' : 'short'
       ctx.showToast?.(String(message ?? ''), d)
     },
+    getDeviceInfo: (): DeviceInfo =>
+      ctx.getDeviceInfo?.() ?? defaultGetDeviceInfo(),
   }
 
   if (ctx.emit) {

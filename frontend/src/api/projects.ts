@@ -95,3 +95,14 @@ export function setProjectEntryPage(payload: {
     body: JSON.stringify(payload),
   })
 }
+
+export function exportProjectVue3(projectPath: string) {
+  return request<{
+    outputPath: string
+    pages: number
+    components: number
+  }>('/api/projects/export/vue3', {
+    method: 'POST',
+    body: JSON.stringify({ projectPath }),
+  })
+}

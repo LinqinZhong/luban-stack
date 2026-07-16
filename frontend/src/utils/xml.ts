@@ -232,7 +232,7 @@ export function borderStyle(attrs: Record<string, string>): Record<string, strin
   return style
 }
 
-/** 布局容器溢出策略：hidden | visible | scroll，默认 hidden */
+/** 布局容器溢出策略：hidden | visible | scroll，默认 visible（显示） */
 export type OverflowStrategy = 'hidden' | 'visible' | 'scroll'
 
 export const OVERFLOW_OPTIONS: Array<{ label: string; value: OverflowStrategy }> = [
@@ -243,7 +243,7 @@ export const OVERFLOW_OPTIONS: Array<{ label: string; value: OverflowStrategy }>
 
 export function parseOverflow(
   value: string | undefined,
-  fallback: OverflowStrategy = 'hidden',
+  fallback: OverflowStrategy = 'visible',
 ): OverflowStrategy {
   const raw = value?.trim().toLowerCase()
   if (raw === 'hidden' || raw === 'visible' || raw === 'scroll') return raw
@@ -253,7 +253,7 @@ export function parseOverflow(
 /** scroll → 纵向可滚（移动端手感），横轴默认不泄出 */
 export function overflowStyle(
   attrs: Record<string, string>,
-  fallback: OverflowStrategy | null = 'hidden',
+  fallback: OverflowStrategy | null = 'visible',
 ): Record<string, string> {
   const raw = attrs.overflow?.trim().toLowerCase()
   const strategy =

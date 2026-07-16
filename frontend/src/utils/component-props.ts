@@ -4,6 +4,7 @@ import {
   type DataFieldValue,
 } from '../types/page-data'
 import type { ComponentConfig, ComponentPropDef } from '../types/component'
+import { dataFieldToMethodParamType } from '../types/page-method'
 
 /** 组件入参运行时命名空间；数据池字段禁止使用此名 */
 export const DOLLAR_PROPS_NAME = '$props'
@@ -12,23 +13,103 @@ export function isReservedDataFieldName(name: string): boolean {
   return name.trim() === DOLLAR_PROPS_NAME
 }
 
-function coercePropValue(type: DataFieldType, raw: string): DataFieldValue {
-  if (type === 'string' || type === 'icon' || type === 'color' || type === 'ref')
-    return raw
+function mapAmbientTsType(type: DataFieldType): string {
+  switch (dataFieldToMethodParamType(type)) {
+    case 'number':
+      return 'number'
+    case 'boolean':
+      return 'boolean'
+    case 'array':
+      return 'unknown[]'
+    case 'object':
+      return 'Record<string, unknown>'
+    default:
+      return 'string'
+  }
+}
+
+/**
+ * Monaco ambient：`declare const $props: { ... }`，按组件参数定义生成属性提示。
+ * 页面（无参数定义）时声明为空对象，与运行时一致。
+ */
+export function buildDollarPropsAmbientDeclaration(
+  defs: ComponentPropDef[] | null | undefined,
+): string {
+  const props = (defs ?? []).filter((item) => {
+    const name = item.name.trim()
+    return Boolean(name) && /^[A-Za-z_$][\w$]*$/.test(name)
+  })
+  if (!props.length) {
+    return 'declare const $props: Record<string, never>;'
+  }
+  const fields = props
+    .map((item) => `  ${item.name.trim()}: ${mapAmbientTsType(item.type)};`)
+    .join('\n')
+  return [`interface VoiderDollarProps {`, fields, `}`, `declare const $props: VoiderDollarProps;`].join(
+    '\n',
+  )
+}
+
+/** 将配置里的默认值规范成运行时类型（尤其避免布尔被存成字符串 "false"） */
+export function normalizePropDefaultValue(
+  type: DataFieldType,
+  value: unknown,
+): DataFieldValue {
+  if (type === 'boolean') {
+    if (value === true || value === 1) return true
+    if (value === false || value === 0) return false
+    if (typeof value === 'string') {
+      const s = value.trim().toLowerCase()
+      if (s === 'true' || s === '1') return true
+      if (s === 'false' || s === '0' || s === '') return false
+    }
+    if (value == null) return false
+    // 禁止 Boolean("false") === true
+    return false
+  }
   if (type === 'number') {
-    const n = Number(raw)
+    if (typeof value === 'number' && Number.isFinite(value)) return value
+    const n = Number(value)
     return Number.isFinite(n) ? n : 0
   }
-  if (type === 'boolean') {
-    if (raw === 'true' || raw === '1') return true
-    if (raw === 'false' || raw === '0' || raw === '') return false
-    return Boolean(raw)
+  if (type === 'string' || type === 'icon' || type === 'color' || type === 'ref') {
+    if (value == null || typeof value === 'object') return ''
+    return String(value)
   }
-  if (!raw.trim()) return defaultValue(type)
+  if (type === 'array') {
+    return Array.isArray(value) ? value : []
+  }
+  if (type === 'json') {
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+      return value as Record<string, unknown>
+    }
+    return {}
+  }
+  if (value === undefined) return defaultValue(type)
+  return value as DataFieldValue
+}
+
+function coercePropValue(type: DataFieldType, raw: unknown): DataFieldValue {
+  if (type === 'boolean') {
+    if (typeof raw === 'boolean') return raw
+    const s = String(raw ?? '').trim().toLowerCase()
+    if (s === 'true' || s === '1') return true
+    if (s === 'false' || s === '0' || s === '') return false
+    return false
+  }
+  const str = raw == null ? '' : String(raw)
+  if (type === 'string' || type === 'icon' || type === 'color' || type === 'ref') {
+    return str
+  }
+  if (type === 'number') {
+    const n = Number(str)
+    return Number.isFinite(n) ? n : 0
+  }
+  if (!str.trim()) return defaultValue(type)
   try {
-    return JSON.parse(raw) as DataFieldValue
+    return JSON.parse(str) as DataFieldValue
   } catch {
-    return raw as unknown as DataFieldValue
+    return str as unknown as DataFieldValue
   }
 }
 
@@ -38,7 +119,9 @@ function defaultsFromDefs(defs: ComponentPropDef[]): Record<string, unknown> {
     const name = def.name.trim()
     if (!name) continue
     result[name] =
-      def.defaultValue !== undefined ? def.defaultValue : defaultValue(def.type)
+      def.defaultValue !== undefined
+        ? normalizePropDefaultValue(def.type, def.defaultValue)
+        : defaultValue(def.type)
   }
   return result
 }
@@ -47,6 +130,7 @@ function defaultsFromDefs(defs: ComponentPropDef[]): Record<string, unknown> {
  * 组装组件运行时 `$props`：
  * - 先用 config.props 的 defaultValue
  * - 再用 Component 实例属性中与「已声明 prop」同名的值覆盖（字符串按类型转换）
+ * - 实例属性留空（或未写）则保留默认值；布尔 false 也能正确覆盖默认 true
  * - 与宿主布局属性同名时（如 background）仍写入 $props，因为控件树里用 {$props.background}
  */
 export function buildDollarProps(
@@ -66,6 +150,9 @@ export function buildDollarProps(
   for (const [key, raw] of Object.entries(instanceAttrs)) {
     const def = byName.get(key)
     if (!def) continue
+    // 留空 = 使用默认值（与属性面板「留空则用默认」一致）
+    // 注意：不能把空串收成 false，否则会盖掉默认 true
+    if (raw == null || String(raw).trim() === '') continue
     result[key] = coercePropValue(def.type, raw)
   }
   return result

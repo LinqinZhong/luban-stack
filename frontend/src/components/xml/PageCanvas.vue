@@ -9,6 +9,8 @@ import {
   MODAL_STACK_KEY,
   type ModalStackApi,
 } from '../../composables/useModalStack'
+import { CANVAS_RUNTIME_KEY } from '../../composables/useCanvasRuntime'
+import { getDeviceInfo } from '../../utils/device-info'
 import type { IconLibrary } from '../../types/icon-library'
 import type { PageData } from '../../types/page-data'
 import type { ComponentRenderMap } from '../../types/component-render'
@@ -16,6 +18,7 @@ import { expandRepeatTree } from '../../utils/repeat'
 import { parsePageXml, type XmlNode } from '../../utils/xml'
 import IconSprite from './IconSprite.vue'
 import XmlNodeView from './XmlNodeView.vue'
+import { STATUS_BAR_NODE_ID } from '../../utils/status-bar'
 
 const props = defineProps<{
   xml: string
@@ -43,6 +46,16 @@ const props = defineProps<{
   toast?: { message: string; id: number } | null
   /** ??? Modal ??????????????? */
   modalStack?: ModalStackApi
+  /** 页面预览显示状态栏/胶囊；组件预览不显示 */
+  showDeviceChrome?: boolean
+  /** 状态栏是否可选中（编辑态） */
+  statusBarSelectable?: boolean
+  /** 状态栏背景色 */
+  statusBarBackground?: string
+  /** 状态栏文字/图标色 black | white */
+  statusBarTextStyle?: 'black' | 'white'
+  /** 状态栏与页面重叠（沉浸式） */
+  statusBarCover?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -58,9 +71,19 @@ const fallbackModalStack = createModalStack()
 const modalHostRef = ref<HTMLElement | null>(null)
 const badgeHostRef = ref<HTMLElement | null>(null)
 
+/** 画布场景：H5 / 小程序 */
+const scene = defineModel<'h5' | 'miniprogram'>('scene', { default: 'h5' })
+
 provide(MODAL_STACK_KEY, props.modalStack ?? fallbackModalStack)
 provide(MODAL_HOST_KEY, modalHostRef)
 provide(BADGE_HOST_KEY, badgeHostRef)
+provide(CANVAS_RUNTIME_KEY, {
+  getDeviceInfo: () =>
+    getDeviceInfo({
+      platform: scene.value,
+      windowWidth: props.canvasWidth,
+    }),
+})
 
 watch(
   () => props.selectable,
@@ -113,6 +136,10 @@ const phoneFitContent = computed(
 const panX = defineModel<number>('panX', { default: 0 })
 const panY = defineModel<number>('panY', { default: 0 })
 const zoom = defineModel<number>('zoom', { default: 1 })
+const sceneTabs = [
+  { key: 'h5' as const, label: 'H5' },
+  { key: 'miniprogram' as const, label: '微信小程序' },
+]
 const panning = ref(false)
 const stageRef = ref<HTMLElement | null>(null)
 let panOriginX = 0
@@ -125,6 +152,25 @@ const MIN_ZOOM = 0.25
 const MAX_ZOOM = 3
 
 const zoomPercent = computed(() => Math.round(zoom.value * 100))
+
+const statusBarSelected = computed(
+  () => props.selectedId === STATUS_BAR_NODE_ID,
+)
+
+const statusBarStyle = computed(() => {
+  const bg = props.statusBarBackground?.trim() || '#ffffff'
+  const light = props.statusBarTextStyle === 'white'
+  return {
+    background: bg,
+    color: light ? '#ffffff' : '#111111',
+  }
+})
+
+function handleStatusBarSelect(event: MouseEvent) {
+  if (!props.statusBarSelectable) return
+  event.stopPropagation()
+  emit('select', STATUS_BAR_NODE_ID)
+}
 
 const worldStyle = computed(() => ({
   transform: `translate(${panX.value}px, ${panY.value}px) scale(${zoom.value})`,
@@ -358,6 +404,9 @@ onBeforeUnmount(() => {
           'is-fit-content': phoneFitContent,
           'is-edit': selectable,
           'is-preview': showTouchCursor,
+          'is-miniprogram': showDeviceChrome && scene === 'miniprogram',
+          'has-status-bar': showDeviceChrome,
+          'status-bar-cover': showDeviceChrome && statusBarCover,
         }"
         :style="phoneFrameStyle"
         @click="handlePhoneClick"
@@ -368,6 +417,71 @@ onBeforeUnmount(() => {
         @pointercancel="onPhonePointerUp"
         @pointerleave="onPhonePointerLeave"
       >
+        <div
+          v-if="showDeviceChrome"
+          class="device-status-bar color-pick-ignore"
+          :class="{
+            selectable: statusBarSelectable,
+            selected: statusBarSelected,
+            cover: statusBarCover,
+          }"
+          :style="statusBarStyle"
+          aria-hidden="true"
+          @click="handleStatusBarSelect"
+        >
+          <span class="status-time">9:41</span>
+          <div class="status-trailing">
+            <svg class="status-icon status-signal" viewBox="0 0 17 12" fill="currentColor">
+              <rect x="0" y="7.5" width="3" height="4.5" rx="0.75" />
+              <rect x="4.5" y="5" width="3" height="7" rx="0.75" />
+              <rect x="9" y="2.5" width="3" height="9.5" rx="0.75" />
+              <rect x="13.5" y="0" width="3" height="12" rx="0.75" />
+            </svg>
+            <svg class="status-icon status-wifi" viewBox="0 0 16 12" fill="currentColor">
+              <circle cx="8" cy="10.6" r="1.15" />
+              <path
+                d="M4.55 7.55a4.9 4.9 0 0 1 6.9 0l-1.15 1.2a3.25 3.25 0 0 0-4.6 0l-1.15-1.2Z"
+              />
+              <path
+                d="M2.2 5.05a8.2 8.2 0 0 1 11.6 0l-1.15 1.2a6.55 6.55 0 0 0-9.3 0L2.2 5.05Z"
+              />
+              <path
+                d="M.15 2.7a11.2 11.2 0 0 1 15.7 0l-1.15 1.2a9.55 9.55 0 0 0-13.4 0L.15 2.7Z"
+              />
+            </svg>
+            <svg class="status-icon status-battery" viewBox="0 0 28 13" fill="none">
+              <rect
+                x="0.75"
+                y="0.75"
+                width="23.5"
+                height="11.5"
+                rx="2.5"
+                stroke="currentColor"
+                stroke-width="1.5"
+                opacity="0.35"
+              />
+              <rect x="2.4" y="2.35" width="17.5" height="8.3" rx="1.5" fill="currentColor" />
+              <rect
+                x="25.2"
+                y="4.1"
+                width="2"
+                height="4.8"
+                rx="0.7"
+                fill="currentColor"
+                opacity="0.4"
+              />
+            </svg>
+          </div>
+        </div>
+        <div
+          v-if="showDeviceChrome && scene === 'miniprogram'"
+          class="mp-capsule color-pick-ignore"
+          aria-hidden="true"
+        >
+          <span class="mp-capsule-more" />
+          <span class="mp-capsule-divider" />
+          <span class="mp-capsule-close" />
+        </div>
         <el-alert
           v-if="parsed.error"
           :title="parsed.error"
@@ -429,8 +543,22 @@ onBeforeUnmount(() => {
     </div>
 
     <div class="stage-status color-pick-ignore">
-      <span class="zoom-label" title="Ctrl + ????">{{ zoomPercent }}%</span>
-      <el-tooltip content="??????????? ? Ctrl+?????" placement="left">
+      <div class="scene-tabs" role="tablist" aria-label="画布场景">
+        <button
+          v-for="tab in sceneTabs"
+          :key="tab.key"
+          type="button"
+          role="tab"
+          class="scene-tab"
+          :class="{ active: scene === tab.key }"
+          :aria-selected="scene === tab.key"
+          @click="scene = tab.key"
+        >
+          {{ tab.label }}
+        </button>
+      </div>
+      <span class="zoom-label" title="Ctrl + 滚轮缩放">{{ zoomPercent }}%</span>
+      <el-tooltip content="重置视图 · Ctrl+0" placement="left">
         <el-button
           class="pan-reset"
           :class="{ visible: viewMoved }"
@@ -515,6 +643,39 @@ onBeforeUnmount(() => {
   gap: 8px;
 }
 
+.scene-tabs {
+  display: inline-flex;
+  align-items: stretch;
+  padding: 2px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid #e4e7ed;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.06);
+}
+
+.scene-tab {
+  border: none;
+  background: transparent;
+  color: #606266;
+  font-size: 12px;
+  line-height: 1.4;
+  padding: 4px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.scene-tab:hover {
+  color: #303133;
+}
+
+.scene-tab.active {
+  background: #ecf5ff;
+  color: #409eff;
+  font-weight: 600;
+}
+
 .zoom-label {
   min-width: 48px;
   padding: 4px 8px;
@@ -528,6 +689,174 @@ onBeforeUnmount(() => {
   line-height: 1.4;
   user-select: none;
   box-shadow: 0 2px 8px rgba(15, 23, 42, 0.06);
+}
+
+/* 系统状态栏：时间 · 信号 · Wi‑Fi · 电量 */
+.device-status-bar {
+  flex-shrink: 0;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 12px 0 16px;
+  background: #fff;
+  color: #111;
+  pointer-events: none;
+  z-index: 6;
+  box-sizing: border-box;
+  outline: 2px solid transparent;
+  outline-offset: -2px;
+  transition: outline-color 0.12s ease;
+}
+
+.device-status-bar.selectable {
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+.device-status-bar.selectable:hover {
+  outline-color: rgba(64, 158, 255, 0.55);
+}
+
+.device-status-bar.selected {
+  outline-color: #409eff;
+}
+
+.device-status-bar.cover {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  flex-shrink: 0;
+}
+
+.phone.status-bar-cover > :deep(.select-shell) {
+  /* 重叠时页面仍铺满手机框，状态栏浮层不占流 */
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* 小程序标题栏胶囊：需避开状态栏高度 */
+.phone.status-bar-cover .mp-capsule {
+  top: 30px;
+}
+
+.status-time {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.status-trailing {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.status-icon {
+  display: block;
+  flex-shrink: 0;
+  color: inherit;
+}
+
+.status-signal {
+  width: 14px;
+  height: 10px;
+}
+
+.status-wifi {
+  width: 13px;
+  height: 10px;
+}
+
+.status-battery {
+  width: 22px;
+  height: 10px;
+}
+
+/* 小程序标题栏胶囊：三点 · 关闭环 */
+.mp-capsule {
+  position: absolute;
+  top: 30px;
+  right: 7px;
+  z-index: 8;
+  display: inline-flex;
+  align-items: center;
+  height: 28px;
+  padding: 0 2px;
+  border-radius: 14px;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  background: #fff;
+  box-sizing: border-box;
+  pointer-events: none;
+}
+
+.mp-capsule-more,
+.mp-capsule-close {
+  position: relative;
+  width: 36px;
+  height: 28px;
+  flex-shrink: 0;
+}
+
+/* 三点：中间略大 */
+.mp-capsule-more::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 4px;
+  height: 4px;
+  margin: -2px 0 0 -2px;
+  border-radius: 50%;
+  background: #111;
+  box-shadow:
+    -6px 0 0 -0.5px #111,
+    6px 0 0 -0.5px #111;
+}
+
+.mp-capsule-divider {
+  width: 1px;
+  height: 16px;
+  background: rgba(0, 0, 0, 0.12);
+  flex-shrink: 0;
+}
+
+/* 关闭：外环 + 实心圆心 */
+.mp-capsule-close::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 15px;
+  height: 15px;
+  margin: -7.5px 0 0 -7.5px;
+  border-radius: 50%;
+  border: 2.5px solid #111;
+  box-sizing: border-box;
+}
+
+.mp-capsule-close::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 5px;
+  height: 5px;
+  margin: -2.5px 0 0 -2.5px;
+  border-radius: 50%;
+  background: #111;
+}
+
+.phone.has-status-bar > :deep(.select-shell) {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.phone.is-miniprogram {
+  border-radius: 0;
 }
 
 .phone {

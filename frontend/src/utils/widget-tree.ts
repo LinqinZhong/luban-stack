@@ -1,6 +1,7 @@
 import type { XmlNode } from './xml'
 import { FRAGMENT_TAG, isFragmentTag, parsePageXml } from './xml'
 import { countNodeEventBindings } from '../types/page-method'
+import { STATUS_BAR_NODE_ID } from './status-bar'
 
 export interface TreeNodeData {
   id: string
@@ -9,6 +10,15 @@ export interface TreeNodeData {
   hasRepeat?: boolean
   eventBindingCount?: number
   children?: TreeNodeData[]
+}
+
+function statusBarTreeNode(): TreeNodeData {
+  return {
+    id: STATUS_BAR_NODE_ID,
+    label: '状态栏 StatusBar',
+    tag: 'StatusBar',
+    children: [],
+  }
 }
 
 function nodeLabel(node: XmlNode): string {
@@ -69,7 +79,10 @@ function toTreeNode(node: XmlNode, path: string): TreeNodeData {
   }
 }
 
-export function buildWidgetTree(xml: string): {
+export function buildWidgetTree(
+  xml: string,
+  options?: { includeStatusBar?: boolean },
+): {
   tree: TreeNodeData[]
   error: string
 } {
@@ -79,17 +92,20 @@ export function buildWidgetTree(xml: string): {
 
   try {
     const root = parsePageXml(xml)
+    const includeStatusBar = Boolean(options?.includeStatusBar)
     // Fragment 多根：树中平铺顶层子节点
     if (isFragmentTag(root.tag)) {
+      const children = root.children.map((child, index) =>
+        toTreeNode(child, `0:${FRAGMENT_TAG}/${index}:${child.tag}`),
+      )
       return {
-        tree: root.children.map((child, index) =>
-          toTreeNode(child, `0:${FRAGMENT_TAG}/${index}:${child.tag}`),
-        ),
+        tree: includeStatusBar ? [statusBarTreeNode(), ...children] : children,
         error: '',
       }
     }
+    const pageTree = [toTreeNode(root, `0:${root.tag}`)]
     return {
-      tree: [toTreeNode(root, `0:${root.tag}`)],
+      tree: includeStatusBar ? [statusBarTreeNode(), ...pageTree] : pageTree,
       error: '',
     }
   } catch (err) {

@@ -55,6 +55,39 @@ export function createEmptyComponentEvent(): ComponentEventDef {
   }
 }
 
+/** 规范化 prop 默认值；布尔必须是真正的 boolean，避免 "false" 被当成真值 */
+function normalizePropDefault(
+  type: DataFieldType,
+  value: unknown,
+): DataFieldValue {
+  if (type === 'boolean') {
+    if (value === true || value === 1) return true
+    if (value === false || value === 0) return false
+    if (typeof value === 'string') {
+      const s = value.trim().toLowerCase()
+      if (s === 'true' || s === '1') return true
+      if (s === 'false' || s === '0' || s === '') return false
+    }
+    return false
+  }
+  if (type === 'number') {
+    if (typeof value === 'number' && Number.isFinite(value)) return value
+    const n = Number(value)
+    return Number.isFinite(n) ? n : 0
+  }
+  if (type === 'array') {
+    return Array.isArray(value) ? (value as unknown[]) : []
+  }
+  if (type === 'json') {
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+      return value as Record<string, unknown>
+    }
+    return {}
+  }
+  if (value == null || typeof value === 'object') return ''
+  return String(value)
+}
+
 export function createDefaultComponentConfig(name: string): ComponentConfig {
   return {
     name,
@@ -103,7 +136,10 @@ export function normalizeComponentConfig(
             name: propName,
             type: (row.type as DataFieldType) || 'string',
             remark: String(row.remark ?? ''),
-            defaultValue: (row.defaultValue ?? '') as DataFieldValue,
+            defaultValue: normalizePropDefault(
+              (row.type as DataFieldType) || 'string',
+              row.defaultValue,
+            ),
             twoWay: Boolean(row.twoWay),
             required: Boolean(row.required),
           }

@@ -193,6 +193,9 @@ const customAmbientExtra = computed(() => {
     'declare function navigateBack(): void;',
     'declare function setData(prop: string, value: any): void;',
     "declare function showToast(message: string, duration?: 'short' | 'long'): void;",
+    'interface MenuButtonBoundingClientRect { width: number; height: number; top: number; right: number; bottom: number; left: number }',
+    'interface DeviceInfo { statusBarHeight: number; userAgent: string; menuButton: MenuButtonBoundingClientRect | null; platform: \'h5\' | \'miniprogram\' }',
+    'declare function getDeviceInfo(): DeviceInfo;',
   ]
   const base = props.emitEvents?.length
     ? `${lines.join('\n')}\n${buildEmitAmbientDeclarations(props.emitEvents)}`

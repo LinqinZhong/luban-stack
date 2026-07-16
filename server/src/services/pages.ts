@@ -18,6 +18,12 @@ const PAGE_DATA_FILE = 'data.json'
 export interface PageConfig {
   name: string
   title?: string
+  /** 系统状态栏样式（小程序场景生效；字段支持数据池绑定） */
+  statusBar?: {
+    textStyle?: string
+    backgroundColor?: string
+    cover?: boolean | string
+  }
 }
 
 export interface PageSummary {
@@ -120,9 +126,13 @@ async function readPageConfig(dir: string): Promise<PageConfig> {
     if (!parsed.name || typeof parsed.name !== 'string') {
       throw new ProjectError(`${PAGE_CONFIG_FILE} 缺少 name 字段`)
     }
+    const statusBar = normalizePageStatusBar(
+      (parsed as Partial<PageConfig>).statusBar,
+    )
     return {
       name: parsed.name,
       title: typeof parsed.title === 'string' ? parsed.title : parsed.name,
+      ...(statusBar ? { statusBar } : {}),
     }
   } catch (err) {
     if (err instanceof ProjectError) throw err
@@ -140,6 +150,43 @@ const DATA_FIELD_TYPES = new Set([
   'color',
   'ref',
 ])
+
+function looksLikeBinding(raw: string): boolean {
+  return /\{[^{}]+\}/.test(raw)
+}
+
+function normalizePageStatusBar(
+  raw: PageConfig['statusBar'] | null | undefined,
+): PageConfig['statusBar'] | undefined {
+  if (!raw || typeof raw !== 'object') return undefined
+
+  const textRaw = typeof raw.textStyle === 'string' ? raw.textStyle.trim() : ''
+  let textStyle = 'black'
+  if (textRaw) {
+    if (looksLikeBinding(textRaw) || textRaw === 'black' || textRaw === 'white') {
+      textStyle = textRaw
+    } else {
+      textStyle = textRaw.toLowerCase() === 'white' ? 'white' : 'black'
+    }
+  }
+
+  const backgroundColor =
+    typeof raw.backgroundColor === 'string' && raw.backgroundColor.trim()
+      ? raw.backgroundColor.trim()
+      : '#ffffff'
+
+  let cover: boolean | string = false
+  if (typeof raw.cover === 'boolean') {
+    cover = raw.cover
+  } else if (typeof raw.cover === 'string') {
+    const c = raw.cover.trim()
+    if (!c) cover = false
+    else if (looksLikeBinding(c) || c === 'true' || c === 'false') cover = c
+    else cover = c === '1' || c.toLowerCase() === 'true'
+  }
+
+  return { textStyle, backgroundColor, cover }
+}
 
 function defaultValue(type: DataField['type']) {
   switch (type) {
@@ -574,6 +621,7 @@ export async function savePageConfig(options: {
   pageId: string
   name: string
   title?: string
+  statusBar?: PageConfig['statusBar']
 }): Promise<PageDetail> {
   const projectPath = await assertProjectDir(options.projectPath)
   const pageId = assertSafePageId(options.pageId)
@@ -599,6 +647,13 @@ export async function savePageConfig(options: {
         : prev.title === prev.name
           ? name
           : prev.title || name,
+  }
+
+  const statusBarSource =
+    options.statusBar !== undefined ? options.statusBar : prev.statusBar
+  const normalizedStatusBar = normalizePageStatusBar(statusBarSource)
+  if (normalizedStatusBar) {
+    config.statusBar = normalizedStatusBar
   }
 
   try {

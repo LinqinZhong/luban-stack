@@ -11,6 +11,7 @@ import {
   createEmptyComponentProp,
   type ComponentPropDef,
 } from '../../types/component'
+import { normalizePropDefaultValue } from '../../utils/component-props'
 import IconValueSelect from './IconValueSelect.vue'
 import ColorPicker from './ColorPicker.vue'
 
@@ -154,9 +155,8 @@ function handleSave() {
     const parsed = parseComplexDefault()
     if (parsed === null) return
     defaultVal = parsed
-  } else if (draft.type === 'color' || draft.type === 'icon' || draft.type === 'string') {
-    defaultVal =
-      defaultVal == null || typeof defaultVal === 'object' ? '' : String(defaultVal)
+  } else {
+    defaultVal = normalizePropDefaultValue(draft.type, defaultVal)
   }
 
   emit('save', {
@@ -219,7 +219,7 @@ function handleSave() {
         />
         <el-switch
           v-else-if="defaultEditor === 'boolean'"
-          :model-value="Boolean(draft.defaultValue)"
+          :model-value="draft.defaultValue === true || draft.defaultValue === 'true'"
           @update:model-value="draft.defaultValue = $event"
         />
         <IconValueSelect

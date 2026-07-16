@@ -4,6 +4,7 @@ import type { AllowDropType, ElTree, NodeDropType, RenderContentContext } from '
 import { ElMessageBox } from 'element-plus'
 import { Hide, View } from '@element-plus/icons-vue'
 import { buildWidgetTree, type TreeNodeData } from '../../utils/widget-tree'
+import { STATUS_BAR_NODE_ID } from '../../utils/status-bar'
 import {
   canMoveWidget,
   isContainerTag,
@@ -21,6 +22,8 @@ const props = defineProps<{
   editable?: boolean
   /** 编辑态被隐藏的节点 id */
   hiddenIds?: string[]
+  /** 页面预览时在树顶插入状态栏虚拟节点 */
+  includeStatusBar?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -42,7 +45,9 @@ function cloneTree(nodes: TreeNodeData[]): TreeNodeData[] {
 }
 
 function syncTreeFromXml() {
-  const result = buildWidgetTree(props.xml)
+  const result = buildWidgetTree(props.xml, {
+    includeStatusBar: props.includeStatusBar,
+  })
   treeError.value = result.error
   treeData.value = cloneTree(result.tree)
 }
@@ -78,6 +83,7 @@ function handleToggleHidden(event: MouseEvent, id: string) {
 function allowDrag(node: TreeNode) {
   if (!props.editable) return false
   const id = (node.data as TreeNodeData).id
+  if (id === STATUS_BAR_NODE_ID) return false
   return Boolean(id && id.includes('/'))
 }
 
@@ -86,6 +92,7 @@ function allowDrop(draggingNode: TreeNode, dropNode: TreeNode, type: AllowDropTy
 
   const sourceId = (draggingNode.data as TreeNodeData).id
   const target = dropNode.data as TreeNodeData
+  if (target.id === STATUS_BAR_NODE_ID || sourceId === STATUS_BAR_NODE_ID) return false
   const position: MovePosition =
     type === 'prev' ? 'before' : type === 'next' ? 'after' : 'inner'
 
@@ -188,7 +195,7 @@ function treeHasId(nodes: TreeNodeData[], id: string): boolean {
 }
 
 watch(
-  () => props.xml,
+  () => [props.xml, props.includeStatusBar] as const,
   () => {
     syncTreeFromXml()
     if (!props.selectedId) return
@@ -259,7 +266,7 @@ watch(
               @click="handleOpenRepeat((data as TreeNodeData).id)"
             />
             <button
-              v-if="editable"
+              v-if="editable && (data as TreeNodeData).id !== STATUS_BAR_NODE_ID"
               type="button"
               class="eye-btn"
               :title="isHidden((data as TreeNodeData).id) ? '显示（仅编辑态）' : '隐藏（仅编辑态）'"

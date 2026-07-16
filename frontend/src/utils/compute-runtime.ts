@@ -3,6 +3,17 @@ import {
   type DataFieldValue,
   type PageData,
 } from '../types/page-data'
+import {
+  getDeviceInfo as defaultGetDeviceInfo,
+  type DeviceInfo,
+} from './device-info'
+
+export interface ResolveComputedOptions {
+  /** 覆盖默认 getDeviceInfo（编辑器可按画布场景注入） */
+  getDeviceInfo?: () => DeviceInfo
+  /** 组件入参 $props（页面为空对象） */
+  dollarProps?: Record<string, unknown>
+}
 
 function isValidIdent(name: string): boolean {
   return /^[A-Za-z_$][\w$]*$/.test(name)
@@ -47,11 +58,22 @@ function sameJson(a: unknown, b: unknown): boolean {
   }
 }
 
+function buildBuiltinScope(options?: ResolveComputedOptions): Record<string, unknown> {
+  return {
+    getDeviceInfo: (): DeviceInfo =>
+      options?.getDeviceInfo?.() ?? defaultGetDeviceInfo(),
+    $props: options?.dollarProps ?? {},
+  }
+}
+
 /**
  * 执行数据池中 binding === 'computed' 的字段，返回带计算结果的 PageData 副本。
  * 多趟求值，使互相依赖的计算字段有机会拿到最新值。
  */
-export function resolveComputedPageData(data: PageData | undefined | null): PageData {
+export function resolveComputedPageData(
+  data: PageData | undefined | null,
+  options?: ResolveComputedOptions,
+): PageData {
   const source = data?.fields ?? []
   const fields: DataField[] = source.map((item) => ({
     ...item,
@@ -62,7 +84,7 @@ export function resolveComputedPageData(data: PageData | undefined | null): Page
   const computedCount = fields.filter((item) => item.binding === 'computed').length
   if (!computedCount) return { fields }
 
-  const scope = seedScope(fields)
+  const scope = { ...buildBuiltinScope(options), ...seedScope(fields) }
   const maxPass = computedCount + 1
 
   for (let pass = 0; pass < maxPass; pass++) {
@@ -73,6 +95,8 @@ export function resolveComputedPageData(data: PageData | undefined | null): Page
       if (!body) continue
       const name = field.name.trim()
       try {
+        // 每趟用最新字段值，并保证内置方法不被同名字段覆盖
+        Object.assign(scope, seedScope(fields), buildBuiltinScope(options))
         const next = runComputeBody(body, scope) as DataFieldValue
         const prev = name && isValidIdent(name) ? scope[name] : field.value
         field.value = next as DataFieldValue
@@ -94,7 +118,74 @@ export function resolveComputedPageData(data: PageData | undefined | null): Page
 export function resolveFieldComputedValue(
   data: PageData,
   fieldName: string,
+  options?: ResolveComputedOptions,
 ): DataFieldValue | undefined {
-  const resolved = resolveComputedPageData(data)
+  const resolved = resolveComputedPageData(data, options)
   return resolved.fields.find((item) => item.name.trim() === fieldName.trim())?.value
+}
+
+/**
+ * 从计算体中收集 `$props.xxx` 依赖。
+ * - 返回 `null`：依赖整个 `$props`（如直接用 `$props` / 动态访问）
+ * - 返回 Set：仅这些键变化时才需要重算
+ */
+export function collectDollarPropsKeysFromComputeBodies(
+  data: PageData | undefined | null,
+): Set<string> | null {
+  const keys = new Set<string>()
+  let usesWholeProps = false
+  for (const field of data?.fields ?? []) {
+    if (field.binding !== 'computed') continue
+    const body = field.computeBody ?? ''
+    if (!body.includes('$props')) continue
+    for (const match of body.matchAll(/\$props\.([A-Za-z_$][\w$]*)/g)) {
+      keys.add(match[1]!)
+    }
+    // `$props` 后不是 `.ident`（整对象或动态）→ 保守视为依赖全部
+    if (/(^|[^.\w$])\$props(?!\.[A-Za-z_$])/.test(body)) {
+      usesWholeProps = true
+    }
+  }
+  if (usesWholeProps) return null
+  return keys
+}
+
+/** 供 Vue 缓存：仅当计算字段真正依赖的输入变化时字符串才变 */
+export function buildComputeDepsKey(
+  data: PageData | undefined | null,
+  dollarProps: Record<string, unknown> | undefined | null,
+  deviceInfo?: DeviceInfo | null,
+): string {
+  const fields = data?.fields ?? []
+  const propKeys = collectDollarPropsKeysFromComputeBodies(data)
+  let propsSlice: unknown
+  if (!dollarProps) {
+    propsSlice = null
+  } else if (propKeys == null) {
+    propsSlice = dollarProps
+  } else {
+    const slice: Record<string, unknown> = {}
+    for (const key of [...propKeys].sort()) {
+      slice[key] = dollarProps[key]
+    }
+    propsSlice = slice
+  }
+  const deviceSlice = deviceInfo
+    ? {
+        platform: deviceInfo.platform,
+        statusBarHeight: deviceInfo.statusBarHeight,
+        menuButton: deviceInfo.menuButton,
+      }
+    : null
+  const bodies = fields
+    .filter((item) => item.binding === 'computed')
+    .map((item) => [item.name.trim(), item.computeBody ?? ''])
+  const plain = fields
+    .filter((item) => item.binding !== 'computed' && item.type !== 'ref')
+    .map((item) => [item.name.trim(), item.value])
+  try {
+    return JSON.stringify({ props: propsSlice, device: deviceSlice, bodies, plain })
+  } catch {
+    return String(Date.now())
+  }
 }

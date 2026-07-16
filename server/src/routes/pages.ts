@@ -81,6 +81,7 @@ router.put('/:pageId/config', async (req, res) => {
       pageId: req.params.pageId,
       name: req.body?.name,
       title: req.body?.title,
+      statusBar: req.body?.statusBar,
     })
     res.json(page)
   } catch (err) {
