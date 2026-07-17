@@ -1,4 +1,10 @@
 import type { DataField, DataFieldType } from './page-data'
+import type { DataTypeLibrary } from './data-types'
+import { findDataTypeDef } from '../utils/named-type-fields'
+import {
+  buildDataTypeTsContext,
+  dataTypeToTs,
+} from '../utils/data-type-ts'
 
 export type MethodParamType =
   | 'string'
@@ -13,6 +19,8 @@ export type MethodReturnType = MethodParamType | 'void'
 export interface MethodParam {
   name: string
   type: MethodParamType
+  /** 精确 TS 类型（优先于 type 映射，如 GoodsItem[]） */
+  tsType?: string
 }
 
 /** 数据池字段类型 → 方法 ambient / 形参类型 */
@@ -26,14 +34,93 @@ export function dataFieldToMethodParamType(type: DataFieldType): MethodParamType
       return 'array'
     case 'json':
       return 'object'
+    case 'any':
+      return 'any'
     default:
       // string / icon / color / ref
       return 'string'
   }
 }
 
+function namedTypeName(
+  typeRef: string | undefined,
+  library: DataTypeLibrary | null | undefined,
+): string | null {
+  if (!typeRef) return null
+  const def = findDataTypeDef(library, typeRef)
+  const name = def?.name?.trim()
+  if (!name || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) return null
+  return name
+}
+
+function primitiveTsType(type: DataFieldType | undefined | null): string {
+  switch (type) {
+    case 'number':
+      return 'number'
+    case 'boolean':
+      return 'boolean'
+    case 'json':
+      return 'Record<string, any>'
+    case 'array':
+      return 'any[]'
+    case 'any':
+      return 'any'
+    case 'icon':
+    case 'color':
+    case 'ref':
+    case 'string':
+    default:
+      return 'string'
+  }
+}
+
+/** 数据池字段 → 精确 TypeScript 类型（含具名类型） */
+export function dataFieldToTsType(
+  field: Pick<
+    DataField,
+    'type' | 'typeRef' | 'itemType' | 'itemTypeRef' | 'itemItemType' | 'itemItemTypeRef'
+  >,
+  library?: DataTypeLibrary | null,
+): string {
+  if (field.type === 'array') {
+    if (field.itemType === 'array') {
+      const inner =
+        namedTypeName(field.itemItemTypeRef, library) ??
+        primitiveTsType(field.itemItemType)
+      return `${inner}[][]`
+    }
+    const elem =
+      namedTypeName(field.itemTypeRef, library) ?? primitiveTsType(field.itemType)
+    return `${elem}[]`
+  }
+  if (field.type === 'json') {
+    return namedTypeName(field.typeRef, library) ?? 'Record<string, any>'
+  }
+  return primitiveTsType(field.type)
+}
+
+/** 将类型库全部声明为 ambient，供方法体编辑器识别具名类型 */
+export function buildTypeLibraryAmbientDeclarations(
+  library: DataTypeLibrary | null | undefined,
+): string {
+  if (!library?.groups?.length) return ''
+  const ctx = buildDataTypeTsContext(library)
+  const parts: string[] = []
+  for (const group of library.groups) {
+    for (const def of group.types) {
+      if (!def.name?.trim()) continue
+      const src = dataTypeToTs(def, ctx).trim()
+      if (src) parts.push(src)
+    }
+  }
+  return parts.join('\n\n')
+}
+
 /** 数据池字段 → Monaco ambient 变量（合法标识符；ref 见 buildRefAmbientDeclarations） */
-export function dataFieldsToAmbientVars(fields: DataField[] | undefined): MethodParam[] {
+export function dataFieldsToAmbientVars(
+  fields: DataField[] | undefined,
+  library?: DataTypeLibrary | null,
+): MethodParam[] {
   const result: MethodParam[] = []
   const seen = new Set<string>()
   for (const field of fields ?? []) {
@@ -41,7 +128,11 @@ export function dataFieldsToAmbientVars(fields: DataField[] | undefined): Method
     const name = field.name.trim()
     if (!name || seen.has(name) || !/^[A-Za-z_$][\w$]*$/.test(name)) continue
     seen.add(name)
-    result.push({ name, type: dataFieldToMethodParamType(field.type) })
+    result.push({
+      name,
+      type: dataFieldToMethodParamType(field.type),
+      tsType: dataFieldToTsType(field, library),
+    })
   }
   return result
 }

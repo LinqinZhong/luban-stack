@@ -3,16 +3,17 @@ import { computed, ref, watch } from 'vue'
 import TsCodeEditor from './TsCodeEditor.vue'
 import { defaultComputeBody, type DataField } from '../../types/page-data'
 import {
-  dataFieldToMethodParamType,
+  buildTypeLibraryAmbientDeclarations,
   dataFieldsToAmbientVars,
+  dataFieldToMethodParamType,
+  dataFieldToTsType,
   type MethodParam,
   type MethodReturnType,
 } from '../../types/page-method'
 import { buildGetDeviceInfoAmbientDeclaration } from '../../utils/device-info'
-import {
-  buildDollarPropsAmbientDeclaration,
-} from '../../utils/component-props'
+import { buildDollarPropsAmbientDeclaration } from '../../utils/component-props'
 import type { ComponentPropDef } from '../../types/component'
+import type { DataTypeLibrary } from '../../types/data-types'
 
 const props = defineProps<{
   modelValue: boolean
@@ -21,6 +22,8 @@ const props = defineProps<{
   siblingFields?: DataField[]
   /** 编辑组件时传入参数定义，注入 $props 提示 */
   componentProps?: ComponentPropDef[] | null
+  /** 项目数据类型库：具名类型 ambient + 精确返回类型 */
+  typeLibrary?: DataTypeLibrary | null
 }>()
 
 const emit = defineEmits<{
@@ -42,19 +45,26 @@ const fieldName = computed(() => props.field?.name.trim() || '未命名字段')
 
 /** 同级字段 → ambient，方法签名无入参 */
 const ambientVars = computed<MethodParam[]>(() =>
-  dataFieldsToAmbientVars(props.siblingFields),
+  dataFieldsToAmbientVars(props.siblingFields, props.typeLibrary),
 )
 
-/** 内置方法 + $props ambient */
+/** 类型库 + 内置方法 + $props ambient */
 const ambientExtra = computed(() =>
   [
+    buildTypeLibraryAmbientDeclarations(props.typeLibrary),
     buildGetDeviceInfoAmbientDeclaration(),
     buildDollarPropsAmbientDeclaration(props.componentProps),
-  ].join('\n'),
+  ]
+    .filter(Boolean)
+    .join('\n'),
 )
 
 const returnType = computed<MethodReturnType>(() =>
   dataFieldToMethodParamType(props.field?.type ?? 'string'),
+)
+
+const returnTypeTs = computed(() =>
+  props.field ? dataFieldToTsType(props.field, props.typeLibrary) : 'any',
 )
 
 const functionName = computed(() =>
@@ -100,6 +110,7 @@ function handleSave() {
           :ambient-vars="ambientVars"
           :ambient-extra="ambientExtra"
           :return-type="returnType"
+          :return-type-ts="returnTypeTs"
         />
       </el-form-item>
     </el-form>

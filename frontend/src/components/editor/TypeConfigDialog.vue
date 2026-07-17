@@ -5,12 +5,12 @@ import { ElMessage } from 'element-plus'
 import TypeExprEditor from './TypeExprEditor.vue'
 import {
   cloneDataTypeDef,
-  cloneTypeExpr,
+  createEmptyClearedTypeExpr,
   createEmptyEnumMember,
   createEmptyGenericParam,
   createEmptyInterfaceField,
-  createEmptyTypeExpr,
   formatTypeExprPreview,
+  isTypeExprCleared,
   isValidTypeName,
   selectValueToTypeExpr,
   typeExprToSelectValue,
@@ -31,10 +31,7 @@ const emit = defineEmits<{
 }>()
 
 const draft = ref<DataTypeDef | null>(null)
-
-const unionDialogVisible = ref(false)
-const unionFieldIndex = ref(-1)
-const unionDraft = ref<TypeExpr>(createEmptyTypeExpr())
+const showFieldErrors = ref(false)
 
 const genericDialogVisible = ref(false)
 const genericIndex = ref(-1)
@@ -45,19 +42,17 @@ watch(
   (visible) => {
     if (!visible || !props.typeDef) {
       draft.value = null
-      unionDialogVisible.value = false
+      showFieldErrors.value = false
       genericDialogVisible.value = false
       return
     }
     draft.value = cloneDataTypeDef(props.typeDef)
+    showFieldErrors.value = false
     if (draft.value.kind === 'interface' && !draft.value.fields.length) {
       draft.value.fields = [createEmptyInterfaceField()]
     }
     if (draft.value.kind === 'enum' && !draft.value.enumMembers.length) {
       draft.value.enumMembers = [createEmptyEnumMember()]
-    }
-    if (draft.value.kind === 'combination' && !draft.value.combination.intersections.length) {
-      draft.value.combination = createEmptyTypeExpr()
     }
   },
 )
@@ -66,7 +61,6 @@ const title = computed(() => {
   if (!draft.value) return '配置类型'
   if (draft.value.kind === 'interface') return `配置接口 · ${draft.value.name || '未命名'}`
   if (draft.value.kind === 'enum') return `配置枚举 · ${draft.value.name || '未命名'}`
-  if (draft.value.kind === 'combination') return `配置组合 · ${draft.value.name || '未命名'}`
   return '配置类型'
 })
 
@@ -80,8 +74,6 @@ const fieldTypeOptions = computed(() => {
     { label: '字符串', value: 'string' },
     { label: '布尔值', value: 'boolean' },
     { label: 'any', value: 'any' },
-    { label: 'unknown', value: 'unknown' },
-    { label: '联合类型', value: 'combination' },
   ]
   for (const name of genericNames.value) {
     base.push({ label: `泛型 ${name}`, value: `generic:${name}` })
@@ -111,75 +103,157 @@ function close() {
   emit('update:modelValue', false)
 }
 
+function fieldNameError(index: number): string {
+  if (!draft.value || draft.value.kind !== 'interface') return ''
+  const name = draft.value.fields[index]?.name.trim() ?? ''
+  if (!name) return '必填'
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) return '不合法'
+  const dup = draft.value.fields.some(
+    (f, i) => i !== index && f.name.trim() === name,
+  )
+  if (dup) return '重复'
+  return ''
+}
+
 function save() {
   if (!draft.value) return
   if (draft.value.kind === 'interface') {
+    showFieldErrors.value = true
+
+    if (!draft.value.fields.length) {
+      ElMessage.error('请至少添加一个字段')
+      return
+    }
+
+    const genericNames = new Set<string>()
     for (const g of draft.value.generics) {
-      if (g.name && !isValidTypeName(g.name)) {
-        ElMessage.error(`泛型参数名不合法：${g.name}`)
+      const name = g.name.trim()
+      if (!name) {
+        ElMessage.error('泛型参数名不能为空')
         return
       }
+      if (!isValidTypeName(name)) {
+        ElMessage.error(`泛型参数名不合法：${name}`)
+        return
+      }
+      if (genericNames.has(name)) {
+        ElMessage.error(`泛型参数名重复：${name}`)
+        return
+      }
+      genericNames.add(name)
     }
-    for (const f of draft.value.fields) {
-      if (f.name && !/^[A-Za-z_][A-Za-z0-9_]*$/.test(f.name)) {
-        ElMessage.error(`字段名不合法：${f.name}`)
+
+    const fieldNames = new Set<string>()
+    for (let i = 0; i < draft.value.fields.length; i++) {
+      const f = draft.value.fields[i]!
+      const name = f.name.trim()
+      if (!name) {
+        ElMessage.error(`第 ${i + 1} 个字段名不能为空`)
+        return
+      }
+      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
+        ElMessage.error(`字段名不合法：${name}`)
+        return
+      }
+      if (fieldNames.has(name)) {
+        ElMessage.error(`字段名重复：${name}`)
+        return
+      }
+      fieldNames.add(name)
+      f.name = name
+      if (isTypeExprCleared(f.type)) {
+        ElMessage.error(`字段「${name}」的类型不能为空`)
         return
       }
     }
   }
   if (draft.value.kind === 'enum') {
-    for (const m of draft.value.enumMembers) {
-      if (m.name && !isValidTypeName(m.name)) {
-        ElMessage.error(`枚举成员名不合法：${m.name}`)
+    if (!draft.value.enumMembers.length) {
+      ElMessage.error('请至少添加一个枚举成员')
+      return
+    }
+    const memberNames = new Set<string>()
+    for (let i = 0; i < draft.value.enumMembers.length; i++) {
+      const m = draft.value.enumMembers[i]!
+      const name = m.name.trim()
+      if (!name) {
+        ElMessage.error(`第 ${i + 1} 个枚举成员名不能为空`)
         return
       }
+      if (!isValidTypeName(name)) {
+        ElMessage.error(`枚举成员名不合法：${name}`)
+        return
+      }
+      if (memberNames.has(name)) {
+        ElMessage.error(`枚举成员名重复：${name}`)
+        return
+      }
+      memberNames.add(name)
+      m.name = name
     }
   }
+  showFieldErrors.value = false
   emit('save', cloneDataTypeDef(draft.value))
   close()
 }
 
 function fieldSelectValue(index: number): string {
   const field = draft.value?.fields[index]
-  if (!field) return 'string'
+  if (!field) return ''
   return typeExprToSelectValue(field.type)
 }
 
-function handleFieldTypeChange(index: number, value: string) {
+function fieldTypeError(index: number): boolean {
+  if (!showFieldErrors.value || !draft.value) return false
+  const field = draft.value.fields[index]
+  return Boolean(field && isTypeExprCleared(field.type))
+}
+
+function handleFieldTypeChange(index: number, value: string | null | undefined) {
   if (!draft.value) return
-  const prev = draft.value.fields[index]?.type
-  const next =
-    value === 'combination' && prev && typeExprToSelectValue(prev) === 'combination'
-      ? cloneTypeExpr(prev)
-      : selectValueToTypeExpr(value)
+  const next = value
+    ? selectValueToTypeExpr(value)
+    : createEmptyClearedTypeExpr()
   draft.value.fields = draft.value.fields.map((f, i) =>
     i === index ? { ...f, type: next } : f,
   )
-  if (value === 'combination') {
-    openUnionConfig(index)
+}
+
+/** 清除已不存在的泛型引用（字段类型 / 其它泛型的约束与默认） */
+function scrubStaleGenericRefs() {
+  if (!draft.value) return
+  const names = new Set(
+    draft.value.generics.map((g) => g.name.trim()).filter(Boolean),
+  )
+
+  function scrubExpr(expr: TypeExpr | null): TypeExpr | null {
+    if (!expr) return null
+    const atom = expr.intersections[0]?.alternatives[0]
+    if (atom?.kind === 'generic' && (!atom.ref || !names.has(atom.ref))) {
+      return null
+    }
+    return expr
   }
+
+  draft.value.fields = draft.value.fields.map((f) => {
+    const atom = f.type.intersections[0]?.alternatives[0]
+    if (atom?.kind === 'generic' && (!atom.ref || !names.has(atom.ref))) {
+      return { ...f, type: createEmptyClearedTypeExpr() }
+    }
+    return f
+  })
+
+  draft.value.generics = draft.value.generics.map((g) => ({
+    ...g,
+    constraint: scrubExpr(g.constraint),
+    default: scrubExpr(g.default),
+  }))
 }
 
-function openUnionConfig(index: number) {
-  const field = draft.value?.fields[index]
-  if (!field) return
-  unionFieldIndex.value = index
-  unionDraft.value = cloneTypeExpr(
-    typeExprToSelectValue(field.type) === 'combination'
-      ? field.type
-      : createEmptyTypeExpr(),
-  )
-  unionDialogVisible.value = true
-}
-
-function saveUnionConfig() {
-  if (!draft.value || unionFieldIndex.value < 0) return
-  const idx = unionFieldIndex.value
-  draft.value.fields = draft.value.fields.map((f, i) =>
-    i === idx ? { ...f, type: cloneTypeExpr(unionDraft.value) } : f,
-  )
-  unionDialogVisible.value = false
-  unionFieldIndex.value = -1
+function removeGeneric(index: number) {
+  if (!draft.value) return
+  draft.value.generics = draft.value.generics.filter((_, i) => i !== index)
+  scrubStaleGenericRefs()
 }
 
 function openGenericConfig(index: number) {
@@ -197,24 +271,29 @@ function saveGenericConfig() {
     ElMessage.error('泛型参数名不合法')
     return
   }
+  const prevName = draft.value.generics[genericIndex.value]?.name.trim() ?? ''
   draft.value.generics = draft.value.generics.map((g, i) =>
     i === genericIndex.value
       ? { ...genericDraft.value!, name }
       : g,
   )
+  // 重命名时同步字段里的旧泛型引用
+  if (prevName && prevName !== name) {
+    draft.value.fields = draft.value.fields.map((f) => {
+      const atom = f.type.intersections[0]?.alternatives[0]
+      if (atom?.kind === 'generic' && atom.ref === prevName) {
+        return {
+          ...f,
+          type: selectValueToTypeExpr(`generic:${name}`),
+        }
+      }
+      return f
+    })
+  }
+  scrubStaleGenericRefs()
   genericDialogVisible.value = false
   genericIndex.value = -1
   genericDraft.value = null
-}
-
-function setGenericConstraint(enabled: boolean) {
-  if (!genericDraft.value) return
-  genericDraft.value.constraint = enabled ? createEmptyTypeExpr() : null
-}
-
-function setGenericDefault(enabled: boolean) {
-  if (!genericDraft.value) return
-  genericDraft.value.default = enabled ? createEmptyTypeExpr() : null
 }
 </script>
 
@@ -240,11 +319,9 @@ function setGenericDefault(enabled: boolean) {
             添加
           </el-button>
         </div>
-        <el-empty
-          v-if="!draft.generics.length"
-          description="无泛型（例如 List&lt;T&gt; 可添加 T）"
-          :image-size="48"
-        />
+        <p v-if="!draft.generics.length" class="section-hint">
+          无泛型（例如 List&lt;T&gt; 可添加 T）
+        </p>
         <div
           v-for="(g, gi) in draft.generics"
           :key="g.id"
@@ -270,7 +347,7 @@ function setGenericDefault(enabled: boolean) {
             type="danger"
             link
             :icon="Delete"
-            @click="draft.generics = draft.generics.filter((_, i) => i !== gi)"
+            @click="removeGeneric(gi)"
           />
         </div>
       </div>
@@ -293,6 +370,7 @@ function setGenericDefault(enabled: boolean) {
             v-model="field.name"
             placeholder="字段名"
             style="width: 120px"
+            :status="showFieldErrors && fieldNameError(fi) ? 'error' : undefined"
           />
           <div class="optional-box">
             <span class="optional-label">可选</span>
@@ -304,10 +382,12 @@ function setGenericDefault(enabled: boolean) {
             style="flex: 1; min-width: 80px"
           />
           <el-select
-            :model-value="fieldSelectValue(fi)"
-            placeholder="类型"
+            :model-value="fieldSelectValue(fi) || undefined"
+            placeholder="选择类型"
             style="width: 150px"
             filterable
+            clearable
+            :status="fieldTypeError(fi) ? 'error' : undefined"
             @update:model-value="handleFieldTypeChange(fi, $event)"
           >
             <el-option
@@ -317,22 +397,6 @@ function setGenericDefault(enabled: boolean) {
               :value="opt.value"
             />
           </el-select>
-          <el-button
-            v-if="fieldSelectValue(fi) === 'combination'"
-            type="primary"
-            link
-            :icon="Setting"
-            @click="openUnionConfig(fi)"
-          >
-            配置
-          </el-button>
-          <span
-            v-if="fieldSelectValue(fi) === 'combination'"
-            class="union-preview"
-            :title="formatTypeExprPreview(field.type, namedLookup)"
-          >
-            {{ formatTypeExprPreview(field.type, namedLookup) }}
-          </span>
           <el-button
             type="danger"
             link
@@ -381,20 +445,6 @@ function setGenericDefault(enabled: boolean) {
       </div>
     </template>
 
-    <template v-else-if="draft?.kind === 'combination'">
-      <div class="section">
-        <div class="section-title" style="margin-bottom: 10px">组合类型（| 与 &amp;）</div>
-        <TypeExprEditor
-          v-model="draft.combination"
-          :named-options="namedOptions"
-        />
-        <div class="preview">
-          预览：
-          {{ formatTypeExprPreview(draft.combination, namedLookup) }}
-        </div>
-      </div>
-    </template>
-
     <template #footer>
       <el-button @click="close">取消</el-button>
       <el-button type="primary" @click="save">保存</el-button>
@@ -402,68 +452,53 @@ function setGenericDefault(enabled: boolean) {
   </el-dialog>
 
   <el-dialog
-    v-model="unionDialogVisible"
-    title="配置联合类型"
-    width="640px"
-    append-to-body
-    destroy-on-close
-  >
-    <TypeExprEditor
-      v-model="unionDraft"
-      :named-options="namedOptions"
-      :generic-names="genericNames"
-    />
-    <div class="preview">
-      预览：{{ formatTypeExprPreview(unionDraft, namedLookup) }}
-    </div>
-    <template #footer>
-      <el-button @click="unionDialogVisible = false">取消</el-button>
-      <el-button type="primary" @click="saveUnionConfig">确定</el-button>
-    </template>
-  </el-dialog>
-
-  <el-dialog
     v-model="genericDialogVisible"
     :title="`配置泛型 · ${genericDraft?.name || 'T'}`"
-    width="640px"
+    width="680px"
     append-to-body
     destroy-on-close
   >
     <template v-if="genericDraft">
-      <div class="generic-cfg-row">
-        <span class="cfg-label">参数名</span>
-        <el-input v-model="genericDraft.name" placeholder="如 T" style="width: 160px" />
+      <div class="generic-form">
+        <div class="generic-form-item">
+          <div class="cfg-label">参数名</div>
+          <div class="cfg-content">
+            <el-input
+              v-model="genericDraft.name"
+              placeholder="如 T"
+              style="width: 160px"
+            />
+          </div>
+        </div>
+
+        <div class="generic-form-item">
+          <div class="cfg-label">约束 extends</div>
+          <div class="cfg-content">
+            <TypeExprEditor
+              class="cfg-editor"
+              :model-value="genericDraft.constraint"
+              :named-options="namedOptions"
+              :generic-names="genericNames"
+              allow-none
+              @update:model-value="genericDraft.constraint = $event"
+            />
+          </div>
+        </div>
+
+        <div class="generic-form-item">
+          <div class="cfg-label">默认类型</div>
+          <div class="cfg-content">
+            <TypeExprEditor
+              class="cfg-editor"
+              :model-value="genericDraft.default"
+              :named-options="namedOptions"
+              :generic-names="genericNames"
+              allow-none
+              @update:model-value="genericDraft.default = $event"
+            />
+          </div>
+        </div>
       </div>
-      <div class="generic-cfg-row">
-        <span class="cfg-label">约束 extends</span>
-        <el-switch
-          :model-value="genericDraft.constraint != null"
-          @update:model-value="setGenericConstraint"
-        />
-      </div>
-      <TypeExprEditor
-        v-if="genericDraft.constraint"
-        :model-value="genericDraft.constraint"
-        :named-options="namedOptions"
-        :generic-names="genericNames"
-        compact
-        @update:model-value="genericDraft.constraint = $event"
-      />
-      <div class="generic-cfg-row">
-        <span class="cfg-label">默认类型</span>
-        <el-switch
-          :model-value="genericDraft.default != null"
-          @update:model-value="setGenericDefault"
-        />
-      </div>
-      <TypeExprEditor
-        v-if="genericDraft.default"
-        :model-value="genericDraft.default"
-        :named-options="namedOptions"
-        :generic-names="genericNames"
-        compact
-        @update:model-value="genericDraft.default = $event"
-      />
     </template>
     <template #footer>
       <el-button @click="genericDialogVisible = false">取消</el-button>
@@ -488,6 +523,13 @@ function setGenericDefault(enabled: boolean) {
   font-size: 14px;
   font-weight: 600;
   color: #303133;
+}
+
+.section-hint {
+  margin: 0 0 8px;
+  font-size: 12px;
+  color: #94a3b8;
+  line-height: 1.4;
 }
 
 .generic-row,
@@ -532,15 +574,6 @@ function setGenericDefault(enabled: boolean) {
   white-space: nowrap;
 }
 
-.union-preview {
-  max-width: 120px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 12px;
-  color: #94a3b8;
-}
-
 .preview {
   margin-top: 8px;
   font-size: 12px;
@@ -548,17 +581,38 @@ function setGenericDefault(enabled: boolean) {
   word-break: break-all;
 }
 
-.generic-cfg-row {
+.generic-form {
   display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 12px;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.generic-form-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
 }
 
 .cfg-label {
-  width: 100px;
+  width: 96px;
   flex-shrink: 0;
+  padding-top: 6px;
   font-size: 13px;
+  line-height: 20px;
   color: #606266;
+  text-align: right;
+}
+
+.cfg-content {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.cfg-editor {
+  width: 100%;
 }
 </style>

@@ -1,21 +1,38 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
-import { DocumentCopy, Plus, Rank } from '@element-plus/icons-vue'
+import { Document, DocumentCopy, Monitor, Plus, Rank } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import ArrayFieldsDialog from './ArrayFieldsDialog.vue'
 import IconValueSelect from './IconValueSelect.vue'
 import ColorPicker from './ColorPicker.vue'
 import ObjectFieldsDialog from './ObjectFieldsDialog.vue'
+import DataFieldTypeTreeSelect from './DataFieldTypeTreeSelect.vue'
+import JsonCodeEditor from './JsonCodeEditor.vue'
 import {
-  ARRAY_ITEM_TYPE_OPTIONS,
+  buildArrayValue,
   buildObjectValue,
   defaultValue,
   resolveObjectFields,
+  typeLabel,
+  valueToArrayFields,
   type ArraySubField,
   type DataFieldType,
   type DataFieldValue,
   type ObjectSubField,
 } from '../../types/page-data'
+import type { DataTypeLibrary } from '../../types/data-types'
+import {
+  findDataTypeDef,
+  isArrayItemTypeLocked,
+  objectFieldsFromTypeRef,
+  resolveNamedTypeAsField,
+} from '../../utils/named-type-fields'
+import {
+  buildArrayJsonSchema,
+  validateJsonAgainstSchema,
+} from '../../utils/json-type-schema'
+
+type EditorMode = 'visual' | 'code'
 
 const CLIPBOARD_MARKER = '__voiderArrayItem'
 
@@ -36,6 +53,9 @@ interface DraftItem {
   key: string
   type: DataFieldType
   value: DataFieldValue
+  typeRef?: string
+  itemType?: DataFieldType
+  itemTypeRef?: string
   arrayFields: ArraySubField[]
   objectFields: ObjectSubField[]
 }
@@ -44,6 +64,13 @@ const props = defineProps<{
   modelValue: boolean
   fields: ArraySubField[]
   iconOptions?: Array<{ id: string; label: string }>
+  typeLibrary?: DataTypeLibrary | null
+  /** 新建项默认类型（来自父级数组的元素类型） */
+  defaultItemType?: DataFieldType
+  defaultItemTypeRef?: string
+  /** 当 defaultItemType 为 array 时，内层数组元素类型 */
+  defaultNestedItemType?: DataFieldType
+  defaultNestedItemTypeRef?: string
 }>()
 
 const emit = defineEmits<{
@@ -58,6 +85,30 @@ const objectDialogVisible = ref(false)
 const objectEditingKey = ref('')
 const nestedDialogVisible = ref(false)
 const nestedEditingKey = ref('')
+const mode = ref<EditorMode>('visual')
+const codeText = ref('[]')
+
+const codeSchema = computed(() =>
+  buildArrayJsonSchema({
+    itemType: props.defaultItemType,
+    itemTypeRef: props.defaultItemTypeRef,
+    itemItemType: props.defaultNestedItemType,
+    itemItemTypeRef: props.defaultNestedItemTypeRef,
+    library: props.typeLibrary,
+  }),
+)
+
+/** 非 any[]：项类型由父级数组锁定 */
+const itemTypeLocked = computed(() => isArrayItemTypeLocked(props.defaultItemType))
+
+const lockedTypeLabel = computed(() => {
+  if (!itemTypeLocked.value) return ''
+  if (props.defaultItemTypeRef) {
+    const def = findDataTypeDef(props.typeLibrary, props.defaultItemTypeRef)
+    if (def?.name?.trim()) return def.name.trim()
+  }
+  return typeLabel(props.defaultItemType || 'string')
+})
 
 watch(
   () => props.modelValue,
@@ -66,6 +117,7 @@ watch(
       window.removeEventListener('keydown', handleGlobalKeydown, true)
       return
     }
+    mode.value = 'visual'
     draft.value = props.fields.map((item) => toDraftItem(item))
     if (!draft.value.length) {
       draft.value.push(createDraftItem())
@@ -74,6 +126,7 @@ watch(
     selectedIndex.value = draft.value.length ? 0 : -1
     objectEditingKey.value = ''
     nestedEditingKey.value = ''
+    syncCodeFromVisual()
     window.addEventListener('keydown', handleGlobalKeydown, true)
   },
   { immediate: true },
@@ -87,35 +140,175 @@ function createKey() {
   return `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
 }
 
+function resolveDefaultItemShape(): {
+  type: DataFieldType
+  typeRef?: string
+  itemType?: DataFieldType
+  itemTypeRef?: string
+  objectFields: ObjectSubField[]
+  arrayFields: ArraySubField[]
+  value: DataFieldValue
+} {
+  const rawType = props.defaultItemType || 'string'
+  const typeRef = props.defaultItemTypeRef
+
+  if (typeRef) {
+    const resolved = resolveNamedTypeAsField(typeRef, props.typeLibrary)
+    if (resolved.type === 'json' && resolved.typeRef) {
+      return {
+        type: 'json',
+        typeRef: resolved.typeRef,
+        objectFields: objectFieldsFromTypeRef(resolved.typeRef, props.typeLibrary),
+        arrayFields: [],
+        value: {},
+      }
+    }
+    return {
+      type: resolved.type,
+      objectFields: [],
+      arrayFields: [],
+      value: defaultValue(resolved.type),
+    }
+  }
+
+  if (rawType === 'json') {
+    return {
+      type: 'json',
+      objectFields: [],
+      arrayFields: [],
+      value: {},
+    }
+  }
+
+  if (rawType === 'array') {
+    return {
+      type: 'array',
+      itemType: props.defaultNestedItemType || 'string',
+      itemTypeRef: props.defaultNestedItemTypeRef,
+      objectFields: [],
+      arrayFields: [],
+      value: [],
+    }
+  }
+
+  if (rawType === 'any') {
+    return {
+      type: 'string',
+      objectFields: [],
+      arrayFields: [],
+      value: '',
+    }
+  }
+
+  return {
+    type: rawType,
+    objectFields: [],
+    arrayFields: [],
+    value: defaultValue(rawType),
+  }
+}
+
+function hydrateNamedObjectFields(item: {
+  type: DataFieldType
+  typeRef?: string
+  objectFields?: ObjectSubField[]
+  value?: DataFieldValue
+}): ObjectSubField[] {
+  if (item.type !== 'json' || !item.typeRef) {
+    return resolveObjectFields(item.objectFields, item.value)
+  }
+  return objectFieldsFromTypeRef(
+    item.typeRef,
+    props.typeLibrary,
+    resolveObjectFields(item.objectFields, item.value),
+  )
+}
+
 function toDraftItem(item: ArraySubField): DraftItem {
-  if (item.type === 'array') {
+  const source = itemTypeLocked.value
+    ? applyLockedTypeToItem(item)
+    : item
+
+  if (source.type === 'array') {
     return {
       key: createKey(),
       type: 'array',
       value: [],
-      arrayFields: item.arrayFields ?? [],
+      typeRef: source.typeRef,
+      itemType: source.itemType,
+      itemTypeRef: source.itemTypeRef,
+      arrayFields: source.arrayFields ?? [],
       objectFields: [],
     }
   }
-  if (item.type === 'json') {
+  if (source.type === 'json') {
     return {
       key: createKey(),
       type: 'json',
       value: {},
+      typeRef: source.typeRef,
       arrayFields: [],
-      objectFields: resolveObjectFields(item.objectFields, item.value),
+      objectFields: hydrateNamedObjectFields(source),
     }
   }
   return {
     key: createKey(),
-    type: item.type,
-    value: item.value ?? defaultValue(item.type),
+    type: source.type,
+    typeRef: source.typeRef,
+    value: source.value ?? defaultValue(source.type),
     arrayFields: [],
     objectFields: [],
   }
 }
 
+/** 锁定元素类型时，把项强制对齐到父级数组声明 */
+function applyLockedTypeToItem(item: ArraySubField): ArraySubField {
+  const shape = resolveDefaultItemShape()
+  if (shape.type === 'json' && shape.typeRef) {
+    return {
+      type: 'json',
+      typeRef: shape.typeRef,
+      objectFields: objectFieldsFromTypeRef(
+        shape.typeRef,
+        props.typeLibrary,
+        item.type === 'json' ? item.objectFields : undefined,
+      ),
+    }
+  }
+  if (shape.type === 'array') {
+    return {
+      type: 'array',
+      itemType: item.type === 'array' ? item.itemType : shape.itemType,
+      itemTypeRef: item.type === 'array' ? item.itemTypeRef : shape.itemTypeRef,
+      arrayFields: item.type === 'array' ? item.arrayFields ?? [] : [],
+    }
+  }
+  if (item.type === shape.type) {
+    return {
+      type: shape.type,
+      value: item.value ?? defaultValue(shape.type),
+    }
+  }
+  return {
+    type: shape.type,
+    value: defaultValue(shape.type),
+  }
+}
+
 function createDraftItem(): DraftItem {
+  if (itemTypeLocked.value || props.defaultItemTypeRef || props.defaultItemType) {
+    const shape = resolveDefaultItemShape()
+    return {
+      key: createKey(),
+      type: shape.type,
+      typeRef: shape.typeRef,
+      value: shape.value,
+      itemType: shape.itemType,
+      itemTypeRef: shape.itemTypeRef,
+      arrayFields: shape.arrayFields,
+      objectFields: shape.objectFields,
+    }
+  }
   return {
     key: createKey(),
     type: 'string',
@@ -127,12 +320,26 @@ function createDraftItem(): DraftItem {
 
 function toArraySubField(item: DraftItem): ArraySubField {
   if (item.type === 'array') {
-    return { type: 'array', arrayFields: deepClone(item.arrayFields) }
+    return {
+      type: 'array',
+      typeRef: item.typeRef,
+      itemType: item.itemType,
+      itemTypeRef: item.itemTypeRef,
+      arrayFields: deepClone(item.arrayFields),
+    }
   }
   if (item.type === 'json') {
-    return { type: 'json', objectFields: deepClone(item.objectFields) }
+    return {
+      type: 'json',
+      typeRef: item.typeRef,
+      objectFields: deepClone(item.objectFields),
+    }
   }
-  return { type: item.type, value: deepClone(item.value) }
+  return {
+    type: item.type,
+    typeRef: item.typeRef,
+    value: deepClone(item.value),
+  }
 }
 
 function cloneArraySubField(item: ArraySubField): ArraySubField {
@@ -162,11 +369,27 @@ function removeField(index: number) {
   }
 }
 
-function handleTypeChange(item: DraftItem, type: DataFieldType) {
-  item.type = type
-  item.value = defaultValue(type)
-  item.arrayFields = type === 'array' ? [] : []
-  item.objectFields = type === 'json' ? [] : []
+function handleTypeChange(
+  item: DraftItem,
+  payload: {
+    type: DataFieldType
+    typeRef?: string
+    itemType?: DataFieldType
+    itemTypeRef?: string
+  },
+) {
+  if (itemTypeLocked.value) return
+  item.type = payload.type
+  item.typeRef = payload.typeRef
+  item.value = defaultValue(payload.type)
+  item.arrayFields = []
+  item.objectFields = []
+  item.itemType = payload.type === 'array' ? payload.itemType || 'string' : undefined
+  item.itemTypeRef = payload.type === 'array' ? payload.itemTypeRef : undefined
+
+  if (payload.type === 'json' && payload.typeRef) {
+    item.objectFields = objectFieldsFromTypeRef(payload.typeRef, props.typeLibrary)
+  }
 }
 
 function onDragStart(index: number) {
@@ -186,6 +409,14 @@ function onDrop(index: number) {
 }
 
 function openObjectEditor(key: string) {
+  const item = findDraftItem(key)
+  if (item?.type === 'json' && item.typeRef) {
+    item.objectFields = objectFieldsFromTypeRef(
+      item.typeRef,
+      props.typeLibrary,
+      item.objectFields,
+    )
+  }
   objectEditingKey.value = key
   objectDialogVisible.value = true
 }
@@ -213,6 +444,13 @@ const editingObjectFields = computed(() => {
   return item.objectFields ?? []
 })
 
+const editingObjectTypeRef = computed(() => {
+  const item = findDraftItem(objectEditingKey.value)
+  return item?.typeRef || props.defaultItemTypeRef || ''
+})
+
+const editingObjectSchemaLocked = computed(() => Boolean(editingObjectTypeRef.value))
+
 const editingNestedFields = computed(() => {
   const item = findDraftItem(nestedEditingKey.value)
   if (!item || item.type !== 'array') return []
@@ -224,25 +462,13 @@ const canPaste = computed(() => {
   return Boolean(sharedClipboard)
 })
 
-function formatPreviewScalar(value: unknown): string {
-  if (value == null) return 'null'
-  if (typeof value === 'string') {
-    const text = value.length > 24 ? `${value.slice(0, 24)}…` : value
-    return text || '""'
-  }
-  if (typeof value === 'number' || typeof value === 'boolean') return String(value)
-  if (Array.isArray(value)) return `[${value.length}]`
-  if (typeof value === 'object') return `{${Object.keys(value).length}}`
-  return String(value)
-}
-
 function objectContentPreview(item: DraftItem): string {
   const obj = buildObjectValue(item.objectFields ?? [])
-  const entries = Object.entries(obj)
-  if (!entries.length) return '空对象'
-  const parts = entries.slice(0, 5).map(([key, value]) => `${key}: ${formatPreviewScalar(value)}`)
-  if (entries.length > 5) parts.push(`…+${entries.length - 5}`)
-  return parts.join(' · ')
+  try {
+    return JSON.stringify(obj)
+  } catch {
+    return '{}'
+  }
 }
 
 async function copyField(index: number) {
@@ -315,6 +541,7 @@ function isTypingTarget(target: EventTarget | null): boolean {
 
 function handleGlobalKeydown(event: KeyboardEvent) {
   if (!props.modelValue) return
+  if (mode.value === 'code') return
   if (objectDialogVisible.value || nestedDialogVisible.value) return
   const mod = event.ctrlKey || event.metaKey
   if (!mod) return
@@ -336,7 +563,64 @@ function handleGlobalKeydown(event: KeyboardEvent) {
   void pasteField()
 }
 
+function syncCodeFromVisual() {
+  const arr = buildArrayValue(draft.value.map((item) => toArraySubField(item)))
+  try {
+    codeText.value = JSON.stringify(arr, null, 2)
+  } catch {
+    codeText.value = '[]'
+  }
+}
+
+function parseCodeJson(): unknown[] | null {
+  const raw = codeText.value.trim()
+  if (!raw) {
+    ElMessage.error('JSON 不能为空')
+    return null
+  }
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : '语法错误'
+    ElMessage.error(`JSON 语法错误：${msg}`)
+    return null
+  }
+  if (!Array.isArray(parsed)) {
+    ElMessage.error('代码模式需要 JSON 数组（例如 [{ "id": "" }]）')
+    return null
+  }
+  const typeErrors = validateJsonAgainstSchema(parsed, codeSchema.value)
+  if (typeErrors.length) {
+    ElMessage.error(typeErrors.slice(0, 3).join('；'))
+    return null
+  }
+  return parsed
+}
+
+function applyCodeToVisual(): boolean {
+  const parsed = parseCodeJson()
+  if (!parsed) return false
+  draft.value = valueToArrayFields(parsed).map((item) => toDraftItem(item))
+  dragIndex.value = -1
+  selectedIndex.value = draft.value.length ? 0 : -1
+  return true
+}
+
+function switchMode(next: EditorMode) {
+  if (next === mode.value) return
+  if (mode.value === 'code' && next === 'visual') {
+    if (!applyCodeToVisual()) return
+  } else if (mode.value === 'visual' && next === 'code') {
+    syncCodeFromVisual()
+  }
+  mode.value = next
+}
+
 function handleSave() {
+  if (mode.value === 'code') {
+    if (!applyCodeToVisual()) return
+  }
   emit(
     'save',
     draft.value.map((item) => toArraySubField(item)),
@@ -353,98 +637,140 @@ function handleSave() {
     destroy-on-close
     @update:model-value="emit('update:modelValue', $event)"
   >
-    <p class="hint">
-      按顺序定义数组每一项的类型与数据值，可拖动排序；选中项后可用 Ctrl+C / Ctrl+V 复制粘贴
-    </p>
-    <div class="field-list">
-      <div
-        v-for="(item, index) in draft"
-        :key="item.key"
-        class="field-row"
-        :class="{ dragging: dragIndex === index, selected: selectedIndex === index }"
-        @click="selectedIndex = index"
-        @dragover.prevent
-        @drop="onDrop(index)"
-      >
-        <el-icon
-          class="drag-handle"
-          :size="16"
-          draggable="true"
-          @dragstart="onDragStart(index)"
-          @dragend="dragIndex = -1"
-        >
-          <Rank />
-        </el-icon>
-        <el-select
-          :model-value="item.type"
-          placeholder="类型"
-          @update:model-value="handleTypeChange(item, $event)"
-        >
-          <el-option
-            v-for="opt in ARRAY_ITEM_TYPE_OPTIONS"
-            :key="opt.value"
-            :label="opt.label"
-            :value="opt.value"
-          />
-        </el-select>
-        <div class="value-cell">
-          <el-input
-            v-if="item.type === 'string'"
-            :model-value="String(item.value ?? '')"
-            placeholder="数据值"
-            @update:model-value="item.value = $event"
-          />
-          <el-input-number
-            v-else-if="item.type === 'number'"
-            :model-value="Number(item.value ?? 0)"
-            controls-position="right"
-            @update:model-value="item.value = Number($event ?? 0)"
-          />
-          <el-switch
-            v-else-if="item.type === 'boolean'"
-            :model-value="Boolean(item.value)"
-            @update:model-value="item.value = $event"
-          />
-          <IconValueSelect
-            v-else-if="item.type === 'icon'"
-            :model-value="String(item.value ?? '')"
-            :options="iconOptions"
-            @update:model-value="item.value = $event"
-          />
-          <ColorPicker
-            v-else-if="item.type === 'color'"
-            :model-value="String(item.value ?? '')"
-            placeholder="#409eff / rgba(...)"
-            @update:model-value="item.value = $event"
-          />
-          <div v-else-if="item.type === 'json'" class="complex-value object-value">
-            <div class="object-preview" :title="objectContentPreview(item)">
-              <span class="object-preview-text">{{ objectContentPreview(item) }}</span>
-              <span class="value-meta">{{ item.objectFields.length }} 个字段</span>
-            </div>
-            <el-button type="primary" link @click.stop="openObjectEditor(item.key)">
-              编辑
-            </el-button>
-          </div>
-          <div v-else class="complex-value">
-            <span class="value-preview">{{ item.arrayFields.length }} 项</span>
-            <el-button type="primary" link @click.stop="openNestedArrayEditor(item.key)">
-              编辑
-            </el-button>
-          </div>
-        </div>
-        <div class="row-actions">
-          <el-button type="primary" link @click.stop="copyField(index)">复制</el-button>
-          <el-button type="danger" link @click.stop="removeField(index)">删除</el-button>
-        </div>
+    <div class="dialog-toolbar">
+      <p class="hint">
+        <template v-if="itemTypeLocked">
+          元素类型已固定为「{{ lockedTypeLabel }}」，可编辑各项数据值并拖动排序；选中项后可用 Ctrl+C /
+          Ctrl+V 复制粘贴
+        </template>
+        <template v-else>
+          按顺序定义数组每一项的类型与数据值，可拖动排序；选中项后可用 Ctrl+C / Ctrl+V 复制粘贴
+        </template>
+      </p>
+      <div class="mode-tabs" role="tablist">
+        <el-tooltip content="可视化模式" placement="top">
+          <button
+            type="button"
+            class="mode-tab"
+            :class="{ active: mode === 'visual' }"
+            role="tab"
+            :aria-selected="mode === 'visual'"
+            @click="switchMode('visual')"
+          >
+            <el-icon :size="16"><Monitor /></el-icon>
+          </button>
+        </el-tooltip>
+        <el-tooltip content="代码模式" placement="top">
+          <button
+            type="button"
+            class="mode-tab"
+            :class="{ active: mode === 'code' }"
+            role="tab"
+            :aria-selected="mode === 'code'"
+            @click="switchMode('code')"
+          >
+            <el-icon :size="16"><Document /></el-icon>
+          </button>
+        </el-tooltip>
       </div>
     </div>
-    <div class="list-actions">
-      <el-button type="primary" link :icon="Plus" @click="addField">添加项</el-button>
-      <el-button type="primary" link :icon="DocumentCopy" @click="pasteField()">
-        粘贴项
-      </el-button>
-      <span v-if="!canPaste" class="paste-hint">先复制一项后再粘贴</span>
+
+    <template v-if="mode === 'visual'">
+      <div class="field-list">
+        <div
+          v-for="(item, index) in draft"
+          :key="item.key"
+          class="field-row"
+          :class="{
+            dragging: dragIndex === index,
+            selected: selectedIndex === index,
+            'no-type': itemTypeLocked,
+          }"
+          @click="selectedIndex = index"
+          @dragover.prevent
+          @drop="onDrop(index)"
+        >
+          <el-icon
+            class="drag-handle"
+            :size="16"
+            draggable="true"
+            @dragstart="onDragStart(index)"
+            @dragend="dragIndex = -1"
+          >
+            <Rank />
+          </el-icon>
+          <DataFieldTypeTreeSelect
+            v-if="!itemTypeLocked"
+            :type="item.type"
+            :type-ref="item.typeRef"
+            :item-type="item.itemType"
+            :item-type-ref="item.itemTypeRef"
+            :library="typeLibrary"
+            composable
+            @change="handleTypeChange(item, $event)"
+          />
+          <div class="value-cell">
+            <el-input
+              v-if="item.type === 'string' || item.type === 'any'"
+              :model-value="String(item.value ?? '')"
+              placeholder="数据值"
+              @update:model-value="item.value = $event"
+            />
+            <el-input-number
+              v-else-if="item.type === 'number'"
+              :model-value="Number(item.value ?? 0)"
+              controls-position="right"
+              @update:model-value="item.value = Number($event ?? 0)"
+            />
+            <el-switch
+              v-else-if="item.type === 'boolean'"
+              :model-value="Boolean(item.value)"
+              @update:model-value="item.value = $event"
+            />
+            <IconValueSelect
+              v-else-if="item.type === 'icon'"
+              :model-value="String(item.value ?? '')"
+              :options="iconOptions"
+              @update:model-value="item.value = $event"
+            />
+            <ColorPicker
+              v-else-if="item.type === 'color'"
+              :model-value="String(item.value ?? '')"
+              placeholder="#409eff / rgba(...)"
+              @update:model-value="item.value = $event"
+            />
+            <div v-else-if="item.type === 'json'" class="complex-value object-value">
+              <div class="object-preview" :title="objectContentPreview(item)">
+                <code class="object-preview-json">{{ objectContentPreview(item) }}</code>
+              </div>
+              <el-button type="primary" link @click.stop="openObjectEditor(item.key)">
+                编辑
+              </el-button>
+            </div>
+            <div v-else class="complex-value">
+              <span class="value-preview">{{ item.arrayFields.length }} 项</span>
+              <el-button type="primary" link @click.stop="openNestedArrayEditor(item.key)">
+                编辑
+              </el-button>
+            </div>
+          </div>
+          <div class="row-actions">
+            <el-button type="primary" link @click.stop="copyField(index)">复制</el-button>
+            <el-button type="danger" link @click.stop="removeField(index)">删除</el-button>
+          </div>
+        </div>
+      </div>
+      <div class="list-actions">
+        <el-button type="primary" link :icon="Plus" @click="addField">添加项</el-button>
+        <el-button type="primary" link :icon="DocumentCopy" @click="pasteField()">
+          粘贴项
+        </el-button>
+        <span v-if="!canPaste" class="paste-hint">先复制一项后再粘贴</span>
+      </div>
+    </template>
+
+    <div v-else class="code-panel">
+      <JsonCodeEditor v-model="codeText" :schema="codeSchema" :min-height="320" />
     </div>
     <template #footer>
       <el-button @click="close">取消</el-button>
@@ -455,22 +781,72 @@ function handleSave() {
       v-model="objectDialogVisible"
       :fields="editingObjectFields"
       :icon-options="iconOptions"
+      :type-library="typeLibrary"
+      :type-ref="editingObjectTypeRef"
+      :schema-locked="editingObjectSchemaLocked"
       @save="saveObjectFields"
     />
     <ArrayFieldsDialog
       v-model="nestedDialogVisible"
       :fields="editingNestedFields"
       :icon-options="iconOptions"
+      :type-library="typeLibrary"
+      :default-item-type="findDraftItem(nestedEditingKey)?.itemType"
+      :default-item-type-ref="findDraftItem(nestedEditingKey)?.itemTypeRef"
       @save="saveNestedArrayFields"
     />
   </el-dialog>
 </template>
 
 <style scoped>
+.dialog-toolbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
 .hint {
-  margin: 0 0 12px;
+  margin: 0;
+  flex: 1;
   font-size: 13px;
   color: #64748b;
+  line-height: 1.5;
+}
+
+.mode-tabs {
+  display: inline-flex;
+  flex-shrink: 0;
+  padding: 2px;
+  border: 1px solid #e4e7ed;
+  border-radius: 8px;
+  background: #f5f7fa;
+}
+
+.mode-tab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 28px;
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: #909399;
+  cursor: pointer;
+}
+
+.mode-tab:hover {
+  color: #409eff;
+}
+
+.mode-tab.active {
+  background: #fff;
+  color: #409eff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
 }
 
 .field-list {
@@ -482,7 +858,7 @@ function handleSave() {
 
 .field-row {
   display: grid;
-  grid-template-columns: 24px 130px 1fr auto;
+  grid-template-columns: 24px minmax(180px, 240px) 1fr auto;
   gap: 8px;
   align-items: center;
   padding: 6px 8px;
@@ -490,6 +866,10 @@ function handleSave() {
   border-radius: 6px;
   background: #fafafa;
   cursor: default;
+}
+
+.field-row.no-type {
+  grid-template-columns: 24px 1fr auto;
 }
 
 .field-row.selected {
@@ -533,10 +913,12 @@ function handleSave() {
   flex: 1;
 }
 
-.object-preview-text {
-  font-size: 13px;
+.object-preview-json {
+  display: block;
+  font-size: 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   color: #334155;
-  line-height: 1.35;
+  line-height: 1.4;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -564,6 +946,10 @@ function handleSave() {
 .paste-hint {
   font-size: 12px;
   color: #94a3b8;
+}
+
+.code-panel {
+  min-height: 320px;
 }
 
 :deep(.el-input-number) {

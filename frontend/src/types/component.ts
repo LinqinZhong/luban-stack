@@ -10,6 +10,14 @@ export interface ComponentPropDef {
   twoWay: boolean
   /** 父页面配置组件实例时是否必填 */
   required?: boolean
+  /** 引用 types/ 库具名类型 */
+  typeRef?: string
+  /** type === 'array' 时的元素类型 */
+  itemType?: DataFieldType
+  itemTypeRef?: string
+  /** itemType === 'array' 时，内层数组的元素类型 */
+  itemItemType?: DataFieldType
+  itemItemTypeRef?: string
 }
 
 export interface ComponentEventDef {

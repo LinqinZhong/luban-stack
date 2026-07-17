@@ -7,15 +7,38 @@ import TypeTsEditDialog from './TypeTsEditDialog.vue'
 import {
   createEmptyDataType,
   createEmptyDataTypeGroup,
+  DATA_TYPE_CATEGORY_OPTIONS,
   DATA_TYPE_KIND_OPTIONS,
   isValidGroupName,
   isValidTypeName,
   kindNeedsConfig,
+  type DataTypeCategory,
   type DataTypeDef,
   type DataTypeGroup,
   type DataTypeKind,
   type DataTypeLibrary,
 } from '../../types/data-types'
+
+const KIND_CATEGORY_CASCADER_OPTIONS = DATA_TYPE_KIND_OPTIONS.map((opt) => {
+  if (opt.value !== 'interface') {
+    return { value: opt.value, label: opt.label }
+  }
+  return {
+    value: opt.value,
+    label: opt.label,
+    children: DATA_TYPE_CATEGORY_OPTIONS.map((c) => ({
+      value: c.value,
+      label: c.label,
+    })),
+  }
+})
+
+function kindCategoryPath(row: DataTypeDef): string[] {
+  if (row.kind === 'interface') {
+    return ['interface', row.category ?? 'other']
+  }
+  return [row.kind]
+}
 
 const props = defineProps<{
   library: DataTypeLibrary
@@ -179,7 +202,7 @@ async function promptAddType() {
   if (!activeGroup.value) return
   let name = ''
   try {
-    const result = await ElMessageBox.prompt('类型名创建后不可修改', '添加类型', {
+    const result = await ElMessageBox.prompt('请输入类型名', '添加类型', {
       confirmButtonText: '添加',
       cancelButtonText: '取消',
       inputPlaceholder: '如 GoodsItem',
@@ -223,8 +246,18 @@ async function removeType(index: number) {
   })
 }
 
-function handleKindChange(index: number, kind: DataTypeKind) {
-  updateType(index, { kind })
+function handleKindChange(index: number, path: string[] | null | undefined) {
+  if (!path?.length) return
+  const kind = path[0] as DataTypeKind
+  const category: DataTypeCategory =
+    kind === 'interface'
+      ? ((path[1] as DataTypeCategory | undefined) ?? 'other')
+      : 'other'
+  updateType(index, {
+    kind,
+    category,
+    ...(category !== 'entity' ? { tableName: '' } : {}),
+  })
   if (kindNeedsConfig(kind)) {
     openConfig(index)
   }
@@ -242,12 +275,8 @@ function openConfig(index: number) {
 }
 
 function saveConfig(def: DataTypeDef) {
-  if (editingTypeIndex.value < 0 || !activeGroup.value) return
-  const prev = activeGroup.value.types[editingTypeIndex.value]
-  updateType(editingTypeIndex.value, {
-    ...def,
-    name: prev?.name ?? def.name,
-  })
+  if (editingTypeIndex.value < 0) return
+  updateType(editingTypeIndex.value, def)
   editingTypeIndex.value = -1
 }
 
@@ -267,14 +296,31 @@ function openTsEdit(index: number) {
 }
 
 function saveTsEdit(def: DataTypeDef) {
-  if (tsEditingTypeIndex.value < 0 || !activeGroup.value) return
-  const prev = activeGroup.value.types[tsEditingTypeIndex.value]
-  // 类型名禁止修改
-  updateType(tsEditingTypeIndex.value, {
-    ...def,
-    name: prev?.name ?? def.name,
-  })
+  if (tsEditingTypeIndex.value < 0) return
+  updateType(tsEditingTypeIndex.value, def)
   tsEditingTypeIndex.value = -1
+}
+
+function handleNameChange(index: number, name: string) {
+  const next = name.trim()
+  if (next && !isValidTypeName(next)) {
+    ElMessage.warning('类型名需以字母或下划线开头，仅含字母数字下划线')
+    return
+  }
+  if (
+    next &&
+    groups.value.some((g) =>
+      g.types.some((t, i) => {
+        if (t.name !== next) return false
+        // 排除自身
+        return !(g.id === activeGroup.value?.id && i === index)
+      }),
+    )
+  ) {
+    ElMessage.warning(`类型名「${next}」已存在`)
+    return
+  }
+  updateType(index, { name: next })
 }
 
 const namedOptionsForConfig = computed(() => {
@@ -349,25 +395,47 @@ const namedOptionsForConfig = computed(() => {
             stripe
             empty-text="该分组暂无类型，点击添加"
           >
-            <el-table-column label="类型名" min-width="140">
-              <template #default="{ row }">
-                <span class="type-name-locked" :title="'类型名不可修改'">{{ row.name }}</span>
+            <el-table-column label="类型名" min-width="200">
+              <template #default="{ row, $index }">
+                <div class="type-name-cell">
+                  <el-input
+                    :model-value="row.name"
+                    placeholder="如 GoodsItem"
+                    @update:model-value="handleNameChange($index, $event)"
+                  />
+                  <el-button
+                    type="primary"
+                    link
+                    :icon="EditPen"
+                    @click="openTsEdit($index)"
+                  >
+                    编辑
+                  </el-button>
+                </div>
               </template>
             </el-table-column>
 
-            <el-table-column label="数据类型" width="140">
+            <el-table-column label="数据类型" min-width="200">
               <template #default="{ row, $index }">
-                <el-select
-                  :model-value="row.kind"
+                <el-cascader
+                  :model-value="kindCategoryPath(row)"
+                  :options="KIND_CATEGORY_CASCADER_OPTIONS"
+                  :props="{ expandTrigger: 'hover' }"
+                  style="width: 100%"
                   @update:model-value="handleKindChange($index, $event)"
-                >
-                  <el-option
-                    v-for="opt in DATA_TYPE_KIND_OPTIONS"
-                    :key="opt.value"
-                    :label="opt.label"
-                    :value="opt.value"
-                  />
-                </el-select>
+                />
+              </template>
+            </el-table-column>
+
+            <el-table-column label="表名" min-width="120">
+              <template #default="{ row, $index }">
+                <el-input
+                  :model-value="row.tableName ?? ''"
+                  placeholder="可选"
+                  clearable
+                  :disabled="row.kind !== 'interface' || row.category !== 'entity'"
+                  @update:model-value="updateType($index, { tableName: $event })"
+                />
               </template>
             </el-table-column>
 
@@ -396,16 +464,8 @@ const namedOptionsForConfig = computed(() => {
               </template>
             </el-table-column>
 
-            <el-table-column label="操作" width="120" align="center">
+            <el-table-column label="操作" width="72" align="center">
               <template #default="{ $index }">
-                <el-button
-                  type="primary"
-                  link
-                  :icon="EditPen"
-                  @click="openTsEdit($index)"
-                >
-                  编辑
-                </el-button>
                 <el-button
                   type="danger"
                   link
@@ -483,11 +543,16 @@ const namedOptionsForConfig = computed(() => {
   line-height: 1;
 }
 
-.type-name-locked {
-  display: inline-block;
-  font-size: 13px;
-  color: #303133;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+.type-name-cell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.type-name-cell :deep(.el-input) {
+  flex: 1;
+  min-width: 0;
 }
 
 .group-list {

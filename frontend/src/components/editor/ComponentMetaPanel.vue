@@ -16,11 +16,13 @@ import {
 import { SIZE_OPTIONS } from '../../utils/xml-node'
 import NumericInput from './NumericInput.vue'
 import ComponentPropDialog from './ComponentPropDialog.vue'
+import type { DataTypeLibrary } from '../../types/data-types'
 
 const props = defineProps<{
   config: ComponentConfig
   methods: PageMethod[]
   iconOptions?: Array<{ id: string; label: string }>
+  typeLibrary?: DataTypeLibrary | null
 }>()
 
 const emit = defineEmits<{
@@ -335,6 +337,7 @@ const customMethodOptions = () =>
       :prop="editingProp"
       :existing-names="propExistingNames()"
       :icon-options="iconOptions"
+      :type-library="typeLibrary"
       @save="saveProp"
     />
   </div>

@@ -9,7 +9,6 @@ import {
   type TypeAtom,
   type TypeExpr,
   type TypeGenericParam,
-  type TypeUnion,
 } from '../types/data-types'
 
 export interface DataTypeTsContext {
@@ -24,7 +23,7 @@ function uid(prefix: string): string {
 }
 
 function resolveName(id: string | undefined, ctx: DataTypeTsContext): string {
-  if (!id) return 'unknown'
+  if (!id) return 'any'
   return ctx.idToName.get(id) || id
 }
 
@@ -35,13 +34,9 @@ function atomToTs(atom: TypeAtom, ctx: DataTypeTsContext): string {
 }
 
 export function typeExprToTs(expr: TypeExpr, ctx: DataTypeTsContext): string {
-  if (!expr.intersections.length) return 'unknown'
-  const parts = expr.intersections.map((union) => {
-    const alts = union.alternatives.map((a) => atomToTs(a, ctx))
-    const joined = alts.join(' | ')
-    return alts.length > 1 && expr.intersections.length > 1 ? `(${joined})` : joined
-  })
-  return parts.join(' & ')
+  const atom = expr.intersections[0]?.alternatives[0]
+  if (!atom) return 'any'
+  return atomToTs(atom, ctx)
 }
 
 function remarkComment(remark: string): string {
@@ -77,11 +72,8 @@ export function dataTypeToTs(def: DataTypeDef, ctx: DataTypeTsContext): string {
     : ''
 
   if (def.kind === 'number' || def.kind === 'string' || def.kind === 'boolean') {
-    return `${headRemark}type ${name} = ${def.kind}\n`
-  }
-
-  if (def.kind === 'combination') {
-    return `${headRemark}type ${name} = ${typeExprToTs(def.combination, ctx)}\n`
+    // 基本类型以 interface 空壳占位，避免使用 type 别名
+    return `${headRemark}interface ${name} {}\n`
   }
 
   if (def.kind === 'enum') {
@@ -112,7 +104,7 @@ export function dataTypeToTs(def: DataTypeDef, ctx: DataTypeTsContext): string {
   return `${headRemark}interface ${name}${gens} {\n${fields}\n}\n`
 }
 
-/** 可编辑区：interface/enum 大括号内；type 别名等号后 */
+/** 可编辑区：interface/enum 大括号内 */
 export function extractDataTypeEditableBody(
   def: DataTypeDef,
   ctx: DataTypeTsContext,
@@ -130,9 +122,7 @@ export function extractDataTypeEditableBody(
       .map((line) => (line.startsWith('  ') ? line.slice(2) : line))
       .join('\n')
   }
-  const full = dataTypeToTs(def, ctx).trim()
-  const eq = full.indexOf('=')
-  return eq >= 0 ? full.slice(eq + 1).trim().replace(/;?\s*$/, '') : full
+  return ''
 }
 
 export function buildDataTypeLockedHeader(
@@ -143,13 +133,13 @@ export function buildDataTypeLockedHeader(
   const headRemark = def.remark.trim()
     ? `/** ${def.remark.trim().replace(/\*\//g, '* /')} */\n`
     : ''
-  if (def.kind === 'interface') {
-    return `${headRemark}interface ${name}${genericsToTs(def.generics, ctx)} {`
-  }
   if (def.kind === 'enum') {
     return `${headRemark}enum ${name} {`
   }
-  return `${headRemark}type ${name} =`
+  // number/string/boolean/interface 一律 interface
+  return `${headRemark}interface ${name}${
+    def.kind === 'interface' ? genericsToTs(def.generics, ctx) : ''
+  } {`
 }
 
 export function composeDataTypeTs(
@@ -158,16 +148,12 @@ export function composeDataTypeTs(
   ctx: DataTypeTsContext,
 ): string {
   const header = buildDataTypeLockedHeader(def, ctx)
-  if (def.kind === 'interface' || def.kind === 'enum') {
-    const indented = (body ?? '')
-      .replace(/\r\n/g, '\n')
-      .split('\n')
-      .map((line) => (line.length ? `  ${line}` : ''))
-      .join('\n')
-    return `${header}\n${indented}\n}\n`
-  }
-  const expr = (body ?? '').trim() || 'unknown'
-  return `${header} ${expr}\n`
+  const indented = (body ?? '')
+    .replace(/\r\n/g, '\n')
+    .split('\n')
+    .map((line) => (line.length ? `  ${line}` : ''))
+    .join('\n')
+  return `${header}\n${indented}\n}\n`
 }
 
 /** 生成 ambient，供 Monaco / 编译器识别其它类型 */
@@ -179,7 +165,7 @@ export function buildAmbientDeclarations(
   for (const name of names) {
     if (!name || name === excludeName) continue
     if (!isValidTypeName(name)) continue
-    lines.push(`declare type ${name} = any`)
+    lines.push(`declare interface ${name} {}`)
   }
   return lines.length ? `${lines.join('\n')}\n\n` : ''
 }
@@ -189,7 +175,6 @@ const BUILTIN_TYPES = new Set([
   'number',
   'boolean',
   'any',
-  'unknown',
   'void',
   'null',
   'undefined',
@@ -214,7 +199,10 @@ function tsTypeToAtom(
   if (node.kind === ts.SyntaxKind.NumberKeyword) return { kind: 'number' }
   if (node.kind === ts.SyntaxKind.BooleanKeyword) return { kind: 'boolean' }
   if (node.kind === ts.SyntaxKind.AnyKeyword) return { kind: 'any' }
-  if (node.kind === ts.SyntaxKind.UnknownKeyword) return { kind: 'unknown' }
+  if (node.kind === ts.SyntaxKind.UnknownKeyword) {
+    errors.push('不支持 unknown，请改用 any 或具体类型')
+    return null
+  }
 
   if (ts.isTypeReferenceNode(node) && ts.isIdentifier(node.typeName)) {
     const name = node.typeName.text
@@ -245,36 +233,9 @@ function tsTypeToExpr(
     return tsTypeToExpr(node.type, ctx, generics, errors)
   }
 
-  if (ts.isIntersectionTypeNode(node)) {
-    const intersections: TypeUnion[] = []
-    for (const part of node.types) {
-      let unionNode = part
-      if (ts.isParenthesizedTypeNode(part)) unionNode = part.type
-      if (ts.isUnionTypeNode(unionNode)) {
-        const alternatives: TypeAtom[] = []
-        for (const alt of unionNode.types) {
-          const atom = tsTypeToAtom(alt, ctx, generics, errors)
-          if (!atom) return null
-          alternatives.push(atom)
-        }
-        intersections.push({ alternatives })
-      } else {
-        const atom = tsTypeToAtom(part, ctx, generics, errors)
-        if (!atom) return null
-        intersections.push({ alternatives: [atom] })
-      }
-    }
-    return { intersections }
-  }
-
-  if (ts.isUnionTypeNode(node)) {
-    const alternatives: TypeAtom[] = []
-    for (const alt of node.types) {
-      const atom = tsTypeToAtom(alt, ctx, generics, errors)
-      if (!atom) return null
-      alternatives.push(atom)
-    }
-    return { intersections: [{ alternatives }] }
+  if (ts.isIntersectionTypeNode(node) || ts.isUnionTypeNode(node)) {
+    errors.push('不支持组合类型（| / &），请使用单一类型')
+    return null
   }
 
   const atom = tsTypeToAtom(node, ctx, generics, errors)
@@ -381,21 +342,22 @@ export function parseDataTypeFromTs(
   )
 
   if (!statements.length) {
-    return { ok: false, errors: ['未找到类型声明（interface / type / enum）'] }
+    return { ok: false, errors: ['未找到类型声明（interface / enum）'] }
   }
   if (statements.length > 1) {
-    return { ok: false, errors: ['请只声明一个类型（不要写多个 interface/type/enum）'] }
+    return { ok: false, errors: ['请只声明一个类型（不要写多个 interface/enum）'] }
   }
 
   const stmt = statements[0]!
   const base = createEmptyDataType('string')
   base.id = options.existing.id
   base.remark = getJsDocRemark(stmt) || options.existing.remark
+  base.tableName = options.existing.tableName ?? ''
+  base.category = options.existing.category ?? 'other'
 
   // 解析时允许自引用
   const selfName =
     ts.isInterfaceDeclaration(stmt) ||
-    ts.isTypeAliasDeclaration(stmt) ||
     ts.isEnumDeclaration(stmt)
       ? stmt.name.text
       : ''
@@ -406,6 +368,13 @@ export function parseDataTypeFromTs(
   if (selfName) {
     ctx.nameToId.set(selfName, options.existing.id)
     ctx.idToName.set(options.existing.id, selfName)
+  }
+
+  if (ts.isTypeAliasDeclaration(stmt)) {
+    return {
+      ok: false,
+      errors: ['不支持 type 别名，请使用 interface 声明'],
+    }
   }
 
   if (ts.isInterfaceDeclaration(stmt)) {
@@ -491,6 +460,7 @@ export function parseDataTypeFromTs(
     if (errors.length) return { ok: false, errors }
     base.kind = 'enum'
     base.name = name
+    base.category = 'other'
     base.enumMembers = enumMembers
     base.fields = []
     base.generics = []
@@ -498,47 +468,9 @@ export function parseDataTypeFromTs(
     return { ok: true, def: base }
   }
 
-  if (ts.isTypeAliasDeclaration(stmt)) {
-    const name = stmt.name.text
-    if (!isValidTypeName(name)) {
-      return { ok: false, errors: [`类型名不合法：${name}`] }
-    }
-    if (stmt.typeParameters?.length) {
-      return { ok: false, errors: ['type 别名暂不支持泛型，请改用 interface'] }
-    }
-    const typeNode = stmt.type
-    // 简单原始类型
-    if (typeNode.kind === ts.SyntaxKind.StringKeyword) {
-      base.kind = 'string'
-      base.name = name
-      return { ok: true, def: base }
-    }
-    if (typeNode.kind === ts.SyntaxKind.NumberKeyword) {
-      base.kind = 'number'
-      base.name = name
-      return { ok: true, def: base }
-    }
-    if (typeNode.kind === ts.SyntaxKind.BooleanKeyword) {
-      base.kind = 'boolean'
-      base.name = name
-      return { ok: true, def: base }
-    }
-
-    const expr = tsTypeToExpr(typeNode, ctx, new Set(), errors)
-    if (errors.length || !expr) return { ok: false, errors: errors.length ? errors : ['无法解析类型'] }
-
-    base.kind = 'combination'
-    base.name = name
-    base.combination = expr
-    base.fields = []
-    base.generics = []
-    base.enumMembers = []
-    return { ok: true, def: base }
-  }
-
   return {
     ok: false,
-    errors: ['仅支持 interface / type / enum 声明'],
+    errors: ['仅支持 interface / enum 声明'],
   }
 }
 

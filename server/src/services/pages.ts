@@ -148,8 +148,22 @@ const DATA_FIELD_TYPES = new Set([
   'array',
   'icon',
   'color',
+  'any',
   'ref',
 ])
+
+function optionalTypeRef(raw: unknown): string | undefined {
+  if (typeof raw !== 'string') return undefined
+  const id = raw.trim()
+  return id || undefined
+}
+
+function optionalItemType(raw: unknown): DataField['itemType'] | undefined {
+  if (typeof raw !== 'string' || !DATA_FIELD_TYPES.has(raw) || raw === 'ref') {
+    return undefined
+  }
+  return raw as DataField['itemType']
+}
 
 function looksLikeBinding(raw: string): boolean {
   return /\{[^{}]+\}/.test(raw)
@@ -198,6 +212,7 @@ function defaultValue(type: DataField['type']) {
       return {}
     case 'array':
       return []
+    case 'any':
     case 'icon':
     case 'color':
     case 'ref':
@@ -248,13 +263,23 @@ function normalizeObjectSubField(raw: unknown): ObjectSubField | null {
   // 引用仅允许数据池顶层
   if (s.type === 'ref') return null
 
+  const typeRef = optionalTypeRef(s.typeRef)
+  const itemType = optionalItemType(s.itemType)
+  const itemTypeRef = optionalTypeRef(s.itemTypeRef)
+
   if (s.type === 'array') {
     const arrayFields = Array.isArray(s.arrayFields)
       ? s.arrayFields
           .map((sub) => normalizeArraySubField(sub))
           .filter((sub): sub is ArraySubField => sub !== null)
       : []
-    return { name: s.name.trim(), type: 'array', arrayFields }
+    return {
+      name: s.name.trim(),
+      type: 'array',
+      ...(itemType ? { itemType } : {}),
+      ...(itemTypeRef ? { itemTypeRef } : {}),
+      arrayFields,
+    }
   }
 
   if (s.type === 'json') {
@@ -263,12 +288,18 @@ function normalizeObjectSubField(raw: unknown): ObjectSubField | null {
           .map((sub) => normalizeObjectSubField(sub))
           .filter((sub): sub is ObjectSubField => sub !== null)
       : []
-    return { name: s.name.trim(), type: 'json', objectFields }
+    return {
+      name: s.name.trim(),
+      type: 'json',
+      ...(typeRef ? { typeRef } : {}),
+      objectFields,
+    }
   }
 
   return {
     name: s.name.trim(),
     type: s.type,
+    ...(typeRef ? { typeRef } : {}),
     value: s.value ?? defaultValue(s.type),
   }
 }
@@ -280,13 +311,22 @@ function normalizeArraySubField(raw: unknown): ArraySubField | null {
   // 引用仅允许数据池顶层
   if (s.type === 'ref') return null
 
+  const typeRef = optionalTypeRef(s.typeRef)
+  const itemType = optionalItemType(s.itemType)
+  const itemTypeRef = optionalTypeRef(s.itemTypeRef)
+
   if (s.type === 'array') {
     const arrayFields = Array.isArray(s.arrayFields)
       ? s.arrayFields
           .map((sub) => normalizeArraySubField(sub))
           .filter((sub): sub is ArraySubField => sub !== null)
       : []
-    return { type: 'array', arrayFields }
+    return {
+      type: 'array',
+      ...(itemType ? { itemType } : {}),
+      ...(itemTypeRef ? { itemTypeRef } : {}),
+      arrayFields,
+    }
   }
 
   if (s.type === 'json') {
@@ -295,11 +335,16 @@ function normalizeArraySubField(raw: unknown): ArraySubField | null {
           .map((sub) => normalizeObjectSubField(sub))
           .filter((sub): sub is ObjectSubField => sub !== null)
       : []
-    return { type: 'json', objectFields }
+    return {
+      type: 'json',
+      ...(typeRef ? { typeRef } : {}),
+      objectFields,
+    }
   }
 
   return {
     type: s.type,
+    ...(typeRef ? { typeRef } : {}),
     value: s.value ?? defaultValue(s.type),
   }
 }
@@ -361,6 +406,26 @@ function normalizeDataField(raw: unknown): DataField | null {
 
   if (typeof item.computeBody === 'string') {
     field.computeBody = item.computeBody
+  }
+
+  const typeRef = optionalTypeRef(item.typeRef)
+  if (typeRef) field.typeRef = typeRef
+
+  if (field.type === 'array') {
+    const itemType = optionalItemType(item.itemType)
+    const itemTypeRef = optionalTypeRef(item.itemTypeRef)
+    if (itemType) field.itemType = itemType
+    if (itemTypeRef) field.itemTypeRef = itemTypeRef
+    if (itemType === 'array') {
+      const itemItemType = optionalItemType(
+        (item as { itemItemType?: unknown }).itemItemType,
+      )
+      const itemItemTypeRef = optionalTypeRef(
+        (item as { itemItemTypeRef?: unknown }).itemItemTypeRef,
+      )
+      if (itemItemType) field.itemItemType = itemItemType
+      if (itemItemTypeRef) field.itemItemTypeRef = itemItemTypeRef
+    }
   }
 
   if (item.type === 'array' && Array.isArray(item.arrayFields)) {

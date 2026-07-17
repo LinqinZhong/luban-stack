@@ -6,6 +6,8 @@ export type DataFieldType =
   | 'array'
   | 'icon'
   | 'color'
+  /** 任意类型（常用于 any[]：数组内每项可自选类型） */
+  | 'any'
   /** 引用当前页面/组件控件树节点（值为节点 path id） */
   | 'ref'
 
@@ -21,6 +23,9 @@ export interface ObjectSubField {
   name: string
   type: DataFieldType
   value?: DataFieldValue
+  typeRef?: string
+  itemType?: DataFieldType
+  itemTypeRef?: string
   arrayFields?: ArraySubField[]
   objectFields?: ObjectSubField[]
 }
@@ -29,6 +34,9 @@ export interface ObjectSubField {
 export interface ArraySubField {
   type: DataFieldType
   value?: DataFieldValue
+  typeRef?: string
+  itemType?: DataFieldType
+  itemTypeRef?: string
   arrayFields?: ArraySubField[]
   objectFields?: ObjectSubField[]
 }
@@ -55,6 +63,15 @@ export interface DataField {
   binding?: DataSourceBinding
   /** binding === 'computed' 时的方法体；return 值即为字段计算值 */
   computeBody?: string
+  /** 引用 types/ 库中的具名类型 id（展示用；值按 type 处理，多为 json） */
+  typeRef?: string
+  /** type === 'array' 时的元素类型 */
+  itemType?: DataFieldType
+  /** 元素类型的具名引用 */
+  itemTypeRef?: string
+  /** itemType === 'array' 时，内层数组的元素类型 */
+  itemItemType?: DataFieldType
+  itemItemTypeRef?: string
   /** 数组结构（含嵌套类型，用于保留 icon 等元数据） */
   arrayFields?: ArraySubField[]
   /** 对象结构（含嵌套类型，用于保留 icon 等元数据） */
@@ -83,6 +100,7 @@ export const DATA_FIELD_TYPE_OPTIONS: { label: string; value: DataFieldType }[] 
   { label: '颜色', value: 'color' },
   { label: '对象', value: 'json' },
   { label: '数组', value: 'array' },
+  { label: '任意', value: 'any' },
   { label: '引用', value: 'ref' },
 ]
 
@@ -148,6 +166,8 @@ export function defaultValue(type: DataFieldType): DataFieldValue {
       return {}
     case 'array':
       return []
+    case 'any':
+      return ''
     case 'icon':
     case 'color':
     case 'ref':
@@ -155,6 +175,68 @@ export function defaultValue(type: DataFieldType): DataFieldValue {
     default:
       return ''
   }
+}
+
+/** 树形类型选择：编码 / 解码（具名类型 → named:<id>） */
+export function encodeTypeSelection(
+  type: DataFieldType,
+  typeRef?: string | null,
+): string {
+  if (typeRef) return `named:${typeRef}`
+  return type
+}
+
+export function decodeTypeSelection(value: string): {
+  type: DataFieldType
+  typeRef?: string
+} {
+  if (value.startsWith('named:')) {
+    const typeRef = value.slice(6)
+    return { type: 'json', typeRef }
+  }
+  const allowed = DATA_FIELD_TYPE_OPTIONS.some((o) => o.value === value)
+  return { type: (allowed ? value : 'string') as DataFieldType }
+}
+
+export interface DataFieldTypeTreeNode {
+  value: string
+  label: string
+  disabled?: boolean
+  children?: DataFieldTypeTreeNode[]
+}
+
+export function buildDataFieldTypeTree(options?: {
+  /** 基本类型列表，默认全量 */
+  baseOptions?: Array<{ label: string; value: DataFieldType }>
+  /** 项目数据类型库 */
+  library?: { groups: Array<{ id: string; name: string; types: Array<{ id: string; name: string }> }> } | null
+  allowNamed?: boolean
+}): DataFieldTypeTreeNode[] {
+  const base = options?.baseOptions ?? DATA_FIELD_TYPE_OPTIONS
+  const nodes: DataFieldTypeTreeNode[] = base.map((o) => ({
+    value: o.value,
+    label: o.label,
+  }))
+
+  if (options?.allowNamed === false) return nodes
+
+  const groups = options?.library?.groups ?? []
+  for (const group of groups) {
+    const children = (group.types ?? [])
+      .filter((t) => t.name?.trim())
+      .map((t) => ({
+        value: `named:${t.id}`,
+        label: t.name.trim(),
+      }))
+    if (!children.length) continue
+    nodes.push({
+      value: `__group__:${group.id}`,
+      label: group.name,
+      disabled: true,
+      children,
+    })
+  }
+  return nodes
 }
 
 export function inferValueType(value: unknown): DataFieldType {
@@ -259,6 +341,9 @@ export interface ObjectEditorNode {
   name: string
   type: DataFieldType
   value?: DataFieldValue
+  typeRef?: string
+  itemType?: DataFieldType
+  itemTypeRef?: string
   children: ObjectEditorNode[]
   isArrayItem: boolean
 }
@@ -278,6 +363,9 @@ function arrayFieldsToEditorNodes(fields: ArraySubField[]): ObjectEditorNode[] {
   return fields.map((item) => {
     const node = createEditorNode(true)
     node.type = item.type
+    node.typeRef = item.typeRef
+    node.itemType = item.itemType
+    node.itemTypeRef = item.itemTypeRef
     if (item.type === 'json') {
       node.children = objectFieldsToEditorNodes(item.objectFields ?? [])
     } else if (item.type === 'array') {
@@ -294,6 +382,9 @@ export function objectFieldsToEditorNodes(fields: ObjectSubField[]): ObjectEdito
     const node = createEditorNode(false)
     node.name = item.name
     node.type = item.type
+    node.typeRef = item.typeRef
+    node.itemType = item.itemType
+    node.itemTypeRef = item.itemTypeRef
     if (item.type === 'json') {
       node.children = objectFieldsToEditorNodes(item.objectFields ?? [])
     } else if (item.type === 'array') {
@@ -313,17 +404,22 @@ function editorNodeToArrayField(node: ObjectEditorNode): ArraySubField {
   if (node.type === 'json') {
     return {
       type: 'json',
+      typeRef: node.typeRef,
       objectFields: editorNodesToObjectFields(node.children),
     }
   }
   if (node.type === 'array') {
     return {
       type: 'array',
+      typeRef: node.typeRef,
+      itemType: node.itemType,
+      itemTypeRef: node.itemTypeRef,
       arrayFields: editorNodesToArrayFields(node.children),
     }
   }
   return {
     type: node.type,
+    typeRef: node.typeRef,
     value: node.value ?? defaultValue(node.type),
   }
 }
@@ -333,6 +429,7 @@ function editorNodeToObjectField(node: ObjectEditorNode): ObjectSubField {
     return {
       name: node.name,
       type: 'json',
+      typeRef: node.typeRef,
       objectFields: editorNodesToObjectFields(node.children),
     }
   }
@@ -340,12 +437,16 @@ function editorNodeToObjectField(node: ObjectEditorNode): ObjectSubField {
     return {
       name: node.name,
       type: 'array',
+      typeRef: node.typeRef,
+      itemType: node.itemType,
+      itemTypeRef: node.itemTypeRef,
       arrayFields: editorNodesToArrayFields(node.children),
     }
   }
   return {
     name: node.name,
     type: node.type,
+    typeRef: node.typeRef,
     value: node.value ?? defaultValue(node.type),
   }
 }

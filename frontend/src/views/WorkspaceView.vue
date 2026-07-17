@@ -47,18 +47,26 @@ import {
 import {
   getDataTypeLibrary,
   getIconLibrary,
+  getMysqlLibrary,
   saveDataTypeLibrary as saveDataTypeLibraryApi,
   saveIconLibrary as saveIconLibraryApi,
+  saveMysqlLibrary as saveMysqlLibraryApi,
   setProjectEntryPage,
 } from '../api/projects'
 import DataPoolPanel from '../components/editor/DataPoolPanel.vue'
 import DataTypesPanel from '../components/editor/DataTypesPanel.vue'
+import MysqlPanel from '../components/editor/MysqlPanel.vue'
 import IconLibraryPanel from '../components/editor/IconLibraryPanel.vue'
 import MethodEditDialog from '../components/editor/MethodEditDialog.vue'
 import MethodsPanel from '../components/editor/MethodsPanel.vue'
 import LifecyclePanel from '../components/editor/LifecyclePanel.vue'
 import LeafIcon from '../components/icons/LeafIcon.vue'
+import MysqlIcon from '../components/icons/MysqlIcon.vue'
+import DevelopIcon from '../components/icons/DevelopIcon.vue'
 import ComponentMetaPanel from '../components/editor/ComponentMetaPanel.vue'
+import PreviewDebugPanel, {
+  type EmitLogEntry,
+} from '../components/editor/PreviewDebugPanel.vue'
 import PropsPanel, { type PropsTab } from '../components/editor/PropsPanel.vue'
 import PageCanvas from '../components/xml/PageCanvas.vue'
 import WidgetTree from '../components/xml/WidgetTree.vue'
@@ -113,12 +121,17 @@ import {
   createEmptyDataTypeLibrary,
   type DataTypeLibrary,
 } from '../types/data-types'
+import {
+  createEmptyMysqlLibrary,
+  type MysqlLibrary,
+} from '../types/mysql'
 
 type WorkspaceMode =
   | 'preview'
   | 'edit'
   | 'datapool'
   | 'datatypes'
+  | 'mysql'
   | 'icons'
   | 'methods'
   | 'lifecycle'
@@ -126,8 +139,11 @@ type WorkspaceMode =
 const projectStore = useProjectStore()
 
 type ResourceKind = 'page' | 'component'
+type ProjectNav = 'datatypes' | 'mysql' | 'icons'
 
 const resourceKind = ref<ResourceKind>('page')
+/** 左侧项目级入口；null 表示页面/组件资源模式 */
+const projectNav = ref<ProjectNav | null>(null)
 const pages = ref<PageSummary[]>([])
 const components = ref<ComponentSummary[]>([])
 const activePageId = ref('')
@@ -149,6 +165,7 @@ const creating = ref(false)
 const addWidgetVisible = ref(false)
 const iconLibrary = ref<IconLibrary>(createEmptyIconLibrary())
 const dataTypeLibrary = ref<DataTypeLibrary>(createEmptyDataTypeLibrary())
+const mysqlLibrary = ref<MysqlLibrary>(createEmptyMysqlLibrary())
 /** 编辑态临时隐藏，不写入 XML；预览模式不生效 */
 const editorHiddenNodeIds = ref<string[]>([])
 const pageMethods = ref<PageMethod[]>([])
@@ -165,6 +182,10 @@ const routeParams = ref<Record<string, unknown>>({})
 /** 预览态手机框内 Toast */
 const previewToast = ref<{ message: string; id: number } | null>(null)
 let previewToastTimer: ReturnType<typeof setTimeout> | null = null
+/** 组件预览：调试面板覆盖的 $props */
+const previewPropOverrides = ref<Record<string, unknown>>({})
+const previewEmitLogs = ref<EmitLogEntry[]>([])
+let previewEmitLogSeq = 0
 /** 画布平移 / 缩放（切页保持，重置按钮仍可归位） */
 const canvasPanX = ref(0)
 const canvasPanY = ref(0)
@@ -237,15 +258,21 @@ function resetPreviewRuntime() {
   if (!activeDoc.value) {
     previewRuntimeData.value = null
     previewComponentMap.value = null
+    previewPropOverrides.value = {}
+    previewEmitLogs.value = []
     return
   }
   previewRuntimeData.value = clonePageData(activeDoc.value.data ?? { fields: [] })
   previewComponentMap.value = cloneComponentRenderMap(componentMap.value)
+  previewPropOverrides.value = {}
+  previewEmitLogs.value = []
 }
 
 function clearPreviewRuntime() {
   previewRuntimeData.value = null
   previewComponentMap.value = null
+  previewPropOverrides.value = {}
+  previewEmitLogs.value = []
 }
 
 /** 画布/预览运行时使用：预览走副本，编辑走数据池 */
@@ -271,11 +298,135 @@ const editorConditionComponentProps = computed(() =>
   isComponentResource.value ? (activeComponent.value?.config.props ?? []) : null,
 )
 
-/** 编辑组件时：用 config.props 默认值作为 $props */
+/** 编辑/预览组件时：用 config.props 默认值 + 调试覆盖作为 $props */
 const editorDollarProps = computed(() => {
   if (!isComponentResource.value || !activeComponent.value) return undefined
-  return buildDollarProps(activeComponent.value.config)
+  return {
+    ...buildDollarProps(activeComponent.value.config),
+    ...previewPropOverrides.value,
+  }
 })
+
+const previewDebugDollarProps = computed(() => editorDollarProps.value ?? {})
+
+const canPreviewGoBack = computed(
+  () => workspaceMode.value === 'preview' && pageHistory.value.length > 0,
+)
+
+const hasEntryPage = computed(() => {
+  const entryId = projectStore.config?.entryPage
+  if (entryId && pages.value.some((item) => item.id === entryId)) return true
+  return pages.value.some((item) => item.isEntry)
+})
+
+function resolveEntryPageId(): string | null {
+  const entryId = projectStore.config?.entryPage
+  if (entryId && pages.value.some((item) => item.id === entryId)) return entryId
+  return pages.value.find((item) => item.isEntry)?.id ?? null
+}
+
+function pushPreviewEmitLog(event: string, args: Record<string, unknown>) {
+  previewEmitLogSeq += 1
+  previewEmitLogs.value = [
+    {
+      id: previewEmitLogSeq,
+      time: new Date().toLocaleTimeString(),
+      event,
+      args,
+    },
+    ...previewEmitLogs.value,
+  ].slice(0, 80)
+}
+
+function createPreviewDebugEmit() {
+  if (!isComponentResource.value || !activeComponent.value) return undefined
+  return createComponentEmit(
+    activeComponent.value.config.events ?? [],
+    (eventName, args) => {
+      pushPreviewEmitLog(eventName, args)
+    },
+  )
+}
+
+function handlePreviewPropUpdate(name: string, value: unknown) {
+  previewPropOverrides.value = {
+    ...previewPropOverrides.value,
+    [name]: value,
+  }
+  void runLifecycleUpdateSequence()
+}
+
+async function handlePreviewNavigateBack() {
+  const prev = pageHistory.value.pop()
+  if (!prev) {
+    ElMessage.info('没有可返回的页面')
+    return
+  }
+  await openPage(prev.pageId, {
+    keepHistory: true,
+    params: prev.params,
+  })
+}
+
+async function handlePreviewGoEntry() {
+  const entryId = resolveEntryPageId()
+  if (!entryId) {
+    ElMessage.warning('未设置入口页')
+    return
+  }
+  await openPage(entryId)
+}
+
+async function handlePreviewRefresh() {
+  if (!activePageId.value) return
+  const pageId = activePageId.value
+  const params = { ...routeParams.value }
+  const history = pageHistory.value.map((item) => ({
+    pageId: item.pageId,
+    params: { ...item.params },
+  }))
+  await openPage(pageId, { keepHistory: true, params })
+  pageHistory.value = history
+}
+
+/** 调试面板：调用当前预览组件的暴露方法 */
+function invokeActiveExposedMethod(methodName: string, args: unknown[]) {
+  if (!activeComponent.value || !activeDoc.value) return
+  const exposed = activeComponent.value.config.exposedMethods ?? []
+  if (!exposed.includes(methodName)) {
+    ElMessage.warning(`方法「${methodName}」未在组件中暴露`)
+    return
+  }
+  const method = pageMethods.value.find(
+    (item) => item.name === methodName && !item.builtin,
+  )
+  if (!method?.body?.trim()) {
+    ElMessage.warning(`找不到方法「${methodName}」的实现`)
+    return
+  }
+
+  const eventArgs: Record<string, unknown> = {}
+  ;(method.params ?? []).forEach((param, index) => {
+    const key = param.name.trim()
+    if (!key || key.startsWith('...')) return
+    eventArgs[key] = args[index]
+  })
+
+  const raw = serializeEventBindings([
+    {
+      id: `debug_exposed_${methodName}`,
+      method: CUSTOM_EVENT_METHOD,
+      args: {},
+      body: method.body,
+    },
+  ])
+
+  void runPreviewBindings(raw, {
+    eventArgs,
+    dollarProps: previewDebugDollarProps.value,
+    emitFn: createPreviewDebugEmit(),
+  })
+}
 
 function previewGetDeviceInfo() {
   return getDeviceInfo({
@@ -357,6 +508,7 @@ const createDialogTitle = computed(() =>
 const isEditMode = computed(() => workspaceMode.value === 'edit')
 const isDataPoolMode = computed(() => workspaceMode.value === 'datapool')
 const isDataTypesMode = computed(() => workspaceMode.value === 'datatypes')
+const isMysqlMode = computed(() => workspaceMode.value === 'mysql')
 const isIconsMode = computed(() => workspaceMode.value === 'icons')
 const isMethodsMode = computed(() => workspaceMode.value === 'methods')
 const isLifecycleMode = computed(() => workspaceMode.value === 'lifecycle')
@@ -364,6 +516,7 @@ const hideWidgetTree = computed(
   () =>
     isDataPoolMode.value ||
     isDataTypesMode.value ||
+    isMysqlMode.value ||
     isIconsMode.value ||
     isMethodsMode.value ||
     isLifecycleMode.value,
@@ -391,15 +544,23 @@ const modeTabs = [
   { key: 'preview' as const, label: '预览', icon: View },
   { key: 'edit' as const, label: '编辑', icon: EditPen },
   { key: 'datapool' as const, label: '数据池', icon: Coin },
-  { key: 'datatypes' as const, label: '数据类型', icon: Collection },
-  { key: 'icons' as const, label: '图标库', icon: Picture },
   { key: 'methods' as const, label: '方法', icon: Lightning },
   { key: 'lifecycle' as const, label: '生命周期', icon: LeafIcon },
 ]
 
+const projectNavItems: { key: ProjectNav; label: string; icon: unknown }[] = [
+  { key: 'datatypes', label: '数据类型', icon: Collection },
+  { key: 'mysql', label: 'MySQL', icon: MysqlIcon },
+  { key: 'icons', label: '图标库', icon: Picture },
+]
+
+const isProjectNav = computed(() => projectNav.value !== null)
+const showModeTabs = computed(() => !isProjectNav.value)
+
 const centerFileLabel = computed(() => {
   if (isDataPoolMode.value) return 'data.json'
   if (isDataTypesMode.value) return 'types/'
+  if (isMysqlMode.value) return 'mysql.json'
   if (isIconsMode.value) return 'icons.json'
   if (isMethodsMode.value) return 'function/'
   if (isLifecycleMode.value) return 'lifecycle.json'
@@ -432,11 +593,12 @@ const centerPathQuery = computed(() => {
 })
 
 const propsPlaceholderText = computed(() => {
-  if (!activePage.value && !isIconsMode.value && !isDataTypesMode.value) {
+  if (!activePage.value && !isIconsMode.value && !isDataTypesMode.value && !isMysqlMode.value) {
     return '打开页面后可编辑'
   }
   if (isDataPoolMode.value) return '数据池模式下请在中间区域编辑'
   if (isDataTypesMode.value) return '数据类型模式下请在中间区域编辑'
+  if (isMysqlMode.value) return 'MySQL 模式下请在中间区域编辑'
   if (isIconsMode.value) return '图标库模式下请在中间区域编辑'
   if (isMethodsMode.value) return '方法模式下请在中间区域编辑'
   if (isLifecycleMode.value) return '生命周期模式下请在中间区域编辑'
@@ -451,7 +613,7 @@ async function loadPages(selectId?: string) {
 
   loadingPages.value = true
   try {
-    await Promise.all([loadIconLibrary(), loadDataTypeLibrary()])
+    await Promise.all([loadIconLibrary(), loadDataTypeLibrary(), loadMysqlLibrary()])
     const [pageResult, componentResult] = await Promise.all([
       listPages(projectStore.path),
       listComponents(projectStore.path),
@@ -509,6 +671,16 @@ async function loadDataTypeLibrary() {
     dataTypeLibrary.value = await getDataTypeLibrary(projectStore.path)
   } catch (err) {
     dataTypeLibrary.value = createEmptyDataTypeLibrary()
+    console.error(err)
+  }
+}
+
+async function loadMysqlLibrary() {
+  if (!projectStore.path) return
+  try {
+    mysqlLibrary.value = await getMysqlLibrary(projectStore.path)
+  } catch (err) {
+    mysqlLibrary.value = createEmptyMysqlLibrary()
     console.error(err)
   }
 }
@@ -740,6 +912,7 @@ async function openComponent(componentId: string) {
 }
 
 function switchResourceKind(kind: ResourceKind) {
+  leaveProjectNav()
   if (resourceKind.value === kind) return
   resourceKind.value = kind
   selectedNodeId.value = ''
@@ -761,6 +934,32 @@ function switchResourceKind(kind: ResourceKind) {
       lifecycleConfig.value = createEmptyLifecycleConfig()
     }
   }
+}
+
+function leaveProjectNav() {
+  if (!projectNav.value) return
+  projectNav.value = null
+  if (
+    workspaceMode.value === 'datatypes' ||
+    workspaceMode.value === 'mysql' ||
+    workspaceMode.value === 'icons'
+  ) {
+    workspaceMode.value = 'preview'
+  }
+}
+
+function selectDevelopNav() {
+  leaveProjectNav()
+}
+
+function selectProjectNav(nav: ProjectNav) {
+  projectNav.value = nav
+  workspaceMode.value = nav
+}
+
+function setWorkspaceMode(mode: (typeof modeTabs)[number]['key']) {
+  projectNav.value = null
+  workspaceMode.value = mode
 }
 
 function toggleEditorHidden(nodeId: string) {
@@ -1130,7 +1329,15 @@ async function runPreviewBindings(
   },
 ) {
   if (!activeDoc.value) return
-    await runEventBindings(raw, {
+  const debugEmit = options?.emitFn ?? createPreviewDebugEmit()
+  const debugEmitWithArgs =
+    options?.emitWithArgs ??
+    (isComponentResource.value
+      ? (eventName: string, args: Record<string, string>) => {
+          pushPreviewEmitLog(eventName, { ...args })
+        }
+      : undefined)
+  await runEventBindings(raw, {
     pageData: resolvedPageData.value,
     xml: activeDoc.value.xml,
     modalStack,
@@ -1141,9 +1348,9 @@ async function runPreviewBindings(
       pageMethods.value.find((item) => item.name === name && !item.builtin),
     scope: options?.scope,
     eventArgs: options?.eventArgs,
-    dollarProps: options?.dollarProps,
-    emit: options?.emitFn,
-    emitWithArgs: options?.emitWithArgs,
+    dollarProps: options?.dollarProps ?? editorDollarProps.value,
+    emit: debugEmit,
+    emitWithArgs: debugEmitWithArgs,
     hasPage: (pageId) => pages.value.some((item) => item.id === pageId),
     navigateTo: async (pageId, params) => {
       if (activePageId.value && activePageId.value !== pageId) {
@@ -1406,6 +1613,26 @@ async function handleDataTypeLibraryUpdate(library: DataTypeLibrary) {
   }, 400)
 }
 
+let mysqlSaveTimer: ReturnType<typeof setTimeout> | null = null
+
+async function handleMysqlLibraryUpdate(library: MysqlLibrary) {
+  if (!projectStore.path) return
+  mysqlLibrary.value = library
+
+  if (mysqlSaveTimer) clearTimeout(mysqlSaveTimer)
+  mysqlSaveTimer = setTimeout(async () => {
+    if (!projectStore.path) return
+    try {
+      mysqlLibrary.value = await saveMysqlLibraryApi({
+        projectPath: projectStore.path,
+        databases: mysqlLibrary.value.databases,
+      })
+    } catch (err) {
+      ElMessage.error(err instanceof Error ? err.message : '保存 MySQL 配置失败')
+    }
+  }, 400)
+}
+
 function openAddMethod() {
   editingMethod.value = createEmptyMethod()
   methodDialogVisible.value = true
@@ -1605,7 +1832,36 @@ onMounted(() => {
 
 <template>
   <div class="workspace">
-    <aside class="side-panel">
+    <nav class="activity-rail" aria-label="项目资源">
+      <el-tooltip content="开发" placement="right">
+        <button
+          type="button"
+          class="rail-btn"
+          :class="{ active: !isProjectNav }"
+          @click="selectDevelopNav"
+        >
+          <el-icon :size="20"><DevelopIcon /></el-icon>
+        </button>
+      </el-tooltip>
+      <div class="rail-divider" />
+      <el-tooltip
+        v-for="item in projectNavItems"
+        :key="item.key"
+        :content="item.label"
+        placement="right"
+      >
+        <button
+          type="button"
+          class="rail-btn"
+          :class="{ active: projectNav === item.key }"
+          @click="selectProjectNav(item.key)"
+        >
+          <el-icon :size="20"><component :is="item.icon" /></el-icon>
+        </button>
+      </el-tooltip>
+    </nav>
+
+    <aside v-if="!isProjectNav" class="side-panel">
       <div class="pages-section">
         <div class="section-header">
           <div class="resource-tabs">
@@ -1725,6 +1981,10 @@ onMounted(() => {
           <span class="preview-title">数据类型</span>
           <span class="preview-sub">types/</span>
         </template>
+        <template v-else-if="isMysqlMode">
+          <span class="preview-title">MySQL</span>
+          <span class="preview-sub">mysql.json</span>
+        </template>
         <template v-else-if="activeDoc">
           <span class="preview-title">{{ activeDoc.config.title || activeDoc.config.name }}</span>
           <span class="preview-sub">
@@ -1746,6 +2006,13 @@ onMounted(() => {
           :library="dataTypeLibrary"
           @update:library="handleDataTypeLibraryUpdate"
         />
+        <MysqlPanel
+          v-else-if="isMysqlMode"
+          :library="mysqlLibrary"
+          :type-library="dataTypeLibrary"
+          @update:library="handleMysqlLibraryUpdate"
+          @update:type-library="handleDataTypeLibraryUpdate"
+        />
         <el-empty
           v-else-if="!activeDoc"
           :description="isComponentResource ? '请选择或新建一个组件' : '请选择或新建一个页面'"
@@ -1758,6 +2025,7 @@ onMounted(() => {
           :get-device-info="previewGetDeviceInfo"
           :component-props="editorConditionComponentProps"
           :dollar-props="editorDollarProps"
+          :type-library="dataTypeLibrary"
           @update:data="handleDataUpdate"
         />
         <MethodsPanel
@@ -1818,7 +2086,7 @@ onMounted(() => {
         />
       </div>
 
-      <div class="mode-tabs">
+      <div v-if="showModeTabs" class="mode-tabs">
         <el-tooltip
           v-for="tab in modeTabs"
           :key="tab.key"
@@ -1829,7 +2097,7 @@ onMounted(() => {
             type="button"
             class="mode-tab"
             :class="{ active: workspaceMode === tab.key }"
-            @click="workspaceMode = tab.key"
+            @click="setWorkspaceMode(tab.key)"
           >
             <el-icon :size="18"><component :is="tab.icon" /></el-icon>
           </button>
@@ -1843,6 +2111,7 @@ onMounted(() => {
         :config="activeComponent!.config"
         :methods="editorMethods"
         :icon-options="iconOptions"
+        :type-library="dataTypeLibrary"
         @update:config="handleComponentConfigUpdate"
       />
       <div v-else class="props-with-back">
@@ -1883,6 +2152,22 @@ onMounted(() => {
       :canvas-scene="canvasScene"
       @update:xml="handleXmlUpdate"
       @update:status-bar="handleStatusBarUpdate"
+    />
+    <PreviewDebugPanel
+      v-else-if="workspaceMode === 'preview' && activeDoc"
+      :mode="isComponentResource ? 'component' : 'page'"
+      :can-go-back="canPreviewGoBack"
+      :has-entry-page="hasEntryPage"
+      :config="activeComponent?.config"
+      :methods="editorMethods"
+      :prop-values="previewDebugDollarProps"
+      :emit-logs="previewEmitLogs"
+      @back="handlePreviewNavigateBack"
+      @go-entry="handlePreviewGoEntry"
+      @refresh="handlePreviewRefresh"
+      @update:prop="handlePreviewPropUpdate"
+      @invoke-method="invokeActiveExposedMethod($event.name, $event.args)"
+      @clear-emit-logs="previewEmitLogs = []"
     />
     <aside v-else class="props-placeholder">
       <div class="panel-header">属性</div>
@@ -1984,6 +2269,48 @@ onMounted(() => {
   width: 100%;
   height: 100%;
   overflow: hidden;
+}
+
+.activity-rail {
+  width: 52px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 10px 0;
+  background: #fff;
+  border-right: 1px solid #ebeef5;
+}
+
+.rail-divider {
+  width: 24px;
+  height: 1px;
+  margin: 4px 0;
+  background: #ebeef5;
+}
+
+.rail-btn {
+  width: 40px;
+  height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: #64748b;
+  cursor: pointer;
+}
+
+.rail-btn:hover {
+  background: #f5f7fa;
+  color: #303133;
+}
+
+.rail-btn.active {
+  background: #ecf5ff;
+  color: #409eff;
 }
 
 .side-panel {

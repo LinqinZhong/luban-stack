@@ -3,12 +3,12 @@ import { computed, ref } from 'vue'
 import { Delete, Plus } from '@element-plus/icons-vue'
 import ArrayFieldsDialog from './ArrayFieldsDialog.vue'
 import ComputedBindingDialog from './ComputedBindingDialog.vue'
+import DataFieldTypeTreeSelect from './DataFieldTypeTreeSelect.vue'
 import IconValueSelect from './IconValueSelect.vue'
 import ColorPicker from './ColorPicker.vue'
 import ObjectFieldsDialog from './ObjectFieldsDialog.vue'
 import {
   createEmptyDataField,
-  DATA_FIELD_TYPE_OPTIONS,
   DATA_SOURCE_BINDING_OPTIONS,
   buildArrayValue,
   buildObjectValue,
@@ -18,6 +18,7 @@ import {
   resolveObjectFields,
   type ArraySubField,
   type DataField,
+  type DataFieldType,
   type DataSourceBinding,
   type ObjectSubField,
   type PageData,
@@ -26,6 +27,8 @@ import { resolveComputedPageData } from '../../utils/compute-runtime'
 import type { DeviceInfo } from '../../utils/device-info'
 import { isReservedDataFieldName } from '../../utils/component-props'
 import type { ComponentPropDef } from '../../types/component'
+import type { DataTypeLibrary } from '../../types/data-types'
+import { objectFieldsFromTypeRef } from '../../utils/named-type-fields'
 import { buildWidgetTreeSelectData } from '../../utils/widget-tree'
 import { ElMessage } from 'element-plus'
 
@@ -40,6 +43,8 @@ const props = defineProps<{
   componentProps?: ComponentPropDef[] | null
   /** 计算字段求值时的 $props */
   dollarProps?: Record<string, unknown>
+  /** 项目数据类型库（树形类型选择） */
+  typeLibrary?: DataTypeLibrary | null
 }>()
 
 const emit = defineEmits<{
@@ -69,13 +74,30 @@ function updateField(index: number, patch: Partial<DataField>) {
   fields.value = next
 }
 
-function handleTypeChange(index: number, type: DataField['type']) {
+function handleTypeChange(
+  index: number,
+  payload: {
+    type: DataFieldType
+    typeRef?: string
+    itemType?: DataFieldType
+    itemTypeRef?: string
+    itemItemType?: DataFieldType
+    itemItemTypeRef?: string
+  },
+) {
+  const { type, typeRef, itemType, itemTypeRef, itemItemType, itemItemTypeRef } = payload
   updateField(index, {
     type,
+    typeRef,
+    itemType: type === 'array' ? itemType || 'string' : undefined,
+    itemTypeRef: type === 'array' ? itemTypeRef : undefined,
+    itemItemType:
+      type === 'array' && itemType === 'array' ? itemItemType || 'string' : undefined,
+    itemItemTypeRef:
+      type === 'array' && itemType === 'array' ? itemItemTypeRef : undefined,
     value: defaultValue(type),
     arrayFields: undefined,
     objectFields: undefined,
-    // 引用类型不可绑定数据源
     ...(type === 'ref' ? { binding: '' as const, computeBody: '' } : {}),
   })
 }
@@ -131,8 +153,16 @@ function saveArrayFields(arrayFields: ArraySubField[]) {
 const editingObjectFields = computed(() => {
   const field = fields.value[editingIndex.value]
   if (!field || field.type !== 'json') return []
-  return resolveObjectFields(field.objectFields, field.value)
+  const existing = resolveObjectFields(field.objectFields, field.value)
+  if (field.typeRef) {
+    return objectFieldsFromTypeRef(field.typeRef, props.typeLibrary, existing)
+  }
+  return existing
 })
+
+const editingObjectTypeRef = computed(
+  () => fields.value[editingIndex.value]?.typeRef || '',
+)
 
 const editingArrayFields = computed(() => {
   const field = fields.value[editingIndex.value]
@@ -244,19 +274,19 @@ function saveComputeBody(body: string) {
           </template>
         </el-table-column>
 
-        <el-table-column label="数据类型" width="140">
+        <el-table-column label="数据类型" min-width="180">
           <template #default="{ row, $index }">
-            <el-select
-              :model-value="row.type"
-              @update:model-value="handleTypeChange($index, $event)"
-            >
-              <el-option
-                v-for="opt in DATA_FIELD_TYPE_OPTIONS"
-                :key="opt.value"
-                :label="opt.label"
-                :value="opt.value"
-              />
-            </el-select>
+            <DataFieldTypeTreeSelect
+              :type="row.type"
+              :type-ref="row.typeRef"
+              :item-type="row.itemType"
+              :item-type-ref="row.itemTypeRef"
+              :item-item-type="row.itemItemType"
+              :item-item-type-ref="row.itemItemTypeRef"
+              :library="typeLibrary"
+              allow-ref
+              @change="handleTypeChange($index, $event)"
+            />
           </template>
         </el-table-column>
 
@@ -267,6 +297,27 @@ function saveComputeBody(body: string) {
               placeholder="备注"
               @update:model-value="updateField($index, { remark: $event })"
             />
+          </template>
+        </el-table-column>
+
+        <el-table-column label="绑定数据源" min-width="140">
+          <template #default="{ row, $index }">
+            <div v-if="row.type === 'ref'" class="binding-disabled">不可绑定</div>
+            <el-select
+              v-else
+              :model-value="row.binding || ''"
+              placeholder="无"
+              style="width: 100%"
+              @update:model-value="handleBindingChange($index, $event)"
+            >
+              <el-option
+                v-for="opt in DATA_SOURCE_BINDING_OPTIONS"
+                :key="opt.value || 'none'"
+                :label="opt.label"
+                :value="opt.value"
+                :disabled="opt.disabled"
+              />
+            </el-select>
           </template>
         </el-table-column>
 
@@ -339,36 +390,6 @@ function saveComputeBody(body: string) {
           </template>
         </el-table-column>
 
-        <el-table-column label="绑定数据源" min-width="180">
-          <template #default="{ row, $index }">
-            <div v-if="row.type === 'ref'" class="binding-disabled">不可绑定</div>
-            <div v-else class="binding-cell">
-              <el-select
-                :model-value="row.binding || ''"
-                placeholder="无"
-                style="flex: 1; min-width: 0"
-                @update:model-value="handleBindingChange($index, $event)"
-              >
-                <el-option
-                  v-for="opt in DATA_SOURCE_BINDING_OPTIONS"
-                  :key="opt.value || 'none'"
-                  :label="opt.label"
-                  :value="opt.value"
-                  :disabled="opt.disabled"
-                />
-              </el-select>
-              <el-button
-                v-if="row.binding === 'computed'"
-                type="primary"
-                link
-                @click="openComputeEditor($index)"
-              >
-                编辑
-              </el-button>
-            </div>
-          </template>
-        </el-table-column>
-
         <el-table-column label="操作" width="72" fixed="right">
           <template #default="{ $index }">
             <el-button
@@ -386,12 +407,20 @@ function saveComputeBody(body: string) {
       v-model="objectDialogVisible"
       :fields="editingObjectFields"
       :icon-options="iconOptions"
+      :type-library="typeLibrary"
+      :type-ref="editingObjectTypeRef"
+      :schema-locked="Boolean(editingObjectTypeRef)"
       @save="saveObjectFields"
     />
     <ArrayFieldsDialog
       v-model="arrayDialogVisible"
       :fields="editingArrayFields"
       :icon-options="iconOptions"
+      :type-library="typeLibrary"
+      :default-item-type="fields[editingIndex]?.itemType"
+      :default-item-type-ref="fields[editingIndex]?.itemTypeRef"
+      :default-nested-item-type="fields[editingIndex]?.itemItemType"
+      :default-nested-item-type-ref="fields[editingIndex]?.itemItemTypeRef"
       @save="saveArrayFields"
     />
     <ComputedBindingDialog
@@ -399,6 +428,7 @@ function saveComputeBody(body: string) {
       :field="editingField"
       :sibling-fields="siblingFieldsForCompute"
       :component-props="componentProps"
+      :type-library="typeLibrary"
       @save="saveComputeBody"
     />
   </div>
@@ -445,12 +475,6 @@ function saveComputeBody(body: string) {
   display: flex;
   align-items: center;
   gap: 8px;
-}
-
-.binding-cell {
-  display: flex;
-  align-items: center;
-  gap: 6px;
 }
 
 .binding-disabled {

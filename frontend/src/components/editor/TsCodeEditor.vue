@@ -33,6 +33,8 @@ const props = defineProps<{
    */
   ambientExtra?: string
   returnType?: MethodReturnType
+  /** 精确返回类型（优先于 returnType，如 GoodsItem[]） */
+  returnTypeTs?: string
 }>()
 
 const emit = defineEmits<{
@@ -71,6 +73,12 @@ function mapTsType(type: string): string {
   }
 }
 
+function resolveTsType(type: string, tsType?: string): string {
+  const precise = tsType?.trim()
+  if (precise) return precise
+  return mapTsType(type)
+}
+
 function sanitizeName(name: string | undefined): string {
   const n = (name ?? '').trim() || 'fn'
   return /^[A-Za-z_$][\w$]*$/.test(n) ? n : 'fn'
@@ -81,17 +89,21 @@ function buildSignature(): string {
     .filter((item) => item.name.trim())
     .map((item) => {
       const name = item.name.trim()
-      return `${name}: ${mapTsType(item.type)}`
+      return `${name}: ${resolveTsType(item.type, item.tsType)}`
     })
     .join(', ')
-  const ret = mapTsType(props.returnType || 'void')
+  const ret =
+    props.returnTypeTs?.trim() || mapTsType(props.returnType || 'void')
   return `function ${sanitizeName(props.functionName)}(${paramList}): ${ret} {`
 }
 
 function buildAmbientHeader(): string {
   const varLines = (props.ambientVars ?? [])
     .filter((item) => item.name.trim())
-    .map((item) => `declare const ${item.name.trim()}: ${mapTsType(item.type)};`)
+    .map(
+      (item) =>
+        `declare const ${item.name.trim()}: ${resolveTsType(item.type, item.tsType)};`,
+    )
   const extra = (props.ambientExtra ?? '').trim()
   const parts = [...varLines, ...(extra ? extra.split('\n') : [])].filter(
     (line) => line.trim().length > 0,
@@ -353,14 +365,15 @@ watch(
   () =>
     [
       (props.ambientVars ?? [])
-        .map((item) => `${item.name}:${item.type}`)
+        .map((item) => `${item.name}:${item.tsType || item.type}`)
         .join('|'),
       props.ambientExtra ?? '',
+      props.returnTypeTs ?? '',
     ].join('##'),
   () => {
     if (!model) return
     const nextHeader = buildAmbientHeader()
-    if (nextHeader === lastAmbientHeader) return
+    if (nextHeader === lastAmbientHeader && buildSignature() === lastSignature) return
     restoreShell(extractBody(model.getValue()))
   },
 )

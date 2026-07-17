@@ -10,7 +10,6 @@ export type DataTypeKind =
   | 'boolean'
   | 'interface'
   | 'enum'
-  | 'combination'
 
 export const DATA_TYPE_KIND_OPTIONS: Array<{ label: string; value: DataTypeKind }> = [
   { label: '数字', value: 'number' },
@@ -18,7 +17,19 @@ export const DATA_TYPE_KIND_OPTIONS: Array<{ label: string; value: DataTypeKind 
   { label: '布尔值', value: 'boolean' },
   { label: '接口', value: 'interface' },
   { label: '枚举', value: 'enum' },
-  { label: '组合', value: 'combination' },
+]
+
+/** 类型用途分类 */
+export type DataTypeCategory = 'entity' | 'dto' | 'vo' | 'other'
+
+export const DATA_TYPE_CATEGORY_OPTIONS: Array<{
+  label: string
+  value: DataTypeCategory
+}> = [
+  { label: '实体', value: 'entity' },
+  { label: '数据传输对象', value: 'dto' },
+  { label: '视图对象', value: 'vo' },
+  { label: '其它', value: 'other' },
 ]
 
 /** 类型表达式中的原子引用 */
@@ -29,7 +40,6 @@ export type TypeAtomKind =
   | 'named'
   | 'generic'
   | 'any'
-  | 'unknown'
 
 export interface TypeAtom {
   kind: TypeAtomKind
@@ -77,6 +87,13 @@ export interface DataTypeDef {
   name: string
   kind: DataTypeKind
   remark: string
+  /** 关联数据表名（可选） */
+  tableName: string
+  /**
+   * 类型用途分类：
+   * entity 实体 / dto 数据传输对象 / vo 视图对象 / other 其它
+   */
+  category: DataTypeCategory
   generics: TypeGenericParam[]
   fields: InterfaceField[]
   enumMembers: EnumMember[]
@@ -142,6 +159,8 @@ export function createEmptyDataType(kind: DataTypeKind = 'string'): DataTypeDef 
     name: '',
     kind,
     remark: '',
+    tableName: '',
+    category: 'other',
     generics: [],
     fields: kind === 'interface' ? [createEmptyInterfaceField()] : [],
     enumMembers: kind === 'enum' ? [createEmptyEnumMember()] : [],
@@ -172,11 +191,22 @@ export function isValidGroupName(name: string): boolean {
 }
 
 export function kindNeedsConfig(kind: DataTypeKind): boolean {
-  return kind === 'interface' || kind === 'enum' || kind === 'combination'
+  return kind === 'interface' || kind === 'enum'
 }
 
 export function kindLabel(kind: DataTypeKind): string {
   return DATA_TYPE_KIND_OPTIONS.find((o) => o.value === kind)?.label ?? kind
+}
+
+export function categoryLabel(category: DataTypeCategory): string {
+  return DATA_TYPE_CATEGORY_OPTIONS.find((o) => o.value === category)?.label ?? category
+}
+
+function normalizeCategory(input: unknown): DataTypeCategory {
+  const raw = typeof input === 'string' ? input.trim() : ''
+  return DATA_TYPE_CATEGORY_OPTIONS.some((o) => o.value === raw)
+    ? (raw as DataTypeCategory)
+    : 'other'
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -185,7 +215,9 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 
 function normalizeAtom(input: unknown): TypeAtom {
   if (!isPlainObject(input)) return createEmptyTypeAtom()
-  const kind = String(input.kind ?? 'string') as TypeAtomKind
+  let kind = String(input.kind ?? 'string') as TypeAtomKind | 'unknown'
+  // 旧版 unknown → any；不再支持
+  if (kind === 'unknown') kind = 'any'
   const allowed: TypeAtomKind[] = [
     'number',
     'string',
@@ -193,9 +225,10 @@ function normalizeAtom(input: unknown): TypeAtom {
     'named',
     'generic',
     'any',
-    'unknown',
   ]
-  const safeKind = allowed.includes(kind) ? kind : 'string'
+  const safeKind = allowed.includes(kind as TypeAtomKind)
+    ? (kind as TypeAtomKind)
+    : 'string'
   const ref = typeof input.ref === 'string' ? input.ref.trim() : ''
   return {
     kind: safeKind,
@@ -214,7 +247,10 @@ export function normalizeTypeExpr(input: unknown): TypeExpr {
   if (!isPlainObject(input) || !Array.isArray(input.intersections) || !input.intersections.length) {
     return createEmptyTypeExpr()
   }
-  return { intersections: input.intersections.map(normalizeUnion) }
+  // 仅保留单原子类型，丢弃旧版 | / & 组合
+  const firstUnion = normalizeUnion(input.intersections[0])
+  const firstAtom = firstUnion.alternatives[0] ?? createEmptyTypeAtom()
+  return { intersections: [{ alternatives: [firstAtom] }] }
 }
 
 function normalizeGeneric(input: unknown): TypeGenericParam | null {
@@ -251,16 +287,21 @@ function normalizeEnumMember(input: unknown): EnumMember | null {
 
 function normalizeTypeDef(input: unknown): DataTypeDef | null {
   if (!isPlainObject(input)) return null
-  const kindRaw = String(input.kind ?? 'string') as DataTypeKind
+  let kindRaw = String(input.kind ?? 'string')
+  // 旧版「组合」迁移为接口
+  if (kindRaw === 'combination') kindRaw = 'interface'
   const kind = DATA_TYPE_KIND_OPTIONS.some((o) => o.value === kindRaw)
-    ? kindRaw
+    ? (kindRaw as DataTypeKind)
     : 'string'
   const generics = Array.isArray(input.generics)
     ? input.generics.map(normalizeGeneric).filter((x): x is TypeGenericParam => Boolean(x))
     : []
-  const fields = Array.isArray(input.fields)
+  let fields = Array.isArray(input.fields)
     ? input.fields.map(normalizeField).filter((x): x is InterfaceField => Boolean(x))
     : []
+  if (kind === 'interface' && !fields.length) {
+    fields = [createEmptyInterfaceField()]
+  }
   const enumMembers = Array.isArray(input.enumMembers)
     ? input.enumMembers.map(normalizeEnumMember).filter((x): x is EnumMember => Boolean(x))
     : []
@@ -269,10 +310,12 @@ function normalizeTypeDef(input: unknown): DataTypeDef | null {
     name: typeof input.name === 'string' ? input.name.trim() : '',
     kind,
     remark: typeof input.remark === 'string' ? input.remark : '',
+    tableName: typeof input.tableName === 'string' ? input.tableName.trim() : '',
+    category: kind === 'enum' ? 'other' : normalizeCategory(input.category),
     generics,
     fields,
     enumMembers,
-    combination: normalizeTypeExpr(input.combination),
+    combination: createEmptyTypeExpr(),
   }
 }
 
@@ -322,17 +365,18 @@ export function normalizeDataTypeLibrary(input: unknown): DataTypeLibrary {
   }
 }
 
-/** 单原子类型（非 | / & 组合） */
-export function isSimpleTypeExpr(expr: TypeExpr): boolean {
-  return (
-    expr.intersections.length === 1 &&
-    (expr.intersections[0]?.alternatives.length ?? 0) === 1
-  )
+/** 未选择类型（清空后） */
+export function createEmptyClearedTypeExpr(): TypeExpr {
+  return { intersections: [] }
 }
 
-/** 字段类型下拉：simple 原子 / combination 联合 */
+export function isTypeExprCleared(expr: TypeExpr): boolean {
+  return !expr.intersections[0]?.alternatives[0]
+}
+
+/** 字段类型下拉：仅单原子；清空时返回空字符串 */
 export function typeExprToSelectValue(expr: TypeExpr): string {
-  if (!isSimpleTypeExpr(expr)) return 'combination'
+  if (isTypeExprCleared(expr)) return ''
   const atom = expr.intersections[0]!.alternatives[0]!
   if (atom.kind === 'named') return `named:${atom.ref ?? ''}`
   if (atom.kind === 'generic') return `generic:${atom.ref ?? ''}`
@@ -340,7 +384,7 @@ export function typeExprToSelectValue(expr: TypeExpr): string {
 }
 
 export function selectValueToTypeExpr(value: string): TypeExpr {
-  if (value === 'combination') return createEmptyTypeExpr()
+  if (!value) return createEmptyClearedTypeExpr()
   if (value.startsWith('named:')) {
     return {
       intersections: [{ alternatives: [{ kind: 'named', ref: value.slice(6) }] }],
@@ -357,7 +401,6 @@ export function selectValueToTypeExpr(value: string): TypeExpr {
     'string',
     'boolean',
     'any',
-    'unknown',
   ]
   return {
     intersections: [
@@ -375,20 +418,14 @@ export function formatTypeExprPreview(
   expr: TypeExpr,
   namedLookup?: (id: string) => string,
 ): string {
-  if (!expr.intersections.length) return '—'
-  return expr.intersections
-    .map((union) => {
-      const parts = union.alternatives.map((atom) => {
-        if (atom.kind === 'named') {
-          const id = atom.ref ?? ''
-          return namedLookup?.(id) || id || '?'
-        }
-        if (atom.kind === 'generic') return atom.ref || 'T'
-        return atom.kind
-      })
-      return parts.length > 1 ? `(${parts.join(' | ')})` : parts[0] || '?'
-    })
-    .join(' & ')
+  if (isTypeExprCleared(expr)) return '—'
+  const atom = expr.intersections[0]!.alternatives[0]!
+  if (atom.kind === 'named') {
+    const id = atom.ref ?? ''
+    return namedLookup?.(id) || id || '?'
+  }
+  if (atom.kind === 'generic') return atom.ref || 'T'
+  return atom.kind
 }
 
 export function cloneTypeExpr(expr: TypeExpr): TypeExpr {

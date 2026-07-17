@@ -1,29 +1,51 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { Delete, Plus } from '@element-plus/icons-vue'
+import { Delete, Document, Monitor, Plus } from '@element-plus/icons-vue'
+import { ElMessage } from 'element-plus'
 import {
-  ARRAY_ITEM_TYPE_OPTIONS,
+  buildObjectValue,
   createEditorNode,
   defaultValue,
   editorNodeTreeLabel,
   editorNodesToObjectFields,
   objectFieldsToEditorNodes,
+  typeLabel,
+  valueToObjectFields,
   type DataFieldType,
   type ObjectEditorNode,
   type ObjectSubField,
 } from '../../types/page-data'
+import type { DataTypeLibrary } from '../../types/data-types'
+import { objectFieldsFromTypeRef } from '../../utils/named-type-fields'
+import {
+  buildObjectJsonSchema,
+  validateJsonAgainstSchema,
+} from '../../utils/json-type-schema'
 import IconValueSelect from './IconValueSelect.vue'
 import ColorPicker from './ColorPicker.vue'
+import DataFieldTypeTreeSelect from './DataFieldTypeTreeSelect.vue'
+import JsonCodeEditor from './JsonCodeEditor.vue'
 
-/** 对象内字段类型（含图标/颜色；不含嵌套对象） */
-const OBJECT_FIELD_TYPE_OPTIONS: Array<{ label: string; value: DataFieldType }> = [
-  { label: '字符串', value: 'string' },
-  { label: '数值', value: 'number' },
-  { label: '布尔值', value: 'boolean' },
-  { label: '图标', value: 'icon' },
-  { label: '颜色', value: 'color' },
-  { label: '数组', value: 'array' },
-]
+type EditorMode = 'visual' | 'code'
+
+const props = withDefaults(
+  defineProps<{
+    modelValue: boolean
+    fields: ObjectSubField[]
+    iconOptions?: Array<{ id: string; label: string }>
+    typeLibrary?: DataTypeLibrary | null
+    /** 具名类型 id：有值时按类型字段锁定结构 */
+    typeRef?: string | null
+    /** 按具名类型给定字段：只改值，不可增删/改类型 */
+    schemaLocked?: boolean
+  }>(),
+  { schemaLocked: false, typeRef: '' },
+)
+
+const emit = defineEmits<{
+  'update:modelValue': [visible: boolean]
+  save: [fields: ObjectSubField[]]
+}>()
 
 interface TreeItem {
   key: string
@@ -31,32 +53,108 @@ interface TreeItem {
   children?: TreeItem[]
 }
 
-const props = defineProps<{
-  modelValue: boolean
-  fields: ObjectSubField[]
-  iconOptions?: Array<{ id: string; label: string }>
-}>()
-
-const emit = defineEmits<{
-  'update:modelValue': [visible: boolean]
-  save: [fields: ObjectSubField[]]
-}>()
-
 const roots = ref<ObjectEditorNode[]>([])
 const selectedKey = ref('')
+const mode = ref<EditorMode>('visual')
+const codeText = ref('{}')
+
+const isSchemaLocked = computed(
+  () => Boolean(props.schemaLocked) || Boolean(props.typeRef?.trim()),
+)
+
+const codeSchema = computed(() =>
+  buildObjectJsonSchema({
+    typeRef: props.typeRef,
+    fields: props.fields,
+    library: props.typeLibrary,
+    schemaLocked: isSchemaLocked.value,
+  }),
+)
+
+function loadFromFields(fields: ObjectSubField[]) {
+  const typeRef = props.typeRef?.trim()
+  const incoming = typeRef
+    ? objectFieldsFromTypeRef(typeRef, props.typeLibrary, fields)
+    : fields
+  roots.value = objectFieldsToEditorNodes(incoming)
+  if (!roots.value.length && !isSchemaLocked.value) {
+    roots.value.push(createEditorNode(false))
+  }
+  selectedKey.value = roots.value[0]?.key ?? ''
+  syncCodeFromVisual()
+}
 
 watch(
   () => props.modelValue,
   (visible) => {
     if (!visible) return
-    roots.value = objectFieldsToEditorNodes(props.fields)
-    if (!roots.value.length) {
-      roots.value.push(createEditorNode(false))
-    }
-    selectedKey.value = roots.value[0]?.key ?? ''
+    mode.value = 'visual'
+    loadFromFields(props.fields)
   },
   { immediate: true },
 )
+
+function syncCodeFromVisual() {
+  const obj = buildObjectValue(editorNodesToObjectFields(roots.value))
+  try {
+    codeText.value = JSON.stringify(obj, null, 2)
+  } catch {
+    codeText.value = '{}'
+  }
+}
+
+/** 校验并解析代码模式 JSON；失败返回 null */
+function parseCodeJson(): Record<string, unknown> | null {
+  const raw = codeText.value.trim()
+  if (!raw) {
+    ElMessage.error('JSON 不能为空')
+    return null
+  }
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : '语法错误'
+    ElMessage.error(`JSON 语法错误：${msg}`)
+    return null
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    ElMessage.error('代码模式需要 JSON 对象（例如 { "id": "" }）')
+    return null
+  }
+  const typeErrors = validateJsonAgainstSchema(parsed, codeSchema.value)
+  if (typeErrors.length) {
+    ElMessage.error(typeErrors.slice(0, 3).join('；'))
+    return null
+  }
+  return parsed as Record<string, unknown>
+}
+
+function applyCodeToVisual(): boolean {
+  const parsed = parseCodeJson()
+  if (!parsed) return false
+  const fromValue = valueToObjectFields(parsed)
+  const typeRef = props.typeRef?.trim()
+  const merged = typeRef
+    ? objectFieldsFromTypeRef(typeRef, props.typeLibrary, fromValue)
+    : fromValue
+  roots.value = objectFieldsToEditorNodes(merged)
+  if (!roots.value.length && !isSchemaLocked.value) {
+    roots.value.push(createEditorNode(false))
+  }
+  selectedKey.value = roots.value[0]?.key ?? ''
+  return true
+}
+
+function switchMode(next: EditorMode) {
+  if (next === mode.value) return
+  if (mode.value === 'code' && next === 'visual') {
+    if (!applyCodeToVisual()) return
+  } else if (mode.value === 'visual' && next === 'code') {
+    syncCodeFromVisual()
+  }
+  mode.value = next
+}
 
 function buildTreeItems(nodes: ObjectEditorNode[]): TreeItem[] {
   return nodes.map((node, index) => ({
@@ -93,13 +191,8 @@ function findParentInfo(
 
 const selectedNode = computed(() => (selectedKey.value ? findNode(selectedKey.value) : null))
 
-/** 对象内字段 / 数组项各自的类型列表（显式含「图标」） */
-const typeOptions = computed(() => {
-  if (selectedNode.value?.isArrayItem) return ARRAY_ITEM_TYPE_OPTIONS
-  return OBJECT_FIELD_TYPE_OPTIONS
-})
-
 const canAddChild = computed(() => {
+  if (isSchemaLocked.value) return false
   const node = selectedNode.value
   if (!node) return false
   if (node.type === 'array') return true
@@ -111,16 +204,23 @@ function close() {
 }
 
 function addRootField() {
+  if (isSchemaLocked.value) return
   const node = createEditorNode(false)
   roots.value.push(node)
   selectedKey.value = node.key
 }
 
 function addChild() {
+  if (isSchemaLocked.value) return
   const parent = selectedNode.value
   if (!parent) return
   if (parent.type === 'array') {
     const child = createEditorNode(true)
+    if (parent.itemType) {
+      child.type = parent.itemType
+      child.typeRef = parent.itemTypeRef
+      child.value = defaultValue(parent.itemType)
+    }
     parent.children.push(child)
     selectedKey.value = child.key
     return
@@ -133,6 +233,7 @@ function addChild() {
 }
 
 function removeSelected() {
+  if (isSchemaLocked.value) return
   if (!selectedKey.value) return
   const info = findParentInfo(selectedKey.value)
   if (!info) return
@@ -146,15 +247,27 @@ function removeSelected() {
   selectedKey.value = roots.value[0]?.key ?? ''
 }
 
-function handleTypeChange(type: ObjectEditorNode['type']) {
+function handleTypeChange(payload: {
+  type: DataFieldType
+  typeRef?: string
+  itemType?: DataFieldType
+  itemTypeRef?: string
+}) {
+  if (isSchemaLocked.value) return
   const node = selectedNode.value
   if (!node) return
-  node.type = type
-  node.value = defaultValue(type)
-  node.children = type === 'array' || type === 'json' ? [] : []
+  node.type = payload.type
+  node.typeRef = payload.typeRef
+  node.value = defaultValue(payload.type)
+  node.children = []
+  node.itemType = payload.type === 'array' ? payload.itemType || 'string' : undefined
+  node.itemTypeRef = payload.type === 'array' ? payload.itemTypeRef : undefined
 }
 
 function handleSave() {
+  if (mode.value === 'code') {
+    if (!applyCodeToVisual()) return
+  }
   emit('save', editorNodesToObjectFields(roots.value))
   close()
 }
@@ -168,9 +281,40 @@ function handleSave() {
     destroy-on-close
     @update:model-value="emit('update:modelValue', $event)"
   >
-    <div class="editor-layout">
+    <div class="dialog-toolbar">
+      <p v-if="isSchemaLocked" class="hint">字段来自类型定义，请直接编辑各字段的数据值。</p>
+      <p v-else class="hint">可在可视化与代码模式间切换编辑对象。</p>
+      <div class="mode-tabs" role="tablist">
+        <el-tooltip content="可视化模式" placement="top">
+          <button
+            type="button"
+            class="mode-tab"
+            :class="{ active: mode === 'visual' }"
+            role="tab"
+            :aria-selected="mode === 'visual'"
+            @click="switchMode('visual')"
+          >
+            <el-icon :size="16"><Monitor /></el-icon>
+          </button>
+        </el-tooltip>
+        <el-tooltip content="代码模式" placement="top">
+          <button
+            type="button"
+            class="mode-tab"
+            :class="{ active: mode === 'code' }"
+            role="tab"
+            :aria-selected="mode === 'code'"
+            @click="switchMode('code')"
+          >
+            <el-icon :size="16"><Document /></el-icon>
+          </button>
+        </el-tooltip>
+      </div>
+    </div>
+
+    <div v-show="mode === 'visual'" class="editor-layout">
       <div class="tree-panel">
-        <div class="tree-toolbar">
+        <div v-if="!isSchemaLocked" class="tree-toolbar">
           <el-button type="primary" link :icon="Plus" @click="addRootField">添加字段</el-button>
           <el-button type="primary" link :icon="Plus" :disabled="!canAddChild" @click="addChild">
             添加子项
@@ -179,7 +323,9 @@ function handleSave() {
             删除
           </el-button>
         </div>
+        <el-empty v-if="!treeData.length" description="类型暂无字段" :image-size="64" />
         <el-tree
+          v-else
           :data="treeData"
           node-key="key"
           highlight-current
@@ -190,33 +336,40 @@ function handleSave() {
       </div>
 
       <div v-if="selectedNode" class="props-panel">
-        <div class="props-title">字段属性</div>
+        <div class="props-title">{{ isSchemaLocked ? '字段值' : '字段属性' }}</div>
 
         <template v-if="!selectedNode.isArrayItem">
           <div class="field-row">
             <label>字段名</label>
-            <el-input v-model="selectedNode.name" placeholder="字段名" />
+            <el-input
+              v-if="!isSchemaLocked"
+              v-model="selectedNode.name"
+              placeholder="字段名"
+            />
+            <span v-else class="readonly-text">{{ selectedNode.name || '—' }}</span>
           </div>
         </template>
 
-        <div class="field-row">
+        <div v-if="!isSchemaLocked" class="field-row">
           <label>数据类型</label>
-          <el-select
-            :model-value="selectedNode.type"
-            placeholder="选择类型"
-            @update:model-value="handleTypeChange"
-          >
-            <el-option
-              v-for="opt in typeOptions"
-              :key="opt.value"
-              :label="opt.label"
-              :value="opt.value"
-            />
-          </el-select>
+          <DataFieldTypeTreeSelect
+            :type="selectedNode.type"
+            :type-ref="selectedNode.typeRef"
+            :item-type="selectedNode.itemType"
+            :item-type-ref="selectedNode.itemTypeRef"
+            :library="typeLibrary"
+            :composable="selectedNode.isArrayItem"
+            :nested="!selectedNode.isArrayItem"
+            @change="handleTypeChange"
+          />
+        </div>
+        <div v-else class="field-row">
+          <label>数据类型</label>
+          <span class="readonly-text">{{ typeLabel(selectedNode.type) }}</span>
         </div>
 
         <el-alert
-          v-if="selectedNode.type === 'json' && !selectedNode.isArrayItem"
+          v-if="!isSchemaLocked && selectedNode.type === 'json' && !selectedNode.isArrayItem"
           type="warning"
           :closable="false"
           title="嵌套对象类型已不支持，请改选其他数据类型"
@@ -224,7 +377,10 @@ function handleSave() {
           class="legacy-alert"
         />
 
-        <div v-if="selectedNode.type === 'string'" class="field-row">
+        <div
+          v-if="selectedNode.type === 'string' || selectedNode.type === 'any'"
+          class="field-row"
+        >
           <label>数据值</label>
           <el-input
             :model-value="String(selectedNode.value ?? '')"
@@ -280,6 +436,10 @@ function handleSave() {
       </div>
     </div>
 
+    <div v-if="mode === 'code'" class="code-panel">
+      <JsonCodeEditor v-model="codeText" :schema="codeSchema" :min-height="360" />
+    </div>
+
     <template #footer>
       <el-button @click="close">取消</el-button>
       <el-button type="primary" @click="handleSave">保存</el-button>
@@ -288,6 +448,61 @@ function handleSave() {
 </template>
 
 <style scoped>
+.dialog-toolbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.hint {
+  margin: 0;
+  flex: 1;
+  font-size: 13px;
+  color: #64748b;
+  line-height: 1.5;
+}
+
+.mode-tabs {
+  display: inline-flex;
+  flex-shrink: 0;
+  padding: 2px;
+  border: 1px solid #e4e7ed;
+  border-radius: 8px;
+  background: #f5f7fa;
+}
+
+.mode-tab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 28px;
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: #909399;
+  cursor: pointer;
+}
+
+.mode-tab:hover {
+  color: #409eff;
+}
+
+.mode-tab.active {
+  background: #fff;
+  color: #409eff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+}
+
+.readonly-text {
+  font-size: 13px;
+  color: #334155;
+}
+
 .editor-layout {
   display: grid;
   grid-template-columns: 280px 1fr;
@@ -335,6 +550,10 @@ function handleSave() {
 .field-row label {
   font-size: 13px;
   color: #606266;
+}
+
+.code-panel {
+  min-height: 360px;
 }
 
 :deep(.el-input-number) {

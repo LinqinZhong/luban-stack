@@ -2,7 +2,6 @@
 import { computed, reactive, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import {
-  COMPOSABLE_FIELD_TYPE_OPTIONS,
   defaultValue,
   type DataFieldType,
   type DataFieldValue,
@@ -12,8 +11,10 @@ import {
   type ComponentPropDef,
 } from '../../types/component'
 import { normalizePropDefaultValue } from '../../utils/component-props'
+import type { DataTypeLibrary } from '../../types/data-types'
 import IconValueSelect from './IconValueSelect.vue'
 import ColorPicker from './ColorPicker.vue'
+import DataFieldTypeTreeSelect from './DataFieldTypeTreeSelect.vue'
 
 const props = defineProps<{
   modelValue: boolean
@@ -21,6 +22,7 @@ const props = defineProps<{
   /** 已有参数名（不含当前），用于重名校验 */
   existingNames?: string[]
   iconOptions?: Array<{ id: string; label: string }>
+  typeLibrary?: DataTypeLibrary | null
 }>()
 
 const emit = defineEmits<{
@@ -75,6 +77,11 @@ function syncDraft(source: ComponentPropDef | null) {
   const next = source ? { ...source } : createEmptyComponentProp()
   draft.name = next.name
   draft.type = next.type
+  draft.typeRef = next.typeRef
+  draft.itemType = next.itemType
+  draft.itemTypeRef = next.itemTypeRef
+  draft.itemItemType = next.itemItemType
+  draft.itemItemTypeRef = next.itemItemTypeRef
   draft.remark = next.remark
   draft.defaultValue = next.defaultValue
   draft.twoWay = next.twoWay
@@ -98,13 +105,28 @@ watch(
   },
 )
 
-function onTypeChange(raw: DataFieldType | string) {
-  const type = (
-    typeof raw === 'string' ? raw : String(raw ?? '')
-  ) as DataFieldType
-  draft.type = type
-  draft.defaultValue = defaultValue(type)
-  if (type === 'json' || type === 'array') {
+function onTypeChange(payload: {
+  type: DataFieldType
+  typeRef?: string
+  itemType?: DataFieldType
+  itemTypeRef?: string
+  itemItemType?: DataFieldType
+  itemItemTypeRef?: string
+}) {
+  draft.type = payload.type
+  draft.typeRef = payload.typeRef
+  draft.itemType = payload.type === 'array' ? payload.itemType || 'string' : undefined
+  draft.itemTypeRef = payload.type === 'array' ? payload.itemTypeRef : undefined
+  draft.itemItemType =
+    payload.type === 'array' && payload.itemType === 'array'
+      ? payload.itemItemType || 'string'
+      : undefined
+  draft.itemItemTypeRef =
+    payload.type === 'array' && payload.itemType === 'array'
+      ? payload.itemItemTypeRef
+      : undefined
+  draft.defaultValue = defaultValue(payload.type)
+  if (payload.type === 'json' || payload.type === 'array') {
     jsonDefaultText.value = formatDefaultForJson(draft.defaultValue)
   } else {
     jsonDefaultText.value = ''
@@ -162,6 +184,11 @@ function handleSave() {
   emit('save', {
     name,
     type: draft.type,
+    typeRef: draft.typeRef,
+    itemType: draft.itemType,
+    itemTypeRef: draft.itemTypeRef,
+    itemItemType: draft.itemItemType,
+    itemItemTypeRef: draft.itemItemTypeRef,
     remark: draft.remark.trim(),
     defaultValue: defaultVal,
     twoWay: Boolean(draft.twoWay),
@@ -185,18 +212,17 @@ function handleSave() {
       </el-form-item>
 
       <el-form-item label="数据类型" required>
-        <el-select
-          :model-value="draft.type"
-          style="width: 100%"
-          @update:model-value="onTypeChange"
-        >
-          <el-option
-            v-for="opt in COMPOSABLE_FIELD_TYPE_OPTIONS"
-            :key="opt.value"
-            :label="opt.label"
-            :value="opt.value"
-          />
-        </el-select>
+        <DataFieldTypeTreeSelect
+          :type="draft.type"
+          :type-ref="draft.typeRef"
+          :item-type="draft.itemType"
+          :item-type-ref="draft.itemTypeRef"
+          :item-item-type="draft.itemItemType"
+          :item-item-type-ref="draft.itemItemTypeRef"
+          :library="typeLibrary"
+          composable
+          @change="onTypeChange"
+        />
       </el-form-item>
 
       <el-form-item label="备注">

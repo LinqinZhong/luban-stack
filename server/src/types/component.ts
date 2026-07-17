@@ -10,6 +10,15 @@ export interface ComponentPropDef {
   twoWay: boolean
   /** 父页面配置组件实例时是否必填 */
   required?: boolean
+  /** 引用 types/ 库中的具名类型 id */
+  typeRef?: string
+  /** type === 'array' 时的元素类型 */
+  itemType?: DataFieldType
+  /** 元素类型的具名引用 */
+  itemTypeRef?: string
+  /** itemType === 'array' 时，内层数组的元素类型 */
+  itemItemType?: DataFieldType
+  itemItemTypeRef?: string
 }
 
 export interface ComponentEventDef {
@@ -132,16 +141,43 @@ export function normalizeComponentConfig(
         .map((item) => {
           const row = item as Partial<ComponentPropDef>
           const propName = String(row.name ?? '').trim()
+          const type = (row.type as DataFieldType) || 'string'
+          const typeRef =
+            typeof row.typeRef === 'string' && row.typeRef.trim()
+              ? row.typeRef.trim()
+              : undefined
+          const itemType =
+            typeof row.itemType === 'string' && row.itemType.trim()
+              ? (row.itemType as DataFieldType)
+              : undefined
+          const itemTypeRef =
+            typeof row.itemTypeRef === 'string' && row.itemTypeRef.trim()
+              ? row.itemTypeRef.trim()
+              : undefined
+          const itemItemType =
+            typeof row.itemItemType === 'string' && row.itemItemType.trim()
+              ? (row.itemItemType as DataFieldType)
+              : undefined
+          const itemItemTypeRef =
+            typeof row.itemItemTypeRef === 'string' && row.itemItemTypeRef.trim()
+              ? row.itemItemTypeRef.trim()
+              : undefined
           return {
             name: propName,
-            type: (row.type as DataFieldType) || 'string',
+            type,
             remark: String(row.remark ?? ''),
-            defaultValue: normalizePropDefault(
-              (row.type as DataFieldType) || 'string',
-              row.defaultValue,
-            ),
+            defaultValue: normalizePropDefault(type, row.defaultValue),
             twoWay: Boolean(row.twoWay),
             required: Boolean(row.required),
+            ...(typeRef ? { typeRef } : {}),
+            ...(type === 'array' && itemType ? { itemType } : {}),
+            ...(type === 'array' && itemTypeRef ? { itemTypeRef } : {}),
+            ...(type === 'array' && itemType === 'array' && itemItemType
+              ? { itemItemType }
+              : {}),
+            ...(type === 'array' && itemType === 'array' && itemItemTypeRef
+              ? { itemItemTypeRef }
+              : {}),
           }
         })
     : []

@@ -1,9 +1,17 @@
 import { request } from './index'
 import type { IconDefinition, IconLibrary } from '../types/icon-library'
 import type { DataTypeGroup, DataTypeLibrary } from '../types/data-types'
+import type {
+  MysqlColumnDef,
+  MysqlConnectionPayload,
+  MysqlDatabaseConfig,
+  MysqlLibrary,
+  MysqlTableDef,
+} from '../types/mysql'
 
 export type { IconDefinition, IconLibrary }
 export type { DataTypeGroup, DataTypeLibrary }
+export type { MysqlDatabaseConfig, MysqlLibrary, MysqlColumnDef, MysqlTableDef }
 
 export interface VoiderProjectConfig {
   name: string
@@ -102,6 +110,109 @@ export function saveDataTypeLibrary(payload: {
     method: 'PUT',
     body: JSON.stringify(payload),
   })
+}
+
+export function getMysqlLibrary(projectPath: string) {
+  return request<MysqlLibrary>(
+    `/api/projects/mysql?projectPath=${encodeURIComponent(projectPath)}`,
+  )
+}
+
+export function saveMysqlLibrary(payload: {
+  projectPath: string
+  databases: MysqlDatabaseConfig[]
+}) {
+  return request<MysqlLibrary>('/api/projects/mysql', {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  })
+}
+
+export function testMysqlConnection(payload: MysqlConnectionPayload) {
+  return request<{
+    ok: true
+    message: string
+    tables: MysqlLibrary['databases'][number]['tables']
+    serverVersion: string
+  }>('/api/projects/mysql/test', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+function mysqlTableRequest<T>(path: string, payload: Record<string, unknown>) {
+  return request<T>(path, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export function listMysqlTables(payload: MysqlConnectionPayload) {
+  return mysqlTableRequest<{ tables: MysqlLibrary['databases'][number]['tables'] }>(
+    '/api/projects/mysql/tables/list',
+    payload,
+  )
+}
+
+export function getMysqlTableColumns(
+  payload: MysqlConnectionPayload & { tableName: string },
+) {
+  return mysqlTableRequest<{ columns: MysqlColumnDef[] }>(
+    '/api/projects/mysql/tables/columns',
+    payload,
+  )
+}
+
+export function createMysqlTable(
+  payload: MysqlConnectionPayload & { table: MysqlTableDef },
+) {
+  return mysqlTableRequest<{ tables: MysqlLibrary['databases'][number]['tables'] }>(
+    '/api/projects/mysql/tables/create',
+    payload,
+  )
+}
+
+export function updateMysqlTableMeta(
+  payload: MysqlConnectionPayload & {
+    tableName: string
+    name: string
+    remark: string
+  },
+) {
+  return mysqlTableRequest<{ tables: MysqlLibrary['databases'][number]['tables'] }>(
+    '/api/projects/mysql/tables/update',
+    payload,
+  )
+}
+
+export function designMysqlTable(
+  payload: MysqlConnectionPayload & {
+    tableName: string
+    columns: MysqlColumnDef[]
+  },
+) {
+  return mysqlTableRequest<{ tables: MysqlLibrary['databases'][number]['tables'] }>(
+    '/api/projects/mysql/tables/design',
+    payload,
+  )
+}
+
+export function dropMysqlTable(
+  payload: MysqlConnectionPayload & { tableName: string },
+) {
+  return mysqlTableRequest<{ tables: MysqlLibrary['databases'][number]['tables'] }>(
+    '/api/projects/mysql/tables/drop',
+    payload,
+  )
+}
+
+export function truncateMysqlTable(
+  payload: MysqlConnectionPayload & { tableName: string },
+) {
+  return mysqlTableRequest<{ tables: MysqlLibrary['databases'][number]['tables'] }>(
+    '/api/projects/mysql/tables/truncate',
+    payload,
+  )
 }
 
 export function setProjectEntryPage(payload: {
