@@ -52,7 +52,8 @@ export const DM = {
   sourceField: '\u6e90\u5b57\u6bb5',
   pickSourceField: '\u9009\u62e9\u6e90\u5b57\u6bb5',
   sql: 'SQL \u8bed\u53e5',
-  sqlPh: '\u81ea\u5b9a\u4e49 SQL\uff0c\u53ef\u4f7f\u7528\u5165\u53c2\u5360\u4f4d',
+  sqlPh:
+    '\u81ea\u5b9a\u4e49 SQL\uff0c\u5165\u53c2\u7528 {name} \u6216 {{name}}\uff0c\u4f8b\u5982 name LIKE \'%{keyword}%\'',
   mappingEmpty:
     '\u51fa\u53c2\u6682\u65e0\u5b57\u6bb5\uff0c\u8bf7\u5148\u914d\u7f6e\u51fa\u53c2\u7c7b\u578b',
   columnExpr: '\u5217 / \u8868\u8fbe\u5f0f',

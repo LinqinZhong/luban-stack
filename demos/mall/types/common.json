@@ -288,8 +288,11 @@
               {
                 "alternatives": [
                   {
-                    "kind": "generic",
-                    "ref": "T"
+                    "kind": "array",
+                    "item": {
+                      "kind": "generic",
+                      "ref": "T"
+                    }
                   }
                 ]
               }

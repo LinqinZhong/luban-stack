@@ -22,8 +22,9 @@ import {
   type ServiceController,
 } from '../../types/backend-services'
 import type { DataTypeLibrary } from '../../types/data-types'
-import ServiceProcessorPanel from './ServiceProcessorPanel.vue'
-import type { DataMethodDebugTarget } from './DataMethodDebugPanel.vue'
+import ServiceProcessorPanel, {
+  type ProcessorDebugTarget,
+} from './ServiceProcessorPanel.vue'
 
 type ServiceLayer = 'controller' | 'service' | 'data' | 'schedule'
 
@@ -36,12 +37,15 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   'update:layer': [layer: ServiceLayer]
-  'update:debug-target': [target: DataMethodDebugTarget | null]
+  'update:debug-target': [target: ProcessorDebugTarget | null]
 }>()
 
 const dataProcessorPanelRef = ref<InstanceType<typeof ServiceProcessorPanel> | null>(
   null,
 )
+const businessProcessorPanelRef = ref<InstanceType<
+  typeof ServiceProcessorPanel
+> | null>(null)
 
 const layerTabs = [
   { key: 'controller' as const, label: '控制器', icon: Connection },
@@ -63,18 +67,31 @@ const editingControllerId = ref<string | null>(null)
 function setLayer(layer: ServiceLayer) {
   activeLayer.value = layer
   emit('update:layer', layer)
-  if (layer !== 'data') emit('update:debug-target', null)
+  if (layer !== 'data' && layer !== 'service') {
+    emit('update:debug-target', null)
+  }
 }
 
-function onDebugTarget(target: DataMethodDebugTarget | null) {
+function onDebugTarget(target: ProcessorDebugTarget | null) {
   emit('update:debug-target', target)
 }
 
 function applyDebugParams(params: Record<string, unknown>) {
+  if (activeLayer.value === 'service') {
+    businessProcessorPanelRef.value?.updateDebugParams(params)
+    return
+  }
   dataProcessorPanelRef.value?.updateDebugParams(params)
 }
 
-defineExpose({ applyDebugParams })
+function applyFlowDebugCursor(state: {
+  cursorNodeId: string | null
+  visitedNodeIds: string[]
+}) {
+  businessProcessorPanelRef.value?.applyFlowDebugCursor(state)
+}
+
+defineExpose({ applyDebugParams, applyFlowDebugCursor })
 
 
 let saveTimer: ReturnType<typeof setTimeout> | null = null
@@ -455,10 +472,12 @@ function onApiConfig() {
     </div>
     <ServiceProcessorPanel
       v-else-if="activeLayer === 'service'"
+      ref="businessProcessorPanelRef"
       :project-path="projectPath"
       :service-id="serviceId"
       layer="business"
       :type-library="typeLibrary"
+      @update:debug-target="onDebugTarget"
     />
     <ServiceProcessorPanel
       v-else-if="activeLayer === 'data'"

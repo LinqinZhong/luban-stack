@@ -10,7 +10,9 @@ import {
   createEmptyProcessorMethod,
   createEmptyProcessorTypeExpr,
   createEmptyServiceProcessor,
+  createDefaultMethodFlow,
   DATA_METHOD_OPERATION_OPTIONS,
+  type MethodFlow,
   type ProcessorLayerKind,
   type ProcessorMethod,
   type ProcessorMethodParam,
@@ -29,8 +31,10 @@ import EditDataMethodDialog, {
   type DataMethodEditPayload,
 } from './EditDataMethodDialog.vue'
 import type { DataMethodDebugTarget } from './DataMethodDebugPanel.vue'
+import type { MethodFlowDebugTarget } from './MethodFlowDebugPanel.vue'
 import MethodParamsDialog from './MethodParamsDialog.vue'
 import TypeGenericArgsDialog from './TypeGenericArgsDialog.vue'
+import MethodFlowEditor from './method-flow/MethodFlowEditor.vue'
 
 const PROCESSOR_EXCLUDE_TYPES: DataFieldType[] = ['color', 'ref', 'icon']
 
@@ -41,8 +45,12 @@ const props = defineProps<{
   typeLibrary: DataTypeLibrary | null
 }>()
 
+export type ProcessorDebugTarget =
+  | ({ kind: 'data' } & DataMethodDebugTarget)
+  | ({ kind: 'flow' } & MethodFlowDebugTarget)
+
 const emit = defineEmits<{
-  'update:debug-target': [target: DataMethodDebugTarget | null]
+  'update:debug-target': [target: ProcessorDebugTarget | null]
 }>()
 
 const processors = ref<ServiceProcessor[]>([])
@@ -72,10 +80,29 @@ const dataMethodDialogVisible = ref(false)
 const dataMethodEditIndex = ref(-1)
 const selectedMethodId = ref('')
 
+/** 业务层：工作流编辑中的方法 */
+const flowEditing = ref<{ processorId: string; methodId: string } | null>(
+  null,
+)
+const flowSelectedNodeId = ref<string | null>(null)
+const flowDebugCursorId = ref<string | null>(null)
+const flowDebugVisitedIds = ref<string[]>([])
+
 let saveTimer: ReturnType<typeof setTimeout> | null = null
 
 const isDataLayer = computed(() => props.layer === 'data')
 const isBusinessLayer = computed(() => props.layer === 'business')
+
+const flowEditingMethod = computed(() => {
+  const ctx = flowEditing.value
+  if (!ctx || !isBusinessLayer.value) return null
+  const proc = processors.value.find((p) => p.id === ctx.processorId)
+  return proc?.methods.find((m) => m.id === ctx.methodId) ?? null
+})
+
+const flowEditingFlow = computed(
+  () => flowEditingMethod.value?.flow ?? createDefaultMethodFlow(),
+)
 
 const layerLabel = computed(() =>
   props.layer === 'business' ? '业务层' : '数据层',
@@ -260,6 +287,7 @@ function paramsSummary(params: ProcessorMethodParam[]): string {
 watch(
   () => [props.projectPath, props.serviceId, props.layer] as const,
   ([path, id]) => {
+    flowEditing.value = null
     if (path && id) void loadProcessors()
     else {
       processors.value = []
@@ -441,6 +469,44 @@ function updateMethod(index: number, patch: Partial<ProcessorMethod>) {
   )
 }
 
+function openFlowEditor(index: number) {
+  if (!isBusinessLayer.value || !activeProcessor.value) return
+  const method = methods.value[index]
+  if (!method) return
+  if (!method.flow?.nodes?.length) {
+    updateMethod(index, { flow: createDefaultMethodFlow() })
+  }
+  flowSelectedNodeId.value = 'start'
+  flowDebugCursorId.value = null
+  flowDebugVisitedIds.value = []
+  flowEditing.value = {
+    processorId: activeProcessor.value.id,
+    methodId: method.id,
+  }
+}
+
+function closeFlowEditor() {
+  flowEditing.value = null
+  flowSelectedNodeId.value = null
+  flowDebugCursorId.value = null
+  flowDebugVisitedIds.value = []
+}
+
+function updateFlowMethod(flow: MethodFlow) {
+  const ctx = flowEditing.value
+  if (!ctx) return
+  const procIndex = processors.value.findIndex((p) => p.id === ctx.processorId)
+  if (procIndex < 0) return
+  const proc = processors.value[procIndex]!
+  const nextMethods = proc.methods.map((m) =>
+    m.id === ctx.methodId ? { ...m, flow } : m,
+  )
+  processors.value = processors.value.map((p, i) =>
+    i === procIndex ? { ...p, methods: nextMethods } : p,
+  )
+  persistProcessors()
+}
+
 async function removeMethod(index: number) {
   const target = methods.value[index]
   if (!target) return
@@ -522,11 +588,12 @@ const selectedMethod = computed(() => {
   return methods.value.find((m) => m.id === selectedMethodId.value) ?? null
 })
 
-const debugTarget = computed<DataMethodDebugTarget | null>(() => {
+const dataDebugTarget = computed<ProcessorDebugTarget | null>(() => {
   if (!isDataLayer.value || !activeProcessor.value || !selectedMethod.value) {
     return null
   }
   return {
+    kind: 'data',
     projectPath: props.projectPath,
     serviceId: props.serviceId,
     processorId: activeProcessor.value.id,
@@ -534,6 +601,31 @@ const debugTarget = computed<DataMethodDebugTarget | null>(() => {
     method: selectedMethod.value,
   }
 })
+
+const flowDebugTarget = computed<ProcessorDebugTarget | null>(() => {
+  if (!isBusinessLayer.value || !flowEditing.value || !flowEditingMethod.value) {
+    return null
+  }
+  const proc = processors.value.find(
+    (p) => p.id === flowEditing.value!.processorId,
+  )
+  if (!proc) return null
+  return {
+    kind: 'flow',
+    projectPath: props.projectPath,
+    serviceId: props.serviceId,
+    processorId: proc.id,
+    processorName: proc.name,
+    method: flowEditingMethod.value,
+    flow: flowEditingFlow.value,
+    selectedNodeId: flowSelectedNodeId.value,
+    dataProcessors: dataLayerProcessors.value,
+  }
+})
+
+const debugTarget = computed(
+  () => flowDebugTarget.value ?? dataDebugTarget.value,
+)
 
 watch(
   debugTarget,
@@ -544,6 +636,18 @@ watch(
 onBeforeUnmount(() => {
   emit('update:debug-target', null)
 })
+
+function onFlowSelectedNode(nodeId: string | null) {
+  flowSelectedNodeId.value = nodeId
+}
+
+function onFlowDebugCursor(state: {
+  cursorNodeId: string | null
+  visitedNodeIds: string[]
+}) {
+  flowDebugCursorId.value = state.cursorNodeId
+  flowDebugVisitedIds.value = state.visitedNodeIds
+}
 
 watch(
   () => [activeProcessorId.value, methods.value.map((m) => m.id).join(',')] as const,
@@ -588,6 +692,20 @@ function saveDataMethodEdit(payload: DataMethodEditPayload) {
 }
 
 function updateDebugParams(params: Record<string, unknown>) {
+  if (isBusinessLayer.value && flowEditing.value) {
+    const ctx = flowEditing.value
+    const procIndex = processors.value.findIndex((p) => p.id === ctx.processorId)
+    if (procIndex < 0) return
+    const proc = processors.value[procIndex]!
+    const nextMethods = proc.methods.map((m) =>
+      m.id === ctx.methodId ? { ...m, debugParams: { ...params } } : m,
+    )
+    processors.value = processors.value.map((p, i) =>
+      i === procIndex ? { ...p, methods: nextMethods } : p,
+    )
+    persistProcessors()
+    return
+  }
   const id = selectedMethodId.value
   if (!id) return
   const index = methods.value.findIndex((m) => m.id === id)
@@ -595,11 +713,25 @@ function updateDebugParams(params: Record<string, unknown>) {
   updateMethod(index, { debugParams: { ...params } })
 }
 
-defineExpose({ updateDebugParams })
+defineExpose({ updateDebugParams, applyFlowDebugCursor: onFlowDebugCursor })
 </script>
 
 <template>
-  <div class="proc-workspace">
+  <MethodFlowEditor
+    v-if="isBusinessLayer && flowEditing && flowEditingMethod"
+    :method-name="flowEditingMethod.name"
+    :flow="flowEditingFlow"
+    :method-params="flowEditingMethod.params"
+    :method-output="flowEditingMethod.output"
+    :data-processors="dataLayerProcessors"
+    :type-library="typeLibrary"
+    :debug-cursor-id="flowDebugCursorId"
+    :debug-visited-ids="flowDebugVisitedIds"
+    @back="closeFlowEditor"
+    @update:flow="updateFlowMethod"
+    @update:selected-node="onFlowSelectedNode"
+  />
+  <div v-else class="proc-workspace">
     <aside class="proc-pane">
       <div class="pane-head">
         <span class="pane-title">处理器</span>
@@ -774,6 +906,21 @@ defineExpose({ updateDebugParams })
               />
             </template>
           </el-table-column>
+          <el-table-column
+            v-if="isBusinessLayer"
+            label="编辑"
+            width="64"
+            align="center"
+          >
+            <template #default="{ $index }">
+              <el-button
+                type="primary"
+                link
+                :icon="EditPen"
+                @click.stop="openFlowEditor($index)"
+              />
+            </template>
+          </el-table-column>
           <el-table-column label="删除" width="64" align="center">
             <template #default="{ $index }">
               <el-button
@@ -885,10 +1032,17 @@ defineExpose({ updateDebugParams })
       :type-options="typeOptions"
       :entity-ref="activeProcessor?.entityRef"
       @save="saveDataMethodEdit"
-    />  </div>
+    />
+  </div>
 </template>
 
 <style scoped>
+:deep(.method-flow-editor) {
+  flex: 1;
+  min-height: 0;
+  height: 100%;
+}
+
 .proc-workspace {
   flex: 1;
   min-height: 0;

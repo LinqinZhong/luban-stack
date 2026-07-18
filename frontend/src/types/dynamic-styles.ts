@@ -258,6 +258,8 @@ export const STYLE_OVERRIDE_KEYS = [
   'text',
   'textSize',
   'textColor',
+  'value',
+  'placeholder',
   'color',
 ] as const
 

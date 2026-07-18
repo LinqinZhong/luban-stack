@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, inject, onBeforeUnmount, provide, shallowRef, watch, type CSSProperties, type ComputedRef } from 'vue'
+import { computed, inject, onBeforeUnmount, provide, ref, shallowRef, watch, type CSSProperties, type ComputedRef } from 'vue'
 import type { IconLibrary } from '../../types/icon-library'
 import { findIcon, iconSymbolId } from '../../types/icon-library'
 import type { PageData } from '../../types/page-data'
@@ -444,6 +444,75 @@ const buttonStyle = computed(() => ({
   cursor: props.selectable || previewInteractive.value ? 'pointer' : 'default',
   minHeight: height.value === 'wrap_content' ? '36px' : undefined,
 }))
+
+const inputValue = computed(() => attrs.value.value ?? '')
+const inputPlaceholder = computed(() => attrs.value.placeholder || '')
+const inputStyle = computed(() => ({
+  ...layoutStyle.value,
+  display: 'block',
+  width: '100%',
+  background: attrs.value.background || '#ffffff',
+  color: attrs.value.textColor || '#303133',
+  fontSize: `${parseNumber(attrs.value.textSize, 14)}px`,
+  outline: 'none',
+  minHeight: height.value === 'wrap_content' ? '36px' : undefined,
+}))
+
+/** 预览态本地覆写（未绑定字段时也能打字） */
+const inputLocalValue = ref<string | null>(null)
+watch(
+  () => props.node.attrs.value,
+  () => {
+    inputLocalValue.value = null
+  },
+)
+
+/** value="{field}" → 预览输入写回数据池 */
+function boundInputFieldName(): string | null {
+  const raw = (props.node.attrs.value ?? '').trim()
+  const m = raw.match(/^\{([A-Za-z_][\w]*)\}$/)
+  return m?.[1] ?? null
+}
+
+const inputDisplayValue = computed(() => {
+  // 已双向绑定：始终跟数据池走，保证外部 setData 能刷新输入框
+  if (boundInputFieldName()) return inputValue.value
+  if (!props.selectable && inputLocalValue.value != null) {
+    return inputLocalValue.value
+  }
+  return inputValue.value
+})
+
+function handleInputClick(event: MouseEvent) {
+  if (props.selectable) {
+    handleSelect(event)
+    return
+  }
+  event.stopPropagation()
+}
+
+function handleInputPointerDown(event: PointerEvent) {
+  if (props.selectable) return
+  // 预览态阻止冒泡，避免父级长按/选中逻辑抢走焦点
+  event.stopPropagation()
+}
+
+function handleInputInput(event: Event) {
+  if (props.selectable || !props.interactEnabled) return
+  const next = (event.target as HTMLInputElement).value
+  const field = boundInputFieldName()
+  if (field) {
+    emit('interact', {
+      eventKey: '__setData',
+      raw: '',
+      scope: props.node.scope,
+      dollarProps: props.dollarProps,
+      eventArgs: { prop: field, value: next },
+    })
+    return
+  }
+  inputLocalValue.value = next
+}
 
 /** 编辑态未展开的 {item.xxx} 等变量，不当作真实 URL 加载 */
 function isTemplateSrc(src: string): boolean {
@@ -1116,6 +1185,44 @@ onBeforeUnmount(() => {
   </WidgetSelectShell>
 
   <WidgetSelectShell
+    v-else-if="node.tag === 'Input'"
+    :selected="isSelected"
+    :hovered="isHovered"
+    :margin-attrs="attrs"
+    :width="width"
+    :height="height"
+    :parent-horizontal="parentHorizontal"
+    :parent-vertical="parentVertical"
+    :fill-parent="isRoot"
+    :extra-style="shellExtraStyle"
+    :repeat-badge="showRepeatBadge"
+    :event-badge-count="eventBadgeCount"
+    :visually-hidden="visuallyHidden"
+    :interactive="previewInteractive"
+    :inside-scroll-port="insideScrollColumn"
+    :fill-remaining-height="fillRemainingHeight"
+    @click="handleSelect"
+    @mouseenter="handleMouseEnter"
+    @pointerdown="handlePointerDown"
+    @pointerup="handlePointerUp"
+    @pointerleave="handlePointerLeave"
+    @open-repeat="handleOpenRepeat"
+  >
+    <input
+      type="text"
+      class="widget input"
+      :value="inputDisplayValue"
+      :placeholder="inputPlaceholder"
+      :readonly="selectable"
+      :style="inputStyle"
+      @mousedown.stop
+      @pointerdown="handleInputPointerDown"
+      @click="handleInputClick"
+      @input="handleInputInput"
+    />
+  </WidgetSelectShell>
+
+  <WidgetSelectShell
     v-else-if="node.tag === 'Image'"
     :selected="isSelected"
     :hovered="isHovered"
@@ -1597,6 +1704,11 @@ onBeforeUnmount(() => {
 
 .widget.button {
   font-family: inherit;
+}
+
+.widget.input {
+  font-family: inherit;
+  box-sizing: border-box;
 }
 
 .widget.image {

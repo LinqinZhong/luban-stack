@@ -560,6 +560,127 @@ export interface ProcessorMethod {
    * 仅数据层调试面板使用
    */
   debugParams: Record<string, unknown>
+  /** 业务层等方法工作流（一期先业务层使用） */
+  flow: MethodFlow
+}
+
+/** 工作流节点种类 */
+export type FlowNodeKind =
+  | 'start'
+  | 'input'
+  | 'branch'
+  | 'action'
+  | 'output'
+  | 'define'
+  | 'end'
+
+export interface FlowNodePosition {
+  x: number
+  y: number
+}
+
+export interface FlowNode {
+  id: string
+  kind: FlowNodeKind
+  position: FlowNodePosition
+  /** 按 kind 解释：input / branch / action 字段 */
+  data: Record<string, unknown>
+}
+
+export interface FlowEdge {
+  id: string
+  source: string
+  target: string
+  /** branch 分流：true | false；其它可省略 */
+  sourceHandle?: string
+  label?: string
+}
+
+export interface MethodFlow {
+  nodes: FlowNode[]
+  edges: FlowEdge[]
+}
+
+export function createDefaultMethodFlow(): MethodFlow {
+  return {
+    nodes: [
+      {
+        id: 'start',
+        kind: 'start',
+        position: { x: 280, y: 40 },
+        data: {},
+      },
+    ],
+    edges: [],
+  }
+}
+
+export function normalizeMethodFlow(input: unknown): MethodFlow {
+  if (!isPlainObject(input)) return createDefaultMethodFlow()
+  const rawNodes = Array.isArray(input.nodes) ? input.nodes : []
+  const nodes: FlowNode[] = []
+  for (const item of rawNodes) {
+    if (!isPlainObject(item)) continue
+    const kind = item.kind
+    if (
+      kind !== 'start' &&
+      kind !== 'input' &&
+      kind !== 'branch' &&
+      kind !== 'action' &&
+      kind !== 'output' &&
+      kind !== 'define' &&
+      kind !== 'end'
+    ) {
+      continue
+    }
+    const id =
+      typeof item.id === 'string' && item.id.trim() ? item.id.trim() : uid('node')
+    const pos = isPlainObject(item.position) ? item.position : {}
+    const x = Number(pos.x)
+    const y = Number(pos.y)
+    const data = isPlainObject(item.data) ? { ...item.data } : {}
+    nodes.push({
+      id,
+      kind,
+      position: {
+        x: Number.isFinite(x) ? x : 0,
+        y: Number.isFinite(y) ? y : 0,
+      },
+      data,
+    })
+  }
+  if (!nodes.some((n) => n.kind === 'start')) {
+    nodes.unshift({
+      id: 'start',
+      kind: 'start',
+      position: { x: 280, y: 40 },
+      data: {},
+    })
+  }
+  const rawEdges = Array.isArray(input.edges) ? input.edges : []
+  const edges: FlowEdge[] = []
+  const nodeIds = new Set(nodes.map((n) => n.id))
+  for (const item of rawEdges) {
+    if (!isPlainObject(item)) continue
+    const source = typeof item.source === 'string' ? item.source.trim() : ''
+    const target = typeof item.target === 'string' ? item.target.trim() : ''
+    if (!source || !target || !nodeIds.has(source) || !nodeIds.has(target)) {
+      continue
+    }
+    const id =
+      typeof item.id === 'string' && item.id.trim()
+        ? item.id.trim()
+        : uid('edge')
+    const edge: FlowEdge = { id, source, target }
+    if (typeof item.sourceHandle === 'string' && item.sourceHandle.trim()) {
+      edge.sourceHandle = item.sourceHandle.trim()
+    }
+    if (typeof item.label === 'string' && item.label.trim()) {
+      edge.label = item.label.trim()
+    }
+    edges.push(edge)
+  }
+  return { nodes, edges }
 }
 
 /** 处理器（业务层 / 数据层共用结构） */
@@ -670,6 +791,7 @@ export function createEmptyProcessorMethod(name = ''): ProcessorMethod {
     output: createEmptyProcessorTypeExpr(),
     dataConfig: createEmptyDataMethodConfig(),
     debugParams: {},
+    flow: createDefaultMethodFlow(),
   }
 }
 
@@ -743,6 +865,7 @@ export function normalizeProcessorMethod(input: unknown): ProcessorMethod | null
     output,
     dataConfig: normalizeDataMethodConfig(input.dataConfig),
     debugParams: normalizeDebugParams(input.debugParams),
+    flow: normalizeMethodFlow(input.flow),
   }
 }
 

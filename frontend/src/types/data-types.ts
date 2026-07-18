@@ -40,11 +40,14 @@ export type TypeAtomKind =
   | 'named'
   | 'generic'
   | 'any'
+  | 'array'
 
 export interface TypeAtom {
   kind: TypeAtomKind
   /** named → 类型 id；generic → 泛型参数名 */
   ref?: string
+  /** array → 元素类型 */
+  item?: TypeAtom
 }
 
 /** tabs = | 的各个分支 */
@@ -215,7 +218,7 @@ export function isReservedCommonTypeName(name: string): boolean {
 }
 
 function typeAtomExpr(
-  kind: TypeAtomKind,
+  kind: Exclude<TypeAtomKind, 'array'>,
   ref?: string,
 ): TypeExpr {
   return {
@@ -228,6 +231,13 @@ function typeAtomExpr(
         ],
       },
     ],
+  }
+}
+
+/** 数组类型：如 T[] */
+function typeArrayExpr(item: TypeAtom): TypeExpr {
+  return {
+    intersections: [{ alternatives: [{ kind: 'array', item }] }],
   }
 }
 
@@ -382,7 +392,7 @@ export function createCommonDataTypeGroup(): DataTypeGroup {
       field(
         'field_common_QueryPageVo_records',
         'records',
-        typeAtomExpr('generic', 'T'),
+        typeArrayExpr({ kind: 'generic', ref: 'T' }),
         '当前页数据',
       ),
     ],
@@ -485,10 +495,17 @@ function normalizeAtom(input: unknown): TypeAtom {
     'named',
     'generic',
     'any',
+    'array',
   ]
   const safeKind = allowed.includes(kind as TypeAtomKind)
     ? (kind as TypeAtomKind)
     : 'string'
+  if (safeKind === 'array') {
+    return {
+      kind: 'array',
+      item: input.item != null ? normalizeAtom(input.item) : { kind: 'any' },
+    }
+  }
   const ref = typeof input.ref === 'string' ? input.ref.trim() : ''
   return {
     kind: safeKind,
@@ -638,6 +655,16 @@ export function isTypeExprCleared(expr: TypeExpr): boolean {
 export function typeExprToSelectValue(expr: TypeExpr): string {
   if (isTypeExprCleared(expr)) return ''
   const atom = expr.intersections[0]!.alternatives[0]!
+  if (atom.kind === 'array') {
+    const item = atom.item ?? { kind: 'any' as const }
+    const inner =
+      item.kind === 'named'
+        ? `named:${item.ref ?? ''}`
+        : item.kind === 'generic'
+          ? `generic:${item.ref ?? ''}`
+          : item.kind
+    return `array:${inner}`
+  }
   if (atom.kind === 'named') return `named:${atom.ref ?? ''}`
   if (atom.kind === 'generic') return `generic:${atom.ref ?? ''}`
   return atom.kind
@@ -645,6 +672,11 @@ export function typeExprToSelectValue(expr: TypeExpr): string {
 
 export function selectValueToTypeExpr(value: string): TypeExpr {
   if (!value) return createEmptyClearedTypeExpr()
+  if (value.startsWith('array:')) {
+    const inner = selectValueToTypeExpr(value.slice(6))
+    const item = inner.intersections[0]?.alternatives[0] ?? { kind: 'any' as const }
+    return typeArrayExpr(item)
+  }
   if (value.startsWith('named:')) {
     return {
       intersections: [{ alternatives: [{ kind: 'named', ref: value.slice(6) }] }],
@@ -673,6 +705,21 @@ export function selectValueToTypeExpr(value: string): TypeExpr {
   }
 }
 
+function formatAtomPreview(
+  atom: TypeAtom,
+  namedLookup?: (id: string) => string,
+): string {
+  if (atom.kind === 'array') {
+    return `${formatAtomPreview(atom.item ?? { kind: 'any' }, namedLookup)}[]`
+  }
+  if (atom.kind === 'named') {
+    const id = atom.ref ?? ''
+    return namedLookup?.(id) || id || '?'
+  }
+  if (atom.kind === 'generic') return atom.ref || 'T'
+  return atom.kind
+}
+
 /** 将类型表达式格式化为简短预览（用于表格） */
 export function formatTypeExprPreview(
   expr: TypeExpr,
@@ -680,12 +727,14 @@ export function formatTypeExprPreview(
 ): string {
   if (isTypeExprCleared(expr)) return '—'
   const atom = expr.intersections[0]!.alternatives[0]!
-  if (atom.kind === 'named') {
-    const id = atom.ref ?? ''
-    return namedLookup?.(id) || id || '?'
-  }
-  if (atom.kind === 'generic') return atom.ref || 'T'
-  return atom.kind
+  return formatAtomPreview(atom, namedLookup)
+}
+
+/** 剥掉外层数组，得到元素原子类型 */
+export function unwrapArrayAtom(atom: TypeAtom): TypeAtom {
+  let cur = atom
+  while (cur.kind === 'array' && cur.item) cur = cur.item
+  return cur
 }
 
 export function cloneTypeExpr(expr: TypeExpr): TypeExpr {

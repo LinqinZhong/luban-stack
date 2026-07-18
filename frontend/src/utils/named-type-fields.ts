@@ -34,6 +34,8 @@ export function typeExprToDataFieldType(
 ): {
   type: DataFieldType
   typeRef?: string
+  itemType?: DataFieldType
+  itemTypeRef?: string
 } {
   const atom = primaryAtom(expr)
   switch (atom.kind) {
@@ -45,6 +47,19 @@ export function typeExprToDataFieldType(
       return resolveNamedTypeAsField(atom.ref ?? '', library)
     case 'any':
       return { type: 'any' }
+    case 'array': {
+      const itemExpr: TypeExpr = {
+        intersections: [
+          { alternatives: [atom.item ?? { kind: 'any' }] },
+        ],
+      }
+      const itemMapped = typeExprToDataFieldType(itemExpr, library)
+      return {
+        type: 'array',
+        itemType: itemMapped.type,
+        itemTypeRef: itemMapped.typeRef,
+      }
+    }
     default:
       return { type: 'string' }
   }
@@ -132,6 +147,16 @@ export function objectFieldsFromTypeRef(
       }
 
       const mapped = typeExprToDataFieldType(f.type, library)
+      if (mapped.type === 'array') {
+        return {
+          name,
+          type: 'array' as const,
+          itemType: mapped.itemType,
+          itemTypeRef: mapped.itemTypeRef,
+          arrayFields:
+            prev?.type === 'array' ? (prev.arrayFields ?? []).map((x) => ({ ...x })) : [],
+        }
+      }
       if (mapped.type === 'json' && mapped.typeRef) {
         return {
           name,

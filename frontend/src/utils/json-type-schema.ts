@@ -21,6 +21,11 @@ function schemaForAtom(
       return { type: 'boolean' }
     case 'any':
       return {}
+    case 'array':
+      return {
+        type: 'array',
+        items: schemaForAtom(atom.item ?? { kind: 'any' }, library, seen),
+      }
     case 'named':
       return schemaForNamedType(atom.ref ?? '', library, seen) ?? { type: 'string' }
     case 'generic':

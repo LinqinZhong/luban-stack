@@ -28,6 +28,11 @@ function resolveName(id: string | undefined, ctx: DataTypeTsContext): string {
 }
 
 function atomToTs(atom: TypeAtom, ctx: DataTypeTsContext): string {
+  if (atom.kind === 'array') {
+    const inner = atomToTs(atom.item ?? { kind: 'any' }, ctx)
+    // 联合/交叉暂不支持；简单原子直接后缀 []
+    return `${inner}[]`
+  }
   if (atom.kind === 'named') return resolveName(atom.ref, ctx)
   if (atom.kind === 'generic') return atom.ref || 'T'
   return atom.kind
@@ -195,6 +200,11 @@ function tsTypeToAtom(
   if (ts.isParenthesizedTypeNode(node)) {
     return tsTypeToAtom(node.type, ctx, generics, errors)
   }
+  if (ts.isArrayTypeNode(node)) {
+    const item = tsTypeToAtom(node.elementType, ctx, generics, errors)
+    if (!item) return null
+    return { kind: 'array', item }
+  }
   if (node.kind === ts.SyntaxKind.StringKeyword) return { kind: 'string' }
   if (node.kind === ts.SyntaxKind.NumberKeyword) return { kind: 'number' }
   if (node.kind === ts.SyntaxKind.BooleanKeyword) return { kind: 'boolean' }
@@ -206,6 +216,16 @@ function tsTypeToAtom(
 
   if (ts.isTypeReferenceNode(node) && ts.isIdentifier(node.typeName)) {
     const name = node.typeName.text
+    if (name === 'Array') {
+      const arg = node.typeArguments?.[0]
+      if (!arg) {
+        errors.push('Array 需要元素类型，例如 Array<T>')
+        return null
+      }
+      const item = tsTypeToAtom(arg, ctx, generics, errors)
+      if (!item) return null
+      return { kind: 'array', item }
+    }
     if (generics.has(name)) return { kind: 'generic', ref: name }
     const id = ctx.nameToId.get(name)
     if (!id) {

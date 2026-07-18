@@ -248,6 +248,8 @@ const layoutForm = reactive({
   text: '',
   textSize: '',
   textColor: '',
+  value: '',
+  placeholder: '',
   src: '',
   alt: '',
   title: '',
@@ -338,6 +340,8 @@ function syncLayoutForm() {
   layoutForm.text = node.attrs.text ?? node.text ?? ''
   layoutForm.textSize = node.attrs.textSize ?? ''
   layoutForm.textColor = node.attrs.textColor ?? ''
+  layoutForm.value = node.attrs.value ?? ''
+  layoutForm.placeholder = node.attrs.placeholder ?? ''
   layoutForm.src = node.attrs.src ?? ''
   layoutForm.alt = node.attrs.alt ?? ''
   layoutForm.title = node.attrs.title ?? ''
@@ -461,6 +465,8 @@ function commitRelativeBool(key: (typeof RELATIVE_BOOL_ATTRS)[number]['key']) {
 const showTextProps = computed(
   () => selectedNode.value?.tag === 'Text' || selectedNode.value?.tag === 'Button',
 )
+
+const showInputProps = computed(() => selectedNode.value?.tag === 'Input')
 
 const showImageProps = computed(() => selectedNode.value?.tag === 'Image')
 
@@ -592,7 +598,8 @@ const showLayoutContainerProps = computed(
     selectedNode.value?.tag === 'RelativeLayout' ||
     selectedNode.value?.tag === 'Swiper' ||
     selectedNode.value?.tag === 'Modal' ||
-    selectedNode.value?.tag === 'Image',
+    selectedNode.value?.tag === 'Image' ||
+    selectedNode.value?.tag === 'Input',
 )
 
 /** 溢出策略：布局容器 + Swiper（Swiper 无 scroll） */
@@ -615,6 +622,73 @@ const arrayFieldOptions = computed(() =>
     .filter((field) => field.type === 'array' && field.name.trim())
     .map((field) => field.name.trim()),
 )
+
+/** Input 双向绑定：仅数据池顶层 string 字段 */
+const stringFieldOptions = computed(() =>
+  (props.dataFields ?? [])
+    .filter((field) => field.type === 'string' && field.name.trim())
+    .map((field) => {
+      const name = field.name.trim()
+      const remark = field.remark?.trim()
+      return {
+        value: name,
+        label: remark ? `${name} · ${remark}` : name,
+      }
+    }),
+)
+
+function parseInputValueBinding(raw: string | undefined): string {
+  const m = (raw ?? '').trim().match(/^\{([A-Za-z_][\w]*)\}$/)
+  return m?.[1] ?? ''
+}
+
+const modelSummary = computed(() => {
+  const field = parseInputValueBinding(selectedNode.value?.attrs.value)
+  return field || '未配置'
+})
+
+const modelDialogVisible = ref(false)
+const modelForm = reactive({
+  field: '',
+})
+
+function openModelDialog() {
+  if (!selectedNode.value || selectedNode.value.tag !== 'Input') return
+  modelForm.field = parseInputValueBinding(selectedNode.value.attrs.value)
+  modelDialogVisible.value = true
+}
+
+function saveModelConfig() {
+  if (!props.selectedId || !selectedNode.value || selectedNode.value.tag !== 'Input') {
+    return
+  }
+  const name = modelForm.field.trim()
+  try {
+    const next = setNodeAttribute(
+      props.xml,
+      props.selectedId,
+      'value',
+      name ? `{${name}}` : '',
+    )
+    emit('update:xml', next)
+    modelDialogVisible.value = false
+  } catch (err) {
+    console.error(err)
+  }
+}
+
+function clearModelConfig() {
+  if (!props.selectedId || !selectedNode.value || selectedNode.value.tag !== 'Input') {
+    return
+  }
+  try {
+    const next = setNodeAttribute(props.xml, props.selectedId, 'value', '')
+    emit('update:xml', next)
+    modelDialogVisible.value = false
+  } catch (err) {
+    console.error(err)
+  }
+}
 
 const repeatSummary = computed(() => {
   const node = selectedNode.value
@@ -1167,6 +1241,44 @@ function saveVisibilityConfig(config: VisibilityConditionConfig) {
             </el-form>
           </template>
 
+          <template v-if="showInputProps">
+            <div class="section-title">输入</div>
+            <el-form label-position="top" size="small">
+              <el-form-item label="value">
+                <el-input
+                  v-model="layoutForm.value"
+                  clearable
+                  placeholder="静态值，或在「动态」配置双向绑定"
+                  @change="commitAttr('value', layoutForm.value)"
+                />
+              </el-form-item>
+              <el-form-item label="placeholder">
+                <el-input
+                  v-model="layoutForm.placeholder"
+                  clearable
+                  placeholder="占位提示"
+                  @change="commitAttr('placeholder', layoutForm.placeholder)"
+                />
+              </el-form-item>
+              <el-form-item label="textSize">
+                <NumericInput
+                  v-model="layoutForm.textSize"
+                  placeholder="例如：14"
+                  :min="1"
+                  :max="200"
+                  @change="commitAttr('textSize', layoutForm.textSize)"
+                />
+              </el-form-item>
+              <el-form-item label="textColor">
+                <ColorPicker
+                  v-model="layoutForm.textColor"
+                  placeholder="#303133"
+                  @change="commitAttr('textColor', layoutForm.textColor)"
+                />
+              </el-form-item>
+            </el-form>
+          </template>
+
           <template v-if="showImageProps">
             <div class="section-title">图片</div>
             <el-form label-position="top" size="small">
@@ -1617,6 +1729,21 @@ function saveVisibilityConfig(config: VisibilityConditionConfig) {
             </p>
           </template>
 
+          <template v-if="showInputProps">
+            <div class="section-title">双向绑定</div>
+            <div class="visibility-row">
+              <span class="visibility-summary">{{ modelSummary }}</span>
+              <el-button type="primary" link @click="openModelDialog">
+                配置
+              </el-button>
+            </div>
+            <p class="hint">
+              仅可选数据池中的字符串字段，写入
+              <code>{'{字段名}'}</code>
+              。预览时输入框与数据池互相同步。
+            </p>
+          </template>
+
           <div class="section-title">显示条件 · v-show</div>
           <div class="visibility-row">
             <span class="visibility-summary">{{ showIfSummary }}</span>
@@ -1703,6 +1830,43 @@ function saveVisibilityConfig(config: VisibilityConditionConfig) {
       </template>
     </el-dialog>
 
+    <el-dialog
+      v-model="modelDialogVisible"
+      title="双向绑定"
+      width="420px"
+      destroy-on-close
+      append-to-body
+    >
+      <el-form label-position="top" size="default">
+        <el-form-item label="数据池字段">
+          <el-select
+            v-model="modelForm.field"
+            clearable
+            filterable
+            placeholder="选择字符串类型字段"
+            style="width: 100%"
+          >
+            <el-option
+              v-for="opt in stringFieldOptions"
+              :key="opt.value"
+              :label="opt.label"
+              :value="opt.value"
+            />
+          </el-select>
+        </el-form-item>
+      </el-form>
+      <p class="hint" style="margin-top: 0">
+        将写入属性
+        <code>value="{'{字段名}'}"</code>
+        。预览输入会写回该字段；数据池变更也会刷新输入框。
+      </p>
+      <template #footer>
+        <el-button @click="clearModelConfig">清除</el-button>
+        <el-button @click="modelDialogVisible = false">取消</el-button>
+        <el-button type="primary" @click="saveModelConfig">确定</el-button>
+      </template>
+    </el-dialog>
+
     <DynamicStyleStateDialog
       v-model="styleStateDialogVisible"
       :state="editingStyleState"
@@ -1731,7 +1895,7 @@ function saveVisibilityConfig(config: VisibilityConditionConfig) {
 
 <style scoped>
 .props-panel {
-  width: 300px;
+  width: var(--workspace-right-width, 300px);
   flex-shrink: 0;
   display: flex;
   flex-direction: column;

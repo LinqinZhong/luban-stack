@@ -82,6 +82,7 @@ pages/
 |------|------|
 | `Text` | 文本 |
 | `Button` | 按钮 |
+| `Input` | 文本输入框（`value` / `placeholder` / `textSize` / `textColor`） |
 | `Image` | 图片（`src` / `alt` / `title` / `objectFit` / `loading`，尺寸用通用 `width` / `height`） |
 | `Icon` | 图标（`iconId` 引用项目 `icons.json`，`size` / `color`） |
 | `LinearLayout` | 线性布局（`orientation`: vertical / horizontal） |

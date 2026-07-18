@@ -81,7 +81,21 @@
           "current": 1,
           "pageSize": 30
         },
-        "keyword": "输入"
+        "keyword": ""
+      },
+      "flow": {
+        "nodes": [
+          {
+            "id": "start",
+            "kind": "start",
+            "position": {
+              "x": 280,
+              "y": 40
+            },
+            "data": {}
+          }
+        ],
+        "edges": []
       }
     },
     {
@@ -149,6 +163,20 @@
             "stock": 0
           }
         ]
+      },
+      "flow": {
+        "nodes": [
+          {
+            "id": "start",
+            "kind": "start",
+            "position": {
+              "x": 280,
+              "y": 40
+            },
+            "data": {}
+          }
+        ],
+        "edges": []
       }
     },
     {
@@ -208,6 +236,150 @@
           "price": 4,
           "stock": 4
         }
+      },
+      "flow": {
+        "nodes": [
+          {
+            "id": "start",
+            "kind": "start",
+            "position": {
+              "x": 280,
+              "y": 40
+            },
+            "data": {}
+          }
+        ],
+        "edges": []
+      }
+    },
+    {
+      "id": "method_mrqp6qd5_10mqd0",
+      "name": "deleteById",
+      "params": [
+        {
+          "id": "param_mrqp703k_4pjd6t",
+          "name": "id",
+          "remark": "",
+          "typeExpr": {
+            "type": "number",
+            "typeRef": "",
+            "itemType": "",
+            "itemTypeRef": "",
+            "itemItemType": "",
+            "itemItemTypeRef": "",
+            "genericArgs": {}
+          }
+        }
+      ],
+      "output": {
+        "type": "number",
+        "typeRef": "",
+        "itemType": "",
+        "itemTypeRef": "",
+        "itemItemType": "",
+        "itemItemTypeRef": "",
+        "genericArgs": {}
+      },
+      "dataConfig": {
+        "source": "mysql",
+        "operation": "delete",
+        "queryFields": [],
+        "sql": "",
+        "fieldMappings": [],
+        "batchSourceParam": "",
+        "conditionGroups": [
+          {
+            "id": "cg_mrqp7c88_0wdd4q",
+            "conditions": [
+              {
+                "id": "cond_mrqp7c88_24ofns",
+                "field": "id",
+                "customField": "",
+                "op": "eq",
+                "valueKind": "param",
+                "value": "id",
+                "valueTo": ""
+              }
+            ]
+          }
+        ]
+      },
+      "debugParams": {
+        "id": 2
+      },
+      "flow": {
+        "nodes": [
+          {
+            "id": "start",
+            "kind": "start",
+            "position": {
+              "x": 280,
+              "y": 40
+            },
+            "data": {}
+          }
+        ],
+        "edges": []
+      }
+    },
+    {
+      "id": "method_mrqs4khy_m96gpp",
+      "name": "count",
+      "params": [
+        {
+          "id": "param_mrqs5o1s_3cwjs4",
+          "name": "keyword",
+          "remark": "",
+          "typeExpr": {
+            "type": "string",
+            "typeRef": "",
+            "itemType": "",
+            "itemTypeRef": "",
+            "itemItemType": "",
+            "itemItemTypeRef": "",
+            "genericArgs": {}
+          }
+        }
+      ],
+      "output": {
+        "type": "number",
+        "typeRef": "",
+        "itemType": "",
+        "itemTypeRef": "",
+        "itemItemType": "",
+        "itemItemTypeRef": "",
+        "genericArgs": {}
+      },
+      "dataConfig": {
+        "source": "mysql",
+        "operation": "custom",
+        "queryFields": [],
+        "sql": "select count(id) as c from goods where name like '%{keyword}%'",
+        "fieldMappings": [
+          {
+            "field": "value",
+            "column": "c"
+          }
+        ],
+        "batchSourceParam": "",
+        "conditionGroups": []
+      },
+      "debugParams": {
+        "keyword": "1ds"
+      },
+      "flow": {
+        "nodes": [
+          {
+            "id": "start",
+            "kind": "start",
+            "position": {
+              "x": 280,
+              "y": 40
+            },
+            "data": {}
+          }
+        ],
+        "edges": []
       }
     }
   ]

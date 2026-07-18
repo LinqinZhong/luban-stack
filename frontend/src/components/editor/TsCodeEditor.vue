@@ -309,8 +309,12 @@ onMounted(() => {
     lineNumbers: 'on',
     scrollBeyondLastLine: false,
     tabSize: 2,
+    insertSpaces: true,
+    detectIndentation: false,
     wordWrap: 'on',
     theme: 'vs',
+    // 避免 Ctrl+M 切到「Tab 移焦」后无法用 Tab 缩进
+    tabFocusMode: false,
     quickSuggestions: { other: true, comments: false, strings: false },
     suggestOnTriggerCharacters: true,
     snippetSuggestions: 'inline',
@@ -387,7 +391,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div ref="hostRef" class="ts-editor" />
+  <div ref="hostRef" class="ts-editor nokey" />
 </template>
 
 <style scoped>

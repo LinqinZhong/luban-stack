@@ -4,6 +4,7 @@ import { FRAGMENT_TAG, isFragmentTag, parsePageXml } from './xml'
 export type WidgetTag =
   | 'Text'
   | 'Button'
+  | 'Input'
   | 'Image'
   | 'Icon'
   | 'LinearLayout'
@@ -138,6 +139,7 @@ export const WIDGET_OPTIONS: Array<{
 }> = [
   { tag: 'Text', label: '文本 Text', description: '显示一段文本' },
   { tag: 'Button', label: '按钮 Button', description: '可点击按钮' },
+  { tag: 'Input', label: '文本输入框 Input', description: '单行文本输入' },
   { tag: 'Image', label: '图片 Image', description: '显示网络或本地图片' },
   { tag: 'Icon', label: '图标 Icon', description: '引用图标库中的 SVG 符号' },
   { tag: 'LinearLayout', label: '线性布局 LinearLayout', description: '水平或垂直排列子控件' },
@@ -291,6 +293,20 @@ function createWidgetElement(doc: Document, tag: WidgetTag): Element {
     el.setAttribute('text', '按钮')
     el.setAttribute('width', 'match_parent')
     el.setAttribute('height', '44')
+    el.setAttribute('marginTop', '8')
+  } else if (tag === 'Input') {
+    el.setAttribute('value', '')
+    el.setAttribute('placeholder', '请输入')
+    el.setAttribute('textSize', '14')
+    el.setAttribute('textColor', '#303133')
+    el.setAttribute('background', '#ffffff')
+    el.setAttribute('borderWidth', '1')
+    el.setAttribute('borderColor', '#dcdfe6')
+    el.setAttribute('borderRadius', '4')
+    el.setAttribute('paddingLeft', '12')
+    el.setAttribute('paddingRight', '12')
+    el.setAttribute('width', 'match_parent')
+    el.setAttribute('height', '40')
     el.setAttribute('marginTop', '8')
   } else if (tag === 'Image') {
     el.setAttribute('src', '')

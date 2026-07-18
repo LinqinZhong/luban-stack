@@ -1694,6 +1694,83 @@ ${pad}</template>`
     })
   }
 
+  if (tag === 'Input') {
+    const valueRaw = attrs.value ?? ''
+    const placeholderRaw = attrs.placeholder ?? ''
+    const extra: string[] = [
+      'box-border',
+      'w-full',
+      'outline-none',
+      'border-solid',
+    ]
+    const bgRaw =
+      attrs.background && attrs.background !== 'null' ? attrs.background : '#ffffff'
+    const colorRes = resolveColorExpr(
+      'textColor',
+      attrs.textColor && attrs.textColor !== 'null' ? attrs.textColor : '#303133',
+      attrs,
+      ctx,
+      inRepeat,
+      '#303133',
+    )
+    if (!bgRaw.includes('{')) {
+      const bg = colorClass('bg', bgRaw)
+      if (bg) extra.push(bg)
+    }
+    if (colorRes.static) {
+      const tc = colorClass('text', colorRes.static)
+      if (tc) extra.push(tc)
+    }
+    const borderColor =
+      attrs.borderColor && attrs.borderColor !== 'null'
+        ? attrs.borderColor
+        : '#dcdfe6'
+    if (!borderColor.includes('{')) {
+      const bc = colorClass('border', borderColor)
+      if (bc) extra.push(bc)
+    }
+    const bw = parseNumber(attrs.borderWidth) ?? 1
+    extra.push(`border-[${bw}px]`)
+    const br = parseNumber(attrs.borderRadius) ?? 4
+    extra.push(`rounded-[${br}px]`)
+    const ts = parseNumber(attrs.textSize)
+    if (ts != null) extra.push(`text-[${ts}px]`)
+    else extra.push('text-[14px]')
+    const tw = twWithRelative(attrs, parentTag, extra, twOpts)
+    const events = [...INTERACTION_ATTRS]
+      .map((k) => eventHandler(k, attrs[k], inRepeat, ctx))
+      .filter(Boolean)
+    const styleParts: string[] = []
+    if (bgRaw.includes('{')) {
+      styleParts.push(`backgroundColor: String(${bindingToExpr(bgRaw, ctx, inRepeat)} ?? '')`)
+    }
+    if (!colorRes.static) styleParts.push(`color: ${colorRes.expr}`)
+    if (borderColor.includes('{')) {
+      styleParts.push(
+        `borderColor: String(${bindingToExpr(borderColor, ctx, inRepeat)} ?? '')`,
+      )
+    }
+    const style = styleAttr(styleParts)
+    const valueAttr = attrBinding('value', valueRaw, ctx, inRepeat)
+    const placeholderAttr = placeholderRaw
+      ? attrBinding('placeholder', placeholderRaw, ctx, inRepeat)
+      : ''
+    return formatVueElement({
+      pad,
+      tag: 'input',
+      attrs: [
+        'type="text"',
+        valueAttr,
+        placeholderAttr,
+        classAttr(tw),
+        style,
+        ...visibilityAttrs(attrs, ctx, inRepeat),
+        ...events,
+      ].filter(Boolean),
+      selfClosing: true,
+    })
+  }
+
   if (tag === 'Image') {
     const srcRaw = attrs.src ?? ''
     const srcTrimmed = srcRaw.trim()

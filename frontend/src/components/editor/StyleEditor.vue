@@ -48,12 +48,15 @@ const form = reactive({
   text: '',
   textSize: '',
   textColor: '',
+  value: '',
+  placeholder: '',
   color: '',
 })
 
 const showTextProps = computed(
   () => props.tag === 'Text' || props.tag === 'Button',
 )
+const showInputProps = computed(() => props.tag === 'Input')
 const showIconColor = computed(() => props.tag === 'Icon')
 /** Modal 始终全屏，无宽高 / margin */
 const showSizeProps = computed(() => props.tag !== 'Modal')
@@ -65,7 +68,8 @@ const showBorder = computed(
       props.tag === 'RelativeLayout' ||
       props.tag === 'Swiper' ||
       props.tag === 'Modal' ||
-      props.tag === 'Image'),
+      props.tag === 'Image' ||
+      props.tag === 'Input'),
 )
 const showOverflow = computed(
   () =>
@@ -133,6 +137,8 @@ function syncFromModel(styles: StyleOverrides) {
   form.text = styles.text ?? ''
   form.textSize = styles.textSize ?? ''
   form.textColor = styles.textColor ?? ''
+  form.value = styles.value ?? ''
+  form.placeholder = styles.placeholder ?? ''
   form.color = styles.color ?? ''
 }
 
@@ -177,6 +183,8 @@ function emitStyles() {
   set('text', form.text)
   set('textSize', form.textSize)
   set('textColor', form.textColor)
+  set('value', form.value)
+  set('placeholder', form.placeholder)
   set('color', form.color)
 
   emit('update:modelValue', next)
@@ -360,6 +368,33 @@ function onFieldChange() {
       <el-form label-position="top" size="small">
         <el-form-item label="text">
           <el-input v-model="form.text" clearable @change="onFieldChange" />
+        </el-form-item>
+        <el-form-item label="textSize">
+          <NumericInput
+            v-model="form.textSize"
+            :min="1"
+            :max="200"
+            @change="onFieldChange"
+          />
+        </el-form-item>
+        <el-form-item label="textColor">
+          <ColorPicker v-model="form.textColor" @change="onFieldChange" />
+        </el-form-item>
+      </el-form>
+    </template>
+
+    <template v-if="showInputProps">
+      <div class="section-title">输入</div>
+      <el-form label-position="top" size="small">
+        <el-form-item label="value">
+          <el-input v-model="form.value" clearable @change="onFieldChange" />
+        </el-form-item>
+        <el-form-item label="placeholder">
+          <el-input
+            v-model="form.placeholder"
+            clearable
+            @change="onFieldChange"
+          />
         </el-form-item>
         <el-form-item label="textSize">
           <NumericInput

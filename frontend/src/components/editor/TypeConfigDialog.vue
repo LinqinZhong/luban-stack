@@ -15,6 +15,7 @@ import {
   selectValueToTypeExpr,
   typeExprToSelectValue,
   type DataTypeDef,
+  type TypeAtom,
   type TypeExpr,
   type TypeGenericParam,
 } from '../../types/data-types'
@@ -231,18 +232,29 @@ function scrubStaleGenericRefs() {
   function scrubExpr(expr: TypeExpr | null): TypeExpr | null {
     if (!expr) return null
     const atom = expr.intersections[0]?.alternatives[0]
-    if (atom?.kind === 'generic' && (!atom.ref || !names.has(atom.ref))) {
+    if (!atom) return expr
+    if (atom.kind === 'array') {
+      const itemScrubbed = scrubExpr({
+        intersections: [{ alternatives: [atom.item ?? { kind: 'any' }] }],
+      })
+      if (!itemScrubbed) return null
+      const item = itemScrubbed.intersections[0]?.alternatives[0] ?? { kind: 'any' as const }
+      return {
+        intersections: [{ alternatives: [{ kind: 'array', item }] }],
+      }
+    }
+    if (atom.kind === 'generic' && (!atom.ref || !names.has(atom.ref))) {
       return null
     }
     return expr
   }
 
   draft.value.fields = draft.value.fields.map((f) => {
-    const atom = f.type.intersections[0]?.alternatives[0]
-    if (atom?.kind === 'generic' && (!atom.ref || !names.has(atom.ref))) {
+    const scrubbed = scrubExpr(f.type)
+    if (!scrubbed) {
       return { ...f, type: createEmptyClearedTypeExpr() }
     }
-    return f
+    return { ...f, type: scrubbed }
   })
 
   draft.value.generics = draft.value.generics.map((g) => ({
@@ -282,15 +294,27 @@ function saveGenericConfig() {
   )
   // 重命名时同步字段里的旧泛型引用
   if (prevName && prevName !== name) {
-    draft.value.fields = draft.value.fields.map((f) => {
-      const atom = f.type.intersections[0]?.alternatives[0]
-      if (atom?.kind === 'generic' && atom.ref === prevName) {
+    function renameGenericInAtom(atom: TypeAtom): TypeAtom {
+      if (atom.kind === 'array') {
         return {
-          ...f,
-          type: selectValueToTypeExpr(`generic:${name}`),
+          kind: 'array',
+          item: renameGenericInAtom(atom.item ?? { kind: 'any' }),
         }
       }
-      return f
+      if (atom.kind === 'generic' && atom.ref === prevName) {
+        return { kind: 'generic', ref: name }
+      }
+      return atom
+    }
+    draft.value.fields = draft.value.fields.map((f) => {
+      const atom = f.type.intersections[0]?.alternatives[0]
+      if (!atom) return f
+      return {
+        ...f,
+        type: {
+          intersections: [{ alternatives: [renameGenericInAtom(atom)] }],
+        },
+      }
     })
   }
   scrubStaleGenericRefs()

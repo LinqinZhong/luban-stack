@@ -15,6 +15,7 @@ export const FRAGMENT_TAG = 'Fragment'
 const SUPPORTED_TAGS = new Set([
   'Text',
   'Button',
+  'Input',
   'Image',
   'Icon',
   'LinearLayout',

@@ -1,0 +1,96 @@
+{
+  "id": "group_mrqq9psx_xcv1am",
+  "types": [
+    {
+      "id": "type_mrqq9v55_7fzo9v",
+      "name": "MessageList",
+      "kind": "interface",
+      "remark": "",
+      "tableName": "",
+      "category": "vo",
+      "generics": [],
+      "fields": [
+        {
+          "id": "field_mrqqaksr_m7c8in",
+          "name": "id",
+          "type": {
+            "intersections": [
+              {
+                "alternatives": [
+                  {
+                    "kind": "string"
+                  }
+                ]
+              }
+            ]
+          },
+          "remark": "",
+          "optional": false
+        },
+        {
+          "id": "field_mrqqaksr_yak7v6",
+          "name": "name",
+          "type": {
+            "intersections": [
+              {
+                "alternatives": [
+                  {
+                    "kind": "string"
+                  }
+                ]
+              }
+            ]
+          },
+          "remark": "",
+          "optional": false
+        },
+        {
+          "id": "field_mrqqaksr_u4oqxw",
+          "name": "content",
+          "type": {
+            "intersections": [
+              {
+                "alternatives": [
+                  {
+                    "kind": "string"
+                  }
+                ]
+              }
+            ]
+          },
+          "remark": "",
+          "optional": false
+        },
+        {
+          "id": "field_mrqqaksr_9akg06",
+          "name": "userId",
+          "type": {
+            "intersections": [
+              {
+                "alternatives": [
+                  {
+                    "kind": "string"
+                  }
+                ]
+              }
+            ]
+          },
+          "remark": "",
+          "optional": false
+        }
+      ],
+      "enumMembers": [],
+      "combination": {
+        "intersections": [
+          {
+            "alternatives": [
+              {
+                "kind": "string"
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

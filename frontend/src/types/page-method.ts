@@ -5,6 +5,7 @@ import {
   buildDataTypeTsContext,
   dataTypeToTs,
 } from '../utils/data-type-ts'
+import type { ProcessorTypeExpr } from './backend-services'
 
 export type MethodParamType =
   | 'string'
@@ -21,6 +22,8 @@ export interface MethodParam {
   type: MethodParamType
   /** 精确 TS 类型（优先于 type 映射，如 GoodsItem[]） */
   tsType?: string
+  /** 精确类型表达式（级联绑定 / 类型匹配） */
+  typeExpr?: ProcessorTypeExpr
 }
 
 /** 数据池字段类型 → 方法 ambient / 形参类型 */
@@ -114,6 +117,66 @@ export function buildTypeLibraryAmbientDeclarations(
     }
   }
   return parts.join('\n\n')
+}
+
+/** 具名类型 + 泛型实参 → QueryPageVo<GoodsItem> */
+function namedTypeWithGenerics(
+  typeRef: string,
+  genericArgs: Record<string, string> | undefined,
+  library: DataTypeLibrary | null | undefined,
+): string | null {
+  const def = findDataTypeDef(library, typeRef)
+  const name = def?.name?.trim()
+  if (!name || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) return null
+  const gens = def?.generics ?? []
+  if (!gens.length) return name
+  const inner = gens
+    .map((g) => {
+      const argId = (genericArgs?.[g.name] ?? '').trim()
+      if (!argId) return 'any'
+      return namedTypeName(argId, library) ?? 'any'
+    })
+    .join(', ')
+  return `${name}<${inner}>`
+}
+
+/** 处理器方法入参/出参类型 → 精确 TS 类型字符串 */
+export function processorTypeExprToTs(
+  expr: ProcessorTypeExpr | null | undefined,
+  library?: DataTypeLibrary | null,
+): string {
+  if (!expr) return 'any'
+  const args = expr.genericArgs ?? {}
+  if (expr.type === 'array') {
+    if (expr.itemType === 'array') {
+      const leaf =
+        namedTypeWithGenerics(expr.itemItemTypeRef, args, library) ??
+        primitiveTsType((expr.itemItemType || 'string') as DataFieldType)
+      return `${leaf}[][]`
+    }
+    const leaf =
+      namedTypeWithGenerics(expr.itemTypeRef, args, library) ??
+      primitiveTsType((expr.itemType || 'string') as DataFieldType)
+    return `${leaf}[]`
+  }
+  if (expr.typeRef) {
+    return (
+      namedTypeWithGenerics(expr.typeRef, args, library) ??
+      (expr.type === 'json' ? 'Record<string, any>' : primitiveTsType(expr.type as DataFieldType))
+    )
+  }
+  if (expr.type === 'json') return 'Record<string, any>'
+  return primitiveTsType((expr.type || 'any') as DataFieldType)
+}
+
+/** 处理器类型表达式 → MethodParam 粗粒度 type */
+export function processorTypeExprToMethodParamType(
+  expr: ProcessorTypeExpr | null | undefined,
+): MethodParamType {
+  if (!expr) return 'any'
+  if (expr.type === 'array') return 'array'
+  if (expr.type === 'json' || expr.typeRef) return 'object'
+  return dataFieldToMethodParamType((expr.type || 'any') as DataFieldType)
 }
 
 /** 数据池字段 → Monaco ambient 变量（合法标识符；ref 见 buildRefAmbientDeclarations） */

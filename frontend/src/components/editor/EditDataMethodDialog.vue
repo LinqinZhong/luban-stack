@@ -21,7 +21,12 @@ import {
   type ProcessorMethodParam,
   type ProcessorTypeExpr,
 } from '../../types/backend-services'
-import type { DataTypeLibrary, InterfaceField, TypeExpr } from '../../types/data-types'
+import {
+  unwrapArrayAtom,
+  type DataTypeLibrary,
+  type InterfaceField,
+  type TypeExpr,
+} from '../../types/data-types'
 import {
   typeLabel,
   type DataFieldType,
@@ -57,7 +62,7 @@ const props = defineProps<{
   method: ProcessorMethod | null
   typeLibrary: DataTypeLibrary | null
   typeOptions: Array<{ id: string; label: string }>
-  /** 数据层处理器绑定的实体 id（插入映射目标字段来源） */
+  /** ??????????? id???????????? */
   entityRef?: string
 }>()
 
@@ -70,7 +75,7 @@ const draft = reactive<DataMethodConfig>(createEmptyDataMethodConfig())
 const draftName = ref('')
 const draftParams = ref<ProcessorMethodParam[]>([])
 const draftOutput = ref<ProcessorTypeExpr>(createEmptyProcessorTypeExpr())
-/** 插入/批量插入：已勾选的目标字段 */
+/** ??/????????????? */
 const insertEnabled = ref<string[]>([])
 
 const paramsDialogVisible = ref(false)
@@ -106,37 +111,64 @@ function fieldsOf(def: { fields: InterfaceField[] } | null | undefined): OutputF
     .filter((f) => f.name)
 }
 
-/** 出参可勾选字段：优先泛型绑定的记录类型（如 QueryPageVo<T> → T） */
+/** ????????????????????? QueryPageVo<T> ? T????????????? */
 function resolveOutputFields(
   output: ProcessorTypeExpr,
   library: DataTypeLibrary | null,
 ): OutputFieldOption[] {
   const named = leafNamedRef(output)
   const def = findDataTypeDef(library, named)
-  if (!def || def.kind !== 'interface') return []
-
-  const genericField = def.fields.find(
-    (f) => primaryAtom(f.type).kind === 'generic',
-  )
-  if (genericField) {
-    const gName = primaryAtom(genericField.type).ref ?? ''
-    const boundId = (output.genericArgs?.[gName] ?? '').trim()
-    const bound = findDataTypeDef(library, boundId)
-    if (bound?.kind === 'interface') {
-      const nested = fieldsOf(bound)
-      if (nested.length) {
-        return nested.map((f) => ({
-          ...f,
-          sourceLabel: bound.name,
-        }))
+  if (def && def.kind === 'interface') {
+    const genericField = def.fields.find((f) => {
+      const atom = unwrapArrayAtom(primaryAtom(f.type))
+      return atom.kind === 'generic'
+    })
+    if (genericField) {
+      const gName = unwrapArrayAtom(primaryAtom(genericField.type)).ref ?? ''
+      const boundId = (output.genericArgs?.[gName] ?? '').trim()
+      const bound = findDataTypeDef(library, boundId)
+      if (bound?.kind === 'interface') {
+        const nested = fieldsOf(bound)
+        if (nested.length) {
+          return nested.map((f) => ({
+            ...f,
+            sourceLabel: bound.name,
+          }))
+        }
       }
     }
+
+    return fieldsOf(def).map((f) => ({
+      ...f,
+      sourceLabel: def.name,
+    }))
   }
 
-  return fieldsOf(def).map((f) => ({
-    ...f,
-    sourceLabel: def.name,
-  }))
+  // ?? / ??? / ?? / ??????????????
+  const t = (output.type || '').trim()
+  if (!t) return []
+
+  let label = ''
+  if (named) {
+    label = def?.name?.trim() || named
+    if (t === 'array') label = `${label}[]`
+  } else if (t === 'array') {
+    const item =
+      typeLabel((output.itemType || 'string') as DataFieldType) ||
+      output.itemType ||
+      '??'
+    label = `?? / ${item}`
+  } else {
+    label = typeLabel(t as DataFieldType) || t
+  }
+
+  return [
+    {
+      name: 'value',
+      remark: label,
+      sourceLabel: label,
+    },
+  ]
 }
 
 function displayRemark(name: string, remark: string): string {
@@ -157,7 +189,7 @@ const isInsert = computed(
   () => draft.operation === 'insert' || draft.operation === 'batchInsert',
 )
 const isBatchInsert = computed(() => draft.operation === 'batchInsert')
-/** 非插入：展示查询条件 */
+/** ?????????? */
 const showConditions = computed(() => !isInsert.value)
 const isMysql = computed(() => draft.source === 'mysql')
 
@@ -219,7 +251,7 @@ const conditionFieldOptions = computed((): ConditionFieldOption[] => {
 
 type SourceOption = { value: string; label: string }
 
-/** 条件「入参」可选路径 */
+/** ?????????? */
 const conditionParamOptions = computed((): SourceOption[] => {
   const opts: SourceOption[] = []
   for (const p of draftParams.value) {
@@ -275,7 +307,7 @@ const entityFields = computed(() => {
   }))
 })
 
-/** 可作为批量插入源的数组入参 */
+/** ????????????? */
 const arrayParamOptions = computed((): SourceOption[] => {
   const opts: SourceOption[] = []
   for (const p of draftParams.value) {
@@ -296,7 +328,7 @@ const arrayParamOptions = computed((): SourceOption[] => {
   return opts
 })
 
-/** 插入 / 批量插入：源字段选项 */
+/** ?? / ?????????? */
 const insertSourceOptions = computed((): SourceOption[] => {
   const opts: SourceOption[] = []
 
@@ -1360,7 +1392,7 @@ function handleSave() {
                   <code class="field-code">{{ row.field }}</code>
                   <span v-if="row.remark" class="field-desc">{{ row.remark }}</span>
                 </div>
-                <span class="mapping-arrow">←</span>
+                <span class="mapping-arrow">?</span>
                 <el-select
                   :model-value="row.source"
                   clearable
@@ -1417,7 +1449,7 @@ function handleSave() {
                   <code class="field-code">{{ row.field }}</code>
                   <span v-if="row.remark" class="field-desc">{{ row.remark }}</span>
                 </div>
-                <span class="mapping-arrow">→</span>
+                <span class="mapping-arrow">?</span>
                 <el-input
                   :model-value="row.column"
                   :placeholder="DM.columnExpr"

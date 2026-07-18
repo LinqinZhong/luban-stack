@@ -31,6 +31,13 @@ function nodeLabel(node: XmlNode): string {
     const short = text.length > 16 ? `${text.slice(0, 16)}…` : text
     return `${node.tag} · ${short}`
   }
+  if (node.tag === 'Input') {
+    const label = node.attrs.placeholder || node.attrs.value
+    if (label) {
+      const short = label.length > 16 ? `${label.slice(0, 16)}…` : label
+      return `${node.tag} · ${short}`
+    }
+  }
   if (node.tag === 'Image') {
     const label = node.attrs.alt || node.attrs.src
     if (label) {

@@ -1157,7 +1157,7 @@ async function handleRun() {
 
 <style scoped>
 .debug-panel {
-  width: 300px;
+  width: var(--workspace-right-width, 300px);
   flex-shrink: 0;
   display: flex;
   flex-direction: column;

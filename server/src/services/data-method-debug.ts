@@ -54,6 +54,17 @@ function sqlLiteral(value: unknown): string {
   return `'${String(value).replace(/\\/g, '\\\\').replace(/'/g, "''")}'`
 }
 
+/** 嵌入已有引号内（如 '%{keyword}%'），不加外层引号 */
+function sqlEmbed(value: unknown): string {
+  if (value == null) return ''
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value)
+  if (typeof value === 'boolean') return value ? '1' : '0'
+  if (typeof value === 'object') {
+    return JSON.stringify(value).replace(/\\/g, '\\\\').replace(/'/g, "''")
+  }
+  return String(value).replace(/\\/g, '\\\\').replace(/'/g, "''")
+}
+
 function resolveTableName(
   processor: ServiceProcessor,
   library: DataTypeLibrary,
@@ -201,10 +212,17 @@ function applyCustomSql(
   template: string,
   params: Record<string, unknown>,
 ): string {
-  return template.replace(
+  // {{name}} → 完整 SQL 字面量（含引号），用于独立占位
+  let sql = template.replace(
     /\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}/g,
     (_, key: string) => sqlLiteral(params[key]),
   )
+  // {name} → 嵌入值（不加外层引号），用于 '%{keyword}%' 这类写法
+  sql = sql.replace(
+    /\{([A-Za-z_][A-Za-z0-9_]*)\}/g,
+    (_, key: string) => sqlEmbed(params[key]),
+  )
+  return sql
 }
 
 /** 解析入参路径：data / data.name */
@@ -244,6 +262,18 @@ function buildInsertSql(
   const cols = list.map((m) => quoteIdent(m.field))
   const values = list.map((m) => sqlLiteral(resolvePath(params, m.column)))
   return `INSERT INTO ${quoteIdent(table)} (${cols.join(', ')}) VALUES (${values.join(', ')})`
+}
+
+function buildDeleteSql(
+  table: string,
+  config: DataMethodConfig,
+  params: Record<string, unknown>,
+): string {
+  const where = buildWhereClause(config.conditionGroups, params)
+  if (!where) {
+    throw new ProjectError('删除操作必须配置有效的查询条件', 400)
+  }
+  return `DELETE FROM ${quoteIdent(table)}${where}`
 }
 
 function buildBatchInsertSql(
@@ -340,6 +370,47 @@ function wrapOutput(
 ): unknown {
   const named = leafNamedRef(method.output)
   const def = findTypeDef(library, named)
+  const mappings = (method.dataConfig?.fieldMappings ?? [])
+    .map((m) => ({
+      field: m.field.trim(),
+      column: m.column.trim(),
+    }))
+    .filter((m) => m.field && m.column)
+
+  // 标量出参：按字段映射取列，或取首行首列
+  const scalarTypes = new Set(['number', 'string', 'boolean'])
+  if (scalarTypes.has(method.output.type) && !named) {
+    const row = rows[0] ?? {}
+    const mapped = mappings.find((m) => m.field === 'value')
+    let raw: unknown
+    if (mapped) {
+      raw = row[mapped.column]
+    } else {
+      const keys = Object.keys(row)
+      raw = keys.length ? row[keys[0]!] : undefined
+    }
+    if (method.output.type === 'number') {
+      const n = Number(raw)
+      return Number.isFinite(n) ? n : 0
+    }
+    if (method.output.type === 'boolean') {
+      return Boolean(raw) && raw !== 0 && raw !== '0'
+    }
+    return raw == null ? '' : String(raw)
+  }
+
+  // 接口出参 + 自定义字段映射：按映射组装对象
+  if (def?.kind === 'interface' && mappings.length && method.dataConfig?.operation === 'custom') {
+    const hasRecords = def.fields.some((f) => f.name === 'records')
+    if (!hasRecords) {
+      const row = rows[0] ?? {}
+      const obj: Record<string, unknown> = {}
+      for (const m of mappings) {
+        obj[m.field] = row[m.column]
+      }
+      return obj
+    }
+  }
 
   if (method.output.type === 'array') {
     return rows
@@ -432,12 +503,15 @@ export async function debugDataLayerMethod(payload: {
       config.batchSourceParam,
     )
     isWrite = true
+  } else if (config.operation === 'delete') {
+    sql = buildDeleteSql(table, config, params)
+    isWrite = true
   } else if (config.operation === 'custom') {
     if (!config.sql.trim()) throw new ProjectError('请先配置自定义 SQL', 400)
     sql = applyCustomSql(config.sql, params)
   } else {
     throw new ProjectError(
-      `操作「${config.operation}」调试稍后实现，请先使用查询、插入或自定义`,
+      `操作「${config.operation}」调试稍后实现，请先使用查询、插入、删除或自定义`,
       400,
     )
   }
@@ -468,6 +542,14 @@ export async function debugDataLayerMethod(payload: {
     let output: unknown = raw
     if (config.operation === 'batchInsert') {
       output = wrapBatchInsertOutput(method, insertIds, affectedRows)
+    } else if (config.operation === 'delete') {
+      if (method.output.type === 'string') {
+        output = String(affectedRows)
+      } else if (method.output.type === 'number') {
+        output = affectedRows
+      } else if (method.output.type === 'boolean') {
+        output = affectedRows > 0
+      }
     } else if (method.output.type === 'string') {
       output = String(insertId || '')
     } else if (method.output.type === 'number') {

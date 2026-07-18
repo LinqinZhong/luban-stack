@@ -60,9 +60,9 @@ import DataTypesPanel from '../components/editor/DataTypesPanel.vue'
 import MysqlPanel from '../components/editor/MysqlPanel.vue'
 import BackendServiceEditor from '../components/editor/BackendServiceEditor.vue'
 import BackendServiceWorkspace from '../components/editor/BackendServiceWorkspace.vue'
-import DataMethodDebugPanel, {
-  type DataMethodDebugTarget,
-} from '../components/editor/DataMethodDebugPanel.vue'
+import DataMethodDebugPanel from '../components/editor/DataMethodDebugPanel.vue'
+import MethodFlowDebugPanel from '../components/editor/MethodFlowDebugPanel.vue'
+import type { ProcessorDebugTarget } from '../components/editor/ServiceProcessorPanel.vue'
 import IconLibraryPanel from '../components/editor/IconLibraryPanel.vue'
 import MethodEditDialog from '../components/editor/MethodEditDialog.vue'
 import MethodsPanel from '../components/editor/MethodsPanel.vue'
@@ -190,7 +190,20 @@ const serviceDialogVisible = ref(false)
 const backendServiceLayer = ref<
   'controller' | 'service' | 'data' | 'schedule'
 >('controller')
-const backendDebugTarget = ref<DataMethodDebugTarget | null>(null)
+const backendDebugTarget = ref<ProcessorDebugTarget | null>(null)
+
+const dataDebugTarget = computed(() => {
+  const t = backendDebugTarget.value
+  if (t?.kind !== 'data') return null
+  const { kind: _kind, ...rest } = t
+  return rest
+})
+const flowDebugTarget = computed(() => {
+  const t = backendDebugTarget.value
+  if (t?.kind !== 'flow') return null
+  const { kind: _kind, ...rest } = t
+  return rest
+})
 const backendWorkspaceRef = ref<InstanceType<
   typeof BackendServiceWorkspace
 > | null>(null)
@@ -640,6 +653,9 @@ const propsPlaceholderText = computed(() => {
   if (isBackendNav.value) {
     if (backendServiceLayer.value === 'data') {
       return '选中数据层方法后可调试'
+    }
+    if (backendServiceLayer.value === 'service') {
+      return '打开业务方法工作流后可调试'
     }
     return '在服务列表右键可重命名、配置或删除'
   }
@@ -1538,6 +1554,18 @@ watch(workspaceMode, async (mode, prev) => {
 async function handlePreviewInteract(payload: PreviewInteractPayload) {
   if (workspaceMode.value !== 'preview' || !activeDoc.value) return
 
+  if (payload.eventKey === '__setData') {
+    const prop = payload.eventArgs?.prop
+    const value = payload.eventArgs?.value
+    if (typeof prop === 'string' && prop.trim()) {
+      applyPreviewSetData(
+        prop.trim(),
+        value as import('../types/page-data').DataFieldValue,
+      )
+    }
+    return
+  }
+
   const hostEmit = payload.componentEmit
 
   const dispatchHostEvent = (
@@ -2331,7 +2359,7 @@ onMounted(() => {
           :type-library="dataTypeLibrary"
           @update:layer="
             backendServiceLayer = $event;
-            if ($event !== 'data') backendDebugTarget = null
+            if ($event !== 'data' && $event !== 'service') backendDebugTarget = null
           "
           @update:debug-target="backendDebugTarget = $event"
         />
@@ -2515,10 +2543,21 @@ onMounted(() => {
     />
     <DataMethodDebugPanel
       v-else-if="isBackendNav && backendServiceLayer === 'data'"
-      :target="backendDebugTarget"
+      :target="dataDebugTarget"
       :type-library="dataTypeLibrary"
       @update:debug-params="
         (params) => backendWorkspaceRef?.applyDebugParams(params)
+      "
+    />
+    <MethodFlowDebugPanel
+      v-else-if="isBackendNav && backendServiceLayer === 'service'"
+      :target="flowDebugTarget"
+      :type-library="dataTypeLibrary"
+      @update:debug-params="
+        (params) => backendWorkspaceRef?.applyDebugParams(params)
+      "
+      @update:cursor="
+        (state) => backendWorkspaceRef?.applyFlowDebugCursor(state)
       "
     />
     <aside v-else class="props-placeholder">
@@ -2604,7 +2643,7 @@ onMounted(() => {
       destroy-on-close
     >
       <p class="add-hint">
-        将添加到当前选中的布局容器；若选中的是 Text/Button，则添加到其父布局。
+        将添加到当前选中的布局容器；若选中的是 Text/Button/Input，则添加到其父布局。
       </p>
       <div class="widget-options">
         <button
@@ -2624,6 +2663,8 @@ onMounted(() => {
 
 <style scoped>
 .workspace {
+  /* 右侧栏统一宽度（与前端预览调试栏一致） */
+  --workspace-right-width: 300px;
   display: flex;
   width: 100%;
   height: 100%;
@@ -2894,7 +2935,7 @@ onMounted(() => {
 }
 
 .props-with-back {
-  width: 300px;
+  width: var(--workspace-right-width, 300px);
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
@@ -2926,7 +2967,7 @@ onMounted(() => {
 }
 
 .props-placeholder {
-  width: 300px;
+  width: var(--workspace-right-width, 300px);
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
