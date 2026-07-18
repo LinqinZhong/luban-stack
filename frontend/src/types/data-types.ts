@@ -180,6 +180,266 @@ export function createEmptyDataTypeLibrary(): DataTypeLibrary {
   return { groups: [] }
 }
 
+export const COMMON_GROUP_NAME = 'common'
+
+/** 系统预设类型 id（不可修改 / 删除） */
+export const COMMON_PRESET_TYPE_IDS = [
+  'type_common_ResultCode',
+  'type_common_Result',
+  'type_common_QueryPageDto',
+  'type_common_QueryPageVo',
+] as const
+
+/** 系统预设类型名 */
+export const COMMON_PRESET_TYPE_NAMES = [
+  'ResultCode',
+  'Result',
+  'QueryPageDto',
+  'QueryPageVo',
+] as const
+
+const COMMON_PRESET_ID_SET = new Set<string>(COMMON_PRESET_TYPE_IDS)
+const COMMON_PRESET_NAME_SET = new Set<string>(COMMON_PRESET_TYPE_NAMES)
+
+/** 是否为系统预设类型（按稳定 id；仅这些只读） */
+export function isSystemCommonType(
+  type: Pick<DataTypeDef, 'id' | 'name'> | null | undefined,
+): boolean {
+  if (!type?.id) return false
+  return COMMON_PRESET_ID_SET.has(type.id)
+}
+
+/** 是否占用了系统预设类型名（新建 / 重命名时禁止） */
+export function isReservedCommonTypeName(name: string): boolean {
+  return COMMON_PRESET_NAME_SET.has(name.trim())
+}
+
+function typeAtomExpr(
+  kind: TypeAtomKind,
+  ref?: string,
+): TypeExpr {
+  return {
+    intersections: [
+      {
+        alternatives: [
+          kind === 'named' || kind === 'generic'
+            ? { kind, ref: ref ?? '' }
+            : { kind },
+        ],
+      },
+    ],
+  }
+}
+
+function field(
+  id: string,
+  name: string,
+  type: TypeExpr,
+  remark = '',
+): InterfaceField {
+  return { id, name, type, remark, optional: false }
+}
+
+/** 系统预设：common 分组（Result / 分页等） */
+export function createCommonDataTypeGroup(): DataTypeGroup {
+  const resultCodeId = 'type_common_ResultCode'
+  const resultId = 'type_common_Result'
+  const queryPageDtoId = 'type_common_QueryPageDto'
+  const queryPageVoId = 'type_common_QueryPageVo'
+
+  const resultCode: DataTypeDef = {
+    id: resultCodeId,
+    name: 'ResultCode',
+    kind: 'enum',
+    remark: '通用响应码',
+    tableName: '',
+    category: 'other',
+    generics: [],
+    fields: [],
+    enumMembers: [
+      { id: 'enum_common_ResultCode_OK', name: 'OK', value: '200' },
+      { id: 'enum_common_ResultCode_BAD_REQUEST', name: 'BAD_REQUEST', value: '400' },
+      {
+        id: 'enum_common_ResultCode_INTERNAL_ERROR',
+        name: 'INTERNAL_ERROR',
+        value: '500',
+      },
+    ],
+    combination: createEmptyTypeExpr(),
+  }
+
+  const result: DataTypeDef = {
+    id: resultId,
+    name: 'Result',
+    kind: 'interface',
+    remark: '通用响应包装',
+    tableName: '',
+    category: 'other',
+    generics: [
+      {
+        id: 'gen_common_Result_T',
+        name: 'T',
+        constraint: null,
+        default: null,
+      },
+    ],
+    fields: [
+      field(
+        'field_common_Result_code',
+        'code',
+        typeAtomExpr('named', resultCodeId),
+        '响应码',
+      ),
+      field(
+        'field_common_Result_message',
+        'message',
+        typeAtomExpr('string'),
+        '提示信息',
+      ),
+      field(
+        'field_common_Result_error',
+        'error',
+        typeAtomExpr('string'),
+        '错误信息',
+      ),
+      field(
+        'field_common_Result_data',
+        'data',
+        typeAtomExpr('generic', 'T'),
+        '业务数据',
+      ),
+    ],
+    enumMembers: [],
+    combination: createEmptyTypeExpr(),
+  }
+
+  const queryPageDto: DataTypeDef = {
+    id: queryPageDtoId,
+    name: 'QueryPageDto',
+    kind: 'interface',
+    remark: '分页查询入参',
+    tableName: '',
+    category: 'dto',
+    generics: [],
+    fields: [
+      field(
+        'field_common_QueryPageDto_current',
+        'current',
+        typeAtomExpr('number'),
+        '当前页',
+      ),
+      field(
+        'field_common_QueryPageDto_pageSize',
+        'pageSize',
+        typeAtomExpr('number'),
+        '每页条数',
+      ),
+    ],
+    enumMembers: [],
+    combination: createEmptyTypeExpr(),
+  }
+
+  const queryPageVo: DataTypeDef = {
+    id: queryPageVoId,
+    name: 'QueryPageVo',
+    kind: 'interface',
+    remark: '分页查询出参',
+    tableName: '',
+    category: 'vo',
+    generics: [
+      {
+        id: 'gen_common_QueryPageVo_T',
+        name: 'T',
+        constraint: null,
+        default: null,
+      },
+    ],
+    fields: [
+      field(
+        'field_common_QueryPageVo_current',
+        'current',
+        typeAtomExpr('number'),
+        '当前页',
+      ),
+      field(
+        'field_common_QueryPageVo_pageSize',
+        'pageSize',
+        typeAtomExpr('number'),
+        '每页条数',
+      ),
+      field(
+        'field_common_QueryPageVo_hasNext',
+        'hasNext',
+        typeAtomExpr('boolean'),
+        '是否有下一页',
+      ),
+      field(
+        'field_common_QueryPageVo_total',
+        'total',
+        typeAtomExpr('number'),
+        '总条数',
+      ),
+      field(
+        'field_common_QueryPageVo_records',
+        'records',
+        typeAtomExpr('generic', 'T'),
+        '当前页数据',
+      ),
+    ],
+    enumMembers: [],
+    combination: createEmptyTypeExpr(),
+  }
+
+  return {
+    id: 'group_common',
+    name: COMMON_GROUP_NAME,
+    types: [resultCode, result, queryPageDto, queryPageVo],
+  }
+}
+
+/** 保证 common 在最前；缺失则插入；系统 id 类型与预设同步 */
+export function ensureCommonGroupFirst(groups: DataTypeGroup[]): DataTypeGroup[] {
+  const preset = createCommonDataTypeGroup()
+  const idx = groups.findIndex((g) => g.name === COMMON_GROUP_NAME)
+  if (idx < 0) {
+    return [preset, ...groups]
+  }
+  const existing = groups[idx]!
+  const presetById = new Map(preset.types.map((t) => [t.id, t]))
+  const presetByName = new Map(preset.types.map((t) => [t.name, t]))
+  const seenNames = new Set<string>()
+  const nextTypes: DataTypeDef[] = []
+
+  for (const t of existing.types) {
+    const sys = presetById.get(t.id) ?? presetByName.get(t.name)
+    if (sys && (t.id === sys.id || t.name === sys.name)) {
+      nextTypes.push(JSON.parse(JSON.stringify(sys)) as DataTypeDef)
+      seenNames.add(sys.name)
+    } else {
+      nextTypes.push(t)
+      if (t.name) seenNames.add(t.name)
+    }
+  }
+  for (const t of preset.types) {
+    if (!seenNames.has(t.name)) {
+      nextTypes.push(JSON.parse(JSON.stringify(t)) as DataTypeDef)
+      seenNames.add(t.name)
+    }
+  }
+
+  const merged: DataTypeGroup = {
+    ...existing,
+    id: existing.id || preset.id,
+    types: nextTypes,
+  }
+  const changed =
+    idx !== 0 ||
+    JSON.stringify(existing.types) !== JSON.stringify(merged.types)
+  if (!changed) return groups
+  const rest = groups.filter((_, i) => i !== idx)
+  return [merged, ...rest]
+}
+
 /** 类型名：字母/下划线开头 */
 export function isValidTypeName(name: string): boolean {
   return /^[A-Za-z_][A-Za-z0-9_]*$/.test(name)

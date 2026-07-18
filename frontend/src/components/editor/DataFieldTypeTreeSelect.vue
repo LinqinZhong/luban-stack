@@ -39,6 +39,7 @@ const props = withDefaults(
     excludeTypes?: DataFieldType[]
     placeholder?: string
     clearable?: boolean
+    size?: 'large' | 'default' | 'small'
   }>(),
   {
     allowRef: false,
@@ -47,6 +48,7 @@ const props = withDefaults(
     nested: false,
     clearable: false,
     placeholder: '选择类型',
+    size: 'default',
   },
 )
 
@@ -213,6 +215,7 @@ function onChange(value: string[] | null | undefined) {
     :options="options"
     :placeholder="placeholder"
     :clearable="clearable"
+    :size="size"
     filterable
     :props="{ expandTrigger: 'hover' }"
     style="width: 100%"

@@ -68,8 +68,12 @@ const TEXT_STYLE_ATTRS = new Set(['textSize', 'textColor', 'color'])
 export interface PageRefField {
   name: string
   nodePath: string
-  componentId: string
+  kind: 'component' | 'modal'
+  /** kind=component */
+  componentId?: string
   exposedMethods: string[]
+  /** kind=modal：弹层 name 属性 */
+  modalName?: string
 }
 
 export interface GeneratedMethod {
@@ -149,6 +153,12 @@ function parseBindings(raw: string | undefined): EventBinding[] {
 function parseBool(value: string | undefined): boolean {
   if (!value) return false
   return value === 'true' || value === '1'
+}
+
+/** 与编辑器一致：未写 closeOnClick 时默认可点遮罩关闭 */
+function parseCloseOnClick(value: string | undefined): boolean {
+  if (value == null || value === '') return true
+  return parseBool(value)
 }
 
 function parseNumber(value: string | undefined): number | null {
@@ -918,12 +928,26 @@ function transformCustomDataReads(line: string, fieldNames: readonly string[]): 
 }
 
 function renderComponentRefDeclarations(refFields: PageRefField[]): string {
-  if (!refFields.length) return ''
-  const lines = refFields.map((field) => {
+  const componentFields = refFields.filter((f) => f.kind === 'component')
+  if (!componentFields.length) return ''
+  const lines = componentFields.map((field) => {
     const methods = field.exposedMethods.filter((m) => /^[A-Za-z_$][\w$]*$/.test(m))
     const typeMembers = methods.map((m) => `${m}?: () => void`).join('; ')
     const type = typeMembers ? `{ ${typeMembers} }` : 'Record<string, any>'
     return `const ${field.name} = ref<${type} | null>(null)`
+  })
+  return `\n${lines.join('\n')}\n`
+}
+
+function renderModalRefDeclarations(refFields: PageRefField[]): string {
+  const modalFields = refFields.filter((f) => f.kind === 'modal' && f.modalName)
+  if (!modalFields.length) return ''
+  const lines = modalFields.map((field) => {
+    const key = escapeTsString(field.modalName!)
+    return `const ${field.name} = ref({
+  show: () => { modalVisible['${key}'] = true },
+  hide: () => { modalVisible['${key}'] = false },
+})`
   })
   return `\n${lines.join('\n')}\n`
 }
@@ -1465,10 +1489,24 @@ ${pad}</template>`
   if (tag === 'Modal') {
     const modalName = attrs.name?.trim() || `modal_${depth}`
     ctx.modalNames.add(modalName)
-    const bg =
-      attrs.background && attrs.background !== 'null'
-        ? colorClass('bg', attrs.background) ?? 'bg-black/45'
-        : 'bg-black/45'
+    const surfaceAttrs: Record<string, string> = {
+      padding: attrs.padding ?? '',
+      paddingLeft: attrs.paddingLeft ?? '',
+      paddingRight: attrs.paddingRight ?? '',
+      paddingTop: attrs.paddingTop ?? '',
+      paddingBottom: attrs.paddingBottom ?? '',
+      background: attrs.background?.trim() || 'rgba(0,0,0,0.45)',
+      borderRadius: attrs.borderRadius ?? '',
+      borderTopLeftRadius: attrs.borderTopLeftRadius ?? '',
+      borderTopRightRadius: attrs.borderTopRightRadius ?? '',
+      borderBottomRightRadius: attrs.borderBottomRightRadius ?? '',
+      borderBottomLeftRadius: attrs.borderBottomLeftRadius ?? '',
+      borderWidth: attrs.borderWidth ?? '',
+      borderColor: attrs.borderColor ?? '',
+    }
+    const surfaceTw = buildTwClasses(surfaceAttrs, {
+      extra: ['absolute', 'inset-0', 'z-50', 'box-border'],
+    })
     const panel = renderChildren(
       node.children,
       ctx,
@@ -1479,7 +1517,8 @@ ${pad}</template>`
       nodePath,
       false,
     )
-    const closeHandler = parseBool(attrs.closeOnClick)
+    const closeOnClick = parseCloseOnClick(attrs.closeOnClick)
+    const closeHandler = closeOnClick
       ? `@click.self="modalVisible['${escapeTsString(modalName)}'] = false"`
       : ''
     const overlay = formatVueElement({
@@ -1487,17 +1526,21 @@ ${pad}</template>`
       tag: 'div',
       attrs: [
         `v-if="modalVisible['${escapeTsString(modalName)}']"`,
-        `class="fixed inset-0 z-50 ${bg}"`,
+        classAttr(surfaceTw),
         closeHandler,
       ],
       inner: formatVueElement({
         pad: `${pad}    `,
         tag: 'div',
-        attrs: ['class="relative w-full h-full min-h-0 overflow-hidden"'],
+        attrs: [
+          'class="relative w-full h-full min-h-0 overflow-hidden"',
+          closeHandler,
+        ],
         inner: panel,
       }),
     })
-    return `${pad}<Teleport to="body">\n${overlay}\n${pad}</Teleport>`
+    // 挂到 .voider-page，随设计稿缩放；勿 Teleport 到 body（会逃出 scale）
+    return `${pad}<Teleport to=".voider-page">\n${overlay}\n${pad}</Teleport>`
   }
 
   if (tag === 'Swiper') {
@@ -1653,7 +1696,7 @@ ${pad}</template>`
 
   if (tag === 'Image') {
     const srcRaw = attrs.src ?? ''
-    const srcAttr = attrBinding('src', srcRaw, ctx, inRepeat)
+    const srcTrimmed = srcRaw.trim()
     const events = [...INTERACTION_ATTRS]
       .map((k) => eventHandler(k, attrs[k], inRepeat, ctx))
       .filter(Boolean)
@@ -1668,13 +1711,55 @@ ${pad}</template>`
     }
     if (attrs.onClick?.trim()) extra.push('cursor-pointer')
     const tw = twWithRelative(attrs, parentTag, extra, twOpts)
-    const alt = attrs.alt ? `alt="${escapeHtmlAttr(attrs.alt)}"` : ''
-    return formatVueElement({
-      pad,
+    const altText = (attrs.alt || '图片').trim() || '图片'
+    const phTw = twWithRelative(
+      attrs,
+      parentTag,
+      [
+        'flex',
+        'items-center',
+        'justify-center',
+        'text-xs',
+        'text-[#909399]',
+        attrs.background?.trim() ? '' : 'bg-[#f2f3f5]',
+      ].filter(Boolean),
+      twOpts,
+    )
+    // 空 src：与编辑器一致用占位，避免浏览器破碎图
+    if (!srcTrimmed) {
+      return formatVueElement({
+        pad,
+        tag: 'div',
+        attrs: [
+          classAttr(phTw),
+          ...visibilityAttrs(attrs, ctx, inRepeat),
+          ...events,
+        ],
+        inner: `${pad}  ${escapeHtmlText(altText)}`,
+      })
+    }
+    const srcAttr = attrBinding('src', srcRaw, ctx, inRepeat)
+    const alt = `alt="${escapeHtmlAttr(altText)}"`
+    const img = formatVueElement({
+      pad: isStaticBinding(srcTrimmed) ? pad : `${pad}  `,
       tag: 'img',
       attrs: [srcAttr, alt, classAttr(tw), ...visibilityAttrs(attrs, ctx, inRepeat), ...events],
       selfClosing: true,
     })
+    if (isStaticBinding(srcTrimmed)) return img
+    // 动态 src 为空时走占位
+    const srcExpr = bindingToExpr(srcTrimmed, ctx, inRepeat)
+    const phNested = formatVueElement({
+      pad: `${pad}  `,
+      tag: 'div',
+      attrs: [
+        classAttr(phTw),
+        ...visibilityAttrs(attrs, ctx, inRepeat),
+        ...events,
+      ],
+      inner: `${pad}    ${escapeHtmlText(altText)}`,
+    })
+    return `${pad}<template v-if="!(${srcExpr})">\n${phNested}\n${pad}</template>\n${pad}<template v-else>\n${img}\n${pad}</template>`
   }
 
   if (tag === 'Icon') {
@@ -1791,7 +1876,11 @@ export function generateViewSfc(options: {
 }): string {
   const storeName = pageIdToStoreName(options.pageId)
   const pageData = generatePageDataSource(options.data.fields)
-  const refPathMap = new Map(options.pageRefFields.map((f) => [f.nodePath, f.name]))
+  const refPathMap = new Map(
+    options.pageRefFields
+      .filter((f) => f.kind === 'component')
+      .map((f) => [f.nodePath, f.name]),
+  )
   const ctx: CodegenContext = {
     kind: 'page',
     id: options.pageId,
@@ -1808,6 +1897,12 @@ export function generateViewSfc(options: {
     indent: 0,
     needsVoiderIcon: false,
     needsVoiderSwiper: false,
+  }
+
+  for (const field of options.pageRefFields) {
+    if (field.kind === 'modal' && field.modalName) {
+      ctx.modalNames.add(field.modalName)
+    }
   }
 
   const root = options.rootNodes[0]
@@ -1844,8 +1939,8 @@ export function generateViewSfc(options: {
   const needsRoute =
     /\broute\./.test(scriptAndTemplate) ||
     (needsVoiderRuntime && /\$route/.test(options.xml))
-  const hasComponentRefs = options.pageRefFields.length > 0
-  const needsRef = pageData.needsRef || hasComponentRefs
+  const hasPageRefs = options.pageRefFields.length > 0
+  const needsRef = pageData.needsRef || hasPageRefs
   const needsModal = ctx.modalNames.size > 0
   const needsReactive = needsModal
   const vueImports = [
@@ -1900,7 +1995,8 @@ export function generateViewSfc(options: {
     needsModal
       ? `const modalVisible = reactive<Record<string, boolean>>({\n${modalInit}\n})`
       : '',
-    hasComponentRefs ? renderComponentRefDeclarations(options.pageRefFields).trim() : '',
+    hasPageRefs ? renderComponentRefDeclarations(options.pageRefFields).trim() : '',
+    hasPageRefs ? renderModalRefDeclarations(options.pageRefFields).trim() : '',
     needsVoiderRuntime
       ? `function visibilityCtx(scope?: EventScope) {
   return {

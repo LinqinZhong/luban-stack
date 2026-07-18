@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, reactive, ref } from 'vue'
-import { Delete, Plus } from '@element-plus/icons-vue'
+import { Plus } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   isValidIconId,
@@ -68,6 +68,13 @@ async function removeIcon(icon: IconDefinition) {
   icons.value = icons.value.filter((item) => item.id !== icon.id)
 }
 
+type IconMenuCommand = 'edit' | 'delete'
+
+function handleIconMenuCommand(command: IconMenuCommand, icon: IconDefinition) {
+  if (command === 'edit') openEdit(icon)
+  else void removeIcon(icon)
+}
+
 function saveIcon() {
   const id = form.id.trim()
   if (!isValidIconId(id)) {
@@ -126,33 +133,41 @@ function saveIcon() {
     />
 
     <div v-else class="icon-grid">
-      <button
+      <el-dropdown
         v-for="icon in icons"
         :key="icon.id"
-        type="button"
-        class="icon-card"
-        @click="openEdit(icon)"
+        trigger="contextmenu"
+        class="icon-dropdown"
+        @command="(cmd) => handleIconMenuCommand(cmd as IconMenuCommand, icon)"
       >
-        <div class="icon-preview">
-          <svg
-            class="preview-svg"
-            :viewBox="icon.viewBox"
-            aria-hidden="true"
-            v-html="icon.content"
-          />
-        </div>
-        <div class="icon-meta">
-          <div class="icon-label">{{ icon.label }}</div>
-          <div class="icon-id">{{ icon.id }}</div>
-        </div>
-        <el-button
-          class="icon-delete"
-          type="danger"
-          link
-          :icon="Delete"
-          @click.stop="removeIcon(icon)"
-        />
-      </button>
+        <button
+          type="button"
+          class="icon-card"
+          @click="openEdit(icon)"
+          @contextmenu.prevent
+        >
+          <div class="icon-preview">
+            <svg
+              class="preview-svg"
+              :viewBox="icon.viewBox"
+              aria-hidden="true"
+              v-html="icon.content"
+            />
+          </div>
+          <div class="icon-meta">
+            <div class="icon-label">{{ icon.label }}</div>
+            <div class="icon-id">{{ icon.id }}</div>
+          </div>
+        </button>
+        <template #dropdown>
+          <el-dropdown-menu>
+            <el-dropdown-item command="edit">编辑</el-dropdown-item>
+            <el-dropdown-item command="delete" divided>
+              删除
+            </el-dropdown-item>
+          </el-dropdown-menu>
+        </template>
+      </el-dropdown>
     </div>
 
     <el-dialog
@@ -291,9 +306,18 @@ function saveIcon() {
   white-space: nowrap;
 }
 
-.icon-delete {
-  position: absolute;
-  top: 4px;
-  right: 4px;
+.icon-dropdown {
+  min-width: 0;
+}
+
+.icon-dropdown :deep(.el-tooltip__trigger) {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.icon-dropdown .icon-card {
+  width: 100%;
+  box-sizing: border-box;
 }
 </style>

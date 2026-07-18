@@ -11,6 +11,7 @@ import {
 import { ensureIconLibraryFile } from './icons.js'
 import { ensureDataTypeLibraryFile } from './data-types.js'
 import { ensureMysqlLibraryFile } from './mysql.js'
+import { ensureBackendServiceLibraryFile } from './backend-services.js'
 
 export class ProjectError extends Error {
   status: number
@@ -208,6 +209,7 @@ export async function createProject(options: {
     await ensureIconLibraryFile(projectPath)
     await ensureDataTypeLibraryFile(projectPath)
     await ensureMysqlLibraryFile(projectPath)
+    await ensureBackendServiceLibraryFile(projectPath)
   } catch {
     throw new ProjectError(`无法写入 ${VOIDER_CONFIG_FILE}`, 500)
   }

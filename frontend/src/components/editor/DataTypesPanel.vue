@@ -5,10 +5,13 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import TypeConfigDialog from './TypeConfigDialog.vue'
 import TypeTsEditDialog from './TypeTsEditDialog.vue'
 import {
+  COMMON_GROUP_NAME,
   createEmptyDataType,
   createEmptyDataTypeGroup,
   DATA_TYPE_CATEGORY_OPTIONS,
   DATA_TYPE_KIND_OPTIONS,
+  isSystemCommonType,
+  isReservedCommonTypeName,
   isValidGroupName,
   isValidTypeName,
   kindNeedsConfig,
@@ -79,6 +82,18 @@ const activeGroup = computed(
   () => groups.value.find((g) => g.id === activeGroupId.value) ?? null,
 )
 
+/** common 分组本身可编辑；仅 4 个系统预设类型只读 */
+const isCommonActive = computed(() => isSystemCommonGroup(activeGroup.value))
+
+function isSystemCommonGroup(group: DataTypeGroup | null | undefined): boolean {
+  if (!group) return false
+  return group.name === COMMON_GROUP_NAME || group.id === 'group_common'
+}
+
+function isPresetTypeRow(row: DataTypeDef): boolean {
+  return isSystemCommonType(row)
+}
+
 const activeTypes = computed(() => activeGroup.value?.types ?? [])
 
 const namedOptions = computed(() => {
@@ -86,7 +101,6 @@ const namedOptions = computed(() => {
   for (const group of groups.value) {
     for (const t of group.types) {
       if (!t.name.trim()) continue
-      // 配置弹窗中排除正在编辑的自身，避免自引用误导（仍允许，但标注分组）
       options.push({
         id: t.id,
         label: `${t.name}（${group.name}）`,
@@ -106,6 +120,14 @@ const tsEditingType = computed(() => {
   return activeGroup.value.types[tsEditingTypeIndex.value] ?? null
 })
 
+const editingTypeReadonly = computed(() =>
+  isSystemCommonType(editingType.value),
+)
+
+const tsEditingTypeReadonly = computed(() =>
+  isSystemCommonType(tsEditingType.value),
+)
+
 function setGroups(next: DataTypeGroup[]) {
   groups.value = next
 }
@@ -121,6 +143,12 @@ function updateActiveGroup(patch: Partial<DataTypeGroup>) {
 
 function updateType(index: number, patch: Partial<DataTypeDef>) {
   if (!activeGroup.value) return
+  const current = activeGroup.value.types[index]
+  if (!current || isSystemCommonType(current)) return
+  if (patch.name != null && isReservedCommonTypeName(String(patch.name))) {
+    ElMessage.warning('不能使用系统预设类型名')
+    return
+  }
   const types = activeGroup.value.types.map((t, i) =>
     i === index ? { ...t, ...patch } : t,
   )
@@ -157,12 +185,20 @@ async function promptAddGroup() {
     ElMessage.error(`分组「${name}」已存在`)
     return
   }
+  if (name === COMMON_GROUP_NAME) {
+    ElMessage.error('common 为系统保留分组名')
+    return
+  }
   const group = createEmptyDataTypeGroup(name)
   setGroups([...groups.value, group])
   activeGroupId.value = group.id
 }
 
 async function removeGroup(group: DataTypeGroup) {
+  if (group.name === COMMON_GROUP_NAME) {
+    ElMessage.warning('系统分组 common 不可删除')
+    return
+  }
   try {
     await ElMessageBox.confirm(
       `确定删除分组「${group.name}」及其下全部类型吗？对应文件 types/${group.name}.json 将一并删除。`,
@@ -175,19 +211,47 @@ async function removeGroup(group: DataTypeGroup) {
   setGroups(groups.value.filter((g) => g.id !== group.id))
 }
 
-function renameGroup(group: DataTypeGroup, name: string) {
-  const next = name.trim()
-  if (!isValidGroupName(next)) {
-    ElMessage.warning('分组名仅允许纯英文（字母开头，字母/数字/下划线）')
+async function promptRenameGroup(group: DataTypeGroup) {
+  if (group.name === COMMON_GROUP_NAME) {
+    ElMessage.warning('系统分组 common 不可重命名')
     return
   }
-  if (groups.value.some((g) => g.id !== group.id && g.name === next)) {
-    ElMessage.warning(`分组「${next}」已存在`)
+  let name = group.name
+  try {
+    const result = await ElMessageBox.prompt('请输入分组名（纯英文）', '重命名分组', {
+      confirmButtonText: '确定',
+      cancelButtonText: '取消',
+      inputValue: group.name,
+      inputPlaceholder: '如 Goods',
+      inputPattern: /^[A-Za-z][A-Za-z0-9_]*$/,
+      inputErrorMessage: '仅允许纯英文：字母开头，字母/数字/下划线',
+    })
+    name = String(result.value ?? '').trim()
+  } catch {
+    return
+  }
+  if (!isValidGroupName(name)) {
+    ElMessage.error('分组名不合法')
+    return
+  }
+  if (groups.value.some((g) => g.id !== group.id && g.name === name)) {
+    ElMessage.error(`分组「${name}」已存在`)
     return
   }
   setGroups(
-    groups.value.map((g) => (g.id === group.id ? { ...g, name: next } : g)),
+    groups.value.map((g) => (g.id === group.id ? { ...g, name } : g)),
   )
+}
+
+type GroupMenuCommand = 'rename' | 'delete'
+
+function handleGroupMenuCommand(command: GroupMenuCommand, group: DataTypeGroup) {
+  if (isSystemCommonGroup(group)) {
+    ElMessage.warning('系统分组 common 不可修改')
+    return
+  }
+  if (command === 'rename') void promptRenameGroup(group)
+  else if (command === 'delete') void removeGroup(group)
 }
 
 function addType() {
@@ -217,6 +281,10 @@ async function promptAddType() {
     ElMessage.error('类型名不合法')
     return
   }
+  if (isReservedCommonTypeName(name)) {
+    ElMessage.error(`「${name}」为系统预设类型名，不可占用`)
+    return
+  }
   const exists = groups.value.some((g) =>
     g.types.some((t) => t.name === name),
   )
@@ -232,9 +300,14 @@ async function promptAddType() {
 async function removeType(index: number) {
   if (!activeGroup.value) return
   const t = activeGroup.value.types[index]
+  if (!t) return
+  if (isSystemCommonType(t)) {
+    ElMessage.warning('系统预设类型不可删除')
+    return
+  }
   try {
     await ElMessageBox.confirm(
-      `确定删除类型「${t?.name || '未命名'}」吗？`,
+      `确定删除类型「${t.name || '未命名'}」吗？`,
       '删除类型',
       { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' },
     )
@@ -343,29 +416,42 @@ const namedOptionsForConfig = computed(() => {
           :image-size="56"
         />
         <ul v-else class="group-list">
-          <li
+          <el-dropdown
             v-for="group in groups"
             :key="group.id"
-            class="group-item"
-            :class="{ active: group.id === activeGroupId }"
-            @click="activeGroupId = group.id"
+            trigger="contextmenu"
+            class="group-dropdown"
+            @command="
+              (cmd) => handleGroupMenuCommand(cmd as GroupMenuCommand, group)
+            "
           >
-            <el-input
-              :model-value="group.name"
-              size="small"
-              class="group-name-input"
-              placeholder="English"
-              @click.stop
-              @update:model-value="renameGroup(group, $event)"
-            />
-            <span class="group-count">{{ group.types.length }}</span>
-            <el-button
-              type="danger"
-              link
-              :icon="Delete"
-              @click.stop="removeGroup(group)"
-            />
-          </li>
+            <li
+              class="group-item"
+              :class="{ active: group.id === activeGroupId }"
+              @click="activeGroupId = group.id"
+              @contextmenu.prevent
+            >
+              <span class="group-name" :title="group.name">{{ group.name }}</span>
+              <span class="group-count">{{ group.types.length }}</span>
+            </li>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item
+                  command="rename"
+                  :disabled="isSystemCommonGroup(group)"
+                >
+                  重命名
+                </el-dropdown-item>
+                <el-dropdown-item
+                  command="delete"
+                  divided
+                  :disabled="isSystemCommonGroup(group)"
+                >
+                  删除
+                </el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
         </ul>
       </aside>
 
@@ -389,6 +475,14 @@ const namedOptionsForConfig = computed(() => {
           :image-size="64"
         />
         <div v-else class="type-table">
+          <el-alert
+            v-if="isCommonActive"
+            type="info"
+            :closable="false"
+            show-icon
+            title="common 中 ResultCode / Result / QueryPageDto / QueryPageVo 为系统预设，不可修改；其余类型可正常编辑"
+            class="common-readonly-tip"
+          />
           <el-table
             :data="activeTypes"
             border
@@ -401,6 +495,7 @@ const namedOptionsForConfig = computed(() => {
                   <el-input
                     :model-value="row.name"
                     placeholder="如 GoodsItem"
+                    :disabled="isPresetTypeRow(row)"
                     @update:model-value="handleNameChange($index, $event)"
                   />
                   <el-button
@@ -409,7 +504,7 @@ const namedOptionsForConfig = computed(() => {
                     :icon="EditPen"
                     @click="openTsEdit($index)"
                   >
-                    编辑
+                    {{ isPresetTypeRow(row) ? '查看' : '编辑' }}
                   </el-button>
                 </div>
               </template>
@@ -421,6 +516,7 @@ const namedOptionsForConfig = computed(() => {
                   :model-value="kindCategoryPath(row)"
                   :options="KIND_CATEGORY_CASCADER_OPTIONS"
                   :props="{ expandTrigger: 'hover' }"
+                  :disabled="isPresetTypeRow(row)"
                   style="width: 100%"
                   @update:model-value="handleKindChange($index, $event)"
                 />
@@ -433,7 +529,11 @@ const namedOptionsForConfig = computed(() => {
                   :model-value="row.tableName ?? ''"
                   placeholder="可选"
                   clearable
-                  :disabled="row.kind !== 'interface' || row.category !== 'entity'"
+                  :disabled="
+                    isPresetTypeRow(row) ||
+                    row.kind !== 'interface' ||
+                    row.category !== 'entity'
+                  "
                   @update:model-value="updateType($index, { tableName: $event })"
                 />
               </template>
@@ -444,6 +544,7 @@ const namedOptionsForConfig = computed(() => {
                 <el-input
                   :model-value="row.remark"
                   placeholder="备注"
+                  :disabled="isPresetTypeRow(row)"
                   @update:model-value="updateType($index, { remark: $event })"
                 />
               </template>
@@ -458,18 +559,19 @@ const namedOptionsForConfig = computed(() => {
                   :icon="Setting"
                   @click="openConfig($index)"
                 >
-                  配置
+                  {{ isPresetTypeRow(row) ? '查看' : '配置' }}
                 </el-button>
                 <span v-else class="cfg-na">—</span>
               </template>
             </el-table-column>
 
             <el-table-column label="操作" width="72" align="center">
-              <template #default="{ $index }">
+              <template #default="{ row, $index }">
                 <el-button
                   type="danger"
                   link
                   :icon="Delete"
+                  :disabled="isPresetTypeRow(row)"
                   @click="removeType($index)"
                 />
               </template>
@@ -483,12 +585,14 @@ const namedOptionsForConfig = computed(() => {
       v-model="configVisible"
       :type-def="editingType"
       :named-options="namedOptionsForConfig"
+      :readonly="editingTypeReadonly"
       @save="saveConfig"
     />
     <TypeTsEditDialog
       v-model="tsEditVisible"
       :type-def="tsEditingType"
       :library="library"
+      :readonly="tsEditingTypeReadonly"
       @save="saveTsEdit"
     />
   </div>
@@ -563,15 +667,29 @@ const namedOptionsForConfig = computed(() => {
   flex: 1;
 }
 
+.group-dropdown {
+  display: block;
+  width: 100%;
+  margin-bottom: 4px;
+}
+
+.group-dropdown :deep(.el-tooltip__trigger),
+.group-dropdown :deep(.el-dropdown__trigger) {
+  display: block !important;
+  width: 100%;
+}
+
 .group-item {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 6px 8px;
-  margin-bottom: 4px;
+  width: 100%;
+  box-sizing: border-box;
+  gap: 8px;
+  padding: 8px 10px;
   border-radius: 6px;
   cursor: pointer;
   border: 1px solid transparent;
+  list-style: none;
 }
 
 .group-item:hover {
@@ -583,22 +701,25 @@ const namedOptionsForConfig = computed(() => {
   border-color: #b3d8ff;
 }
 
-.group-name-input {
-  flex: 1;
+.group-name {
+  flex: 1 1 auto;
   min-width: 0;
-}
-
-.group-name-input :deep(.el-input__wrapper) {
-  box-shadow: none;
-  background: transparent;
-  padding-left: 4px;
+  font-size: 13px;
+  color: #303133;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .group-count {
+  flex: 0 0 auto;
+  margin-left: auto;
+  padding-left: 8px;
   font-size: 11px;
   color: #94a3b8;
-  min-width: 16px;
-  text-align: center;
+  min-width: 1.25em;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
 }
 
 .type-table {
@@ -606,6 +727,13 @@ const namedOptionsForConfig = computed(() => {
   min-height: 0;
   overflow: auto;
   padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.common-readonly-tip {
+  flex-shrink: 0;
 }
 
 .cfg-na {

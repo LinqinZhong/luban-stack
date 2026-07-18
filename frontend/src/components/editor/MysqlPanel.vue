@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { Delete, Plus, Refresh, Setting } from '@element-plus/icons-vue'
+import { Plus, Refresh } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { dropMysqlTable, listMysqlTables, truncateMysqlTable } from '../../api/projects'
 import MysqlConnectionDialog from './MysqlConnectionDialog.vue'
@@ -97,6 +97,13 @@ function openCreateDb() {
 function openEditDb(db: MysqlDatabaseConfig) {
   editingDb.value = JSON.parse(JSON.stringify(db)) as MysqlDatabaseConfig
   connDialogVisible.value = true
+}
+
+type DbMenuCommand = 'config' | 'delete'
+
+function handleDbMenuCommand(command: DbMenuCommand, db: MysqlDatabaseConfig) {
+  if (command === 'config') openEditDb(db)
+  else void removeDb(db)
 }
 
 async function removeDb(db: MysqlDatabaseConfig) {
@@ -265,34 +272,38 @@ function formatTime(ts: number | null): string {
           :image-size="56"
         />
         <ul v-else class="db-list">
-          <li
+          <el-dropdown
             v-for="db in databases"
             :key="db.id"
-            class="db-item"
-            :class="{ active: db.id === activeId }"
-            @click="activeId = db.id"
+            trigger="contextmenu"
+            class="db-dropdown"
+            @command="(cmd) => handleDbMenuCommand(cmd as DbMenuCommand, db)"
           >
-            <div class="db-meta">
-              <div class="db-name">{{ db.name }}</div>
-              <div class="db-sub">
-                {{ db.host }}:{{ db.port }}
-                <span v-if="db.ssh.enabled"> · SSH</span>
+            <li
+              class="db-item"
+              :class="{ active: db.id === activeId }"
+              @click="activeId = db.id"
+              @dblclick="openEditDb(db)"
+              @contextmenu.prevent
+            >
+              <div class="db-meta">
+                <div class="db-name">{{ db.name }}</div>
+                <div class="db-sub">
+                  {{ db.host }}:{{ db.port }}
+                  <span v-if="db.ssh.enabled"> · SSH</span>
+                </div>
               </div>
-            </div>
-            <span class="db-count">{{ db.tables.length }}</span>
-            <el-button
-              type="primary"
-              link
-              :icon="Setting"
-              @click.stop="openEditDb(db)"
-            />
-            <el-button
-              type="danger"
-              link
-              :icon="Delete"
-              @click.stop="removeDb(db)"
-            />
-          </li>
+              <span class="db-count">{{ db.tables.length }}</span>
+            </li>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item command="config">配置</el-dropdown-item>
+                <el-dropdown-item command="delete" divided>
+                  删除
+                </el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
         </ul>
       </aside>
 
@@ -461,15 +472,26 @@ function formatTime(ts: number | null): string {
   flex: 1;
 }
 
+.db-dropdown {
+  display: block;
+  width: 100%;
+  margin-bottom: 4px;
+}
+
+.db-dropdown :deep(.el-tooltip__trigger) {
+  display: block;
+  width: 100%;
+}
+
 .db-item {
   display: flex;
   align-items: center;
   gap: 4px;
   padding: 8px 10px;
-  margin-bottom: 4px;
   border-radius: 6px;
   cursor: pointer;
   border: 1px solid transparent;
+  list-style: none;
 }
 
 .db-item:hover {

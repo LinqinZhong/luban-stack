@@ -15,6 +15,7 @@ import {
   readMysqlLibrary,
   saveMysqlLibrary,
   testMysqlConnection,
+  listMysqlDatabases,
   createMysqlTable,
   updateMysqlTableMeta,
   updateMysqlTableSchema,
@@ -23,6 +24,15 @@ import {
   getMysqlTableColumns,
   refreshMysqlTables,
 } from '../services/mysql.js'
+import {
+  readBackendServiceLibrary,
+  readServiceControllers,
+  readServiceProcessors,
+  saveBackendServiceLibrary,
+  saveServiceControllers,
+  saveServiceProcessors,
+} from '../services/backend-services.js'
+import { debugDataLayerMethod } from '../services/data-method-debug.js'
 import { exportVue3Project } from '../services/export-vue3.js'
 import { DEFAULT_CANVAS_WIDTH, ENGINE_VERSION } from '../types/voider-project.js'
 
@@ -209,11 +219,195 @@ router.put('/mysql', async (req, res) => {
   }
 })
 
+router.get('/services', async (req, res) => {
+  try {
+    const projectPath = typeof req.query.projectPath === 'string' ? req.query.projectPath : ''
+    if (!projectPath.trim()) {
+      res.status(400).json({ message: '请提供 projectPath' })
+      return
+    }
+    const library = await readBackendServiceLibrary(projectPath.trim())
+    res.json(library)
+  } catch (err) {
+    handleError(res, err)
+  }
+})
+
+router.put('/services', async (req, res) => {
+  try {
+    const { projectPath, services } = req.body ?? {}
+    if (!projectPath || typeof projectPath !== 'string' || !projectPath.trim()) {
+      res.status(400).json({ message: '请提供 projectPath' })
+      return
+    }
+    const library = await saveBackendServiceLibrary(projectPath.trim(), { services })
+    res.json(library)
+  } catch (err) {
+    handleError(res, err)
+  }
+})
+
+router.get('/services/controllers', async (req, res) => {
+  try {
+    const projectPath = typeof req.query.projectPath === 'string' ? req.query.projectPath : ''
+    const serviceId = typeof req.query.serviceId === 'string' ? req.query.serviceId : ''
+    if (!projectPath.trim()) {
+      res.status(400).json({ message: '请提供 projectPath' })
+      return
+    }
+    if (!serviceId.trim()) {
+      res.status(400).json({ message: '请提供 serviceId' })
+      return
+    }
+    const controllers = await readServiceControllers(
+      projectPath.trim(),
+      serviceId.trim(),
+    )
+    res.json({ controllers })
+  } catch (err) {
+    handleError(res, err)
+  }
+})
+
+router.put('/services/controllers', async (req, res) => {
+  try {
+    const { projectPath, serviceId, controllers } = req.body ?? {}
+    if (!projectPath || typeof projectPath !== 'string' || !projectPath.trim()) {
+      res.status(400).json({ message: '请提供 projectPath' })
+      return
+    }
+    if (!serviceId || typeof serviceId !== 'string' || !serviceId.trim()) {
+      res.status(400).json({ message: '请提供 serviceId' })
+      return
+    }
+    const next = await saveServiceControllers(
+      projectPath.trim(),
+      serviceId.trim(),
+      controllers,
+    )
+    res.json({ controllers: next })
+  } catch (err) {
+    handleError(res, err)
+  }
+})
+
+function parseProcessorLayer(raw: unknown): 'business' | 'data' | null {
+  return raw === 'business' || raw === 'data' ? raw : null
+}
+
+router.get('/services/processors', async (req, res) => {
+  try {
+    const projectPath = typeof req.query.projectPath === 'string' ? req.query.projectPath : ''
+    const serviceId = typeof req.query.serviceId === 'string' ? req.query.serviceId : ''
+    const layer = parseProcessorLayer(req.query.layer)
+    if (!projectPath.trim()) {
+      res.status(400).json({ message: '请提供 projectPath' })
+      return
+    }
+    if (!serviceId.trim()) {
+      res.status(400).json({ message: '请提供 serviceId' })
+      return
+    }
+    if (!layer) {
+      res.status(400).json({ message: '请提供 layer（business | data）' })
+      return
+    }
+    const processors = await readServiceProcessors(
+      projectPath.trim(),
+      serviceId.trim(),
+      layer,
+    )
+    res.json({ processors })
+  } catch (err) {
+    handleError(res, err)
+  }
+})
+
+router.put('/services/processors', async (req, res) => {
+  try {
+    const { projectPath, serviceId, layer, processors } = req.body ?? {}
+    if (!projectPath || typeof projectPath !== 'string' || !projectPath.trim()) {
+      res.status(400).json({ message: '请提供 projectPath' })
+      return
+    }
+    if (!serviceId || typeof serviceId !== 'string' || !serviceId.trim()) {
+      res.status(400).json({ message: '请提供 serviceId' })
+      return
+    }
+    const kind = parseProcessorLayer(layer)
+    if (!kind) {
+      res.status(400).json({ message: '请提供 layer（business | data）' })
+      return
+    }
+    const next = await saveServiceProcessors(
+      projectPath.trim(),
+      serviceId.trim(),
+      kind,
+      processors,
+    )
+    res.json({ processors: next })
+  } catch (err) {
+    handleError(res, err)
+  }
+})
+
+router.post('/services/processors/debug', async (req, res) => {
+  try {
+    const {
+      projectPath,
+      serviceId,
+      processorId,
+      methodId,
+      params,
+      dryRun,
+    } = req.body ?? {}
+    if (!projectPath || typeof projectPath !== 'string' || !projectPath.trim()) {
+      res.status(400).json({ message: '请提供 projectPath' })
+      return
+    }
+    if (!serviceId || typeof serviceId !== 'string' || !serviceId.trim()) {
+      res.status(400).json({ message: '请提供 serviceId' })
+      return
+    }
+    if (!processorId || typeof processorId !== 'string' || !processorId.trim()) {
+      res.status(400).json({ message: '请提供 processorId' })
+      return
+    }
+    if (!methodId || typeof methodId !== 'string' || !methodId.trim()) {
+      res.status(400).json({ message: '请提供 methodId' })
+      return
+    }
+    const result = await debugDataLayerMethod({
+      projectPath: projectPath.trim(),
+      serviceId: serviceId.trim(),
+      processorId: processorId.trim(),
+      methodId: methodId.trim(),
+      params:
+        params && typeof params === 'object' && !Array.isArray(params)
+          ? (params as Record<string, unknown>)
+          : {},
+      dryRun: dryRun !== false,
+    })
+    res.json(result)
+  } catch (err) {
+    handleError(res, err)
+  }
+})
+
 router.post('/mysql/test', async (req, res) => {
   try {
     const body = req.body ?? {}
     const result = await testMysqlConnection(parseMysqlConnection(body))
     res.json(result)
+  } catch (err) {
+    handleError(res, err)
+  }
+})
+
+router.post('/mysql/databases', async (req, res) => {
+  try {
+    const databases = await listMysqlDatabases(parseMysqlConnection(req.body ?? {}))
+    res.json({ databases })
   } catch (err) {
     handleError(res, err)
   }

@@ -336,11 +336,18 @@ function normalizeTableDef(input: unknown): MysqlTableDef {
   }
 }
 
-function columnSql(col: MysqlColumnDef): string {
+function columnSql(
+  col: MysqlColumnDef,
+  options?: { autoIncrement?: boolean },
+): string {
+  const useAi =
+    options?.autoIncrement !== undefined
+      ? options.autoIncrement
+      : col.autoIncrement
   const parts = [`${quoteIdent(col.name)} ${col.type}`]
-  if (col.autoIncrement) parts.push('AUTO_INCREMENT')
+  if (useAi) parts.push('AUTO_INCREMENT')
   parts.push(col.nullable ? 'NULL' : 'NOT NULL')
-  if (col.defaultValue !== '' && !col.autoIncrement) {
+  if (col.defaultValue !== '' && !useAi) {
     const raw = col.defaultValue.trim()
     if (/^(NULL|CURRENT_TIMESTAMP(\(\d+\))?)$/i.test(raw)) {
       parts.push(`DEFAULT ${raw}`)
@@ -380,6 +387,33 @@ export async function testMysqlConnection(
       serverVersion: version,
     }
   })
+}
+
+/** 列出服务器上的库名（不依赖已选 database） */
+export async function listMysqlDatabases(
+  payload: MysqlConnectionPayload,
+): Promise<string[]> {
+  return withMysqlConnection(
+    { ...payload, database: '' },
+    async (connection) => {
+      const [rows] = await connection.query('SHOW DATABASES')
+      const list = Array.isArray(rows) ? rows : []
+      const names = list
+        .map((row: any) => {
+          const key = Object.keys(row ?? {})[0]
+          return key ? String(row[key] ?? '').trim() : ''
+        })
+        .filter(Boolean)
+        // 过滤系统库
+        .filter(
+          (name) =>
+            !['information_schema', 'performance_schema', 'mysql', 'sys'].includes(
+              name.toLowerCase(),
+            ),
+        )
+      return names.sort((a, b) => a.localeCompare(b, 'en'))
+    },
+  )
 }
 
 export async function refreshMysqlTables(
@@ -435,9 +469,20 @@ export async function createMysqlTable(
   tableInput: unknown,
 ): Promise<MysqlTableInfo[]> {
   const table = normalizeTableDef(tableInput)
+  for (const col of table.columns) {
+    if (col.autoIncrement && !col.primaryKey) {
+      throw new ProjectError(
+        `列「${col.name}」设置了自增，必须同时设为主键`,
+        400,
+      )
+    }
+  }
+  if (table.columns.filter((c) => c.autoIncrement).length > 1) {
+    throw new ProjectError('一张表只能有一列自增', 400)
+  }
   return withMysqlConnection(payload, async (connection) => {
     await useDatabase(connection, payload.database)
-    const colSql = table.columns.map(columnSql).join(',\n  ')
+    const colSql = table.columns.map((c) => columnSql(c)).join(',\n  ')
     const pkCols = table.columns.filter((c) => c.primaryKey).map((c) => quoteIdent(c.name))
     const pkSql = pkCols.length ? `,\n  PRIMARY KEY (${pkCols.join(', ')})` : ''
     const commentSql = table.remark
@@ -497,12 +542,25 @@ export async function updateMysqlTableSchema(
     }
     names.add(col.name)
   }
+  for (const col of columns) {
+    if (col.autoIncrement && !col.primaryKey) {
+      throw new ProjectError(
+        `列「${col.name}」设置了自增，必须同时设为主键`,
+        400,
+      )
+    }
+  }
+  const autoCount = columns.filter((c) => c.autoIncrement).length
+  if (autoCount > 1) {
+    throw new ProjectError('一张表只能有一列自增', 400)
+  }
 
   return withMysqlConnection(payload, async (connection) => {
     await useDatabase(connection, payload.database)
 
     const existing = await getColumnsOnConnection(connection, tableName)
     const existingNames = new Set(existing.map((c) => c.name))
+    const existingByName = new Map(existing.map((c) => [c.name, c]))
 
     const nextOriginals = new Set(
       columns
@@ -510,6 +568,19 @@ export async function updateMysqlTableSchema(
         .filter((n) => existingNames.has(n)),
     )
 
+    // 1) 先去掉现有自增，否则无法 DROP PRIMARY KEY
+    for (const old of existing) {
+      if (!old.autoIncrement) continue
+      if (!nextOriginals.has(old.name) && !existingNames.has(old.name)) continue
+      await connection.query(
+        `ALTER TABLE ${quoteIdent(tableName)} MODIFY COLUMN ${columnSql(
+          { ...old, autoIncrement: false },
+          { autoIncrement: false },
+        )}`,
+      )
+    }
+
+    // 2) 删除已移除的列
     for (const old of existing) {
       if (!nextOriginals.has(old.name)) {
         await connection.query(
@@ -518,31 +589,47 @@ export async function updateMysqlTableSchema(
       }
     }
 
+    // 3) 增改列（暂不带 AUTO_INCREMENT）
     for (const col of columns) {
-      const from = col.originalName && existingNames.has(col.originalName)
-        ? col.originalName
-        : existingNames.has(col.name)
-          ? col.name
-          : null
+      const from =
+        col.originalName && existingNames.has(col.originalName)
+          ? col.originalName
+          : existingNames.has(col.name)
+            ? col.name
+            : null
+
+      const sqlWithoutAi = columnSql(col, { autoIncrement: false })
 
       if (!from) {
         await connection.query(
-          `ALTER TABLE ${quoteIdent(tableName)} ADD COLUMN ${columnSql(col)}`,
+          `ALTER TABLE ${quoteIdent(tableName)} ADD COLUMN ${sqlWithoutAi}`,
         )
         continue
       }
 
       if (from !== col.name) {
         await connection.query(
-          `ALTER TABLE ${quoteIdent(tableName)} CHANGE COLUMN ${quoteIdent(from)} ${columnSql(col)}`,
+          `ALTER TABLE ${quoteIdent(tableName)} CHANGE COLUMN ${quoteIdent(from)} ${sqlWithoutAi}`,
         )
       } else {
-        await connection.query(
-          `ALTER TABLE ${quoteIdent(tableName)} MODIFY COLUMN ${columnSql(col)}`,
-        )
+        const prev = existingByName.get(from)
+        // 类型/可空/默认/备注有变化，或此前有自增（已在步骤1去掉）时再 MODIFY
+        const needModify =
+          !prev ||
+          prev.type !== col.type ||
+          prev.nullable !== col.nullable ||
+          prev.defaultValue !== col.defaultValue ||
+          prev.comment !== col.comment ||
+          prev.autoIncrement
+        if (needModify) {
+          await connection.query(
+            `ALTER TABLE ${quoteIdent(tableName)} MODIFY COLUMN ${sqlWithoutAi}`,
+          )
+        }
       }
     }
 
+    // 4) 重建主键
     const [pkRows] = await connection.query(
       `SELECT CONSTRAINT_NAME AS name
        FROM information_schema.TABLE_CONSTRAINTS
@@ -552,12 +639,24 @@ export async function updateMysqlTableSchema(
       [tableName],
     )
     if (Array.isArray(pkRows) && pkRows.length) {
-      await connection.query(`ALTER TABLE ${quoteIdent(tableName)} DROP PRIMARY KEY`)
+      await connection.query(
+        `ALTER TABLE ${quoteIdent(tableName)} DROP PRIMARY KEY`,
+      )
     }
     const pkCols = columns.filter((c) => c.primaryKey).map((c) => quoteIdent(c.name))
     if (pkCols.length) {
       await connection.query(
         `ALTER TABLE ${quoteIdent(tableName)} ADD PRIMARY KEY (${pkCols.join(', ')})`,
+      )
+    }
+
+    // 5) 主键就绪后再加 AUTO_INCREMENT
+    for (const col of columns) {
+      if (!col.autoIncrement) continue
+      await connection.query(
+        `ALTER TABLE ${quoteIdent(tableName)} MODIFY COLUMN ${columnSql(col, {
+          autoIncrement: true,
+        })}`,
       )
     }
 
@@ -624,4 +723,95 @@ export async function truncateMysqlTable(
     await connection.query(`TRUNCATE TABLE ${quoteIdent(tableName)}`)
     return listTables(connection, payload.database)
   })
+}
+
+export function mysqlDatabaseToPayload(
+  db: import('../types/mysql.js').MysqlDatabaseConfig,
+): MysqlConnectionPayload {
+  return {
+    host: db.host,
+    port: db.port,
+    username: db.username,
+    password: db.password,
+    database: db.database,
+    ssh: db.ssh,
+  }
+}
+
+export async function runMysqlQuery(
+  payload: MysqlConnectionPayload,
+  sql: string,
+  options?: { dryRun?: boolean },
+): Promise<{
+  rows: Record<string, unknown>[]
+  fields: string[]
+  meta?: Record<string, unknown>
+}> {
+  const text = sql.trim()
+  if (!text) throw new ProjectError('SQL 不能为空', 400)
+  return withMysqlConnection(payload, async (connection) => {
+    if (payload.database?.trim()) {
+      await useDatabase(connection, payload.database)
+    }
+
+    const dryRun = options?.dryRun === true
+    if (dryRun) {
+      await connection.beginTransaction()
+      try {
+        const [result, fieldPackets] = await connection.query(text)
+        const parsed = parseMysqlQueryResult(result, fieldPackets)
+        await connection.rollback()
+        return {
+          ...parsed,
+          meta: {
+            ...(parsed.meta ?? {}),
+            dryRun: true,
+          },
+        }
+      } catch (err) {
+        try {
+          await connection.rollback()
+        } catch {
+          // ignore
+        }
+        throw err
+      }
+    }
+
+    const [result, fieldPackets] = await connection.query(text)
+    return parseMysqlQueryResult(result, fieldPackets)
+  })
+}
+
+function parseMysqlQueryResult(
+  result: unknown,
+  fieldPackets: unknown,
+): {
+  rows: Record<string, unknown>[]
+  fields: string[]
+  meta?: Record<string, unknown>
+} {
+  if (Array.isArray(result)) {
+    const fields = Array.isArray(fieldPackets)
+      ? fieldPackets
+          .map((f) =>
+            f && typeof f === 'object' && 'name' in f ? String(f.name) : '',
+          )
+          .filter(Boolean)
+      : []
+    return { rows: result as Record<string, unknown>[], fields }
+  }
+  const header = result as {
+    affectedRows?: number
+    insertId?: number
+    warningStatus?: number
+  }
+  return {
+    rows: [],
+    fields: [],
+    meta: {
+      affectedRows: header.affectedRows ?? 0,
+      insertId: header.insertId ?? 0,
+    },
+  }
 }

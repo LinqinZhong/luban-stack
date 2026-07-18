@@ -79,7 +79,21 @@ function collectPageRefFields(
     if (!nodePath || !name || !/^[A-Za-z_$][\w$]*$/.test(name)) continue
 
     const node = resolveNodeByPath(root, nodePath)
-    if (!node || node.tag !== 'Component') continue
+    if (!node) continue
+
+    if (node.tag === 'Modal') {
+      const modalName = node.attrs.name?.trim() || `modal_${name}`
+      refs.push({
+        name,
+        nodePath,
+        kind: 'modal',
+        exposedMethods: ['show', 'hide'],
+        modalName,
+      })
+      continue
+    }
+
+    if (node.tag !== 'Component') continue
 
     const componentId = node.attrs.componentId?.trim()
     if (!componentId) continue
@@ -88,11 +102,54 @@ function collectPageRefFields(
     refs.push({
       name,
       nodePath,
+      kind: 'component',
       componentId,
       exposedMethods: (config?.exposedMethods ?? []).filter(Boolean),
     })
   }
   return refs
+}
+
+/** 导出时兼容旧 Mask → Modal（与编辑器 migrateLegacyMaskToModal 对齐） */
+function gravityToLayoutAttrs(gravity: string): Record<string, string> {
+  const g = gravity.trim() || 'center'
+  const attrs: Record<string, string> = {}
+  if (g === 'center') {
+    attrs.layout_centerInParent = 'true'
+    return attrs
+  }
+  if (g.includes('center_horizontal')) attrs.layout_centerHorizontal = 'true'
+  if (g.includes('center_vertical')) attrs.layout_centerVertical = 'true'
+  if (g.includes('left') || g.includes('start')) attrs.layout_alignParentLeft = 'true'
+  if (g.includes('right') || g.includes('end')) attrs.layout_alignParentRight = 'true'
+  if (g.includes('top') && !g.includes('center')) attrs.layout_alignParentTop = 'true'
+  if (g.includes('bottom')) attrs.layout_alignParentBottom = 'true'
+  if (!Object.keys(attrs).length) attrs.layout_centerInParent = 'true'
+  return attrs
+}
+
+function migrateMaskNode(node: XmlNode): XmlNode {
+  const children = node.children.map(migrateMaskNode)
+  if (node.tag !== 'Mask') {
+    return { ...node, children }
+  }
+  const gravity = node.attrs.gravity?.trim() || 'center'
+  const attrs = { ...node.attrs }
+  delete attrs.gravity
+  const migratedChildren = children.map((child) => {
+    if (child.tag === '#text') return child
+    const hasLayout = Object.keys(child.attrs).some((k) => k.startsWith('layout_'))
+    if (hasLayout) return child
+    return {
+      ...child,
+      attrs: { ...child.attrs, ...gravityToLayoutAttrs(gravity) },
+    }
+  })
+  return { tag: 'Modal', attrs, children: migratedChildren }
+}
+
+function migrateLegacyMaskNodes(nodes: XmlNode[]): XmlNode[] {
+  return nodes.map(migrateMaskNode)
 }
 
 export async function exportVue3Project(projectPathInput: string): Promise<ExportVue3Result> {
@@ -121,7 +178,7 @@ export async function exportVue3Project(projectPathInput: string): Promise<Expor
     componentSummaries.map(async (summary) => {
       const detail = await getComponent(projectPath, summary.id)
       componentConfigs.set(summary.id, detail.config)
-      const roots = parseXml(detail.xml)
+      const roots = migrateLegacyMaskNodes(parseXml(detail.xml))
       const root = findRootNode(roots)
       if (root) componentRoots.set(summary.id, root)
       return detail
@@ -143,7 +200,7 @@ export async function exportVue3Project(projectPathInput: string): Promise<Expor
   await writeMany(outputPath, scaffold)
 
   for (const page of pageDetails) {
-    const rootNodes = parseXml(page.xml)
+    const rootNodes = migrateLegacyMaskNodes(parseXml(page.xml))
     const root = findRootNode(rootNodes)
     const pageRefFields = collectPageRefFields(page.data.fields, root, componentConfigs)
 
@@ -166,7 +223,7 @@ export async function exportVue3Project(projectPathInput: string): Promise<Expor
   for (const component of componentDetails) {
     // 组件数据池改为 SFC 内 ref/computed，不再生成 Pinia store
 
-    const rootNodes = parseXml(component.xml)
+    const rootNodes = migrateLegacyMaskNodes(parseXml(component.xml))
     const sfc = generateComponentSfc({
       componentId: component.id,
       config: component.config,

@@ -45,9 +45,11 @@ import {
   type ComponentDetail,
 } from '../api/components'
 import {
+  getBackendServiceLibrary,
   getDataTypeLibrary,
   getIconLibrary,
   getMysqlLibrary,
+  saveBackendServiceLibrary as saveBackendServiceLibraryApi,
   saveDataTypeLibrary as saveDataTypeLibraryApi,
   saveIconLibrary as saveIconLibraryApi,
   saveMysqlLibrary as saveMysqlLibraryApi,
@@ -56,6 +58,11 @@ import {
 import DataPoolPanel from '../components/editor/DataPoolPanel.vue'
 import DataTypesPanel from '../components/editor/DataTypesPanel.vue'
 import MysqlPanel from '../components/editor/MysqlPanel.vue'
+import BackendServiceEditor from '../components/editor/BackendServiceEditor.vue'
+import BackendServiceWorkspace from '../components/editor/BackendServiceWorkspace.vue'
+import DataMethodDebugPanel, {
+  type DataMethodDebugTarget,
+} from '../components/editor/DataMethodDebugPanel.vue'
 import IconLibraryPanel from '../components/editor/IconLibraryPanel.vue'
 import MethodEditDialog from '../components/editor/MethodEditDialog.vue'
 import MethodsPanel from '../components/editor/MethodsPanel.vue'
@@ -63,6 +70,7 @@ import LifecyclePanel from '../components/editor/LifecyclePanel.vue'
 import LeafIcon from '../components/icons/LeafIcon.vue'
 import MysqlIcon from '../components/icons/MysqlIcon.vue'
 import DevelopIcon from '../components/icons/DevelopIcon.vue'
+import BackendIcon from '../components/icons/BackendIcon.vue'
 import ComponentMetaPanel from '../components/editor/ComponentMetaPanel.vue'
 import PreviewDebugPanel, {
   type EmitLogEntry,
@@ -125,6 +133,13 @@ import {
   createEmptyMysqlLibrary,
   type MysqlLibrary,
 } from '../types/mysql'
+import {
+  createEmptyBackendService,
+  createEmptyBackendServiceLibrary,
+  isValidServiceId,
+  type BackendService,
+  type BackendServiceLibrary,
+} from '../types/backend-services'
 
 type WorkspaceMode =
   | 'preview'
@@ -140,10 +155,11 @@ const projectStore = useProjectStore()
 
 type ResourceKind = 'page' | 'component'
 type ProjectNav = 'datatypes' | 'mysql' | 'icons'
+/** 活动栏：前端 / 后端 / 项目级资源 */
+type TopNav = 'frontend' | 'backend' | ProjectNav
 
 const resourceKind = ref<ResourceKind>('page')
-/** 左侧项目级入口；null 表示页面/组件资源模式 */
-const projectNav = ref<ProjectNav | null>(null)
+const topNav = ref<TopNav>('frontend')
 const pages = ref<PageSummary[]>([])
 const components = ref<ComponentSummary[]>([])
 const activePageId = ref('')
@@ -166,6 +182,19 @@ const addWidgetVisible = ref(false)
 const iconLibrary = ref<IconLibrary>(createEmptyIconLibrary())
 const dataTypeLibrary = ref<DataTypeLibrary>(createEmptyDataTypeLibrary())
 const mysqlLibrary = ref<MysqlLibrary>(createEmptyMysqlLibrary())
+const backendServiceLibrary = ref<BackendServiceLibrary>(
+  createEmptyBackendServiceLibrary(),
+)
+const activeServiceId = ref('')
+const serviceDialogVisible = ref(false)
+const backendServiceLayer = ref<
+  'controller' | 'service' | 'data' | 'schedule'
+>('controller')
+const backendDebugTarget = ref<DataMethodDebugTarget | null>(null)
+const backendWorkspaceRef = ref<InstanceType<
+  typeof BackendServiceWorkspace
+> | null>(null)
+let backendServiceSaveTimer: ReturnType<typeof setTimeout> | null = null
 /** 编辑态临时隐藏，不写入 XML；预览模式不生效 */
 const editorHiddenNodeIds = ref<string[]>([])
 const pageMethods = ref<PageMethod[]>([])
@@ -554,10 +583,25 @@ const projectNavItems: { key: ProjectNav; label: string; icon: unknown }[] = [
   { key: 'icons', label: '图标库', icon: Picture },
 ]
 
-const isProjectNav = computed(() => projectNav.value !== null)
-const showModeTabs = computed(() => !isProjectNav.value)
+const isFrontendNav = computed(() => topNav.value === 'frontend')
+const isBackendNav = computed(() => topNav.value === 'backend')
+const isProjectNav = computed(
+  () =>
+    topNav.value === 'datatypes' ||
+    topNav.value === 'mysql' ||
+    topNav.value === 'icons',
+)
+const showModeTabs = computed(() => isFrontendNav.value)
+
+const activeBackendService = computed(
+  () =>
+    backendServiceLibrary.value.services.find(
+      (item) => item.id === activeServiceId.value,
+    ) ?? null,
+)
 
 const centerFileLabel = computed(() => {
+  if (isBackendNav.value) return 'services/'
   if (isDataPoolMode.value) return 'data.json'
   if (isDataTypesMode.value) return 'types/'
   if (isMysqlMode.value) return 'mysql.json'
@@ -593,13 +637,19 @@ const centerPathQuery = computed(() => {
 })
 
 const propsPlaceholderText = computed(() => {
+  if (isBackendNav.value) {
+    if (backendServiceLayer.value === 'data') {
+      return '选中数据层方法后可调试'
+    }
+    return '在服务列表右键可重命名、配置或删除'
+  }
+  if (isDataTypesMode.value) return '在分组列表右键可重命名或删除'
+  if (isMysqlMode.value) return '在数据库列表右键可配置或删除'
+  if (isIconsMode.value) return '在图标上右键可编辑或删除'
   if (!activePage.value && !isIconsMode.value && !isDataTypesMode.value && !isMysqlMode.value) {
     return '打开页面后可编辑'
   }
   if (isDataPoolMode.value) return '数据池模式下请在中间区域编辑'
-  if (isDataTypesMode.value) return '数据类型模式下请在中间区域编辑'
-  if (isMysqlMode.value) return 'MySQL 模式下请在中间区域编辑'
-  if (isIconsMode.value) return '图标库模式下请在中间区域编辑'
   if (isMethodsMode.value) return '方法模式下请在中间区域编辑'
   if (isLifecycleMode.value) return '生命周期模式下请在中间区域编辑'
   if (isComponentResource.value && activeComponent.value && !selectedNodeId.value) {
@@ -613,7 +663,12 @@ async function loadPages(selectId?: string) {
 
   loadingPages.value = true
   try {
-    await Promise.all([loadIconLibrary(), loadDataTypeLibrary(), loadMysqlLibrary()])
+    await Promise.all([
+      loadIconLibrary(),
+      loadDataTypeLibrary(),
+      loadMysqlLibrary(),
+      loadBackendServiceLibrary(),
+    ])
     const [pageResult, componentResult] = await Promise.all([
       listPages(projectStore.path),
       listComponents(projectStore.path),
@@ -681,6 +736,24 @@ async function loadMysqlLibrary() {
     mysqlLibrary.value = await getMysqlLibrary(projectStore.path)
   } catch (err) {
     mysqlLibrary.value = createEmptyMysqlLibrary()
+    console.error(err)
+  }
+}
+
+async function loadBackendServiceLibrary() {
+  if (!projectStore.path) return
+  try {
+    backendServiceLibrary.value = await getBackendServiceLibrary(projectStore.path)
+    if (
+      activeServiceId.value &&
+      !backendServiceLibrary.value.services.some((s) => s.id === activeServiceId.value)
+    ) {
+      activeServiceId.value = backendServiceLibrary.value.services[0]?.id ?? ''
+    } else if (!activeServiceId.value && backendServiceLibrary.value.services.length) {
+      activeServiceId.value = backendServiceLibrary.value.services[0]!.id
+    }
+  } catch (err) {
+    backendServiceLibrary.value = createEmptyBackendServiceLibrary()
     console.error(err)
   }
 }
@@ -937,8 +1010,8 @@ function switchResourceKind(kind: ResourceKind) {
 }
 
 function leaveProjectNav() {
-  if (!projectNav.value) return
-  projectNav.value = null
+  if (!isProjectNav.value && !isBackendNav.value) return
+  topNav.value = 'frontend'
   if (
     workspaceMode.value === 'datatypes' ||
     workspaceMode.value === 'mysql' ||
@@ -948,17 +1021,35 @@ function leaveProjectNav() {
   }
 }
 
-function selectDevelopNav() {
+function selectFrontendNav() {
   leaveProjectNav()
+  topNav.value = 'frontend'
+}
+
+function selectBackendNav() {
+  topNav.value = 'backend'
+  if (
+    workspaceMode.value === 'datatypes' ||
+    workspaceMode.value === 'mysql' ||
+    workspaceMode.value === 'icons'
+  ) {
+    workspaceMode.value = 'preview'
+  }
+  if (
+    !activeServiceId.value &&
+    backendServiceLibrary.value.services.length
+  ) {
+    activeServiceId.value = backendServiceLibrary.value.services[0]!.id
+  }
 }
 
 function selectProjectNav(nav: ProjectNav) {
-  projectNav.value = nav
+  topNav.value = nav
   workspaceMode.value = nav
 }
 
 function setWorkspaceMode(mode: (typeof modeTabs)[number]['key']) {
-  projectNav.value = null
+  topNav.value = 'frontend'
   workspaceMode.value = mode
 }
 
@@ -1633,6 +1724,159 @@ async function handleMysqlLibraryUpdate(library: MysqlLibrary) {
   }, 400)
 }
 
+function persistBackendServices() {
+  if (!projectStore.path) return
+  if (backendServiceSaveTimer) clearTimeout(backendServiceSaveTimer)
+  backendServiceSaveTimer = setTimeout(async () => {
+    if (!projectStore.path) return
+    try {
+      backendServiceLibrary.value = await saveBackendServiceLibraryApi({
+        projectPath: projectStore.path,
+        services: backendServiceLibrary.value.services,
+      })
+    } catch (err) {
+      ElMessage.error(err instanceof Error ? err.message : '保存服务配置失败')
+    }
+  }, 400)
+}
+
+function handleBackendServiceUpdate(service: BackendService) {
+  const nameTaken = backendServiceLibrary.value.services.some(
+    (item) => item.id !== service.id && item.name === service.name,
+  )
+  if (nameTaken) {
+    ElMessage.error(`服务「${service.name}」已存在`)
+    return
+  }
+  const portTaken = backendServiceLibrary.value.services.some(
+    (item) => item.id !== service.id && item.port === service.port,
+  )
+  if (portTaken) {
+    ElMessage.error(`端口 ${service.port} 已被占用`)
+    return
+  }
+  backendServiceLibrary.value = {
+    services: backendServiceLibrary.value.services.map((item) =>
+      item.id === service.id ? service : item,
+    ),
+  }
+  persistBackendServices()
+}
+
+function openBackendServiceConfig(service: BackendService) {
+  activeServiceId.value = service.id
+  serviceDialogVisible.value = true
+}
+
+async function renameBackendService(service: BackendService) {
+  let name = ''
+  try {
+    const result = await ElMessageBox.prompt('请输入新的服务显示名', '重命名', {
+      confirmButtonText: '确定',
+      cancelButtonText: '取消',
+      inputValue: service.name,
+      inputPattern: /\S+/,
+      inputErrorMessage: '名称不能为空',
+    })
+    name = String(result.value ?? '').trim()
+  } catch {
+    return
+  }
+  if (!name || name === service.name) return
+  if (
+    backendServiceLibrary.value.services.some(
+      (item) => item.id !== service.id && item.name === name,
+    )
+  ) {
+    ElMessage.error(`服务「${name}」已存在`)
+    return
+  }
+  handleBackendServiceUpdate({ ...service, name })
+  ElMessage.success('已重命名')
+}
+
+type ServiceMenuCommand = 'rename' | 'config' | 'delete'
+
+function handleServiceMenuCommand(
+  command: ServiceMenuCommand,
+  service: BackendService,
+) {
+  if (command === 'rename') {
+    void renameBackendService(service)
+    return
+  }
+  if (command === 'config') {
+    openBackendServiceConfig(service)
+    return
+  }
+  if (command === 'delete') {
+    void removeBackendService(service)
+  }
+}
+
+async function addBackendService() {
+  let id = ''
+  try {
+    const result = await ElMessageBox.prompt(
+      '服务 ID 将作为目录名 services/{id}/，仅允许英文（字母开头）',
+      '新建服务',
+      {
+        confirmButtonText: '添加',
+        cancelButtonText: '取消',
+        inputPlaceholder: '如 goods',
+        inputPattern: /^[A-Za-z][A-Za-z0-9_-]*$/,
+        inputErrorMessage: '仅允许英文：字母开头，字母/数字/下划线/连字符',
+      },
+    )
+    id = String(result.value ?? '').trim()
+  } catch {
+    return
+  }
+  if (!isValidServiceId(id)) {
+    ElMessage.error('服务 ID 不合法')
+    return
+  }
+  if (backendServiceLibrary.value.services.some((s) => s.id === id)) {
+    ElMessage.error(`服务「${id}」已存在`)
+    return
+  }
+  const usedPorts = new Set(backendServiceLibrary.value.services.map((s) => s.port))
+  let port = 3000
+  while (usedPorts.has(port)) port += 1
+  const next = createEmptyBackendService(id)
+  next.port = port
+  backendServiceLibrary.value = {
+    services: [...backendServiceLibrary.value.services, next],
+  }
+  activeServiceId.value = next.id
+  persistBackendServices()
+  serviceDialogVisible.value = true
+}
+
+async function removeBackendService(service: BackendService) {
+  try {
+    await ElMessageBox.confirm(
+      `确定删除服务「${service.name}」吗？`,
+      '删除服务',
+      { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' },
+    )
+  } catch {
+    return
+  }
+  const editingDeleted =
+    serviceDialogVisible.value && activeServiceId.value === service.id
+  backendServiceLibrary.value = {
+    services: backendServiceLibrary.value.services.filter((s) => s.id !== service.id),
+  }
+  if (activeServiceId.value === service.id) {
+    activeServiceId.value = backendServiceLibrary.value.services[0]?.id ?? ''
+  }
+  if (editingDeleted) {
+    serviceDialogVisible.value = false
+  }
+  persistBackendServices()
+}
+
 function openAddMethod() {
   editingMethod.value = createEmptyMethod()
   methodDialogVisible.value = true
@@ -1833,14 +2077,24 @@ onMounted(() => {
 <template>
   <div class="workspace">
     <nav class="activity-rail" aria-label="项目资源">
-      <el-tooltip content="开发" placement="right">
+      <el-tooltip content="前端" placement="right">
         <button
           type="button"
           class="rail-btn"
-          :class="{ active: !isProjectNav }"
-          @click="selectDevelopNav"
+          :class="{ active: isFrontendNav }"
+          @click="selectFrontendNav"
         >
           <el-icon :size="20"><DevelopIcon /></el-icon>
+        </button>
+      </el-tooltip>
+      <el-tooltip content="后端" placement="right">
+        <button
+          type="button"
+          class="rail-btn"
+          :class="{ active: isBackendNav }"
+          @click="selectBackendNav"
+        >
+          <el-icon :size="20"><BackendIcon /></el-icon>
         </button>
       </el-tooltip>
       <div class="rail-divider" />
@@ -1853,7 +2107,7 @@ onMounted(() => {
         <button
           type="button"
           class="rail-btn"
-          :class="{ active: projectNav === item.key }"
+          :class="{ active: topNav === item.key }"
           @click="selectProjectNav(item.key)"
         >
           <el-icon :size="20"><component :is="item.icon" /></el-icon>
@@ -1861,7 +2115,7 @@ onMounted(() => {
       </el-tooltip>
     </nav>
 
-    <aside v-if="!isProjectNav" class="side-panel">
+    <aside v-if="isFrontendNav" class="side-panel">
       <div class="pages-section">
         <div class="section-header">
           <div class="resource-tabs">
@@ -1971,9 +2225,81 @@ onMounted(() => {
       />
     </aside>
 
+    <aside v-else-if="isBackendNav" class="side-panel">
+      <div class="pages-section backend-services-section">
+        <div class="section-header">
+          <span class="section-title">服务列表</span>
+          <el-button type="primary" :icon="Plus" size="small" @click="addBackendService">
+            新建
+          </el-button>
+        </div>
+        <div class="pages-body">
+          <el-empty
+            v-if="!backendServiceLibrary.services.length"
+            description="暂无服务，点击新建"
+            :image-size="64"
+          />
+          <div v-else class="page-list">
+            <el-dropdown
+              v-for="service in backendServiceLibrary.services"
+              :key="service.id"
+              trigger="contextmenu"
+              class="page-dropdown"
+              @command="
+                (cmd) =>
+                  handleServiceMenuCommand(cmd as ServiceMenuCommand, service)
+              "
+            >
+              <button
+                type="button"
+                class="page-item"
+                :class="{ active: service.id === activeServiceId }"
+                @click="activeServiceId = service.id"
+                @dblclick="openBackendServiceConfig(service)"
+                @contextmenu.prevent
+              >
+                <el-icon><BackendIcon /></el-icon>
+                <div class="page-meta">
+                  <div class="page-name">{{ service.name }}</div>
+                  <div class="page-id">{{ service.id }} · :{{ service.port }}</div>
+                </div>
+              </button>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item command="rename">重命名</el-dropdown-item>
+                  <el-dropdown-item command="config">配置</el-dropdown-item>
+                  <el-dropdown-item command="delete" divided>
+                    删除
+                  </el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
+          </div>
+        </div>
+      </div>
+    </aside>
+
     <section class="center-panel">
       <div class="preview-header">
-        <template v-if="isIconsMode">
+        <template v-if="isBackendNav">
+          <span class="preview-title">后端</span>
+          <span class="preview-sub">
+            services/{{
+              activeBackendService
+                ? `${activeBackendService.id}/${
+                    backendServiceLayer === 'controller'
+                      ? 'controllers/'
+                      : backendServiceLayer === 'service'
+                        ? 'business/'
+                        : backendServiceLayer === 'data'
+                          ? 'data/'
+                          : 'schedules/'
+                  }`
+                : ''
+            }}
+          </span>
+        </template>
+        <template v-else-if="isIconsMode">
           <span class="preview-title">图标库</span>
           <span class="preview-sub">icons.json</span>
         </template>
@@ -1995,7 +2321,25 @@ onMounted(() => {
       </div>
 
       <div class="preview-body">
-        <el-skeleton v-if="loadingPage" :rows="8" animated />
+        <el-skeleton v-if="loadingPage && isFrontendNav" :rows="8" animated />
+        <BackendServiceWorkspace
+          v-else-if="isBackendNav && activeBackendService"
+          ref="backendWorkspaceRef"
+          :project-path="projectStore.path"
+          :service-id="activeBackendService.id"
+          :service-name="activeBackendService.name"
+          :type-library="dataTypeLibrary"
+          @update:layer="
+            backendServiceLayer = $event;
+            if ($event !== 'data') backendDebugTarget = null
+          "
+          @update:debug-target="backendDebugTarget = $event"
+        />
+        <el-empty
+          v-else-if="isBackendNav"
+          description="暂无服务，请在左侧新建"
+          :image-size="80"
+        />
         <IconLibraryPanel
           v-else-if="isIconsMode"
           :library="iconLibrary"
@@ -2105,7 +2449,7 @@ onMounted(() => {
       </div>
     </section>
 
-    <template v-if="activeDoc && isEditMode && isComponentResource">
+    <template v-if="isFrontendNav && activeDoc && isEditMode && isComponentResource">
       <ComponentMetaPanel
         v-if="!selectedNodeId"
         :config="activeComponent!.config"
@@ -2136,7 +2480,7 @@ onMounted(() => {
       </div>
     </template>
     <PropsPanel
-      v-else-if="activeDoc && isEditMode"
+      v-else-if="isFrontendNav && activeDoc && isEditMode"
       v-model:tab="propsTab"
       :xml="activeDoc.xml"
       :selected-id="selectedNodeId"
@@ -2154,7 +2498,7 @@ onMounted(() => {
       @update:status-bar="handleStatusBarUpdate"
     />
     <PreviewDebugPanel
-      v-else-if="workspaceMode === 'preview' && activeDoc"
+      v-else-if="isFrontendNav && workspaceMode === 'preview' && activeDoc"
       :mode="isComponentResource ? 'component' : 'page'"
       :can-go-back="canPreviewGoBack"
       :has-entry-page="hasEntryPage"
@@ -2169,8 +2513,16 @@ onMounted(() => {
       @invoke-method="invokeActiveExposedMethod($event.name, $event.args)"
       @clear-emit-logs="previewEmitLogs = []"
     />
+    <DataMethodDebugPanel
+      v-else-if="isBackendNav && backendServiceLayer === 'data'"
+      :target="backendDebugTarget"
+      :type-library="dataTypeLibrary"
+      @update:debug-params="
+        (params) => backendWorkspaceRef?.applyDebugParams(params)
+      "
+    />
     <aside v-else class="props-placeholder">
-      <div class="panel-header">属性</div>
+      <div class="panel-header">{{ isBackendNav ? '服务' : '属性' }}</div>
       <el-empty
         :description="propsPlaceholderText"
         :image-size="64"
@@ -2186,6 +2538,13 @@ onMounted(() => {
       :component-methods-map="componentMethodsMap"
       :ambient-extra="methodAmbientExtra"
       @save="handleSaveMethod"
+    />
+
+    <BackendServiceEditor
+      v-model="serviceDialogVisible"
+      :service="activeBackendService"
+      :mysql-library="mysqlLibrary"
+      @save="handleBackendServiceUpdate"
     />
 
     <el-dialog v-model="createVisible" :title="createDialogTitle" width="480px" destroy-on-close>
@@ -2331,6 +2690,17 @@ onMounted(() => {
   min-height: 160px;
   max-height: 50%;
   overflow: hidden;
+}
+
+.backend-services-section {
+  flex: 1;
+  max-height: none;
+}
+
+.section-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #303133;
 }
 
 .resource-tabs {

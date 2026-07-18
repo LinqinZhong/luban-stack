@@ -8,10 +8,24 @@ import type {
   MysqlLibrary,
   MysqlTableDef,
 } from '../types/mysql'
+import type {
+  BackendService,
+  BackendServiceLibrary,
+  ProcessorLayerKind,
+  ServiceController,
+  ServiceProcessor,
+} from '../types/backend-services'
 
 export type { IconDefinition, IconLibrary }
 export type { DataTypeGroup, DataTypeLibrary }
 export type { MysqlDatabaseConfig, MysqlLibrary, MysqlColumnDef, MysqlTableDef }
+export type {
+  BackendService,
+  BackendServiceLibrary,
+  ProcessorLayerKind,
+  ServiceController,
+  ServiceProcessor,
+}
 
 export interface VoiderProjectConfig {
   name: string
@@ -128,6 +142,87 @@ export function saveMysqlLibrary(payload: {
   })
 }
 
+export function getBackendServiceLibrary(projectPath: string) {
+  return request<BackendServiceLibrary>(
+    `/api/projects/services?projectPath=${encodeURIComponent(projectPath)}`,
+  )
+}
+
+export function saveBackendServiceLibrary(payload: {
+  projectPath: string
+  services: BackendService[]
+}) {
+  return request<BackendServiceLibrary>('/api/projects/services', {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  })
+}
+
+export function getServiceControllers(projectPath: string, serviceId: string) {
+  return request<{ controllers: ServiceController[] }>(
+    `/api/projects/services/controllers?projectPath=${encodeURIComponent(projectPath)}&serviceId=${encodeURIComponent(serviceId)}`,
+  )
+}
+
+export function saveServiceControllers(payload: {
+  projectPath: string
+  serviceId: string
+  controllers: ServiceController[]
+}) {
+  return request<{ controllers: ServiceController[] }>(
+    '/api/projects/services/controllers',
+    {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    },
+  )
+}
+
+export function getServiceProcessors(
+  projectPath: string,
+  serviceId: string,
+  layer: ProcessorLayerKind,
+) {
+  return request<{ processors: ServiceProcessor[] }>(
+    `/api/projects/services/processors?projectPath=${encodeURIComponent(projectPath)}&serviceId=${encodeURIComponent(serviceId)}&layer=${encodeURIComponent(layer)}`,
+  )
+}
+
+export function saveServiceProcessors(payload: {
+  projectPath: string
+  serviceId: string
+  layer: ProcessorLayerKind
+  processors: ServiceProcessor[]
+}) {
+  return request<{ processors: ServiceProcessor[] }>(
+    '/api/projects/services/processors',
+    {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    },
+  )
+}
+
+export function debugDataLayerMethod(payload: {
+  projectPath: string
+  serviceId: string
+  processorId: string
+  methodId: string
+  params: Record<string, unknown>
+  /** 默认 true：写入在事务中执行后回滚 */
+  dryRun?: boolean
+}) {
+  return request<{
+    sql: string
+    raw: unknown
+    output: unknown
+    dryRun?: boolean
+  }>('/api/projects/services/processors/debug', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
 export function testMysqlConnection(payload: MysqlConnectionPayload) {
   return request<{
     ok: true
@@ -137,6 +232,32 @@ export function testMysqlConnection(payload: MysqlConnectionPayload) {
   }>('/api/projects/mysql/test', {
     method: 'POST',
     body: JSON.stringify(payload),
+  })
+}
+
+export function listMysqlDatabases(payload: {
+  host: string
+  port: number
+  username: string
+  password: string
+  database?: string
+}) {
+  return request<{ databases: string[] }>('/api/projects/mysql/databases', {
+    method: 'POST',
+    body: JSON.stringify({
+      ...payload,
+      database: payload.database ?? '',
+      ssh: {
+        enabled: false,
+        host: '',
+        port: 22,
+        username: '',
+        authType: 'password',
+        password: '',
+        privateKey: '',
+        passphrase: '',
+      },
+    }),
   })
 }
 

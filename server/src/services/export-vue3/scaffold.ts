@@ -243,6 +243,7 @@ const designScreenH = computed(() => vh.value / scale.value)
 }
 .voider-page {
   position: relative;
+  overflow: hidden;
 }
 </style>
 `

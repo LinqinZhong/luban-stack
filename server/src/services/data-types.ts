@@ -10,9 +10,10 @@ import {
 import { constants } from 'node:fs'
 import path from 'node:path'
 import {
-  createEmptyDataTypeLibrary,
+  COMMON_GROUP_NAME,
   DATA_TYPES_DIR,
   DATA_TYPES_LEGACY_FILE,
+  ensureCommonGroupFirst,
   isValidGroupName,
   normalizeDataTypeLibrary,
   normalizeTypeGroupFile,
@@ -86,6 +87,43 @@ async function migrateLegacyIfNeeded(projectPath: string): Promise<void> {
   }
 }
 
+async function writeGroupFile(
+  projectPath: string,
+  group: DataTypeGroup,
+): Promise<void> {
+  const name = group.name.trim()
+  const payload = {
+    id: group.id,
+    types: group.types,
+  }
+  try {
+    await writeFile(
+      groupFilePath(projectPath, name),
+      `${JSON.stringify(payload, null, 2)}\n`,
+      'utf-8',
+    )
+  } catch {
+    throw new ProjectError(`无法写入 ${DATA_TYPES_DIR}/${name}.json`, 500)
+  }
+}
+
+/** 若缺少 common 分组（或预设类型有更新），补齐并落盘 */
+async function ensureCommonGroupPersisted(
+  projectPath: string,
+  groups: DataTypeGroup[],
+): Promise<DataTypeGroup[]> {
+  const next = ensureCommonGroupFirst(groups)
+  const common = next.find((g) => g.name === COMMON_GROUP_NAME)
+  const prev = groups.find((g) => g.name === COMMON_GROUP_NAME)
+  const needWrite =
+    Boolean(common) &&
+    (!prev || JSON.stringify(prev.types) !== JSON.stringify(common!.types))
+  if (needWrite && common) {
+    await writeGroupFile(projectPath, common)
+  }
+  return next
+}
+
 export async function readDataTypeLibrary(projectPath: string): Promise<DataTypeLibrary> {
   await migrateLegacyIfNeeded(projectPath)
   const dir = await ensureDir(projectPath)
@@ -114,7 +152,7 @@ export async function readDataTypeLibrary(projectPath: string): Promise<DataType
     }
   }
 
-  return { groups }
+  return { groups: await ensureCommonGroupPersisted(projectPath, groups) }
 }
 
 export async function saveDataTypeLibrary(
@@ -142,20 +180,7 @@ export async function saveDataTypeLibrary(
 
   // 写入各组文件
   for (const group of normalized.groups) {
-    const name = group.name.trim()
-    const payload = {
-      id: group.id,
-      types: group.types,
-    }
-    try {
-      await writeFile(
-        groupFilePath(projectPath, name),
-        `${JSON.stringify(payload, null, 2)}\n`,
-        'utf-8',
-      )
-    } catch {
-      throw new ProjectError(`无法写入 ${DATA_TYPES_DIR}/${name}.json`, 500)
-    }
+    await writeGroupFile(projectPath, group)
   }
 
   // 删除已不存在的分组文件
@@ -189,4 +214,6 @@ export async function saveDataTypeLibrary(
 export async function ensureDataTypeLibraryFile(projectPath: string): Promise<void> {
   await migrateLegacyIfNeeded(projectPath)
   await ensureDir(projectPath)
+  // 新建项目 / 旧项目：补齐 common 预设
+  await readDataTypeLibrary(projectPath)
 }

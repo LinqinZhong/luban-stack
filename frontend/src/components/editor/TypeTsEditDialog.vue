@@ -26,6 +26,7 @@ const props = defineProps<{
   modelValue: boolean
   typeDef: DataTypeDef | null
   library: DataTypeLibrary
+  readonly?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -40,7 +41,8 @@ let model: monaco.editor.ITextModel | null = null
 let ambientModel: monaco.editor.ITextModel | null = null
 
 const title = computed(
-  () => `编辑 TypeScript · ${props.typeDef?.name || '未命名'}`,
+  () =>
+    `${props.readonly ? '查看' : '编辑'} TypeScript · ${props.typeDef?.name || '未命名'}`,
 )
 
 function buildCtx(): DataTypeTsContext {
@@ -116,6 +118,7 @@ async function setupEditor() {
     tabSize: 2,
     wordWrap: 'on',
     theme: 'vs',
+    readOnly: Boolean(props.readonly),
   })
 
   model.onDidChangeContent(() => {
@@ -143,7 +146,7 @@ function close() {
 }
 
 async function save() {
-  if (!props.typeDef) return
+  if (!props.typeDef || props.readonly) return
   const source = `${(model?.getValue() ?? '').trim()}\n`
   if (!source.trim()) {
     errorText.value = '代码不能为空'
@@ -213,13 +216,17 @@ async function save() {
     @update:model-value="emit('update:modelValue', $event)"
   >
     <div class="hint">
-      可直接修改类型名与成员。保存时解析回结构；语法错误、重名或引用不存在的类型将无法保存。
+      {{
+        readonly
+          ? '系统预设类型，仅可查看 TypeScript 定义。'
+          : '可直接修改类型名与成员。保存时解析回结构；语法错误、重名或引用不存在的类型将无法保存。'
+      }}
     </div>
     <div ref="hostRef" class="ts-host" />
     <div v-if="errorText" class="errors">{{ errorText }}</div>
     <template #footer>
-      <el-button @click="close">取消</el-button>
-      <el-button type="primary" @click="save">保存</el-button>
+      <el-button @click="close">{{ readonly ? '关闭' : '取消' }}</el-button>
+      <el-button v-if="!readonly" type="primary" @click="save">保存</el-button>
     </template>
   </el-dialog>
 </template>

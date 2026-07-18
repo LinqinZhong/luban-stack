@@ -57,6 +57,21 @@ function emptyColumn(partial?: Partial<MysqlColumnDef>): MysqlColumnDef {
   }
 }
 
+function onAutoIncrementChange(col: MysqlColumnDef) {
+  if (col.autoIncrement) {
+    col.primaryKey = true
+    col.nullable = false
+  }
+}
+
+function onPrimaryKeyChange(col: MysqlColumnDef) {
+  if (!col.primaryKey) {
+    col.autoIncrement = false
+  } else {
+    col.nullable = false
+  }
+}
+
 function defaultColumns(): MysqlColumnDef[] {
   return [
     emptyColumn({
@@ -256,8 +271,11 @@ const dialogTitle = computed(() =>
               <el-option v-for="t in COMMON_TYPES" :key="t" :label="t" :value="t" />
             </el-select>
             <el-checkbox v-model="col.nullable" />
-            <el-checkbox v-model="col.primaryKey" />
-            <el-checkbox v-model="col.autoIncrement" />
+            <el-checkbox v-model="col.primaryKey" @change="onPrimaryKeyChange(col)" />
+            <el-checkbox
+              v-model="col.autoIncrement"
+              @change="onAutoIncrementChange(col)"
+            />
             <el-input v-model="col.defaultValue" size="small" placeholder="—" />
             <el-input v-model="col.comment" size="small" placeholder="—" />
             <el-button

@@ -23,6 +23,7 @@ const props = defineProps<{
   modelValue: boolean
   typeDef: DataTypeDef | null
   namedOptions: Array<{ id: string; label: string }>
+  readonly?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -58,10 +59,11 @@ watch(
 )
 
 const title = computed(() => {
-  if (!draft.value) return '配置类型'
-  if (draft.value.kind === 'interface') return `配置接口 · ${draft.value.name || '未命名'}`
-  if (draft.value.kind === 'enum') return `配置枚举 · ${draft.value.name || '未命名'}`
-  return '配置类型'
+  if (!draft.value) return props.readonly ? '查看类型' : '配置类型'
+  const verb = props.readonly ? '查看' : '配置'
+  if (draft.value.kind === 'interface') return `${verb}接口 · ${draft.value.name || '未命名'}`
+  if (draft.value.kind === 'enum') return `${verb}枚举 · ${draft.value.name || '未命名'}`
+  return props.readonly ? '查看类型' : '配置类型'
 })
 
 const genericNames = computed(() =>
@@ -116,7 +118,7 @@ function fieldNameError(index: number): string {
 }
 
 function save() {
-  if (!draft.value) return
+  if (!draft.value || props.readonly) return
   if (draft.value.kind === 'interface') {
     showFieldErrors.value = true
 
@@ -251,7 +253,7 @@ function scrubStaleGenericRefs() {
 }
 
 function removeGeneric(index: number) {
-  if (!draft.value) return
+  if (!draft.value || props.readonly) return
   draft.value.generics = draft.value.generics.filter((_, i) => i !== index)
   scrubStaleGenericRefs()
 }
@@ -265,6 +267,7 @@ function openGenericConfig(index: number) {
 }
 
 function saveGenericConfig() {
+  if (props.readonly) return
   if (!draft.value || !genericDraft.value || genericIndex.value < 0) return
   const name = genericDraft.value.name.trim()
   if (!isValidTypeName(name)) {
@@ -306,11 +309,13 @@ function saveGenericConfig() {
     append-to-body
     @update:model-value="emit('update:modelValue', $event)"
   >
+    <fieldset class="readonly-fieldset" :disabled="readonly">
     <template v-if="draft?.kind === 'interface'">
       <div class="section">
         <div class="section-head">
           <span class="section-title">泛型参数</span>
           <el-button
+            v-if="!readonly"
             type="primary"
             link
             :icon="Plus"
@@ -336,6 +341,7 @@ function saveGenericConfig() {
             {{ genericSummary(g) }}
           </span>
           <el-button
+            v-if="!readonly"
             type="primary"
             link
             :icon="Setting"
@@ -344,6 +350,16 @@ function saveGenericConfig() {
             配置
           </el-button>
           <el-button
+            v-else
+            type="primary"
+            link
+            :icon="Setting"
+            @click="openGenericConfig(gi)"
+          >
+            查看
+          </el-button>
+          <el-button
+            v-if="!readonly"
             type="danger"
             link
             :icon="Delete"
@@ -356,6 +372,7 @@ function saveGenericConfig() {
         <div class="section-head">
           <span class="section-title">字段</span>
           <el-button
+            v-if="!readonly"
             type="primary"
             link
             :icon="Plus"
@@ -398,6 +415,7 @@ function saveGenericConfig() {
             />
           </el-select>
           <el-button
+            v-if="!readonly"
             type="danger"
             link
             :icon="Delete"
@@ -412,6 +430,7 @@ function saveGenericConfig() {
         <div class="section-head">
           <span class="section-title">枚举成员</span>
           <el-button
+            v-if="!readonly"
             type="primary"
             link
             :icon="Plus"
@@ -431,7 +450,12 @@ function saveGenericConfig() {
               <el-input v-model="row.value" placeholder="留空则自动" />
             </template>
           </el-table-column>
-          <el-table-column label="操作" width="72" align="center">
+          <el-table-column
+            v-if="!readonly"
+            label="操作"
+            width="72"
+            align="center"
+          >
             <template #default="{ $index }">
               <el-button
                 type="danger"
@@ -444,10 +468,11 @@ function saveGenericConfig() {
         </el-table>
       </div>
     </template>
+    </fieldset>
 
     <template #footer>
-      <el-button @click="close">取消</el-button>
-      <el-button type="primary" @click="save">保存</el-button>
+      <el-button @click="close">{{ readonly ? '关闭' : '取消' }}</el-button>
+      <el-button v-if="!readonly" type="primary" @click="save">保存</el-button>
     </template>
   </el-dialog>
 
@@ -501,13 +526,24 @@ function saveGenericConfig() {
       </div>
     </template>
     <template #footer>
-      <el-button @click="genericDialogVisible = false">取消</el-button>
-      <el-button type="primary" @click="saveGenericConfig">确定</el-button>
+      <el-button @click="genericDialogVisible = false">
+        {{ readonly ? '关闭' : '取消' }}
+      </el-button>
+      <el-button v-if="!readonly" type="primary" @click="saveGenericConfig">
+        确定
+      </el-button>
     </template>
   </el-dialog>
 </template>
 
 <style scoped>
+.readonly-fieldset {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+
 .section {
   margin-bottom: 20px;
 }
