@@ -1,0 +1,37 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html, body, #app {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  font-size: 14px;
+}
+
+.voider-toast {
+  position: absolute;
+  left: 50%;
+  bottom: 72px;
+  z-index: 1000;
+  transform: translateX(-50%) translateY(8px);
+  max-width: calc(100% - 48px);
+  padding: 10px 16px;
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.86);
+  color: #fff;
+  font-size: 14px;
+  line-height: 1.4;
+  text-align: center;
+  word-break: break-word;
+  pointer-events: none;
+  opacity: 0;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.2);
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.voider-toast.is-visible {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}

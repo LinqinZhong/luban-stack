@@ -1,0 +1,20 @@
+{
+  "fields": [
+    {
+      "name": "offsetTop",
+      "type": "number",
+      "remark": "",
+      "value": 0,
+      "binding": "computed",
+      "computeBody": "// 可直接使用同级数据池字段名作为变量（无需形参）\n// return 的值即为该字段的计算值\nconst info = getDeviceInfo()\nif($props.isFillScreen && info.platform !== 'h5'){\n  return info.statusBarHeight\n}\nreturn 0"
+    },
+    {
+      "name": "height",
+      "type": "number",
+      "remark": "",
+      "value": 0,
+      "binding": "computed",
+      "computeBody": "// 可直接使用同级数据池字段名作为变量（无需形参）\n// return 的值即为该字段的计算值\nconst info = getDeviceInfo()\nif(info.platform === 'h5'){\n  return 45\n}\nreturn offsetTop + info.menuButton.height + (info.menuButton.top-info.statusBarHeight)+5"
+    }
+  ]
+}

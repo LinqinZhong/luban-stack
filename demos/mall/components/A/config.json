@@ -1,0 +1,9 @@
+{
+  "name": "A",
+  "title": "A",
+  "width": "match_parent",
+  "height": "wrap_content",
+  "props": [],
+  "events": [],
+  "exposedMethods": []
+}

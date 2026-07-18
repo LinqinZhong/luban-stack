@@ -1,0 +1,32 @@
+{
+  "databases": [
+    {
+      "id": "mysql_mrole022_bhoxp0",
+      "name": "测试环境",
+      "host": "127.0.0.1",
+      "port": 3306,
+      "username": "root",
+      "password": "Password_1727",
+      "database": "voider_test",
+      "ssh": {
+        "enabled": false,
+        "host": "",
+        "port": 22,
+        "username": "",
+        "authType": "password",
+        "password": "",
+        "privateKey": "",
+        "passphrase": ""
+      },
+      "tables": [
+        {
+          "name": "goods",
+          "remark": "",
+          "engine": "InnoDB",
+          "rows": 0
+        }
+      ],
+      "lastTestedAt": 1784386079642
+    }
+  ]
+}

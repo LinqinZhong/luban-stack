@@ -1,0 +1,9 @@
+{
+  "name": "商品详情",
+  "title": "商品详情",
+  "statusBar": {
+    "textStyle": "{statusBarColor}",
+    "backgroundColor": "transparent",
+    "cover": true
+  }
+}

@@ -1,0 +1,3 @@
+<?xml version="1.0" encoding="utf-8"?>
+  
+<Modal name="mask" background="rgba(0,0,0,0.45)" padding="0" closeOnClick="true"><LinearLayout orientation="vertical" width="match_parent" height="400" padding="12" background="#ffffff" paddingTop="0" paddingBottom="0" layout_alignParentBottom="true" borderRadius="0" borderBottomRightRadius="0" borderTopLeftRadius="30" borderTopRightRadius="30"/></Modal>

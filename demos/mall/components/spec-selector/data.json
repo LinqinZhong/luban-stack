@@ -1,0 +1,12 @@
+{
+  "fields": [
+    {
+      "name": "modalRef",
+      "type": "ref",
+      "remark": "",
+      "value": "0:Modal",
+      "binding": "",
+      "computeBody": ""
+    }
+  ]
+}

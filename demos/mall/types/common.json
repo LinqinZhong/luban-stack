@@ -1,0 +1,316 @@
+{
+  "id": "group_common",
+  "types": [
+    {
+      "id": "type_common_ResultCode",
+      "name": "ResultCode",
+      "kind": "enum",
+      "remark": "通用响应码",
+      "tableName": "",
+      "category": "other",
+      "generics": [],
+      "fields": [],
+      "enumMembers": [
+        {
+          "id": "enum_common_ResultCode_OK",
+          "name": "OK",
+          "value": "200"
+        },
+        {
+          "id": "enum_common_ResultCode_BAD_REQUEST",
+          "name": "BAD_REQUEST",
+          "value": "400"
+        },
+        {
+          "id": "enum_common_ResultCode_INTERNAL_ERROR",
+          "name": "INTERNAL_ERROR",
+          "value": "500"
+        }
+      ],
+      "combination": {
+        "intersections": [
+          {
+            "alternatives": [
+              {
+                "kind": "string"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "type_common_Result",
+      "name": "Result",
+      "kind": "interface",
+      "remark": "通用响应包装",
+      "tableName": "",
+      "category": "other",
+      "generics": [
+        {
+          "id": "gen_common_Result_T",
+          "name": "T",
+          "constraint": null,
+          "default": null
+        }
+      ],
+      "fields": [
+        {
+          "id": "field_common_Result_code",
+          "name": "code",
+          "type": {
+            "intersections": [
+              {
+                "alternatives": [
+                  {
+                    "kind": "named",
+                    "ref": "type_common_ResultCode"
+                  }
+                ]
+              }
+            ]
+          },
+          "remark": "响应码",
+          "optional": false
+        },
+        {
+          "id": "field_common_Result_message",
+          "name": "message",
+          "type": {
+            "intersections": [
+              {
+                "alternatives": [
+                  {
+                    "kind": "string"
+                  }
+                ]
+              }
+            ]
+          },
+          "remark": "提示信息",
+          "optional": false
+        },
+        {
+          "id": "field_common_Result_error",
+          "name": "error",
+          "type": {
+            "intersections": [
+              {
+                "alternatives": [
+                  {
+                    "kind": "string"
+                  }
+                ]
+              }
+            ]
+          },
+          "remark": "错误信息",
+          "optional": false
+        },
+        {
+          "id": "field_common_Result_data",
+          "name": "data",
+          "type": {
+            "intersections": [
+              {
+                "alternatives": [
+                  {
+                    "kind": "generic",
+                    "ref": "T"
+                  }
+                ]
+              }
+            ]
+          },
+          "remark": "业务数据",
+          "optional": false
+        }
+      ],
+      "enumMembers": [],
+      "combination": {
+        "intersections": [
+          {
+            "alternatives": [
+              {
+                "kind": "string"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "type_common_QueryPageDto",
+      "name": "QueryPageDto",
+      "kind": "interface",
+      "remark": "分页查询入参",
+      "tableName": "",
+      "category": "dto",
+      "generics": [],
+      "fields": [
+        {
+          "id": "field_common_QueryPageDto_current",
+          "name": "current",
+          "type": {
+            "intersections": [
+              {
+                "alternatives": [
+                  {
+                    "kind": "number"
+                  }
+                ]
+              }
+            ]
+          },
+          "remark": "当前页",
+          "optional": false
+        },
+        {
+          "id": "field_common_QueryPageDto_pageSize",
+          "name": "pageSize",
+          "type": {
+            "intersections": [
+              {
+                "alternatives": [
+                  {
+                    "kind": "number"
+                  }
+                ]
+              }
+            ]
+          },
+          "remark": "每页条数",
+          "optional": false
+        }
+      ],
+      "enumMembers": [],
+      "combination": {
+        "intersections": [
+          {
+            "alternatives": [
+              {
+                "kind": "string"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "type_common_QueryPageVo",
+      "name": "QueryPageVo",
+      "kind": "interface",
+      "remark": "分页查询出参",
+      "tableName": "",
+      "category": "vo",
+      "generics": [
+        {
+          "id": "gen_common_QueryPageVo_T",
+          "name": "T",
+          "constraint": null,
+          "default": null
+        }
+      ],
+      "fields": [
+        {
+          "id": "field_common_QueryPageVo_current",
+          "name": "current",
+          "type": {
+            "intersections": [
+              {
+                "alternatives": [
+                  {
+                    "kind": "number"
+                  }
+                ]
+              }
+            ]
+          },
+          "remark": "当前页",
+          "optional": false
+        },
+        {
+          "id": "field_common_QueryPageVo_pageSize",
+          "name": "pageSize",
+          "type": {
+            "intersections": [
+              {
+                "alternatives": [
+                  {
+                    "kind": "number"
+                  }
+                ]
+              }
+            ]
+          },
+          "remark": "每页条数",
+          "optional": false
+        },
+        {
+          "id": "field_common_QueryPageVo_hasNext",
+          "name": "hasNext",
+          "type": {
+            "intersections": [
+              {
+                "alternatives": [
+                  {
+                    "kind": "boolean"
+                  }
+                ]
+              }
+            ]
+          },
+          "remark": "是否有下一页",
+          "optional": false
+        },
+        {
+          "id": "field_common_QueryPageVo_total",
+          "name": "total",
+          "type": {
+            "intersections": [
+              {
+                "alternatives": [
+                  {
+                    "kind": "number"
+                  }
+                ]
+              }
+            ]
+          },
+          "remark": "总条数",
+          "optional": false
+        },
+        {
+          "id": "field_common_QueryPageVo_records",
+          "name": "records",
+          "type": {
+            "intersections": [
+              {
+                "alternatives": [
+                  {
+                    "kind": "generic",
+                    "ref": "T"
+                  }
+                ]
+              }
+            ]
+          },
+          "remark": "当前页数据",
+          "optional": false
+        }
+      ],
+      "enumMembers": [],
+      "combination": {
+        "intersections": [
+          {
+            "alternatives": [
+              {
+                "kind": "string"
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

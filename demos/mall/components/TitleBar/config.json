@@ -1,0 +1,50 @@
+{
+  "name": "标题栏",
+  "title": "标题栏",
+  "width": "match_parent",
+  "height": "wrap_content",
+  "props": [
+    {
+      "name": "title",
+      "type": "string",
+      "remark": "标题",
+      "defaultValue": "标题",
+      "twoWay": false,
+      "required": true
+    },
+    {
+      "name": "showBack",
+      "type": "boolean",
+      "remark": "显示返回键",
+      "defaultValue": true,
+      "twoWay": false,
+      "required": false
+    },
+    {
+      "name": "background",
+      "type": "color",
+      "remark": "",
+      "defaultValue": "#ffffff",
+      "twoWay": false,
+      "required": false
+    },
+    {
+      "name": "color",
+      "type": "color",
+      "remark": "",
+      "defaultValue": "#000000",
+      "twoWay": false,
+      "required": false
+    },
+    {
+      "name": "isFillScreen",
+      "type": "boolean",
+      "remark": "是否为沉浸模式",
+      "defaultValue": false,
+      "twoWay": false,
+      "required": false
+    }
+  ],
+  "events": [],
+  "exposedMethods": []
+}

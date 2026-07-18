@@ -1,0 +1,96 @@
+{
+  "id": "group_mrnx6edz_4qrqvj",
+  "types": [
+    {
+      "id": "type_mrnx6ke8_4d7vry",
+      "name": "GoodsItem",
+      "kind": "interface",
+      "remark": "",
+      "tableName": "goods",
+      "category": "entity",
+      "generics": [],
+      "fields": [
+        {
+          "id": "field_mrompy5o_kmf8wa",
+          "name": "id",
+          "type": {
+            "intersections": [
+              {
+                "alternatives": [
+                  {
+                    "kind": "string"
+                  }
+                ]
+              }
+            ]
+          },
+          "remark": "id",
+          "optional": false
+        },
+        {
+          "id": "field_mrompy5o_xl7f1b",
+          "name": "name",
+          "type": {
+            "intersections": [
+              {
+                "alternatives": [
+                  {
+                    "kind": "string"
+                  }
+                ]
+              }
+            ]
+          },
+          "remark": "商品名称",
+          "optional": false
+        },
+        {
+          "id": "field_mrompy5o_qp9ycg",
+          "name": "price",
+          "type": {
+            "intersections": [
+              {
+                "alternatives": [
+                  {
+                    "kind": "number"
+                  }
+                ]
+              }
+            ]
+          },
+          "remark": "价格",
+          "optional": false
+        },
+        {
+          "id": "field_mromqhts_1dtw7d",
+          "name": "stock",
+          "type": {
+            "intersections": [
+              {
+                "alternatives": [
+                  {
+                    "kind": "number"
+                  }
+                ]
+              }
+            ]
+          },
+          "remark": "库存",
+          "optional": false
+        }
+      ],
+      "enumMembers": [],
+      "combination": {
+        "intersections": [
+          {
+            "alternatives": [
+              {
+                "kind": "string"
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

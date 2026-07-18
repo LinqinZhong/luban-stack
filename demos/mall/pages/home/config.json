@@ -1,0 +1,9 @@
+{
+  "name": "首页",
+  "title": "首页",
+  "statusBar": {
+    "textStyle": "white",
+    "backgroundColor": "#409eff",
+    "cover": false
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "id": "cmrqed0jzshj7",
+  "name": "goods",
+  "path": "",
+  "remark": "",
+  "apis": [
+    {
+      "id": "api_mrqedc08_9iml1r",
+      "name": "api1",
+      "path": "",
+      "remark": "",
+      "method": "GET",
+      "inputDtoRef": "type_common_QueryPageDto",
+      "headers": "",
+      "requireAuth": false
+    }
+  ]
+}

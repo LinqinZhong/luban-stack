@@ -1,0 +1,214 @@
+{
+  "id": "pmrqfm9hxqct4",
+  "name": "goods",
+  "remark": "",
+  "entityRef": "type_mrnx6ke8_4d7vry",
+  "dataProcessorRef": "",
+  "methods": [
+    {
+      "id": "method_mrqfmd1j_ah6zjv",
+      "name": "list",
+      "params": [
+        {
+          "id": "param_mrqfn5od_2x0r2s",
+          "name": "pageDto",
+          "remark": "",
+          "typeExpr": {
+            "type": "json",
+            "typeRef": "type_common_QueryPageDto",
+            "itemType": "",
+            "itemTypeRef": "",
+            "itemItemType": "",
+            "itemItemTypeRef": "",
+            "genericArgs": {}
+          }
+        },
+        {
+          "id": "param_mrqj4aai_nuxni0",
+          "name": "keyword",
+          "remark": "",
+          "typeExpr": {
+            "type": "string",
+            "typeRef": "",
+            "itemType": "",
+            "itemTypeRef": "",
+            "itemItemType": "",
+            "itemItemTypeRef": "",
+            "genericArgs": {}
+          }
+        }
+      ],
+      "output": {
+        "type": "json",
+        "typeRef": "type_mrnx6ke8_4d7vry",
+        "itemType": "",
+        "itemTypeRef": "",
+        "itemItemType": "",
+        "itemItemTypeRef": "",
+        "genericArgs": {}
+      },
+      "dataConfig": {
+        "source": "mysql",
+        "operation": "query",
+        "queryFields": [
+          "name",
+          "id",
+          "price",
+          "stock"
+        ],
+        "sql": "",
+        "fieldMappings": [],
+        "batchSourceParam": "",
+        "conditionGroups": [
+          {
+            "id": "cg_mrqj4pcr_o20n1q",
+            "conditions": [
+              {
+                "id": "cond_mrqj4pcr_xm9jst",
+                "field": "name",
+                "customField": "",
+                "op": "like",
+                "valueKind": "param",
+                "value": "keyword",
+                "valueTo": ""
+              }
+            ]
+          }
+        ]
+      },
+      "debugParams": {
+        "pageDto": {
+          "current": 1,
+          "pageSize": 30
+        },
+        "keyword": "输入"
+      }
+    },
+    {
+      "id": "method_mrqgzrbx_jl23n8",
+      "name": "saveBatch",
+      "params": [
+        {
+          "id": "param_mrqgztqe_3d0ofu",
+          "name": "data",
+          "remark": "",
+          "typeExpr": {
+            "type": "array",
+            "typeRef": "",
+            "itemType": "json",
+            "itemTypeRef": "type_mrnx6ke8_4d7vry",
+            "itemItemType": "",
+            "itemItemTypeRef": "",
+            "genericArgs": {}
+          }
+        }
+      ],
+      "output": {
+        "type": "array",
+        "typeRef": "",
+        "itemType": "number",
+        "itemTypeRef": "",
+        "itemItemType": "",
+        "itemItemTypeRef": "",
+        "genericArgs": {}
+      },
+      "dataConfig": {
+        "source": "mysql",
+        "operation": "batchInsert",
+        "queryFields": [],
+        "sql": "",
+        "fieldMappings": [
+          {
+            "field": "name",
+            "column": "data.name"
+          },
+          {
+            "field": "price",
+            "column": "data.price"
+          },
+          {
+            "field": "stock",
+            "column": "data.stock"
+          }
+        ],
+        "batchSourceParam": "data",
+        "conditionGroups": []
+      },
+      "debugParams": {
+        "data": [
+          {
+            "id": "1",
+            "name": "",
+            "price": 0,
+            "stock": 0
+          },
+          {
+            "id": "",
+            "name": "",
+            "price": 0,
+            "stock": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "method_mrqir4sh_3tqdfb",
+      "name": "save",
+      "params": [
+        {
+          "id": "param_mrqir9lm_425rtw",
+          "name": "data",
+          "remark": "",
+          "typeExpr": {
+            "type": "json",
+            "typeRef": "type_mrnx6ke8_4d7vry",
+            "itemType": "",
+            "itemTypeRef": "",
+            "itemItemType": "",
+            "itemItemTypeRef": "",
+            "genericArgs": {}
+          }
+        }
+      ],
+      "output": {
+        "type": "string",
+        "typeRef": "",
+        "itemType": "",
+        "itemTypeRef": "",
+        "itemItemType": "",
+        "itemItemTypeRef": "",
+        "genericArgs": {}
+      },
+      "dataConfig": {
+        "source": "mysql",
+        "operation": "insert",
+        "queryFields": [],
+        "sql": "",
+        "fieldMappings": [
+          {
+            "field": "name",
+            "column": "data.name"
+          },
+          {
+            "field": "price",
+            "column": "data.price"
+          },
+          {
+            "field": "stock",
+            "column": "data.stock"
+          }
+        ],
+        "batchSourceParam": "",
+        "conditionGroups": []
+      },
+      "debugParams": {
+        "data": {
+          "id": "",
+          "name": "输入",
+          "price": 4,
+          "stock": 4
+        }
+      }
+    }
+  ]
+}

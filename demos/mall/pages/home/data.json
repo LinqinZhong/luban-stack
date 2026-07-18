@@ -1,0 +1,250 @@
+{
+  "fields": [
+    {
+      "name": "messagList",
+      "type": "array",
+      "remark": "",
+      "value": [],
+      "binding": "",
+      "itemType": "any"
+    },
+    {
+      "name": "navs",
+      "type": "array",
+      "remark": "",
+      "value": [
+        {
+          "label": "首页",
+          "color": "#00b2ff",
+          "icon": "home",
+          "key": "home"
+        },
+        {
+          "label": "消息",
+          "color": "#333333",
+          "icon": "message",
+          "key": "message"
+        },
+        {
+          "label": "我的",
+          "color": "#333333",
+          "icon": "user",
+          "key": "me"
+        }
+      ],
+      "binding": "",
+      "arrayFields": [
+        {
+          "type": "json",
+          "objectFields": [
+            {
+              "name": "label",
+              "type": "string",
+              "value": "首页"
+            },
+            {
+              "name": "color",
+              "type": "string",
+              "value": "#00b2ff"
+            },
+            {
+              "name": "icon",
+              "type": "icon",
+              "value": "home"
+            },
+            {
+              "name": "key",
+              "type": "string",
+              "value": "home"
+            }
+          ]
+        },
+        {
+          "type": "json",
+          "objectFields": [
+            {
+              "name": "label",
+              "type": "string",
+              "value": "消息"
+            },
+            {
+              "name": "color",
+              "type": "string",
+              "value": "#333333"
+            },
+            {
+              "name": "icon",
+              "type": "icon",
+              "value": "message"
+            },
+            {
+              "name": "key",
+              "type": "string",
+              "value": "message"
+            }
+          ]
+        },
+        {
+          "type": "json",
+          "objectFields": [
+            {
+              "name": "label",
+              "type": "string",
+              "value": "我的"
+            },
+            {
+              "name": "color",
+              "type": "string",
+              "value": "#333333"
+            },
+            {
+              "name": "icon",
+              "type": "icon",
+              "value": "user"
+            },
+            {
+              "name": "key",
+              "type": "string",
+              "value": "me"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "currentNav",
+      "type": "string",
+      "remark": "",
+      "value": "home",
+      "binding": ""
+    },
+    {
+      "name": "goodsList",
+      "type": "array",
+      "remark": "商品列表",
+      "value": [
+        {
+          "id": "1",
+          "name": "内裤",
+          "price": 2.12,
+          "stock": 0
+        },
+        {
+          "id": "2",
+          "name": "上衣",
+          "price": 0,
+          "stock": 0
+        },
+        {
+          "id": "3",
+          "name": "阿三大苏打",
+          "price": 0,
+          "stock": 0
+        }
+      ],
+      "binding": "",
+      "itemType": "json",
+      "itemTypeRef": "type_mrnx6ke8_4d7vry",
+      "arrayFields": [
+        {
+          "type": "json",
+          "typeRef": "type_mrnx6ke8_4d7vry",
+          "objectFields": [
+            {
+              "name": "id",
+              "type": "string",
+              "value": "1"
+            },
+            {
+              "name": "name",
+              "type": "string",
+              "value": "内裤"
+            },
+            {
+              "name": "price",
+              "type": "number",
+              "value": 2.12
+            },
+            {
+              "name": "stock",
+              "type": "number",
+              "value": 0
+            }
+          ]
+        },
+        {
+          "type": "json",
+          "typeRef": "type_mrnx6ke8_4d7vry",
+          "objectFields": [
+            {
+              "name": "id",
+              "type": "string",
+              "value": "2"
+            },
+            {
+              "name": "name",
+              "type": "string",
+              "value": "上衣"
+            },
+            {
+              "name": "price",
+              "type": "number",
+              "value": 0
+            },
+            {
+              "name": "stock",
+              "type": "number",
+              "value": 0
+            }
+          ]
+        },
+        {
+          "type": "json",
+          "typeRef": "type_mrnx6ke8_4d7vry",
+          "objectFields": [
+            {
+              "name": "id",
+              "type": "string",
+              "value": "3"
+            },
+            {
+              "name": "name",
+              "type": "string",
+              "value": "阿三大苏打"
+            },
+            {
+              "name": "price",
+              "type": "number",
+              "value": 0
+            },
+            {
+              "name": "stock",
+              "type": "number",
+              "value": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "goodsList1",
+      "type": "array",
+      "remark": "商品列表-左",
+      "value": [],
+      "binding": "computed",
+      "computeBody": "{}  // 可直接使用同级数据池字段名作为变量（无需形参）\n// return 的值即为该字段的计算值\nreturn goodsList.filter((a, i) => (i&1) === 1)",
+      "itemType": "json",
+      "itemTypeRef": "type_mrnx6ke8_4d7vry"
+    },
+    {
+      "name": "goodsList2",
+      "type": "array",
+      "remark": "商品列表-右",
+      "value": [],
+      "binding": "computed",
+      "computeBody": "{}  // 可直接使用同级数据池字段名作为变量（无需形参）\n// return 的值即为该字段的计算值\nreturn goodsList.filter((a, i) => (i&1) === 0)",
+      "itemType": "json",
+      "itemTypeRef": "type_mrnx6ke8_4d7vry"
+    }
+  ]
+}

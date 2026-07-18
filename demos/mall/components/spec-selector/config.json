@@ -1,0 +1,12 @@
+{
+  "name": "规格选择器",
+  "title": "规格选择器",
+  "width": "match_parent",
+  "height": "match_parent",
+  "props": [],
+  "events": [],
+  "exposedMethods": [
+    "open",
+    "close"
+  ]
+}

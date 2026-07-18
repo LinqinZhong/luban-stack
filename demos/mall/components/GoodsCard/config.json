@@ -1,0 +1,52 @@
+{
+  "name": "商品卡片",
+  "title": "商品卡片",
+  "width": "match_parent",
+  "height": "wrap_content",
+  "props": [
+    {
+      "name": "title",
+      "type": "string",
+      "remark": "",
+      "defaultValue": "商品名称",
+      "twoWay": false,
+      "required": true
+    },
+    {
+      "name": "price",
+      "type": "number",
+      "remark": "",
+      "defaultValue": 0,
+      "twoWay": false,
+      "required": true
+    },
+    {
+      "name": "img",
+      "type": "string",
+      "remark": "图片",
+      "defaultValue": "",
+      "twoWay": false,
+      "required": false
+    },
+    {
+      "name": "id",
+      "type": "string",
+      "remark": "",
+      "defaultValue": "",
+      "twoWay": false,
+      "required": true
+    }
+  ],
+  "events": [
+    {
+      "name": "select",
+      "params": [
+        {
+          "name": "id",
+          "type": "string"
+        }
+      ]
+    }
+  ],
+  "exposedMethods": []
+}

@@ -1,0 +1,43 @@
+{
+  "fields": [
+    {
+      "name": "titleBarOpacity",
+      "type": "number",
+      "remark": "",
+      "value": 0,
+      "binding": "",
+      "computeBody": ""
+    },
+    {
+      "name": "titleBarColor",
+      "type": "color",
+      "remark": "",
+      "value": "",
+      "binding": "computed",
+      "computeBody": "// 可直接使用同级数据池字段名作为变量（无需形参）\n// return 的值即为该字段的计算值\nreturn `rgba(255, 255, 255, ${titleBarOpacity})`\n"
+    },
+    {
+      "name": "titleTextColor",
+      "type": "color",
+      "remark": "",
+      "value": "",
+      "binding": "computed",
+      "computeBody": "// 可直接使用同级数据池字段名作为变量（无需形参）\n// return 的值即为该字段的计算值\nconst a = 255 * (1 - titleBarOpacity)\nreturn `rgb(${a}, ${a}, ${a})`\n"
+    },
+    {
+      "name": "specSelectRef",
+      "type": "ref",
+      "remark": "",
+      "value": "0:LinearLayout/1:Component",
+      "binding": ""
+    },
+    {
+      "name": "statusBarColor",
+      "type": "string",
+      "remark": "",
+      "value": "",
+      "binding": "computed",
+      "computeBody": "// 可直接使用同级数据池字段名作为变量（无需形参）\n// return 的值即为该字段的计算值\nreturn titleBarOpacity > 0.5 ? 'black' : 'white'\n"
+    }
+  ]
+}

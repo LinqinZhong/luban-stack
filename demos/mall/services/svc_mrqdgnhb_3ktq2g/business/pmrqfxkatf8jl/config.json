@@ -1,0 +1,16 @@
+{
+  "id": "pmrqfxkatf8jl",
+  "name": "goods",
+  "remark": "",
+  "entityRef": "",
+  "dataProcessorRef": "pmrqfm9hxqct4",
+  "methods": [
+    {
+      "id": "method_mrqfxlh1_u651zc",
+      "name": "list",
+      "params": [],
+      "outputRef": "",
+      "outputGenericArgs": {}
+    }
+  ]
+}

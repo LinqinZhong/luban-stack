@@ -1,0 +1,10 @@
+{
+  "name": "测试",
+  "version": "0.1.0",
+  "author": "",
+  "engineVersion": "1.0.0",
+  "canvas": {
+    "width": 375
+  },
+  "entryPage": "home"
+}
