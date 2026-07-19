@@ -11,7 +11,7 @@
       "generics": [],
       "fields": [
         {
-          "id": "field_mrompy5o_kmf8wa",
+          "id": "field_mrs1wk66_2tem17",
           "name": "id",
           "type": {
             "intersections": [
@@ -28,7 +28,7 @@
           "optional": false
         },
         {
-          "id": "field_mrompy5o_xl7f1b",
+          "id": "field_mrs1wk66_8fe84l",
           "name": "name",
           "type": {
             "intersections": [
@@ -45,7 +45,7 @@
           "optional": false
         },
         {
-          "id": "field_mrompy5o_qp9ycg",
+          "id": "field_mrs1wk66_xvuu2x",
           "name": "price",
           "type": {
             "intersections": [
@@ -62,7 +62,7 @@
           "optional": false
         },
         {
-          "id": "field_mromqhts_1dtw7d",
+          "id": "field_mrs1wk66_h318ty",
           "name": "stock",
           "type": {
             "intersections": [
@@ -76,6 +76,23 @@
             ]
           },
           "remark": "库存",
+          "optional": false
+        },
+        {
+          "id": "field_mrs1wk66_matb66",
+          "name": "img",
+          "type": {
+            "intersections": [
+              {
+                "alternatives": [
+                  {
+                    "kind": "string"
+                  }
+                ]
+              }
+            ]
+          },
+          "remark": "图片",
           "optional": false
         }
       ],

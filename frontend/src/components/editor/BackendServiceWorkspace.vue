@@ -1,29 +1,41 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import {
   Coin,
   Connection,
   Cpu,
-  Delete,
   Plus,
-  Setting,
   Timer,
 } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   getServiceControllers,
+  getServiceProcessors,
   saveServiceControllers as saveServiceControllersApi,
 } from '../../api/projects'
 import {
+  createDefaultMethodFlow,
+  createEmptyDataMethodConfig,
+  createEmptyProcessorTypeExpr,
   createEmptyServiceApi,
   createEmptyServiceController,
-  HTTP_METHOD_OPTIONS,
+  type MethodFlow,
+  type ProcessorMethod,
+  type ProcessorMethodParam,
+  type ProcessorTypeExpr,
   type ServiceApi,
+  type ServiceApiParamLocation,
   type ServiceController,
+  type ServiceProcessor,
 } from '../../types/backend-services'
 import type { DataTypeLibrary } from '../../types/data-types'
+import EditServiceApiDialog, {
+  type ServiceApiEditPayload,
+} from './EditServiceApiDialog.vue'
+import MethodFlowEditor from './method-flow/MethodFlowEditor.vue'
 import ServiceProcessorPanel, {
   type ProcessorDebugTarget,
+  type ProcessorSelectionState,
 } from './ServiceProcessorPanel.vue'
 
 type ServiceLayer = 'controller' | 'service' | 'data' | 'schedule'
@@ -33,11 +45,29 @@ const props = defineProps<{
   serviceId: string
   serviceName: string
   typeLibrary: DataTypeLibrary | null
+  /** 受控：当前层（由工作区持久化） */
+  layer?: ServiceLayer
+  /** 恢复：控制器选中 */
+  restoredControllerId?: string
+  /** 恢复：业务层选中 */
+  restoredBusiness?: {
+    processorId: string
+    methodId: string
+    flowEditing: { processorId: string; methodId: string } | null
+  } | null
+  /** 恢复：数据层选中 */
+  restoredData?: {
+    processorId: string
+    methodId: string
+  } | null
 }>()
 
 const emit = defineEmits<{
   'update:layer': [layer: ServiceLayer]
   'update:debug-target': [target: ProcessorDebugTarget | null]
+  'update:controller-id': [id: string]
+  'update:business-selection': [state: ProcessorSelectionState]
+  'update:data-selection': [state: ProcessorSelectionState]
 }>()
 
 const dataProcessorPanelRef = ref<InstanceType<typeof ServiceProcessorPanel> | null>(
@@ -54,7 +84,12 @@ const layerTabs = [
   { key: 'schedule' as const, label: '定时任务', icon: Timer },
 ]
 
-const activeLayer = ref<ServiceLayer>('controller')
+const activeLayer = computed({
+  get: () => props.layer ?? 'controller',
+  set: (layer: ServiceLayer) => {
+    emit('update:layer', layer)
+  },
+})
 const controllers = ref<ServiceController[]>([])
 const activeControllerId = ref('')
 const loading = ref(false)
@@ -66,17 +101,21 @@ const editingControllerId = ref<string | null>(null)
 
 function setLayer(layer: ServiceLayer) {
   activeLayer.value = layer
-  emit('update:layer', layer)
-  if (layer !== 'data' && layer !== 'service') {
+  if (layer === 'schedule') {
     emit('update:debug-target', null)
   }
 }
 
 function onDebugTarget(target: ProcessorDebugTarget | null) {
+  if (activeLayer.value === 'controller') return
   emit('update:debug-target', target)
 }
 
 function applyDebugParams(params: Record<string, unknown>) {
+  if (activeLayer.value === 'controller') {
+    updateApiDebugParams(params)
+    return
+  }
   if (activeLayer.value === 'service') {
     businessProcessorPanelRef.value?.updateDebugParams(params)
     return
@@ -87,12 +126,16 @@ function applyDebugParams(params: Record<string, unknown>) {
 function applyFlowDebugCursor(state: {
   cursorNodeId: string | null
   visitedNodeIds: string[]
+  printByNode?: Record<string, string>
 }) {
+  if (activeLayer.value === 'controller') {
+    onApiFlowDebugCursor(state)
+    return
+  }
   businessProcessorPanelRef.value?.applyFlowDebugCursor(state)
 }
 
 defineExpose({ applyDebugParams, applyFlowDebugCursor })
-
 
 let saveTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -120,8 +163,7 @@ const dtoOptions = computed(() => {
 watch(
   () => [props.projectPath, props.serviceId] as const,
   ([path, id]) => {
-    activeLayer.value = 'controller'
-    emit('update:layer', 'controller')
+    // 切服务时不再强制回控制器；层由父级持久化状态决定
     if (path && id) void loadControllers()
     else {
       controllers.value = []
@@ -138,11 +180,29 @@ watch(
       activeControllerId.value = ''
       return
     }
+    const prefer = props.restoredControllerId
+    if (prefer && list.some((c) => c.id === prefer)) {
+      activeControllerId.value = prefer
+      return
+    }
     if (!list.some((c) => c.id === activeControllerId.value)) {
       activeControllerId.value = list[0]!.id
     }
   },
   { deep: true },
+)
+
+watch(activeControllerId, (id) => {
+  emit('update:controller-id', id)
+})
+
+watch(
+  () => props.layer,
+  (layer) => {
+    if (layer === 'schedule') {
+      emit('update:debug-target', null)
+    }
+  },
 )
 
 async function loadControllers() {
@@ -250,18 +310,379 @@ function patchActiveApis(nextApis: ServiceApi[]) {
   persistControllers()
 }
 
+const apiDialogVisible = ref(false)
+const apiEditIndex = ref(-1)
+const apiDraft = ref<ServiceApi | null>(null)
+const selectedApiId = ref('')
+
+const editingApi = computed(() => apiDraft.value)
+
+const apiReservedNames = computed(() =>
+  apis.value
+    .filter((_, i) => i !== apiEditIndex.value)
+    .map((a) => a.name.trim())
+    .filter(Boolean),
+)
+
+function apiInputLocationClass(location: ServiceApiParamLocation): string {
+  switch (location) {
+    case 'query':
+      return 'api-in-query'
+    case 'param':
+      return 'api-in-param'
+    case 'body':
+      return 'api-in-body'
+    case 'httpHeader':
+      return 'api-in-header'
+    default:
+      return ''
+  }
+}
+
+function apiInputItems(api: ServiceApi): Array<{
+  name: string
+  location: ServiceApiParamLocation
+  className: string
+}> {
+  return (api.inputs ?? [])
+    .map((p) => {
+      const name = p.varName.trim()
+      if (!name) return null
+      return {
+        name,
+        location: p.location,
+        className: apiInputLocationClass(p.location),
+      }
+    })
+    .filter((x): x is NonNullable<typeof x> => Boolean(x))
+}
+
+function apiInputsTitle(api: ServiceApi): string {
+  const list = apiInputItems(api)
+  if (!list.length) return '无'
+  return list.map((p) => `${p.location}:${p.name}`).join('、')
+}
+
 function addApi() {
   if (!activeController.value) {
     ElMessage.warning('请先选择或创建控制器')
     return
   }
-  patchActiveApis([...apis.value, createEmptyServiceApi(`api${apis.value.length + 1}`)])
+  openApiDesign(-1)
 }
 
-function updateApi(index: number, patch: Partial<ServiceApi>) {
-  const next = apis.value.map((api, i) => (i === index ? { ...api, ...patch } : api))
-  patchActiveApis(next)
+/** 设计：弹窗编辑 API 元信息 */
+function openApiDesign(index: number) {
+  if (!activeController.value) return
+  apiEditIndex.value = index
+  if (index < 0) {
+    apiDraft.value = createEmptyServiceApi(`api${apis.value.length + 1}`)
+  } else {
+    const api = apis.value[index]
+    if (!api) return
+    apiDraft.value = {
+      ...api,
+      inputs: (api.inputs ?? []).map((p) => ({ ...p })),
+      flow: api.flow ?? createDefaultMethodFlow(),
+    }
+    selectedApiId.value = api.id
+  }
+  apiDialogVisible.value = true
 }
+
+function saveApiEdit(payload: ServiceApiEditPayload) {
+  if (apiEditIndex.value < 0) {
+    const base = apiDraft.value ?? createEmptyServiceApi(payload.name)
+    patchActiveApis([
+      ...apis.value,
+      {
+        ...base,
+        name: payload.name,
+        path: payload.path,
+        remark: payload.remark,
+        method: payload.method,
+        inputs: payload.inputs,
+        requireAuth: payload.requireAuth,
+        flow: base.flow ?? createDefaultMethodFlow(),
+      },
+    ])
+    selectedApiId.value = base.id
+  } else {
+    const next = apis.value.map((api, i) =>
+      i === apiEditIndex.value
+        ? {
+            ...api,
+            name: payload.name,
+            path: payload.path,
+            remark: payload.remark,
+            method: payload.method,
+            inputs: payload.inputs,
+            requireAuth: payload.requireAuth,
+          }
+        : api,
+    )
+    patchActiveApis(next)
+  }
+  apiEditIndex.value = -1
+  apiDraft.value = null
+}
+
+/** API 流程图编辑中 */
+const apiFlowEditing = ref<{ controllerId: string; apiId: string } | null>(
+  null,
+)
+const businessProcessors = ref<ServiceProcessor[]>([])
+const dataLayerProcessors = ref<ServiceProcessor[]>([])
+const flowProcessorsLoading = ref(false)
+const apiFlowSelectedNodeId = ref<string | null>(null)
+const apiFlowDebugCursorId = ref<string | null>(null)
+const apiFlowDebugVisitedIds = ref<string[]>([])
+const apiFlowDebugPrintByNode = ref<Record<string, string>>({})
+
+const apiFlowEditingApi = computed(() => {
+  const ctx = apiFlowEditing.value
+  if (!ctx) return null
+  const ctrl = controllers.value.find((c) => c.id === ctx.controllerId)
+  return ctrl?.apis.find((a) => a.id === ctx.apiId) ?? null
+})
+
+const apiFlowEditingFlow = computed(
+  () => apiFlowEditingApi.value?.flow ?? createDefaultMethodFlow(),
+)
+
+const selectedApi = computed(
+  () => apis.value.find((a) => a.id === selectedApiId.value) ?? null,
+)
+
+function findTypeDef(id: string) {
+  if (!id) return null
+  for (const group of props.typeLibrary?.groups ?? []) {
+    const hit = group.types.find((t) => t.id === id)
+    if (hit) return hit
+  }
+  return null
+}
+
+function buildApiMethodParams(api: ServiceApi): ProcessorMethodParam[] {
+  if (!api.inputs?.length) return []
+  return api.inputs.map((p) => {
+    const varName =
+      p.varName.trim().replace(/[^A-Za-z0-9_]/g, '_') || 'input'
+    const def = p.typeRef ? findTypeDef(p.typeRef) : null
+    const type = p.typeRef ? 'json' : p.type || 'string'
+    return {
+      id: p.id || `api_input_${varName}`,
+      name: varName,
+      remark: p.remark || def?.remark || `${p.location} · ${varName}`,
+      typeExpr: {
+        ...createEmptyProcessorTypeExpr(type),
+        typeRef: p.typeRef || '',
+      },
+    }
+  })
+}
+
+/** API 入参：供流程图环境变量使用（非 body 对象已平铺） */
+const apiFlowMethodParams = computed((): ProcessorMethodParam[] => {
+  const api = apiFlowEditingApi.value
+  if (!api) return []
+  return buildApiMethodParams(api)
+})
+
+const apiFlowMethodOutput = computed(
+  (): ProcessorTypeExpr => createEmptyProcessorTypeExpr(),
+)
+
+function apiAsProcessorMethod(api: ServiceApi): ProcessorMethod {
+  return {
+    id: api.id,
+    name: api.name,
+    remark: api.remark,
+    scope: 'public',
+    params: buildApiMethodParams(api),
+    output: createEmptyProcessorTypeExpr(),
+    dataConfig: createEmptyDataMethodConfig(),
+    debugParams: api.debugParams ?? {},
+    flow: api.flow ?? createDefaultMethodFlow(),
+  }
+}
+
+const apiFlowDebugTarget = computed<ProcessorDebugTarget | null>(() => {
+  if (activeLayer.value !== 'controller') return null
+  if (!props.projectPath || !props.serviceId) return null
+
+  if (apiFlowEditing.value && apiFlowEditingApi.value) {
+    const api = apiFlowEditingApi.value
+    const ctrl = activeController.value
+    return {
+      kind: 'flow',
+      projectPath: props.projectPath,
+      serviceId: props.serviceId,
+      processorId: ctrl?.id || 'controller',
+      processorName: ctrl?.name || '控制器',
+      method: apiAsProcessorMethod(api),
+      flow: api.flow ?? createDefaultMethodFlow(),
+      selectedNodeId: apiFlowSelectedNodeId.value,
+      dataProcessors: dataLayerProcessors.value,
+      businessProcessors: businessProcessors.value,
+      mode: 'canvas',
+    }
+  }
+
+  if (!selectedApi.value) return null
+  return {
+    kind: 'flow',
+    projectPath: props.projectPath,
+    serviceId: props.serviceId,
+    processorId: activeController.value?.id || 'controller',
+    processorName: activeController.value?.name || '控制器',
+    method: apiAsProcessorMethod(selectedApi.value),
+    flow: selectedApi.value.flow ?? createDefaultMethodFlow(),
+    selectedNodeId: apiFlowSelectedNodeId.value || 'start',
+    dataProcessors: dataLayerProcessors.value,
+    businessProcessors: businessProcessors.value,
+    mode: 'list',
+  }
+})
+
+watch(
+  apiFlowDebugTarget,
+  (target) => {
+    if (activeLayer.value !== 'controller') return
+    emit('update:debug-target', target)
+  },
+  { immediate: true },
+)
+
+async function loadFlowProcessors() {
+  if (!props.projectPath || !props.serviceId) {
+    businessProcessors.value = []
+    dataLayerProcessors.value = []
+    return
+  }
+  flowProcessorsLoading.value = true
+  try {
+    const [biz, data] = await Promise.all([
+      getServiceProcessors(props.projectPath, props.serviceId, 'business'),
+      getServiceProcessors(props.projectPath, props.serviceId, 'data'),
+    ])
+    businessProcessors.value = biz.processors
+    dataLayerProcessors.value = data.processors
+  } catch (err) {
+    businessProcessors.value = []
+    dataLayerProcessors.value = []
+    console.error(err)
+  } finally {
+    flowProcessorsLoading.value = false
+  }
+}
+
+watch(
+  () =>
+    [
+      activeLayer.value,
+      props.projectPath,
+      props.serviceId,
+    ] as const,
+  ([layer, path, id]) => {
+    if (layer === 'controller' && path && id) void loadFlowProcessors()
+  },
+  { immediate: true },
+)
+
+function clearApiFlowDebug() {
+  apiFlowSelectedNodeId.value = null
+  apiFlowDebugCursorId.value = null
+  apiFlowDebugVisitedIds.value = []
+  apiFlowDebugPrintByNode.value = {}
+}
+
+function onApiFlowSelectedNode(nodeId: string | null) {
+  apiFlowSelectedNodeId.value = nodeId
+}
+
+function onApiFlowDebugCursor(state: {
+  cursorNodeId: string | null
+  visitedNodeIds: string[]
+  printByNode?: Record<string, string>
+}) {
+  apiFlowDebugCursorId.value = state.cursorNodeId
+  apiFlowDebugVisitedIds.value = state.visitedNodeIds
+  apiFlowDebugPrintByNode.value = state.printByNode ?? {}
+}
+
+function updateApiDebugParams(params: Record<string, unknown>) {
+  const apiId = apiFlowEditing.value?.apiId ?? selectedApiId.value
+  const ctrlId = apiFlowEditing.value?.controllerId ?? activeControllerId.value
+  if (!apiId || !ctrlId) return
+  controllers.value = controllers.value.map((c) => {
+    if (c.id !== ctrlId) return c
+    return {
+      ...c,
+      apis: c.apis.map((a) =>
+        a.id === apiId ? { ...a, debugParams: { ...params } } : a,
+      ),
+    }
+  })
+  persistControllers()
+}
+
+/** 编辑：打开 API 流程图（与业务层方法一致） */
+async function openApiFlow(index: number) {
+  const api = apis.value[index]
+  if (!api || !activeControllerId.value) return
+  if (!api.flow?.nodes?.length) {
+    updateApiFlow(api.id, createDefaultMethodFlow())
+  }
+  selectedApiId.value = api.id
+  clearApiFlowDebug()
+  apiFlowEditing.value = {
+    controllerId: activeControllerId.value,
+    apiId: api.id,
+  }
+  await loadFlowProcessors()
+}
+
+function closeApiFlow() {
+  apiFlowEditing.value = null
+  clearApiFlowDebug()
+}
+
+function updateApiFlow(apiId: string, flow: MethodFlow) {
+  const ctrlId = activeControllerId.value
+  if (!ctrlId) return
+  controllers.value = controllers.value.map((c) => {
+    if (c.id !== ctrlId) return c
+    return {
+      ...c,
+      apis: c.apis.map((a) => (a.id === apiId ? { ...a, flow } : a)),
+    }
+  })
+  persistControllers()
+}
+
+function onApiFlowUpdate(flow: MethodFlow) {
+  const ctx = apiFlowEditing.value
+  if (!ctx) return
+  updateApiFlow(ctx.apiId, flow)
+}
+
+watch(
+  () => [props.projectPath, props.serviceId] as const,
+  () => {
+    apiFlowEditing.value = null
+    clearApiFlowDebug()
+  },
+)
+
+watch(activeControllerId, () => {
+  apiFlowEditing.value = null
+  clearApiFlowDebug()
+})
+
+watch(selectedApiId, () => {
+  if (!apiFlowEditing.value) clearApiFlowDebug()
+})
 
 async function removeApi(index: number) {
   const target = apis.value[index]
@@ -275,17 +696,58 @@ async function removeApi(index: number) {
   } catch {
     return
   }
+  if (selectedApiId.value === target.id) selectedApiId.value = ''
+  if (apiFlowEditing.value?.apiId === target.id) apiFlowEditing.value = null
   patchActiveApis(apis.value.filter((_, i) => i !== index))
 }
 
-function onApiConfig() {
-  ElMessage.info('API 配置稍后实现')
-}
+watch(
+  apis,
+  (list) => {
+    if (!list.length) {
+      selectedApiId.value = ''
+      return
+    }
+    if (!list.some((a) => a.id === selectedApiId.value)) {
+      selectedApiId.value = list[0]!.id
+    }
+  },
+  { deep: true },
+)
+
+onBeforeUnmount(() => {
+  apiFlowEditing.value = null
+  emit('update:debug-target', null)
+})
 </script>
 
 <template>
   <div class="svc-workspace">
-    <div v-if="activeLayer === 'controller'" class="svc-workspace-body">
+    <MethodFlowEditor
+      v-if="activeLayer === 'controller' && apiFlowEditing && apiFlowEditingApi"
+      :method-name="apiFlowEditingApi.name"
+      title-kind="API"
+      input-source-mode="business"
+      :flow="apiFlowEditingFlow"
+      :method-params="apiFlowMethodParams"
+      :method-output="apiFlowMethodOutput"
+      :data-processors="dataLayerProcessors"
+      :business-processors="businessProcessors"
+      current-processor-id=""
+      current-method-id=""
+      bound-data-processor-id=""
+      :type-library="typeLibrary"
+      :debug-cursor-id="apiFlowDebugCursorId"
+      :debug-visited-ids="apiFlowDebugVisitedIds"
+      :debug-print-by-node="apiFlowDebugPrintByNode"
+      @back="closeApiFlow"
+      @update:flow="onApiFlowUpdate"
+      @update:selected-node="onApiFlowSelectedNode"
+    />
+    <div
+      v-else-if="activeLayer === 'controller'"
+      class="svc-workspace-body"
+    >
       <aside class="ctrl-pane">
         <div class="pane-head">
           <span class="pane-title">控制器</span>
@@ -325,7 +787,7 @@ function onApiConfig() {
               >
                 {{ ctrl.name }}
               </span>
-              <span v-if="ctrl.path" class="ctrl-path">{{ ctrl.path }}</span>
+              <span v-if="ctrl.path" class="ctrl-path">({{ ctrl.path }})</span>
             </li>
             <template #dropdown>
               <el-dropdown-menu>
@@ -358,112 +820,95 @@ function onApiConfig() {
           :image-size="64"
         />
         <div v-else class="api-table">
-          <el-table :data="apis" border stripe empty-text="暂无 API，点击创建">
-            <el-table-column label="名称" min-width="110">
-              <template #default="{ row, $index }">
-                <el-input
-                  :model-value="row.name"
-                  placeholder="名称"
-                  size="small"
-                  @update:model-value="updateApi($index, { name: String($event) })"
-                />
+          <el-table
+            :data="apis"
+            border
+            stripe
+            empty-text="暂无 API，点击创建"
+            highlight-current-row
+            :row-class-name="
+              ({ row }) => (row.id === selectedApiId ? 'is-selected-row' : '')
+            "
+            @row-click="(row) => (selectedApiId = (row as ServiceApi).id)"
+          >
+            <el-table-column label="名称" min-width="100">
+              <template #default="{ row }">
+                <span class="cell-text">{{ row.name || '—' }}</span>
               </template>
             </el-table-column>
-            <el-table-column label="路径" min-width="120">
-              <template #default="{ row, $index }">
-                <el-input
-                  :model-value="row.path"
-                  placeholder="/path"
-                  size="small"
-                  @update:model-value="updateApi($index, { path: String($event) })"
-                />
+            <el-table-column label="路径" min-width="110">
+              <template #default="{ row }">
+                <span class="cell-text muted">{{ row.path || '/' }}</span>
               </template>
             </el-table-column>
             <el-table-column label="说明" min-width="100">
-              <template #default="{ row, $index }">
-                <el-input
-                  :model-value="row.remark"
-                  placeholder="说明"
-                  size="small"
-                  @update:model-value="updateApi($index, { remark: String($event) })"
-                />
+              <template #default="{ row }">
+                <span class="cell-text muted">{{ row.remark || '—' }}</span>
               </template>
             </el-table-column>
-            <el-table-column label="请求方法" width="110">
-              <template #default="{ row, $index }">
-                <el-select
-                  :model-value="row.method"
-                  size="small"
-                  style="width: 100%"
-                  @update:model-value="updateApi($index, { method: $event })"
+            <el-table-column label="请求方法" width="88" align="center">
+              <template #default="{ row }">
+                <span class="cell-text">{{ row.method }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="入参" min-width="180">
+              <template #default="{ row }">
+                <span
+                  v-if="!apiInputItems(row).length"
+                  class="cell-text muted"
+                >无</span>
+                <span
+                  v-else
+                  class="api-inputs"
+                  :title="apiInputsTitle(row)"
                 >
-                  <el-option
-                    v-for="opt in HTTP_METHOD_OPTIONS"
-                    :key="opt.value"
-                    :label="opt.label"
-                    :value="opt.value"
-                  />
-                </el-select>
+                  <template
+                    v-for="(item, i) in apiInputItems(row)"
+                    :key="`${item.location}-${item.name}-${i}`"
+                  >
+                    <span
+                      v-if="i > 0"
+                      class="api-inputs-sep"
+                    >、</span>
+                    <span
+                      class="api-input-name"
+                      :class="item.className"
+                    >{{ item.name }}</span>
+                  </template>
+                </span>
               </template>
             </el-table-column>
-            <el-table-column label="入参 (选择DTO)" min-width="140">
-              <template #default="{ row, $index }">
-                <el-select
-                  :model-value="row.inputDtoRef"
-                  clearable
-                  filterable
-                  placeholder="选择 DTO"
-                  size="small"
-                  style="width: 100%"
-                  @update:model-value="
-                    updateApi($index, { inputDtoRef: String($event ?? '') })
-                  "
-                >
-                  <el-option
-                    v-for="opt in dtoOptions"
-                    :key="opt.id"
-                    :label="opt.label"
-                    :value="opt.id"
-                  />
-                </el-select>
+            <el-table-column label="鉴权" width="64" align="center">
+              <template #default="{ row }">
+                <span class="cell-text">{{ row.requireAuth ? '是' : '否' }}</span>
               </template>
             </el-table-column>
-            <el-table-column label="请求头" min-width="100">
-              <template #default="{ row, $index }">
-                <el-input
-                  :model-value="row.headers"
-                  placeholder="请求头"
-                  size="small"
-                  @update:model-value="updateApi($index, { headers: String($event) })"
-                />
-              </template>
-            </el-table-column>
-            <el-table-column label="需要鉴权" width="90" align="center">
-              <template #default="{ row, $index }">
-                <el-switch
-                  :model-value="row.requireAuth"
-                  size="small"
-                  @update:model-value="
-                    updateApi($index, { requireAuth: Boolean($event) })
-                  "
-                />
-              </template>
-            </el-table-column>
-            <el-table-column label="配置" width="72" align="center">
-              <template #default>
-                <el-button type="primary" link :icon="Setting" @click="onApiConfig">
-                  配置
-                </el-button>
-              </template>
-            </el-table-column>
-            <el-table-column label="删除" width="64" align="center">
+            <el-table-column label="操作" width="160" align="center" fixed="right">
               <template #default="{ $index }">
+                <el-button
+                  type="primary"
+                  link
+                  size="small"
+                  @click.stop="openApiDesign($index)"
+                >
+                  设计
+                </el-button>
+                <el-button
+                  type="primary"
+                  link
+                  size="small"
+                  @click.stop="openApiFlow($index)"
+                >
+                  编辑
+                </el-button>
                 <el-button
                   type="danger"
                   link
-                  :icon="Delete"
-                  @click="removeApi($index)"
-                />
+                  size="small"
+                  @click.stop="removeApi($index)"
+                >
+                  删除
+                </el-button>
               </template>
             </el-table-column>
           </el-table>
@@ -477,7 +922,9 @@ function onApiConfig() {
       :service-id="serviceId"
       layer="business"
       :type-library="typeLibrary"
+      :restored="restoredBusiness"
       @update:debug-target="onDebugTarget"
+      @update:selection="emit('update:business-selection', $event)"
     />
     <ServiceProcessorPanel
       v-else-if="activeLayer === 'data'"
@@ -486,7 +933,17 @@ function onApiConfig() {
       :service-id="serviceId"
       layer="data"
       :type-library="typeLibrary"
+      :restored="
+        restoredData
+          ? {
+              processorId: restoredData.processorId,
+              methodId: restoredData.methodId,
+              flowEditing: null,
+            }
+          : null
+      "
       @update:debug-target="onDebugTarget"
+      @update:selection="emit('update:data-selection', $event)"
     />
     <div v-else class="layer-placeholder">
       <el-empty description="定时任务稍后实现" :image-size="80" />
@@ -548,6 +1005,14 @@ function onApiConfig() {
         <el-button type="primary" @click="submitDialog">确定</el-button>
       </template>
     </el-dialog>
+
+    <EditServiceApiDialog
+      v-model="apiDialogVisible"
+      :api="editingApi"
+      :dto-options="dtoOptions"
+      :reserved-names="apiReservedNames"
+      @save="saveApiEdit"
+    />
   </div>
 </template>
 
@@ -667,6 +1132,33 @@ function onApiConfig() {
   padding: 12px;
 }
 
+.api-inputs {
+  display: inline;
+  font-size: 13px;
+  line-height: 1.4;
+  word-break: break-all;
+}
+
+.api-inputs-sep {
+  color: #c0c4cc;
+}
+
+.api-input-name.api-in-query {
+  color: #67c23a;
+}
+
+.api-input-name.api-in-param {
+  color: #e6a23c;
+}
+
+.api-input-name.api-in-body {
+  color: #9b59b6;
+}
+
+.api-input-name.api-in-header {
+  color: #409eff;
+}
+
 .layer-placeholder {
   flex: 1;
   min-height: 0;
@@ -707,5 +1199,19 @@ function onApiConfig() {
 .layer-tab.active {
   background: #ecf5ff;
   color: #409eff;
+}
+
+.cell-text {
+  font-size: 13px;
+  color: #303133;
+  word-break: break-all;
+}
+
+.cell-text.muted {
+  color: #909399;
+}
+
+.api-table :deep(.is-selected-row > td.el-table__cell) {
+  background: #ecf5ff !important;
 }
 </style>

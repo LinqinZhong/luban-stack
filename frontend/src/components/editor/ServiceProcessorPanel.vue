@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch, onBeforeUnmount } from 'vue'
-import { Delete, EditPen, Plus } from '@element-plus/icons-vue'
+import { Plus } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   getServiceProcessors,
@@ -8,7 +8,6 @@ import {
 } from '../../api/projects'
 import {
   createEmptyProcessorMethod,
-  createEmptyProcessorTypeExpr,
   createEmptyServiceProcessor,
   createDefaultMethodFlow,
   DATA_METHOD_OPERATION_OPTIONS,
@@ -20,37 +19,43 @@ import {
   type ServiceProcessor,
 } from '../../types/backend-services'
 import type { DataTypeLibrary } from '../../types/data-types'
-import {
-  typeLabel,
-  type DataFieldType,
-} from '../../types/page-data'
-import DataFieldTypeTreeSelect, {
-  type TypeSelectPayload,
-} from './DataFieldTypeTreeSelect.vue'
+import { typeLabel, type DataFieldType } from '../../types/page-data'
+import EditBusinessMethodDialog, {
+  type BusinessMethodEditPayload,
+} from './EditBusinessMethodDialog.vue'
 import EditDataMethodDialog, {
   type DataMethodEditPayload,
 } from './EditDataMethodDialog.vue'
 import type { DataMethodDebugTarget } from './DataMethodDebugPanel.vue'
 import type { MethodFlowDebugTarget } from './MethodFlowDebugPanel.vue'
-import MethodParamsDialog from './MethodParamsDialog.vue'
-import TypeGenericArgsDialog from './TypeGenericArgsDialog.vue'
 import MethodFlowEditor from './method-flow/MethodFlowEditor.vue'
-
-const PROCESSOR_EXCLUDE_TYPES: DataFieldType[] = ['color', 'ref', 'icon']
 
 const props = defineProps<{
   projectPath: string
   serviceId: string
   layer: ProcessorLayerKind
   typeLibrary: DataTypeLibrary | null
+  /** 刷新 / 切层后恢复选中 */
+  restored?: {
+    processorId: string
+    methodId: string
+    flowEditing: { processorId: string; methodId: string } | null
+  } | null
 }>()
 
 export type ProcessorDebugTarget =
   | ({ kind: 'data' } & DataMethodDebugTarget)
   | ({ kind: 'flow' } & MethodFlowDebugTarget)
 
+export type ProcessorSelectionState = {
+  processorId: string
+  methodId: string
+  flowEditing: { processorId: string; methodId: string } | null
+}
+
 const emit = defineEmits<{
   'update:debug-target': [target: ProcessorDebugTarget | null]
+  'update:selection': [state: ProcessorSelectionState]
 }>()
 
 const processors = ref<ServiceProcessor[]>([])
@@ -64,21 +69,13 @@ const dialogEntityRef = ref('')
 const dialogDataProcessorRef = ref('')
 const editingProcessorId = ref<string | null>(null)
 
-const paramsDialogVisible = ref(false)
-const editingMethodIndex = ref(-1)
-const editingParams = ref<ProcessorMethodParam[]>([])
-
-const genericDialogVisible = ref(false)
-const genericDialogIndex = ref(-1)
-const genericDialogNames = ref<string[]>([])
-const genericDialogTypeName = ref('')
-const genericDialogArgs = ref<Record<string, string>>({})
-const genericDialogTarget = ref<'output' | 'param'>('output')
-const genericDialogParamIndex = ref(-1)
-
 const dataMethodDialogVisible = ref(false)
 const dataMethodEditIndex = ref(-1)
 const selectedMethodId = ref('')
+
+const businessMethodDialogVisible = ref(false)
+const businessMethodEditIndex = ref(-1)
+const businessMethodDraft = ref<ProcessorMethod | null>(null)
 
 /** 业务层：工作流编辑中的方法 */
 const flowEditing = ref<{ processorId: string; methodId: string } | null>(
@@ -87,6 +84,7 @@ const flowEditing = ref<{ processorId: string; methodId: string } | null>(
 const flowSelectedNodeId = ref<string | null>(null)
 const flowDebugCursorId = ref<string | null>(null)
 const flowDebugVisitedIds = ref<string[]>([])
+const flowDebugPrintByNode = ref<Record<string, string>>({})
 
 let saveTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -191,27 +189,15 @@ function typeDefById(id: string) {
   return null
 }
 
-function genericNamesOf(typeRef: string): string[] {
-  return (typeDefById(typeRef)?.generics ?? [])
-    .map((g) => g.name.trim())
-    .filter(Boolean)
-}
-
-function leafNamedRef(expr: ProcessorTypeExpr): string {
-  if (expr.type === 'array') {
-    if (expr.itemType === 'array') return expr.itemItemTypeRef || ''
-    return expr.itemTypeRef || ''
-  }
-  return expr.typeRef || ''
-}
-
 function formatTypeWithGenerics(
   typeRef: string,
   args: Record<string, string>,
 ): string {
   const def = typeDefById(typeRef)
   if (!def?.name) return typeRef || '—'
-  const names = genericNamesOf(typeRef)
+  const names = (def.generics ?? [])
+    .map((g) => g.name.trim())
+    .filter(Boolean)
   if (!names.length) return def.name
   const inner = names
     .map((n) => {
@@ -221,6 +207,14 @@ function formatTypeWithGenerics(
     })
     .join(', ')
   return `${def.name}<${inner}>`
+}
+
+function leafNamedRef(expr: ProcessorTypeExpr): string {
+  if (expr.type === 'array') {
+    if (expr.itemType === 'array') return expr.itemItemTypeRef || ''
+    return expr.itemTypeRef || ''
+  }
+  return expr.typeRef || ''
 }
 
 function formatTypeExpr(expr: ProcessorTypeExpr): string {
@@ -250,32 +244,28 @@ function operationLabel(method: ProcessorMethod): string {
   )
 }
 
-function payloadToTypeExpr(
-  payload: TypeSelectPayload,
-  prev?: ProcessorTypeExpr,
-): ProcessorTypeExpr {
-  const next: ProcessorTypeExpr = {
-    ...createEmptyProcessorTypeExpr(payload.type),
-    type: payload.type,
-    typeRef: payload.typeRef ?? '',
-    itemType: payload.itemType ?? '',
-    itemTypeRef: payload.itemTypeRef ?? '',
-    itemItemType: payload.itemItemType ?? '',
-    itemItemTypeRef: payload.itemItemTypeRef ?? '',
-    genericArgs: {},
+function operationTagClass(method: ProcessorMethod): string {
+  const op = method.dataConfig?.operation || ''
+  switch (op) {
+    case 'query':
+      return 'op-tag--query'
+    case 'insert':
+      return 'op-tag--insert'
+    case 'batchInsert':
+      return 'op-tag--batch'
+    case 'update':
+      return 'op-tag--update'
+    case 'delete':
+      return 'op-tag--delete'
+    case 'custom':
+      return 'op-tag--custom'
+    default:
+      return ''
   }
-  const named = leafNamedRef(next)
-  const prevNamed = prev ? leafNamedRef(prev) : ''
-  if (named && named === prevNamed) {
-    next.genericArgs = { ...(prev?.genericArgs ?? {}) }
-  } else {
-    for (const n of genericNamesOf(named)) next.genericArgs[n] = ''
-  }
-  return next
 }
 
 function paramsSummary(params: ProcessorMethodParam[]): string {
-  if (!params.length) return '点击编辑入参'
+  if (!params.length) return '无'
   return params
     .map((p) => {
       const label = formatTypeExpr(p.typeExpr)
@@ -284,10 +274,19 @@ function paramsSummary(params: ProcessorMethodParam[]): string {
     .join(', ')
 }
 
+/** 加载中：避免把 flowEditing=null 写回父级，冲掉 localStorage 恢复值 */
+const hydrating = ref(false)
+const pendingRestore = ref<{
+  processorId: string
+  methodId: string
+  flowEditing: { processorId: string; methodId: string } | null
+} | null>(null)
+
 watch(
   () => [props.projectPath, props.serviceId, props.layer] as const,
   ([path, id]) => {
     flowEditing.value = null
+    selectedMethodId.value = ''
     if (path && id) void loadProcessors()
     else {
       processors.value = []
@@ -305,6 +304,11 @@ watch(
       activeProcessorId.value = ''
       return
     }
+    const prefer = pendingRestore.value?.processorId
+    if (prefer && list.some((p) => p.id === prefer)) {
+      activeProcessorId.value = prefer
+      return
+    }
     if (!list.some((p) => p.id === activeProcessorId.value)) {
       activeProcessorId.value = list[0]!.id
     }
@@ -312,8 +316,62 @@ watch(
   { deep: true },
 )
 
+watch(
+  () =>
+    ({
+      processorId: activeProcessorId.value,
+      methodId: selectedMethodId.value,
+      flowEditing: flowEditing.value,
+    }) satisfies ProcessorSelectionState,
+  (state) => {
+    if (hydrating.value || !state.processorId) return
+    emit('update:selection', {
+      processorId: state.processorId,
+      methodId: state.methodId,
+      flowEditing: state.flowEditing,
+    })
+  },
+  { deep: true },
+)
+
+function applyRestoredSelection(
+  r: {
+    processorId: string
+    methodId: string
+    flowEditing: { processorId: string; methodId: string } | null
+  } | null,
+) {
+  if (!r) return
+  if (r.processorId && processors.value.some((p) => p.id === r.processorId)) {
+    activeProcessorId.value = r.processorId
+  }
+  const preferMethod = r.methodId
+  if (preferMethod && methods.value.some((m) => m.id === preferMethod)) {
+    selectedMethodId.value = preferMethod
+  }
+  if (isBusinessLayer.value && r.flowEditing) {
+    const fe = r.flowEditing
+    const proc = processors.value.find((p) => p.id === fe.processorId)
+    if (proc?.methods.some((m) => m.id === fe.methodId)) {
+      flowEditing.value = { processorId: fe.processorId, methodId: fe.methodId }
+      flowSelectedNodeId.value = 'start'
+    }
+  }
+}
+
 async function loadProcessors() {
   if (!props.projectPath || !props.serviceId) return
+  // 快照：后续 await 期间父级 props.restored 可能被中间态 emit 冲掉
+  pendingRestore.value = props.restored
+    ? {
+        processorId: props.restored.processorId,
+        methodId: props.restored.methodId,
+        flowEditing: props.restored.flowEditing
+          ? { ...props.restored.flowEditing }
+          : null,
+      }
+    : null
+  hydrating.value = true
   loading.value = true
   try {
     const res = await getServiceProcessors(
@@ -332,12 +390,22 @@ async function loadProcessors() {
     } else {
       dataLayerProcessors.value = []
     }
+    applyRestoredSelection(pendingRestore.value)
   } catch (err) {
     ElMessage.error(err instanceof Error ? err.message : '加载处理器失败')
     processors.value = []
     dataLayerProcessors.value = []
   } finally {
     loading.value = false
+    hydrating.value = false
+    if (activeProcessorId.value) {
+      emit('update:selection', {
+        processorId: activeProcessorId.value,
+        methodId: selectedMethodId.value,
+        flowEditing: flowEditing.value,
+      })
+    }
+    pendingRestore.value = null
   }
 }
 
@@ -457,6 +525,10 @@ function addMethod() {
     ElMessage.warning('请先选择或创建处理器')
     return
   }
+  if (isBusinessLayer.value) {
+    openBusinessMethodDesign(-1)
+    return
+  }
   patchActiveMethods([
     ...methods.value,
     createEmptyProcessorMethod(`method${methods.value.length + 1}`),
@@ -469,6 +541,72 @@ function updateMethod(index: number, patch: Partial<ProcessorMethod>) {
   )
 }
 
+const editingBusinessMethod = computed(() => businessMethodDraft.value)
+
+const businessMethodReservedNames = computed(() =>
+  methods.value
+    .filter((_, i) => i !== businessMethodEditIndex.value)
+    .map((m) => m.name.trim())
+    .filter(Boolean),
+)
+
+function openBusinessMethodDesign(index: number) {
+  if (!isBusinessLayer.value || !activeProcessor.value) return
+  businessMethodEditIndex.value = index
+  if (index < 0) {
+    businessMethodDraft.value = createEmptyProcessorMethod(
+      `method${methods.value.length + 1}`,
+    )
+  } else {
+    const method = methods.value[index]
+    if (!method) return
+    selectedMethodId.value = method.id
+    flowSelectedNodeId.value = 'start'
+    businessMethodDraft.value = {
+      ...method,
+      params: method.params.map((p) => ({
+        ...p,
+        typeExpr: {
+          ...p.typeExpr,
+          genericArgs: { ...(p.typeExpr.genericArgs ?? {}) },
+        },
+      })),
+      output: {
+        ...method.output,
+        genericArgs: { ...(method.output.genericArgs ?? {}) },
+      },
+    }
+  }
+  businessMethodDialogVisible.value = true
+}
+
+function saveBusinessMethodEdit(payload: BusinessMethodEditPayload) {
+  if (businessMethodEditIndex.value < 0) {
+    const base = businessMethodDraft.value ?? createEmptyProcessorMethod(payload.name)
+    patchActiveMethods([
+      ...methods.value,
+      {
+        ...base,
+        name: payload.name,
+        remark: payload.remark,
+        scope: payload.scope,
+        params: payload.params,
+        output: payload.output,
+      },
+    ])
+  } else {
+    updateMethod(businessMethodEditIndex.value, {
+      name: payload.name,
+      remark: payload.remark,
+      scope: payload.scope,
+      params: payload.params,
+      output: payload.output,
+    })
+  }
+  businessMethodEditIndex.value = -1
+  businessMethodDraft.value = null
+}
+
 function openFlowEditor(index: number) {
   if (!isBusinessLayer.value || !activeProcessor.value) return
   const method = methods.value[index]
@@ -476,9 +614,11 @@ function openFlowEditor(index: number) {
   if (!method.flow?.nodes?.length) {
     updateMethod(index, { flow: createDefaultMethodFlow() })
   }
+  selectedMethodId.value = method.id
   flowSelectedNodeId.value = 'start'
   flowDebugCursorId.value = null
   flowDebugVisitedIds.value = []
+  flowDebugPrintByNode.value = {}
   flowEditing.value = {
     processorId: activeProcessor.value.id,
     methodId: method.id,
@@ -487,9 +627,10 @@ function openFlowEditor(index: number) {
 
 function closeFlowEditor() {
   flowEditing.value = null
-  flowSelectedNodeId.value = null
+  flowSelectedNodeId.value = selectedMethodId.value ? 'start' : null
   flowDebugCursorId.value = null
   flowDebugVisitedIds.value = []
+  flowDebugPrintByNode.value = {}
 }
 
 function updateFlowMethod(flow: MethodFlow) {
@@ -522,69 +663,13 @@ async function removeMethod(index: number) {
   patchActiveMethods(methods.value.filter((_, i) => i !== index))
 }
 
-function openParamsDialog(index: number) {
-  const method = methods.value[index]
-  if (!method) return
-  editingMethodIndex.value = index
-  editingParams.value = method.params.map((p) => ({
-    ...p,
-    typeExpr: {
-      ...p.typeExpr,
-      genericArgs: { ...(p.typeExpr.genericArgs ?? {}) },
-    },
-  }))
-  paramsDialogVisible.value = true
-}
-
-function saveParams(params: ProcessorMethodParam[]) {
-  if (editingMethodIndex.value < 0) return
-  updateMethod(editingMethodIndex.value, { params })
-  editingMethodIndex.value = -1
-}
-
-function handleOutputChange(index: number, payload: TypeSelectPayload) {
-  const prev = methods.value[index]?.output
-  const next = payloadToTypeExpr(payload, prev)
-  updateMethod(index, { output: next })
-  const named = leafNamedRef(next)
-  if (genericNamesOf(named).length) openOutputGenerics(index, next)
-}
-
-function openOutputGenerics(index: number, expr?: ProcessorTypeExpr) {
-  const method = methods.value[index]
-  const output = expr ?? method?.output
-  if (!output) return
-  const named = leafNamedRef(output)
-  const names = genericNamesOf(named)
-  if (!names.length) return
-  genericDialogTarget.value = 'output'
-  genericDialogIndex.value = index
-  genericDialogParamIndex.value = -1
-  genericDialogNames.value = names
-  genericDialogTypeName.value = typeDefById(named)?.name ?? ''
-  genericDialogArgs.value = { ...(output.genericArgs ?? {}) }
-  genericDialogVisible.value = true
-}
-
-function saveGenericArgs(args: Record<string, string>) {
-  if (genericDialogTarget.value === 'output') {
-    if (genericDialogIndex.value < 0) return
-    const method = methods.value[genericDialogIndex.value]
-    if (!method) return
-    updateMethod(genericDialogIndex.value, {
-      output: { ...method.output, genericArgs: args },
-    })
-  }
-  genericDialogIndex.value = -1
-}
-
 const editingDataMethod = computed(() => {
   if (dataMethodEditIndex.value < 0) return null
   return methods.value[dataMethodEditIndex.value] ?? null
 })
 
 const selectedMethod = computed(() => {
-  if (!isDataLayer.value || !selectedMethodId.value) return null
+  if (!selectedMethodId.value) return null
   return methods.value.find((m) => m.id === selectedMethodId.value) ?? null
 })
 
@@ -603,23 +688,41 @@ const dataDebugTarget = computed<ProcessorDebugTarget | null>(() => {
 })
 
 const flowDebugTarget = computed<ProcessorDebugTarget | null>(() => {
-  if (!isBusinessLayer.value || !flowEditing.value || !flowEditingMethod.value) {
-    return null
+  if (!isBusinessLayer.value) return null
+
+  if (flowEditing.value && flowEditingMethod.value) {
+    const proc = processors.value.find(
+      (p) => p.id === flowEditing.value!.processorId,
+    )
+    if (!proc) return null
+    return {
+      kind: 'flow',
+      projectPath: props.projectPath,
+      serviceId: props.serviceId,
+      processorId: proc.id,
+      processorName: proc.name,
+      method: flowEditingMethod.value,
+      flow: flowEditingFlow.value,
+      selectedNodeId: flowSelectedNodeId.value,
+      dataProcessors: dataLayerProcessors.value,
+      businessProcessors: processors.value,
+      mode: 'canvas',
+    }
   }
-  const proc = processors.value.find(
-    (p) => p.id === flowEditing.value!.processorId,
-  )
-  if (!proc) return null
+
+  if (!activeProcessor.value || !selectedMethod.value) return null
   return {
     kind: 'flow',
     projectPath: props.projectPath,
     serviceId: props.serviceId,
-    processorId: proc.id,
-    processorName: proc.name,
-    method: flowEditingMethod.value,
-    flow: flowEditingFlow.value,
-    selectedNodeId: flowSelectedNodeId.value,
+    processorId: activeProcessor.value.id,
+    processorName: activeProcessor.value.name,
+    method: selectedMethod.value,
+    flow: selectedMethod.value.flow ?? createDefaultMethodFlow(),
+    selectedNodeId: flowSelectedNodeId.value || 'start',
     dataProcessors: dataLayerProcessors.value,
+    businessProcessors: processors.value,
+    mode: 'list',
   }
 })
 
@@ -644,32 +747,46 @@ function onFlowSelectedNode(nodeId: string | null) {
 function onFlowDebugCursor(state: {
   cursorNodeId: string | null
   visitedNodeIds: string[]
+  printByNode?: Record<string, string>
 }) {
   flowDebugCursorId.value = state.cursorNodeId
   flowDebugVisitedIds.value = state.visitedNodeIds
+  flowDebugPrintByNode.value = state.printByNode ?? {}
 }
 
 watch(
   () => [activeProcessorId.value, methods.value.map((m) => m.id).join(',')] as const,
   () => {
-    if (!isDataLayer.value) {
-      selectedMethodId.value = ''
-      return
-    }
+    const prefer =
+      pendingRestore.value?.methodId ?? props.restored?.methodId
     if (
       selectedMethodId.value &&
       !methods.value.some((m) => m.id === selectedMethodId.value)
     ) {
-      selectedMethodId.value = methods.value[0]?.id ?? ''
+      selectedMethodId.value =
+        (prefer && methods.value.some((m) => m.id === prefer)
+          ? prefer
+          : methods.value[0]?.id) ?? ''
     } else if (!selectedMethodId.value && methods.value.length) {
-      selectedMethodId.value = methods.value[0]!.id
+      selectedMethodId.value =
+        (prefer && methods.value.some((m) => m.id === prefer)
+          ? prefer
+          : methods.value[0]!.id)
+    }
+    if (isBusinessLayer.value && selectedMethodId.value && !flowEditing.value) {
+      flowSelectedNodeId.value = 'start'
     }
   },
 )
 
 function selectMethodRow(method: ProcessorMethod) {
-  if (!isDataLayer.value) return
   selectedMethodId.value = method.id
+  if (isBusinessLayer.value && !flowEditing.value) {
+    flowSelectedNodeId.value = 'start'
+    flowDebugCursorId.value = null
+    flowDebugVisitedIds.value = []
+    flowDebugPrintByNode.value = {}
+  }
 }
 
 function openDataMethodDialog(index: number) {
@@ -724,9 +841,17 @@ defineExpose({ updateDebugParams, applyFlowDebugCursor: onFlowDebugCursor })
     :method-params="flowEditingMethod.params"
     :method-output="flowEditingMethod.output"
     :data-processors="dataLayerProcessors"
+    :business-processors="processors"
+    :current-processor-id="flowEditing.processorId"
+    :current-method-id="flowEditing.methodId"
+    :bound-data-processor-id="
+      processors.find((p) => p.id === flowEditing!.processorId)
+        ?.dataProcessorRef ?? ''
+    "
     :type-library="typeLibrary"
     :debug-cursor-id="flowDebugCursorId"
     :debug-visited-ids="flowDebugVisitedIds"
+    :debug-print-by-node="flowDebugPrintByNode"
     @back="closeFlowEditor"
     @update:flow="updateFlowMethod"
     @update:selected-node="onFlowSelectedNode"
@@ -807,23 +932,34 @@ defineExpose({ updateDebugParams, applyFlowDebugCursor: onFlowDebugCursor })
           highlight-current-row
           :row-class-name="
             ({ row }) =>
-              isDataLayer && row.id === selectedMethodId ? 'is-selected-row' : ''
+              row.id === selectedMethodId ? 'is-selected-row' : ''
           "
           @row-click="(row) => selectMethodRow(row as ProcessorMethod)"
         >
           <el-table-column label="名称" min-width="120">
-            <template #default="{ row, $index }">
-              <el-input
-                v-if="!isDataLayer"
-                :model-value="row.name"
-                placeholder="方法名"
-                size="small"
-                @click.stop
-                @update:model-value="
-                  updateMethod($index, { name: String($event) })
-                "
-              />
-              <span v-else class="cell-text">{{ row.name || '—' }}</span>
+            <template #default="{ row }">
+              <span class="cell-text">{{ row.name || '—' }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column
+            v-if="isBusinessLayer"
+            label="说明"
+            min-width="120"
+          >
+            <template #default="{ row }">
+              <span class="cell-text muted">{{ row.remark || '—' }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column
+            v-if="isBusinessLayer"
+            label="作用域"
+            width="80"
+            align="center"
+          >
+            <template #default="{ row }">
+              <span class="cell-text">{{
+                row.scope === 'private' ? '私有' : '公共'
+              }}</span>
             </template>
           </el-table-column>
           <el-table-column
@@ -833,102 +969,58 @@ defineExpose({ updateDebugParams, applyFlowDebugCursor: onFlowDebugCursor })
             align="center"
           >
             <template #default="{ row }">
-              <span class="op-tag">{{ operationLabel(row) }}</span>
+              <span class="op-tag" :class="operationTagClass(row)">{{
+                operationLabel(row)
+              }}</span>
             </template>
           </el-table-column>
           <el-table-column label="入参" min-width="160">
-            <template #default="{ row, $index }">
-              <button
-                v-if="!isDataLayer"
-                type="button"
-                class="params-trigger"
-                @click.stop="openParamsDialog($index)"
-              >
-                {{ paramsSummary(row.params) }}
-              </button>
-              <span v-else class="cell-text muted">
-                {{ paramsSummary(row.params) }}
-              </span>
+            <template #default="{ row }">
+              <span class="cell-text muted">{{ paramsSummary(row.params) }}</span>
             </template>
           </el-table-column>
           <el-table-column label="出参" min-width="160">
-            <template #default="{ row, $index }">
-              <div v-if="!isDataLayer" class="output-cell" @click.stop>
-                <DataFieldTypeTreeSelect
-                  class="output-select"
-                  :type="(row.output.type || 'string') as DataFieldType"
-                  :type-ref="row.output.typeRef"
-                  :item-type="(row.output.itemType || undefined) as DataFieldType | undefined"
-                  :item-type-ref="row.output.itemTypeRef"
-                  :item-item-type="
-                    (row.output.itemItemType || undefined) as DataFieldType | undefined
-                  "
-                  :item-item-type-ref="row.output.itemItemTypeRef"
-                  :library="typeLibrary"
-                  :exclude-types="PROCESSOR_EXCLUDE_TYPES"
-                  :allow-ref="false"
-                  clearable
-                  size="small"
-                  placeholder="选择出参类型"
-                  @change="handleOutputChange($index, $event)"
-                />
-                <el-tooltip
-                  v-if="genericNamesOf(leafNamedRef(row.output)).length"
-                  :content="formatTypeExpr(row.output)"
-                  placement="top"
-                >
-                  <el-button
-                    type="primary"
-                    link
-                    size="small"
-                    class="generic-btn"
-                    @click="openOutputGenerics($index)"
-                  >
-                    泛型
-                  </el-button>
-                </el-tooltip>
-              </div>
-              <span v-else class="cell-text">{{ formatTypeExpr(row.output) }}</span>
+            <template #default="{ row }">
+              <span class="cell-text">{{ formatTypeExpr(row.output) }}</span>
             </template>
           </el-table-column>
-          <el-table-column
-            v-if="isDataLayer"
-            label="编辑"
-            width="64"
-            align="center"
-          >
+          <el-table-column label="操作" width="160" align="center" fixed="right">
             <template #default="{ $index }">
               <el-button
+                v-if="isDataLayer"
                 type="primary"
                 link
-                :icon="EditPen"
+                size="small"
                 @click.stop="openDataMethodDialog($index)"
-              />
-            </template>
-          </el-table-column>
-          <el-table-column
-            v-if="isBusinessLayer"
-            label="编辑"
-            width="64"
-            align="center"
-          >
-            <template #default="{ $index }">
-              <el-button
-                type="primary"
-                link
-                :icon="EditPen"
-                @click.stop="openFlowEditor($index)"
-              />
-            </template>
-          </el-table-column>
-          <el-table-column label="删除" width="64" align="center">
-            <template #default="{ $index }">
+              >
+                编辑
+              </el-button>
+              <template v-if="isBusinessLayer">
+                <el-button
+                  type="primary"
+                  link
+                  size="small"
+                  @click.stop="openBusinessMethodDesign($index)"
+                >
+                  设计
+                </el-button>
+                <el-button
+                  type="primary"
+                  link
+                  size="small"
+                  @click.stop="openFlowEditor($index)"
+                >
+                  编辑
+                </el-button>
+              </template>
               <el-button
                 type="danger"
                 link
-                :icon="Delete"
+                size="small"
                 @click.stop="removeMethod($index)"
-              />
+              >
+                删除
+              </el-button>
             </template>
           </el-table-column>
         </el-table>
@@ -1008,21 +1100,14 @@ defineExpose({ updateDebugParams, applyFlowDebugCursor: onFlowDebugCursor })
       </template>
     </el-dialog>
 
-    <MethodParamsDialog
-      v-model="paramsDialogVisible"
-      :params="editingParams"
-      :type-options="typeOptions"
+    <EditBusinessMethodDialog
+      v-if="isBusinessLayer"
+      v-model="businessMethodDialogVisible"
+      :method="editingBusinessMethod"
       :type-library="typeLibrary"
-      :method-name="methods[editingMethodIndex]?.name"
-      @save="saveParams"
-    />
-    <TypeGenericArgsDialog
-      v-model="genericDialogVisible"
-      :type-name="genericDialogTypeName"
-      :generic-names="genericDialogNames"
-      :args="genericDialogArgs"
       :type-options="typeOptions"
-      @save="saveGenericArgs"
+      :reserved-names="businessMethodReservedNames"
+      @save="saveBusinessMethodEdit"
     />
     <EditDataMethodDialog
       v-if="isDataLayer"
@@ -1192,52 +1277,6 @@ defineExpose({ updateDebugParams, applyFlowDebugCursor: onFlowDebugCursor })
   min-height: 24px;
 }
 
-.params-trigger {
-  display: flex;
-  align-items: center;
-  width: 100%;
-  height: 24px;
-  box-sizing: border-box;
-  padding: 0 11px;
-  border: 1px solid #dcdfe6;
-  border-radius: 4px;
-  background: #fff;
-  color: #606266;
-  font-size: 12px;
-  line-height: 22px;
-  text-align: left;
-  cursor: pointer;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.params-trigger:hover {
-  border-color: #c0c4cc;
-  color: #409eff;
-}
-
-.output-cell {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  width: 100%;
-  min-width: 0;
-  height: 24px;
-}
-
-.output-select {
-  flex: 1;
-  min-width: 0;
-}
-
-.generic-btn {
-  flex-shrink: 0;
-  height: 24px;
-  padding: 0 4px;
-  margin: 0;
-}
-
 .cell-text {
   display: block;
   width: 100%;
@@ -1255,12 +1294,42 @@ defineExpose({ updateDebugParams, applyFlowDebugCursor: onFlowDebugCursor })
   height: 22px;
   padding: 0 8px;
   border-radius: 4px;
-  background: #f0f5ff;
-  color: #409eff;
+  background: #f0f2f5;
+  color: #606266;
   font-size: 12px;
   font-weight: 500;
   line-height: 1;
   white-space: nowrap;
+}
+
+.op-tag--query {
+  background: #ecf5ff;
+  color: #409eff;
+}
+
+.op-tag--insert {
+  background: #f0f9eb;
+  color: #67c23a;
+}
+
+.op-tag--batch {
+  background: #e8f8f0;
+  color: #18a058;
+}
+
+.op-tag--update {
+  background: #fdf6ec;
+  color: #e6a23c;
+}
+
+.op-tag--delete {
+  background: #fef0f0;
+  color: #f56c6c;
+}
+
+.op-tag--custom {
+  background: #f4f4f5;
+  color: #909399;
 }
 
 .cell-text.muted {
@@ -1272,10 +1341,6 @@ defineExpose({ updateDebugParams, applyFlowDebugCursor: onFlowDebugCursor })
 }
 
 .method-table :deep(.el-table__body tr) {
-  cursor: default;
-}
-
-.method-table.data-layer :deep(.el-table__body tr) {
   cursor: pointer;
 }
 </style>

@@ -39,8 +39,21 @@ export interface ArraySubField {
   objectFields?: ObjectSubField[]
 }
 
-/** 数据源绑定：接口暂未实现；计算 = 方法体 return 值 */
-export type DataSourceBinding = '' | 'api' | 'computed'
+/** 数据源绑定：控制器 = 绑定后端 API；计算 = 方法体 return 值 */
+export type DataSourceBinding = '' | 'controller' | 'computed'
+
+/** 控制器绑定配置（数据池字段） */
+export interface ControllerBindingConfig {
+  serviceId: string
+  controllerId: string
+  apiId: string
+  /** 形参 data（Result.data），return 解析后的字段值 */
+  parseBody: string
+  /** EventMethodBinding[] 序列化字符串 */
+  onLoading: string
+  onSuccess: string
+  onError: string
+}
 
 export interface DataField {
   name: string
@@ -51,8 +64,12 @@ export interface DataField {
   binding?: DataSourceBinding
   /** binding === 'computed' 时的方法体；return 值即为字段计算值 */
   computeBody?: string
+  /** binding === 'controller' 时的控制器配置 */
+  controllerBinding?: ControllerBindingConfig
   /** 引用 types/ 库中的具名类型 id */
   typeRef?: string
+  /** 具名泛型实参：形参名 → 类型库 type id */
+  genericArgs?: Record<string, string>
   /** type === 'array' 时的元素类型 */
   itemType?: DataFieldType
   /** 元素类型的具名引用 */
@@ -72,4 +89,44 @@ export interface PageData {
 
 export function createDefaultPageData(): PageData {
   return { fields: [] }
+}
+
+export function normalizeDataSourceBinding(raw: unknown): DataSourceBinding {
+  if (raw === 'computed' || raw === 'controller') return raw
+  return ''
+}
+
+function defaultControllerParseBody(type: DataField['type']): string {
+  const sample =
+    type === 'number'
+      ? '0'
+      : type === 'boolean'
+        ? 'false'
+        : type === 'array'
+          ? '[]'
+          : type === 'json'
+            ? '{}'
+            : "''"
+  return `// data 为接口 Result.data\n// return 的值写入本数据池字段\nreturn data ?? ${sample}\n`
+}
+
+export function normalizeControllerBinding(
+  input: unknown,
+  fieldType: DataField['type'] = 'string',
+): ControllerBindingConfig | undefined {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return undefined
+  const raw = input as Record<string, unknown>
+  return {
+    serviceId: typeof raw.serviceId === 'string' ? raw.serviceId.trim() : '',
+    controllerId:
+      typeof raw.controllerId === 'string' ? raw.controllerId.trim() : '',
+    apiId: typeof raw.apiId === 'string' ? raw.apiId.trim() : '',
+    parseBody:
+      typeof raw.parseBody === 'string' && raw.parseBody.trim()
+        ? raw.parseBody
+        : defaultControllerParseBody(fieldType),
+    onLoading: typeof raw.onLoading === 'string' ? raw.onLoading : '',
+    onSuccess: typeof raw.onSuccess === 'string' ? raw.onSuccess : '',
+    onError: typeof raw.onError === 'string' ? raw.onError : '',
+  }
 }

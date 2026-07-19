@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import { Handle, Position, type NodeProps } from '@vue-flow/core'
 import { useFlowDebugNode } from '../use-flow-debug-node'
+import FlowNodePrintBubble from '../FlowNodePrintBubble.vue'
 
 const props = defineProps<NodeProps>()
 const { debugClass } = useFlowDebugNode(props.id)
@@ -32,12 +33,14 @@ const summary = computed(() => {
       </div>
     </div>
     <Handle id="default" type="source" :position="Position.Bottom" />
+    <FlowNodePrintBubble :node-id="id" />
   </div>
 </template>
 
 <style scoped>
 .io-wrap {
   position: relative;
+  overflow: visible;
   min-width: 148px;
   max-width: 260px;
 }

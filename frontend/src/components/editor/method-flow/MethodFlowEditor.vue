@@ -62,11 +62,14 @@ import {
   processorTypeExprToMethodParamType,
   processorTypeExprToTs,
 } from '../../../types/page-method'
+import { flowDraftToTypeExpr } from '../../../utils/flow-type-select'
 import { coarseToProcessorTypeExpr } from '../../../utils/typed-binding-paths'
 import { typeLabel, type DataFieldType } from '../../../types/page-data'
-import InputNodeDialog, {
-  type InputNodeForm,
-} from './dialogs/InputNodeDialog.vue'
+import InputNodeDialog from './dialogs/InputNodeDialog.vue'
+import type {
+  InputDataSource,
+  InputNodeForm,
+} from './dialogs/input-node'
 import BranchNodeDialog from './dialogs/BranchNodeDialog.vue'
 import ActionNodeDialog, {
   type ActionNodeForm,
@@ -80,6 +83,7 @@ import DefineNodeDialog, {
 import EndNodeDialog, {
   type EndNodeForm,
 } from './dialogs/EndNodeDialog.vue'
+import StartNodeDialog from './dialogs/StartNodeDialog.vue'
 import { FLOW_DEBUG_KEY } from './flow-debug-inject'
 import FlowHelperLines from './FlowHelperLines.vue'
 import { getHelperLines } from './helper-lines'
@@ -96,15 +100,31 @@ const helperLineVertical = ref<number | undefined>(undefined)
 
 const props = defineProps<{
   methodName: string
+  /** 工具栏标题前缀，默认「方法」 */
+  titleKind?: string
   flow: MethodFlow
   methodParams: ProcessorMethodParam[]
   methodOutput: ProcessorTypeExpr
   dataProcessors: ServiceProcessor[]
+  /** 业务层处理器列表（输入节点「当前/其它业务」） */
+  businessProcessors?: ServiceProcessor[]
+  currentProcessorId?: string
+  currentMethodId?: string
+  /** 当前业务绑定的数据层 id */
+  boundDataProcessorId?: string
+  /**
+   * 输入节点数据来源：
+   * - all：业务方法流默认
+   * - business：仅业务层（API 编排）
+   */
+  inputSourceMode?: 'all' | 'business'
   typeLibrary?: DataTypeLibrary | null
   /** 调试游标节点 */
   debugCursorId?: string | null
   /** 已执行过的节点 */
   debugVisitedIds?: string[]
+  /** 各节点打印文案 */
+  debugPrintByNode?: Record<string, string>
 }>()
 
 const emit = defineEmits<{
@@ -116,6 +136,7 @@ const emit = defineEmits<{
 provide(FLOW_DEBUG_KEY, {
   cursorId: toRef(props, 'debugCursorId'),
   visitedIds: toRef(props, 'debugVisitedIds'),
+  printByNode: toRef(props, 'debugPrintByNode'),
 })
 
 function flowToNodes(flow: MethodFlow): Node[] {
@@ -227,7 +248,7 @@ function withDebugEdgeStyles(list: Edge[]): Edge[] {
       animated: on,
       class: on ? 'is-debug-edge' : undefined,
       style: on
-        ? { stroke: '#e6a23c', strokeWidth: 2.5 }
+        ? { stroke: '#1d4ed8', strokeWidth: 2.5 }
         : { stroke: '#b1b3b8', strokeWidth: 1.5 },
     }
   })
@@ -331,6 +352,22 @@ watch(
 watch(
   () => (props.debugVisitedIds ?? []).join('\0'),
   () => patchDebugEdgeStyles(),
+)
+
+watch(
+  () => props.debugCursorId,
+  (cursorId) => {
+    if (!cursorId) return
+    let changed = false
+    for (const n of nodes.value) {
+      const next = n.id === cursorId
+      if (n.selected !== next) {
+        n.selected = next
+        changed = true
+      }
+    }
+    if (changed) emit('update:selected-node', cursorId)
+  },
 )
 
 function onNodesChange(changes: NodeChange[]) {
@@ -482,20 +519,34 @@ function defaultDataForKind(kind: Exclude<FlowNodeKind, 'start'>): Record<string
   switch (kind) {
     case 'input':
       return {
+        dataSource:
+          props.inputSourceMode === 'business'
+            ? 'other_business'
+            : props.boundDataProcessorId
+              ? 'current_data'
+              : 'other_data',
         dataProcessorId: '',
         dataMethodId: '',
+        headerField: '',
         varName: '',
         methodLabel: '',
         paramBindings: {},
+        printExpr: '',
       }
     case 'branch':
-      return { expression: '' }
+      return { expression: '', printExpr: '' }
     case 'action':
       return {
         code: '',
         description: '',
+        printExpr: '',
         outputType: 'void',
         outputTypeRef: '',
+        outputItemType: '',
+        outputItemTypeRef: '',
+        outputItemItemType: '',
+        outputItemItemTypeRef: '',
+        outputGenericArgs: {},
         outputVarName: '',
       }
     case 'output':
@@ -506,18 +557,26 @@ function defaultDataForKind(kind: Exclude<FlowNodeKind, 'start'>): Record<string
         paramBindings: {},
         resultVarName: '',
         description: '',
+        printExpr: '',
       }
     case 'define':
       return {
         varName: '',
         valueType: 'any',
         valueTypeRef: '',
-        initExpr: '',
+        valueItemType: '',
+        valueItemTypeRef: '',
+        valueItemItemType: '',
+        valueItemItemTypeRef: '',
+        valueGenericArgs: {},
+        initExpr: 'null',
         description: '',
+        printExpr: '',
       }
     case 'end':
       return {
         returnExpr: '',
+        printExpr: '',
         needsReturn: methodHasReturn.value,
       }
     default:
@@ -571,21 +630,33 @@ const actionDialogVisible = ref(false)
 const outputDialogVisible = ref(false)
 const defineDialogVisible = ref(false)
 const endDialogVisible = ref(false)
+const startDialogVisible = ref(false)
 const editingNodeId = ref('')
 
 const editingInputForm = ref<InputNodeForm>({
+  dataSource: 'other_business',
   dataProcessorId: '',
   dataMethodId: '',
+  headerField: '',
   varName: '',
   methodLabel: '',
   paramBindings: {},
+  printExpr: '',
 })
 const editingExpression = ref('')
+const editingBranchPrintExpr = ref('')
+const editingStartPrintExpr = ref('')
 const editingActionForm = ref<ActionNodeForm>({
   code: '',
   description: '',
+  printExpr: '',
   outputType: 'void',
   outputTypeRef: '',
+  outputItemType: '',
+  outputItemTypeRef: '',
+  outputItemItemType: '',
+  outputItemItemTypeRef: '',
+  outputGenericArgs: {},
   outputVarName: '',
 })
 const editingOutputForm = ref<OutputNodeForm>({
@@ -595,16 +666,24 @@ const editingOutputForm = ref<OutputNodeForm>({
   paramBindings: {},
   resultVarName: '',
   description: '',
+  printExpr: '',
 })
 const editingDefineForm = ref<DefineNodeForm>({
   varName: '',
   valueType: 'any',
   valueTypeRef: '',
-  initExpr: '',
+  valueItemType: '',
+  valueItemTypeRef: '',
+  valueItemItemType: '',
+  valueItemItemTypeRef: '',
+  valueGenericArgs: {},
+  initExpr: 'null',
   description: '',
+  printExpr: '',
 })
 const editingEndForm = ref<EndNodeForm>({
   returnExpr: '',
+  printExpr: '',
 })
 
 function namedTypeTs(typeRef: string): string {
@@ -617,20 +696,40 @@ function namedTypeTs(typeRef: string): string {
   return ''
 }
 
+function readGenericArgs(raw: unknown): Record<string, string> {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {}
+  const out: Record<string, string> = {}
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof v === 'string') out[k] = v
+  }
+  return out
+}
+
+function strField(data: Record<string, unknown>, key: string): string {
+  const v = data[key]
+  return typeof v === 'string' ? v : ''
+}
+
 function actionOutputToParam(data: Record<string, unknown>): MethodParam | null {
   const outputType = (
     typeof data.outputType === 'string' ? data.outputType : 'void'
   ) as MethodReturnType
-  const outputTypeRef =
-    typeof data.outputTypeRef === 'string' ? data.outputTypeRef.trim() : ''
-  const outputVarName =
-    typeof data.outputVarName === 'string' ? data.outputVarName.trim() : ''
+  const outputTypeRef = strField(data, 'outputTypeRef').trim()
+  const outputVarName = strField(data, 'outputVarName').trim()
   if (!outputVarName) return null
   if (outputType === 'void' && !outputTypeRef) return null
   const type =
     outputType === 'void' ? 'object' : (outputType as MethodParam['type'])
-  const typeExpr = coarseToProcessorTypeExpr(type, outputTypeRef)
-  const tsType = namedTypeTs(outputTypeRef)
+  const typeExpr = flowDraftToTypeExpr({
+    type: outputType === 'void' ? 'object' : outputType,
+    typeRef: outputTypeRef,
+    itemType: strField(data, 'outputItemType'),
+    itemTypeRef: strField(data, 'outputItemTypeRef'),
+    itemItemType: strField(data, 'outputItemItemType'),
+    itemItemTypeRef: strField(data, 'outputItemItemTypeRef'),
+    genericArgs: readGenericArgs(data.outputGenericArgs),
+  })
+  const tsType = processorTypeExprToTs(typeExpr, props.typeLibrary)
   return {
     name: outputVarName,
     type,
@@ -645,10 +744,17 @@ function defineToParam(data: Record<string, unknown>): MethodParam | null {
   const valueType = (
     typeof data.valueType === 'string' ? data.valueType : 'any'
   ) as MethodParamType
-  const valueTypeRef =
-    typeof data.valueTypeRef === 'string' ? data.valueTypeRef.trim() : ''
-  const typeExpr = coarseToProcessorTypeExpr(valueType, valueTypeRef)
-  const tsType = namedTypeTs(valueTypeRef)
+  const valueTypeRef = strField(data, 'valueTypeRef').trim()
+  const typeExpr = flowDraftToTypeExpr({
+    type: valueType,
+    typeRef: valueTypeRef,
+    itemType: strField(data, 'valueItemType'),
+    itemTypeRef: strField(data, 'valueItemTypeRef'),
+    itemItemType: strField(data, 'valueItemItemType'),
+    itemItemTypeRef: strField(data, 'valueItemItemTypeRef'),
+    genericArgs: readGenericArgs(data.valueGenericArgs),
+  })
+  const tsType = processorTypeExprToTs(typeExpr, props.typeLibrary)
   return {
     name: varName,
     type: valueType,
@@ -793,14 +899,69 @@ function readParamBindings(data: Record<string, unknown>): Record<string, string
   return out
 }
 
+function inferInputDataSource(
+  data: Record<string, unknown>,
+): InputDataSource {
+  const businessOnly = props.inputSourceMode === 'business'
+  const raw = data.dataSource
+  const allowed: InputDataSource[] = [
+    'current_business',
+    'other_business',
+    'current_data',
+    'other_data',
+    'request_header',
+  ]
+  if (typeof raw === 'string' && allowed.includes(raw as InputDataSource)) {
+    const src = raw as InputDataSource
+    if (businessOnly) {
+      if (src === 'current_business' && props.currentProcessorId) {
+        return 'current_business'
+      }
+      return 'other_business'
+    }
+    if (src === 'current_data' && !props.boundDataProcessorId) {
+      return 'other_data'
+    }
+    if (src === 'current_business' && !props.currentProcessorId) {
+      return 'other_business'
+    }
+    return src
+  }
+  if (businessOnly) return 'other_business'
+  if (typeof data.headerField === 'string' && data.headerField.trim()) {
+    return 'request_header'
+  }
+  const pid =
+    typeof data.dataProcessorId === 'string' ? data.dataProcessorId : ''
+  const bound = props.boundDataProcessorId ?? ''
+  if (pid && bound && pid === bound) return 'current_data'
+  if (pid) {
+    const inBusiness = (props.businessProcessors ?? []).some((p) => p.id === pid)
+    if (inBusiness) {
+      return pid === props.currentProcessorId
+        ? 'current_business'
+        : 'other_business'
+    }
+    return 'other_data'
+  }
+  return bound ? 'current_data' : 'other_data'
+}
+
 function openNodeEditor(node: Node) {
-  if (node.type === 'start') return
+  if (node.type === 'start') {
+    editingNodeId.value = node.id
+    const data = (node.data ?? {}) as Record<string, unknown>
+    editingStartPrintExpr.value =
+      typeof data.printExpr === 'string' ? data.printExpr : ''
+    startDialogVisible.value = true
+    return
+  }
   if (node.type === 'end') {
-    if (!methodHasReturn.value) return
     editingNodeId.value = node.id
     const data = (node.data ?? {}) as Record<string, unknown>
     editingEndForm.value = {
       returnExpr: typeof data.returnExpr === 'string' ? data.returnExpr : '',
+      printExpr: typeof data.printExpr === 'string' ? data.printExpr : '',
     }
     endDialogVisible.value = true
     return
@@ -809,19 +970,25 @@ function openNodeEditor(node: Node) {
   const data = (node.data ?? {}) as Record<string, unknown>
   if (node.type === 'input') {
     editingInputForm.value = {
+      dataSource: inferInputDataSource(data),
       dataProcessorId:
         typeof data.dataProcessorId === 'string' ? data.dataProcessorId : '',
       dataMethodId:
         typeof data.dataMethodId === 'string' ? data.dataMethodId : '',
+      headerField:
+        typeof data.headerField === 'string' ? data.headerField : '',
       varName: typeof data.varName === 'string' ? data.varName : '',
       methodLabel:
         typeof data.methodLabel === 'string' ? data.methodLabel : '',
       paramBindings: readParamBindings(data),
+      printExpr: typeof data.printExpr === 'string' ? data.printExpr : '',
     }
     inputDialogVisible.value = true
   } else if (node.type === 'branch') {
     editingExpression.value =
       typeof data.expression === 'string' ? data.expression : ''
+    editingBranchPrintExpr.value =
+      typeof data.printExpr === 'string' ? data.printExpr : ''
     branchDialogVisible.value = true
   } else if (node.type === 'action') {
     const outputTypeRaw =
@@ -830,6 +997,7 @@ function openNodeEditor(node: Node) {
       code: typeof data.code === 'string' ? data.code : '',
       description:
         typeof data.description === 'string' ? data.description : '',
+      printExpr: typeof data.printExpr === 'string' ? data.printExpr : '',
       outputType: (
         ['void', 'string', 'number', 'boolean', 'object', 'array', 'any'].includes(
           outputTypeRaw,
@@ -839,6 +1007,21 @@ function openNodeEditor(node: Node) {
       ) as MethodReturnType,
       outputTypeRef:
         typeof data.outputTypeRef === 'string' ? data.outputTypeRef : '',
+      outputItemType:
+        typeof data.outputItemType === 'string' ? data.outputItemType : '',
+      outputItemTypeRef:
+        typeof data.outputItemTypeRef === 'string'
+          ? data.outputItemTypeRef
+          : '',
+      outputItemItemType:
+        typeof data.outputItemItemType === 'string'
+          ? data.outputItemItemType
+          : '',
+      outputItemItemTypeRef:
+        typeof data.outputItemItemTypeRef === 'string'
+          ? data.outputItemItemTypeRef
+          : '',
+      outputGenericArgs: readGenericArgs(data.outputGenericArgs),
       outputVarName:
         typeof data.outputVarName === 'string' ? data.outputVarName : '',
     }
@@ -856,6 +1039,7 @@ function openNodeEditor(node: Node) {
         typeof data.resultVarName === 'string' ? data.resultVarName : '',
       description:
         typeof data.description === 'string' ? data.description : '',
+      printExpr: typeof data.printExpr === 'string' ? data.printExpr : '',
     }
     outputDialogVisible.value = true
   } else if (node.type === 'define') {
@@ -872,9 +1056,23 @@ function openNodeEditor(node: Node) {
       ) as MethodParamType,
       valueTypeRef:
         typeof data.valueTypeRef === 'string' ? data.valueTypeRef : '',
-      initExpr: typeof data.initExpr === 'string' ? data.initExpr : '',
+      valueItemType:
+        typeof data.valueItemType === 'string' ? data.valueItemType : '',
+      valueItemTypeRef:
+        typeof data.valueItemTypeRef === 'string' ? data.valueItemTypeRef : '',
+      valueItemItemType:
+        typeof data.valueItemItemType === 'string'
+          ? data.valueItemItemType
+          : '',
+      valueItemItemTypeRef:
+        typeof data.valueItemItemTypeRef === 'string'
+          ? data.valueItemItemTypeRef
+          : '',
+      valueGenericArgs: readGenericArgs(data.valueGenericArgs),
+      initExpr: typeof data.initExpr === 'string' ? data.initExpr : 'null',
       description:
         typeof data.description === 'string' ? data.description : '',
+      printExpr: typeof data.printExpr === 'string' ? data.printExpr : '',
     }
     defineDialogVisible.value = true
   }
@@ -895,9 +1093,17 @@ function saveInputNode(form: InputNodeForm) {
   patchNodeData(editingNodeId.value, { ...form })
 }
 
-function saveBranchNode(expression: string) {
+function saveBranchNode(payload: { expression: string; printExpr: string }) {
   if (!editingNodeId.value) return
-  patchNodeData(editingNodeId.value, { expression })
+  patchNodeData(editingNodeId.value, {
+    expression: payload.expression,
+    printExpr: payload.printExpr,
+  })
+}
+
+function saveStartNode(payload: { printExpr: string }) {
+  if (!editingNodeId.value) return
+  patchNodeData(editingNodeId.value, { printExpr: payload.printExpr })
 }
 
 function saveActionNode(form: ActionNodeForm) {
@@ -924,6 +1130,7 @@ function saveEndNode(form: EndNodeForm) {
   if (!editingNodeId.value) return
   patchNodeData(editingNodeId.value, {
     returnExpr: form.returnExpr,
+    printExpr: form.printExpr,
     needsReturn: methodHasReturn.value,
   })
 }
@@ -988,7 +1195,9 @@ onUnmounted(() => {
     <header class="flow-toolbar">
       <div class="toolbar-left">
         <el-button :icon="ArrowLeft" link @click="emit('back')">返回</el-button>
-        <span class="method-title">方法 {{ methodName || '未命名' }}</span>
+        <span class="method-title"
+          >{{ titleKind || '方法' }} {{ methodName || '未命名' }}</span
+        >
       </div>
       <el-dropdown trigger="click" @command="addFlowNode">
         <el-button type="primary" :icon="Plus">添加节点</el-button>
@@ -1032,7 +1241,12 @@ onUnmounted(() => {
     <InputNodeDialog
       v-model="inputDialogVisible"
       :form="editingInputForm"
+      :business-processors="businessProcessors ?? []"
       :data-processors="dataProcessors"
+      :current-processor-id="currentProcessorId ?? ''"
+      :current-method-id="currentMethodId ?? ''"
+      :bound-data-processor-id="boundDataProcessorId ?? ''"
+      :source-mode="inputSourceMode ?? 'all'"
       :reserved-names="reservedNames"
       :ambient-vars="ambientVars"
       :type-library="typeLibrary"
@@ -1041,8 +1255,14 @@ onUnmounted(() => {
     <BranchNodeDialog
       v-model="branchDialogVisible"
       :expression="editingExpression"
+      :print-expr="editingBranchPrintExpr"
       :ambient-hint="ambientHint"
       @save="saveBranchNode"
+    />
+    <StartNodeDialog
+      v-model="startDialogVisible"
+      :print-expr="editingStartPrintExpr"
+      @save="saveStartNode"
     />
     <ActionNodeDialog
       v-model="actionDialogVisible"
@@ -1071,9 +1291,9 @@ onUnmounted(() => {
       @save="saveDefineNode"
     />
     <EndNodeDialog
-      v-if="methodHasReturn"
       v-model="endDialogVisible"
       :form="editingEndForm"
+      :require-return="methodHasReturn"
       :output-type-label="methodOutputLabel"
       :output-type="methodOutput"
       :ambient-vars="ambientVars"
@@ -1138,6 +1358,7 @@ onUnmounted(() => {
   box-shadow: none;
   border-radius: 0;
   width: auto !important;
+  overflow: visible;
 }
 
 .flow-canvas :deep(.vue-flow__node.selected) {
@@ -1191,20 +1412,20 @@ onUnmounted(() => {
   background: #909399;
 }
 
-/* 已执行路径上的边：橙色 + 虚线流动 */
+/* 已执行路径上的边：深蓝 + 虚线流动 */
 .flow-canvas :deep(.vue-flow__edge.is-debug-edge .vue-flow__edge-path) {
-  stroke: #e6a23c !important;
+  stroke: #1d4ed8 !important;
   stroke-width: 2.5 !important;
   stroke-dasharray: 6 4;
   animation: flow-edge-dash 0.8s linear infinite;
 }
 
 .flow-canvas :deep(.vue-flow__edge.is-debug-edge .vue-flow__edge-text) {
-  fill: #e6a23c;
+  fill: #1d4ed8;
 }
 
 .flow-canvas :deep(.vue-flow__edge.is-debug-edge .vue-flow__edge-textbg) {
-  fill: #fff7e6;
+  fill: #eff6ff;
 }
 
 @keyframes flow-edge-dash {

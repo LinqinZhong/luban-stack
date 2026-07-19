@@ -23,10 +23,10 @@
           "name": "goods",
           "remark": "",
           "engine": "InnoDB",
-          "rows": 0
+          "rows": 1
         }
       ],
-      "lastTestedAt": 1784386079642
+      "lastTestedAt": 1784480952309
     }
   ]
 }

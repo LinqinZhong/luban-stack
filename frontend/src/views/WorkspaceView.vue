@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   Box,
@@ -62,7 +62,10 @@ import BackendServiceEditor from '../components/editor/BackendServiceEditor.vue'
 import BackendServiceWorkspace from '../components/editor/BackendServiceWorkspace.vue'
 import DataMethodDebugPanel from '../components/editor/DataMethodDebugPanel.vue'
 import MethodFlowDebugPanel from '../components/editor/MethodFlowDebugPanel.vue'
-import type { ProcessorDebugTarget } from '../components/editor/ServiceProcessorPanel.vue'
+import type {
+  ProcessorDebugTarget,
+  ProcessorSelectionState,
+} from '../components/editor/ServiceProcessorPanel.vue'
 import IconLibraryPanel from '../components/editor/IconLibraryPanel.vue'
 import MethodEditDialog from '../components/editor/MethodEditDialog.vue'
 import MethodsPanel from '../components/editor/MethodsPanel.vue'
@@ -91,6 +94,10 @@ import { runEventBindings } from '../utils/event-runtime'
 import { createComponentEmit } from '../utils/component-emit'
 import type { PreviewInteractPayload } from '../utils/event-runtime'
 import { resolveComputedPageData } from '../utils/compute-runtime'
+import {
+  hasControllerBoundFields,
+  loadControllerBoundPageData,
+} from '../utils/controller-binding-runtime'
 import {
   normalizeStatusBarConfig,
   resolveStatusBarConfig,
@@ -140,6 +147,14 @@ import {
   type BackendService,
   type BackendServiceLibrary,
 } from '../types/backend-services'
+import {
+  emptyBackendServiceUiState,
+  loadWorkspaceUiState,
+  saveWorkspaceUiState,
+  type BackendLayer,
+  type BackendServiceUiState,
+  type WorkspaceUiState,
+} from '../utils/workspace-ui-state'
 
 type WorkspaceMode =
   | 'preview'
@@ -187,10 +202,12 @@ const backendServiceLibrary = ref<BackendServiceLibrary>(
 )
 const activeServiceId = ref('')
 const serviceDialogVisible = ref(false)
-const backendServiceLayer = ref<
-  'controller' | 'service' | 'data' | 'schedule'
->('controller')
+const backendServiceLayer = ref<BackendLayer>('controller')
 const backendDebugTarget = ref<ProcessorDebugTarget | null>(null)
+/** 各服务的层 / 选中状态（刷新与切 tab 后恢复） */
+const backendByService = ref<Record<string, BackendServiceUiState>>({})
+/** 已从 localStorage 恢复，之后才写回 */
+const workspaceUiReady = ref(false)
 
 const dataDebugTarget = computed(() => {
   const t = backendDebugTarget.value
@@ -613,6 +630,125 @@ const activeBackendService = computed(
     ) ?? null,
 )
 
+const activeBackendUi = computed(
+  () =>
+    (activeServiceId.value
+      ? backendByService.value[activeServiceId.value]
+      : null) ?? null,
+)
+
+function patchBackendServiceUi(
+  serviceId: string,
+  patch: Partial<BackendServiceUiState>,
+) {
+  if (!serviceId) return
+  const prev =
+    backendByService.value[serviceId] ?? emptyBackendServiceUiState()
+  backendByService.value = {
+    ...backendByService.value,
+    [serviceId]: {
+      ...prev,
+      ...patch,
+      processors: {
+        ...prev.processors,
+        ...(patch.processors ?? {}),
+      },
+    },
+  }
+}
+
+function collectWorkspaceUiState(): WorkspaceUiState {
+  return {
+    topNav: topNav.value,
+    resourceKind: resourceKind.value,
+    workspaceMode: workspaceMode.value,
+    activePageId: activePageId.value,
+    activeComponentId: activeComponentId.value,
+    activeServiceId: activeServiceId.value,
+    backendServiceLayer: backendServiceLayer.value,
+    backendByService: backendByService.value,
+  }
+}
+
+function applyWorkspaceUiState(saved: WorkspaceUiState) {
+  const top = saved.topNav as TopNav
+  if (
+    top === 'frontend' ||
+    top === 'backend' ||
+    top === 'datatypes' ||
+    top === 'mysql' ||
+    top === 'icons'
+  ) {
+    topNav.value = top
+  }
+  if (saved.resourceKind === 'page' || saved.resourceKind === 'component') {
+    resourceKind.value = saved.resourceKind
+  }
+  if (top === 'datatypes' || top === 'mysql' || top === 'icons') {
+    workspaceMode.value = top
+  } else if (
+    saved.workspaceMode === 'preview' ||
+    saved.workspaceMode === 'edit' ||
+    saved.workspaceMode === 'datapool' ||
+    saved.workspaceMode === 'methods' ||
+    saved.workspaceMode === 'lifecycle'
+  ) {
+    workspaceMode.value = saved.workspaceMode
+  }
+  activePageId.value = saved.activePageId || ''
+  activeComponentId.value = saved.activeComponentId || ''
+  activeServiceId.value = saved.activeServiceId || ''
+  const layer = saved.backendServiceLayer
+  if (
+    layer === 'controller' ||
+    layer === 'service' ||
+    layer === 'data' ||
+    layer === 'schedule'
+  ) {
+    backendServiceLayer.value = layer
+  }
+  backendByService.value = saved.backendByService ?? {}
+}
+
+function onBackendLayerUpdate(layer: BackendLayer) {
+  backendServiceLayer.value = layer
+  if (layer === 'schedule') backendDebugTarget.value = null
+  if (activeServiceId.value) {
+    patchBackendServiceUi(activeServiceId.value, { layer })
+  }
+}
+
+function onBackendControllerId(id: string) {
+  if (!activeServiceId.value) return
+  patchBackendServiceUi(activeServiceId.value, { controllerId: id })
+}
+
+function onBackendBusinessSelection(state: ProcessorSelectionState) {
+  if (!activeServiceId.value) return
+  patchBackendServiceUi(activeServiceId.value, {
+    processors: {
+      business: {
+        processorId: state.processorId,
+        methodId: state.methodId,
+        flowEditing: state.flowEditing,
+      },
+    },
+  })
+}
+
+function onBackendDataSelection(state: ProcessorSelectionState) {
+  if (!activeServiceId.value) return
+  patchBackendServiceUi(activeServiceId.value, {
+    processors: {
+      data: {
+        processorId: state.processorId,
+        methodId: state.methodId,
+        flowEditing: null,
+      },
+    },
+  })
+}
+
 const centerFileLabel = computed(() => {
   if (isBackendNav.value) return 'services/'
   if (isDataPoolMode.value) return 'data.json'
@@ -655,7 +791,7 @@ const propsPlaceholderText = computed(() => {
       return '选中数据层方法后可调试'
     }
     if (backendServiceLayer.value === 'service') {
-      return '打开业务方法工作流后可调试'
+      return '选中业务方法后可调试'
     }
     return '在服务列表右键可重命名、配置或删除'
   }
@@ -924,27 +1060,41 @@ async function openPage(
 
   await teardownLifecycleSession()
 
-  resourceKind.value = 'page'
+  // 侧栏立即高亮；画布内容等新页就绪后再换，避免抖动
   activePageId.value = pageId
-  activeComponentId.value = ''
-  activeComponent.value = null
+  const softNav = Boolean(activePage.value || activeComponent.value)
   selectedNodeId.value = ''
   editorHiddenNodeIds.value = []
   modalStack.closeAll()
-  loadingPage.value = true
+  if (!softNav) loadingPage.value = true
   try {
     const detail = await getPage(projectStore.path, pageId)
     const migrated = migrateLegacyMaskToModal(detail.xml)
-    if (migrated.changed) {
-      activePage.value = { ...detail, xml: migrated.xml }
-      await Promise.all([loadPageMethods(pageId), loadLifecycle(pageId)])
-      await handleXmlUpdate(migrated.xml)
-    } else {
-      activePage.value = detail
-      await Promise.all([loadPageMethods(pageId), loadLifecycle(pageId)])
-    }
+    const nextPage: PageDetail = migrated.changed
+      ? { ...detail, xml: migrated.xml }
+      : detail
+
+    // 预览数据先离屏准备好，再与页面一并提交，避免先空后满闪一下
+    let nextPreview: import('../types/page-data').PageData | null = null
+    let nextCompMap: ComponentRenderMap | null = null
     if (workspaceMode.value === 'preview') {
-      resetPreviewRuntime()
+      const prepared = await buildPreviewRuntimeSnapshot(nextPage.data)
+      nextPreview = prepared.data
+      nextCompMap = prepared.componentMap
+    }
+
+    resourceKind.value = 'page'
+    activeComponentId.value = ''
+    activeComponent.value = null
+    activePage.value = nextPage
+    await Promise.all([loadPageMethods(pageId), loadLifecycle(pageId)])
+    if (migrated.changed) {
+      await handleXmlUpdate(migrated.xml)
+    }
+
+    if (workspaceMode.value === 'preview' && nextPreview && nextCompMap) {
+      commitPreviewRuntime(nextPreview, nextCompMap)
+      await fireControllerBindingEvents(nextPreview)
     } else {
       clearPreviewRuntime()
     }
@@ -963,29 +1113,41 @@ async function openComponent(componentId: string) {
   if (!projectStore.path) return
   await teardownLifecycleSession()
 
-  resourceKind.value = 'component'
-  activeComponentId.value = componentId
-  activePageId.value = ''
-  activePage.value = null
+  const softNav = Boolean(activeComponent.value || activePage.value)
   selectedNodeId.value = ''
   editorHiddenNodeIds.value = []
   pageHistory.value = []
   routeParams.value = {}
   modalStack.closeAll()
-  loadingPage.value = true
+  if (!softNav) loadingPage.value = true
   try {
     const detail = await getComponent(projectStore.path, componentId)
     const migrated = migrateLegacyMaskToModal(detail.xml)
-    if (migrated.changed) {
-      activeComponent.value = { ...detail, xml: migrated.xml }
-      await Promise.all([loadPageMethods(componentId), loadLifecycle(componentId)])
-      await handleXmlUpdate(migrated.xml)
-    } else {
-      activeComponent.value = detail
-      await Promise.all([loadPageMethods(componentId), loadLifecycle(componentId)])
-    }
+    const nextComponent = migrated.changed
+      ? { ...detail, xml: migrated.xml }
+      : detail
+
+    let nextPreview: import('../types/page-data').PageData | null = null
+    let nextCompMap: ComponentRenderMap | null = null
     if (workspaceMode.value === 'preview') {
-      resetPreviewRuntime()
+      const prepared = await buildPreviewRuntimeSnapshot(nextComponent.data)
+      nextPreview = prepared.data
+      nextCompMap = prepared.componentMap
+    }
+
+    resourceKind.value = 'component'
+    activeComponentId.value = componentId
+    activePageId.value = ''
+    activePage.value = null
+    activeComponent.value = nextComponent
+    await Promise.all([loadPageMethods(componentId), loadLifecycle(componentId)])
+    if (migrated.changed) {
+      await handleXmlUpdate(migrated.xml)
+    }
+
+    if (workspaceMode.value === 'preview' && nextPreview && nextCompMap) {
+      commitPreviewRuntime(nextPreview, nextCompMap)
+      await fireControllerBindingEvents(nextPreview)
     } else {
       clearPreviewRuntime()
     }
@@ -1502,6 +1664,91 @@ async function runPreviewBindings(
   })
 }
 
+/** 预览进入时拉取控制器绑定字段（与数据池编辑态隔离） */
+let previewControllerHydrateSeq = 0
+
+async function buildPreviewRuntimeSnapshot(
+  pageData: import('../types/page-data').PageData | undefined | null,
+): Promise<{
+  data: import('../types/page-data').PageData
+  componentMap: ComponentRenderMap
+}> {
+  const data = clonePageData(pageData ?? { fields: [] })
+  const map = cloneComponentRenderMap(componentMap.value)
+  const path = projectStore.path
+  if (!path || !hasControllerBoundFields(data)) {
+    return { data, componentMap: map }
+  }
+  const seq = ++previewControllerHydrateSeq
+  try {
+    // 离屏加载：先不触发事件，避免 toast 打在旧页面上
+    const next = await loadControllerBoundPageData(data, {
+      projectPath: path,
+      dryRun: true,
+    })
+    if (seq !== previewControllerHydrateSeq) {
+      return { data, componentMap: map }
+    }
+    return { data: next, componentMap: map }
+  } catch (err) {
+    console.warn('[voider] 预览控制器数据加载失败:', err)
+    return { data, componentMap: map }
+  }
+}
+
+function commitPreviewRuntime(
+  data: import('../types/page-data').PageData,
+  map: ComponentRenderMap,
+) {
+  previewRuntimeData.value = data
+  previewComponentMap.value = map
+  previewPropOverrides.value = {}
+  previewEmitLogs.value = []
+}
+
+/** 页面已切换后再播控制器成功事件（加载过程已在离屏完成） */
+async function fireControllerBindingEvents(
+  data: import('../types/page-data').PageData,
+) {
+  for (const field of data.fields) {
+    if (field.binding !== 'controller') continue
+    const raw = field.controllerBinding?.onSuccess?.trim()
+    if (raw) await runPreviewBindings(raw)
+  }
+}
+
+async function hydratePreviewControllerBindings() {
+  const path = projectStore.path
+  const runtime = previewRuntimeData.value
+  if (!path || !runtime || workspaceMode.value !== 'preview') return
+  if (!hasControllerBoundFields(runtime)) return
+
+  const seq = ++previewControllerHydrateSeq
+  try {
+    const next = await loadControllerBoundPageData(runtime, {
+      projectPath: path,
+      dryRun: true,
+      runEvents: (raw) => runPreviewBindings(raw),
+    })
+    if (seq !== previewControllerHydrateSeq) return
+    if (workspaceMode.value !== 'preview') return
+    previewRuntimeData.value = next
+  } catch (err) {
+    console.warn('[voider] 预览控制器数据加载失败:', err)
+  }
+}
+
+async function preparePreviewRuntime() {
+  if (!activeDoc.value) {
+    clearPreviewRuntime()
+    return
+  }
+  const snap = await buildPreviewRuntimeSnapshot(activeDoc.value.data)
+  if (workspaceMode.value !== 'preview') return
+  commitPreviewRuntime(snap.data, snap.componentMap)
+  await fireControllerBindingEvents(snap.data)
+}
+
 async function runLifecycleHook(key: LifecycleHookKey) {
   const raw = lifecycleConfig.value[key]
   if (!raw?.trim()) return
@@ -1545,7 +1792,7 @@ watch(workspaceMode, async (mode, prev) => {
     return
   }
   if (mode === 'preview' && prev !== 'preview') {
-    resetPreviewRuntime()
+    await preparePreviewRuntime()
     await nextTick()
     await syncLifecycleSession()
   }
@@ -2097,9 +2344,41 @@ async function handleMoveWidget(payload: {
   }
 }
 
-onMounted(() => {
-  void loadPages()
-})
+watch(
+  () => projectStore.path,
+  async (path) => {
+    workspaceUiReady.value = false
+    if (!path) return
+    const saved = loadWorkspaceUiState(path)
+    if (saved) applyWorkspaceUiState(saved)
+    await loadPages()
+    if (activeServiceId.value) {
+      const st = backendByService.value[activeServiceId.value]
+      if (st?.layer) backendServiceLayer.value = st.layer
+    }
+    // 等列表与服务库加载完再允许写回，避免中间态冲掉 flowEditing
+    workspaceUiReady.value = true
+  },
+  { immediate: true },
+)
+
+watch(
+  activeServiceId,
+  (id) => {
+    if (!id || !workspaceUiReady.value) return
+    const st = backendByService.value[id]
+    if (st?.layer) backendServiceLayer.value = st.layer
+  },
+)
+
+watch(
+  collectWorkspaceUiState,
+  (state) => {
+    if (!workspaceUiReady.value || !projectStore.path) return
+    saveWorkspaceUiState(projectStore.path, state)
+  },
+  { deep: true },
+)
 </script>
 
 <template>
@@ -2143,7 +2422,7 @@ onMounted(() => {
       </el-tooltip>
     </nav>
 
-    <aside v-if="isFrontendNav" class="side-panel">
+    <aside v-show="isFrontendNav" class="side-panel">
       <div class="pages-section">
         <div class="section-header">
           <div class="resource-tabs">
@@ -2253,7 +2532,7 @@ onMounted(() => {
       />
     </aside>
 
-    <aside v-else-if="isBackendNav" class="side-panel">
+    <aside v-show="isBackendNav" class="side-panel">
       <div class="pages-section backend-services-section">
         <div class="section-header">
           <span class="section-title">服务列表</span>
@@ -2349,27 +2628,49 @@ onMounted(() => {
       </div>
 
       <div class="preview-body">
-        <el-skeleton v-if="loadingPage && isFrontendNav" :rows="8" animated />
-        <BackendServiceWorkspace
-          v-else-if="isBackendNav && activeBackendService"
-          ref="backendWorkspaceRef"
-          :project-path="projectStore.path"
-          :service-id="activeBackendService.id"
-          :service-name="activeBackendService.name"
-          :type-library="dataTypeLibrary"
-          @update:layer="
-            backendServiceLayer = $event;
-            if ($event !== 'data' && $event !== 'service') backendDebugTarget = null
-          "
-          @update:debug-target="backendDebugTarget = $event"
+        <!-- 仅首次无文档时展示骨架，避免切换页面时插入骨架把画布顶抖 -->
+        <el-skeleton
+          v-if="loadingPage && isFrontendNav && !activeDoc"
+          :rows="8"
+          animated
         />
-        <el-empty
-          v-else-if="isBackendNav"
-          description="暂无服务，请在左侧新建"
-          :image-size="80"
-        />
+        <div v-show="isBackendNav" class="preview-pane-fill">
+          <KeepAlive>
+            <BackendServiceWorkspace
+              v-if="isBackendNav && activeBackendService"
+              :key="activeBackendService.id"
+              ref="backendWorkspaceRef"
+              :project-path="projectStore.path"
+              :service-id="activeBackendService.id"
+              :service-name="activeBackendService.name"
+              :type-library="dataTypeLibrary"
+              :layer="backendServiceLayer"
+              :restored-controller-id="activeBackendUi?.controllerId"
+              :restored-business="activeBackendUi?.processors.business ?? null"
+              :restored-data="
+                activeBackendUi?.processors.data
+                  ? {
+                      processorId: activeBackendUi.processors.data.processorId,
+                      methodId: activeBackendUi.processors.data.methodId,
+                    }
+                  : null
+              "
+              @update:layer="onBackendLayerUpdate"
+              @update:debug-target="backendDebugTarget = $event"
+              @update:controller-id="onBackendControllerId"
+              @update:business-selection="onBackendBusinessSelection"
+              @update:data-selection="onBackendDataSelection"
+            />
+          </KeepAlive>
+          <el-empty
+            v-if="!activeBackendService"
+            description="暂无服务，请在左侧新建"
+            :image-size="80"
+          />
+        </div>
+        <template v-if="!isBackendNav">
         <IconLibraryPanel
-          v-else-if="isIconsMode"
+          v-if="isIconsMode"
           :library="iconLibrary"
           @update:library="handleIconLibraryUpdate"
         />
@@ -2398,6 +2699,13 @@ onMounted(() => {
           :component-props="editorConditionComponentProps"
           :dollar-props="editorDollarProps"
           :type-library="dataTypeLibrary"
+          :project-path="projectStore.path"
+          :methods="editorMethods"
+          :component-map="componentMap"
+          :component-methods-map="componentMethodsMap"
+          :emit-events="
+            isComponentResource ? activeComponent?.config.events : undefined
+          "
           @update:data="handleDataUpdate"
         />
         <MethodsPanel
@@ -2456,6 +2764,7 @@ onMounted(() => {
           @add-component="openAddComponentDialog"
           @delete="handleDeleteWidget"
         />
+        </template>
       </div>
 
       <div v-if="showModeTabs" class="mode-tabs">
@@ -2550,7 +2859,11 @@ onMounted(() => {
       "
     />
     <MethodFlowDebugPanel
-      v-else-if="isBackendNav && backendServiceLayer === 'service'"
+      v-else-if="
+        isBackendNav &&
+        (backendServiceLayer === 'service' ||
+          backendServiceLayer === 'controller')
+      "
       :target="flowDebugTarget"
       :type-library="dataTypeLibrary"
       @update:debug-params="
@@ -2898,6 +3211,15 @@ onMounted(() => {
   flex: 1;
   min-height: 0;
   overflow: hidden;
+  position: relative;
+}
+
+.preview-pane-fill {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: auto;
 }
 
 .mode-tabs {

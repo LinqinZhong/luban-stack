@@ -76,21 +76,34 @@ function onPathChange(val: string[] | null | undefined) {
 </script>
 
 <template>
-  <el-cascader
-    :model-value="pathValue"
-    :options="options"
-    :props="cascaderProps"
-    filterable
-    clearable
-    :placeholder="placeholder || '选择类型匹配的变量或字段'"
-    class="typed-binding-cascader"
-    @update:model-value="onPathChange"
-  />
-  <p v-if="!options.length" class="empty-hint">暂无类型匹配的可选变量</p>
+  <div class="typed-binding-wrap">
+    <el-cascader
+      :model-value="pathValue"
+      :options="options"
+      :props="cascaderProps"
+      filterable
+      clearable
+      :placeholder="placeholder || '选择类型匹配的变量或字段'"
+      class="typed-binding-cascader"
+      @update:model-value="onPathChange"
+    />
+    <p v-if="!options.length" class="empty-hint">暂无类型匹配的可选变量</p>
+  </div>
 </template>
 
 <style scoped>
+.typed-binding-wrap {
+  width: 100%;
+  display: block;
+}
+
 .typed-binding-cascader {
+  width: 100%;
+  display: inline-flex;
+}
+
+.typed-binding-cascader :deep(.el-input),
+.typed-binding-cascader :deep(.el-input__wrapper) {
   width: 100%;
 }
 

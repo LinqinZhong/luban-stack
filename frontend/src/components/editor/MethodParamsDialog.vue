@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { Delete, Plus } from '@element-plus/icons-vue'
+import { Plus } from '@element-plus/icons-vue'
 import {
   createEmptyProcessorMethodParam,
   createEmptyProcessorTypeExpr,
@@ -284,14 +284,16 @@ function handleSave() {
           />
         </template>
       </el-table-column>
-      <el-table-column label="删除" width="64" align="center">
+      <el-table-column label="操作" width="72" align="center">
         <template #default="{ $index }">
           <el-button
             type="danger"
             link
-            :icon="Delete"
+            size="small"
             @click="removeParam($index)"
-          />
+          >
+            删除
+          </el-button>
         </template>
       </el-table-column>
     </el-table>

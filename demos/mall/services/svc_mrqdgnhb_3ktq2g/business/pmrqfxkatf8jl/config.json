@@ -7,12 +7,14 @@
   "methods": [
     {
       "id": "method_mrqfxlh1_u651zc",
-      "name": "list",
+      "name": "page",
+      "remark": "获取商品分页",
+      "scope": "public",
       "params": [
         {
           "id": "param_mrqr5xd7_z4b74l",
           "name": "page",
-          "remark": "",
+          "remark": "分页",
           "typeExpr": {
             "type": "json",
             "typeRef": "type_common_QueryPageDto",
@@ -26,7 +28,7 @@
         {
           "id": "param_mrqr6f3m_334gcw",
           "name": "keyword",
-          "remark": "",
+          "remark": "关键词",
           "typeExpr": {
             "type": "string",
             "typeRef": "",
@@ -63,7 +65,7 @@
           "current": 1,
           "pageSize": 10
         },
-        "keyword": ""
+        "keyword": null
       },
       "flow": {
         "nodes": [
@@ -90,26 +92,28 @@
               "methodLabel": "goods.count",
               "paramBindings": {
                 "keyword": "keyword"
-              }
+              },
+              "printExpr": "`共${total}条数据`"
             }
           },
           {
             "id": "branch_mrqrubd9_r4hx",
             "kind": "branch",
             "position": {
-              "x": 262.5231326371338,
-              "y": -77.0861163315831
+              "x": 262.082202614797,
+              "y": -74.76153483586918
             },
             "data": {
-              "expression": "total === 0"
+              "expression": "total === 0",
+              "printExpr": ""
             }
           },
           {
             "id": "end_mrqruu4u_yw0t",
             "kind": "end",
             "position": {
-              "x": 559.6556437990981,
-              "y": 412.0836736381065
+              "x": 456.082202614797,
+              "y": 310.87511834602674
             },
             "data": {
               "returnExpr": "goodsPage"
@@ -119,8 +123,8 @@
             "id": "input_mrqsb2qc_atuv",
             "kind": "input",
             "position": {
-              "x": -17.482320570506026,
-              "y": 63.51196018654461
+              "x": 141.08220261479698,
+              "y": 111.2521688633902
             },
             "data": {
               "dataProcessorId": "pmrqfm9hxqct4",
@@ -137,54 +141,36 @@
             "id": "define_mrqsbudf_tc70",
             "kind": "define",
             "position": {
-              "x": 266.082202614797,
-              "y": -296.6774124600273
+              "x": 216.08220261479698,
+              "y": -282.35012479218096
             },
             "data": {
               "varName": "goodsPage",
               "valueType": "object",
               "valueTypeRef": "type_common_QueryPageVo",
-              "initExpr": "[]",
-              "description": ""
+              "initExpr": "{\r\ncurrent: 0,\r\npageSize: 0,\r\nhasNext: false,\r\ntotal: 0,\r\nrecords: []\r\n}",
+              "description": "",
+              "valueGenericArgs": {},
+              "valueItemType": "",
+              "valueItemTypeRef": "",
+              "valueItemItemType": "",
+              "valueItemItemTypeRef": ""
             }
           },
           {
             "id": "action_mrqscowl_z99a",
             "kind": "action",
             "position": {
-              "x": -11.982320570506026,
-              "y": 256.3825745910205
+              "x": 146.58220261479698,
+              "y": 212.63445791783107
             },
             "data": {
-              "code": "return {\n  total,\n  records: goodsList,\n  hasNext: true,\n  current: page.current,\n  pageSize: page.pageSize\n}",
-              "description": "",
-              "outputType": "object",
-              "outputTypeRef": "type_common_QueryPageVo",
-              "outputVarName": "goodsPage1"
-            }
-          },
-          {
-            "id": "end_mrqt733h_x89e",
-            "kind": "end",
-            "position": {
-              "x": 4.017679429493974,
-              "y": 412.0836736381065
-            },
-            "data": {
-              "returnExpr": "goodsPage1"
-            }
-          },
-          {
-            "id": "output_mrque1vt_zfys",
-            "kind": "output",
-            "position": {
-              "x": 536.6556437990981,
-              "y": 70.9138836684169
-            },
-            "data": {
-              "dtoTypeRef": "",
-              "dtoLabel": "",
-              "description": ""
+              "code": "goodsPage = {\n  total,\n  records: goodsList,\n  hasNext: true,\n  current: page.current,\n  pageSize: page.pageSize\n}",
+              "description": "赋值goodsPage",
+              "outputType": "void",
+              "outputTypeRef": "",
+              "outputVarName": "",
+              "outputGenericArgs": {}
             }
           }
         ],
@@ -217,20 +203,15 @@
             "target": "action_mrqscowl_z99a"
           },
           {
-            "id": "e_action_mrqscowl_z99a_default_end_mrqt733h_x89e_mrqt79c5",
-            "source": "action_mrqscowl_z99a",
-            "target": "end_mrqt733h_x89e"
-          },
-          {
-            "id": "e_branch_mrqrubd9_r4hx_true_output_mrque1vt_zfys_mrque74i",
+            "id": "e_branch_mrqrubd9_r4hx_true_end_mrqruu4u_yw0t_mrri3ae2",
             "source": "branch_mrqrubd9_r4hx",
-            "target": "output_mrque1vt_zfys",
+            "target": "end_mrqruu4u_yw0t",
             "sourceHandle": "true",
             "label": "是"
           },
           {
-            "id": "e_output_mrque1vt_zfys_default_end_mrqruu4u_yw0t_mrquegeo",
-            "source": "output_mrque1vt_zfys",
+            "id": "e_action_mrqscowl_z99a_default_end_mrqruu4u_yw0t_mrri5gj6",
+            "source": "action_mrqscowl_z99a",
             "target": "end_mrqruu4u_yw0t"
           }
         ]

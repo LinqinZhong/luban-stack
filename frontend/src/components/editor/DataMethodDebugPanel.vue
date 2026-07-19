@@ -59,6 +59,10 @@ const emit = defineEmits<{
 
 /** 顶层入参值 */
 const draft = reactive<Record<string, unknown>>({})
+/** 对象类入参是否启用（不勾选则为禁用值） */
+const paramEnabled = reactive<Record<string, boolean>>({})
+/** 取消勾选时暂存上次启用值，便于恢复 */
+const paramStash = reactive<Record<string, unknown>>({})
 const running = ref(false)
 /** 试运行：写入走事务并回滚，默认开启 */
 const dryRun = ref(true)
@@ -125,6 +129,52 @@ function buildObjectDefault(fields: ObjectFieldForm[]): Record<string, unknown> 
   const out: Record<string, unknown> = {}
   for (const f of fields) out[f.name] = defaultForKind(f.kind)
   return out
+}
+
+/** 不勾选时提交的值：数字 0、布尔 false、其余 null */
+function disabledParamValue(form: ParamFormModel): unknown {
+  if (form.kind === 'number') return 0
+  if (form.kind === 'boolean') return false
+  return null
+}
+
+/** 勾选后的默认可编辑值 */
+function defaultEnabledParamValue(form: ParamFormModel): unknown {
+  if (form.mode === 'object') return buildObjectDefault(form.fields)
+  if (form.mode === 'json') return {}
+  if (form.mode === 'array' || form.kind === 'array') return []
+  if (form.kind === 'number') return 0
+  if (form.kind === 'boolean') return false
+  if (form.kind === 'enum') return form.enumOptions[0] ?? ''
+  return ''
+}
+
+function disabledParamHint(form: ParamFormModel): string {
+  if (form.kind === 'number') return '0'
+  if (form.kind === 'boolean') return 'false'
+  return 'null'
+}
+
+function isParamEnabled(form: ParamFormModel): boolean {
+  return paramEnabled[form.param.name.trim()] !== false
+}
+
+function setParamEnabled(form: ParamFormModel, enabled: boolean) {
+  const name = form.param.name.trim()
+  if (enabled) {
+    const restored = paramStash[name]
+    paramEnabled[name] = true
+    draft[name] =
+      restored !== undefined ? restored : defaultEnabledParamValue(form)
+    delete paramStash[name]
+  } else {
+    if (paramEnabled[name] !== false) {
+      paramStash[name] = draft[name]
+    }
+    paramEnabled[name] = false
+    draft[name] = disabledParamValue(form)
+  }
+  persistDebugParams()
 }
 
 function primaryAtom(expr: TypeExpr | undefined | null) {
@@ -368,11 +418,24 @@ function coerceArrayValue(prev: unknown): unknown[] {
 
 function syncDraftFromMethod(options?: { clearResults?: boolean }) {
   for (const key of Object.keys(draft)) delete draft[key]
+  for (const key of Object.keys(paramEnabled)) delete paramEnabled[key]
+  for (const key of Object.keys(paramStash)) delete paramStash[key]
   const saved = method.value?.debugParams ?? {}
   let shouldPersist = false
   for (const form of paramForms.value) {
     const name = form.param.name.trim()
     const prev = saved[name]
+    // 数字/布尔无法从 0/false 区分「未勾选」，默认勾选；其余 null 视为未勾选
+    const canInferOff =
+      form.kind !== 'number' &&
+      form.kind !== 'boolean' &&
+      prev === null
+    if (canInferOff) {
+      draft[name] = disabledParamValue(form)
+      paramEnabled[name] = false
+      continue
+    }
+    paramEnabled[name] = true
     if (form.mode === 'object') {
       const base = buildObjectDefault(form.fields)
       if (prev && typeof prev === 'object' && !Array.isArray(prev)) {
@@ -391,9 +454,9 @@ function syncDraftFromMethod(options?: { clearResults?: boolean }) {
       if (prev !== undefined && !Array.isArray(prev)) shouldPersist = true
       if (prev === undefined) shouldPersist = true
     } else if (form.mode === 'json') {
-      draft[name] = prev !== undefined ? prev : {}
+      draft[name] = prev !== undefined && prev !== null ? prev : {}
     } else {
-      draft[name] = prev !== undefined ? String(prev) : ''
+      draft[name] = prev !== undefined && prev !== null ? String(prev) : ''
     }
   }
   if (shouldPersist) persistDebugParams()
@@ -737,12 +800,20 @@ async function handleRun() {
         <div v-else class="param-list">
           <div v-for="form in paramForms" :key="form.param.id" class="param-block">
             <div class="prop-label">
+              <el-checkbox
+                :model-value="isParamEnabled(form)"
+                @update:model-value="setParamEnabled(form, $event === true)"
+              />
               <span class="prop-name">{{ form.param.name }}</span>
               <span class="prop-type">{{ form.typeLabel }}</span>
             </div>
 
+            <div v-if="!isParamEnabled(form)" class="null-hint">
+              {{ disabledParamHint(form) }}
+            </div>
+
             <!-- 标量 -->
-            <template v-if="form.mode === 'scalar'">
+            <template v-else-if="form.mode === 'scalar'">
               <el-switch
                 v-if="form.kind === 'boolean'"
                 :model-value="draft[form.param.name] === true"
@@ -1290,13 +1361,21 @@ async function handleRun() {
 
 .prop-label {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 6px;
   min-width: 0;
 }
 
 .prop-label.nested {
   margin-bottom: 0;
+  align-items: baseline;
+}
+
+.null-hint {
+  font-size: 12px;
+  color: #909399;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  line-height: 32px;
 }
 
 .prop-name {

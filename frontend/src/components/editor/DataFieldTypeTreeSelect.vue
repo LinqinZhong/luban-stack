@@ -8,7 +8,7 @@ import {
 import type { DataTypeLibrary } from '../../types/data-types'
 
 export type TypeSelectPayload = {
-  type: DataFieldType
+  type: DataFieldType | 'void'
   typeRef?: string
   itemType?: DataFieldType
   itemTypeRef?: string
@@ -25,7 +25,7 @@ interface CascaderNode {
 
 const props = withDefaults(
   defineProps<{
-    type: DataFieldType
+    type: DataFieldType | 'void'
     typeRef?: string | null
     itemType?: DataFieldType | null
     itemTypeRef?: string | null
@@ -34,16 +34,21 @@ const props = withDefaults(
     library?: DataTypeLibrary | null
     allowRef?: boolean
     allowNamed?: boolean
+    /** 允许选择 void（方法出参等） */
+    allowVoid?: boolean
     composable?: boolean
     nested?: boolean
     excludeTypes?: DataFieldType[]
     placeholder?: string
     clearable?: boolean
     size?: 'large' | 'default' | 'small'
+    /** 覆盖输入框展示文案（如 QueryPageVo<GoodsItem>） */
+    labelOverride?: string | null
   }>(),
   {
     allowRef: false,
     allowNamed: true,
+    allowVoid: false,
     composable: false,
     nested: false,
     clearable: false,
@@ -54,6 +59,8 @@ const props = withDefaults(
 
 const emit = defineEmits<{
   change: [payload: TypeSelectPayload]
+  /** 点击覆盖文案（用于打开泛型配置） */
+  'label-click': []
 }>()
 
 function baseOptions(): Array<{ label: string; value: DataFieldType }> {
@@ -125,7 +132,13 @@ function buildCascaderOptions(arrayDepth: number, forArrayElement = false): Casc
   return nodes
 }
 
-const options = computed(() => buildCascaderOptions(2, false))
+const options = computed(() => {
+  const nodes = buildCascaderOptions(2, false)
+  if (props.allowVoid) {
+    return [{ value: 'void', label: 'void' }, ...nodes]
+  }
+  return nodes
+})
 
 function findNamedPath(typeRef: string): string[] {
   for (const group of props.library?.groups ?? []) {
@@ -142,6 +155,7 @@ function encodeLeaf(type: DataFieldType, typeRef?: string | null): string[] {
 }
 
 const cascaderValue = computed<string[]>(() => {
+  if (props.type === 'void') return ['void']
   if (props.type === 'array') {
     if (props.itemType === 'array') {
       return [
@@ -175,6 +189,7 @@ function decodeLeaf(path: string[]): {
 
 function decodePath(path: string[]): TypeSelectPayload {
   if (!path.length) return { type: 'string' }
+  if (path[0] === 'void') return { type: 'void' }
 
   let arrayDepth = 0
   while (path[arrayDepth] === 'array') arrayDepth += 1
@@ -191,7 +206,6 @@ function decodePath(path: string[]): TypeSelectPayload {
       itemTypeRef: leaf.typeRef,
     }
   }
-  // array / array / …element（多层数组时，模型保留两层：外层数组 → 内层数组 → 元素）
   return {
     type: 'array',
     itemType: 'array',
@@ -202,23 +216,71 @@ function decodePath(path: string[]): TypeSelectPayload {
 
 function onChange(value: string[] | null | undefined) {
   if (!value?.length) {
-    emit('change', { type: 'string' })
+    emit('change', props.allowVoid ? { type: 'void' } : { type: 'string' })
     return
   }
   emit('change', decodePath(value))
 }
+
+const overrideText = computed(() => (props.labelOverride ?? '').trim())
 </script>
 
 <template>
-  <el-cascader
-    :model-value="cascaderValue"
-    :options="options"
-    :placeholder="placeholder"
-    :clearable="clearable"
-    :size="size"
-    filterable
-    :props="{ expandTrigger: 'hover' }"
-    style="width: 100%"
-    @update:model-value="onChange"
-  />
+  <div class="type-tree-select" :class="{ 'has-override': Boolean(overrideText) }">
+    <el-cascader
+      :model-value="cascaderValue"
+      :options="options"
+      :placeholder="placeholder"
+      :clearable="clearable"
+      :size="size"
+      filterable
+      :show-all-levels="!overrideText"
+      :props="{ expandTrigger: 'hover' }"
+      style="width: 100%"
+      @update:model-value="onChange"
+    />
+    <button
+      v-if="overrideText"
+      type="button"
+      class="type-override-label"
+      :title="overrideText"
+      @click.stop="emit('label-click')"
+    >
+      {{ overrideText }}
+    </button>
+  </div>
 </template>
+
+<style scoped>
+.type-tree-select {
+  position: relative;
+  width: 100%;
+}
+
+.type-tree-select.has-override :deep(.el-input__inner),
+.type-tree-select.has-override :deep(.el-input__wrapper input) {
+  color: transparent !important;
+  -webkit-text-fill-color: transparent;
+}
+
+.type-override-label {
+  position: absolute;
+  left: 11px;
+  right: 30px;
+  top: 50%;
+  transform: translateY(-50%);
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  text-align: left;
+  font-size: 13px;
+  line-height: 1.2;
+  color: #606266;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: none;
+}
+</style>
+

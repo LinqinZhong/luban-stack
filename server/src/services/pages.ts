@@ -4,6 +4,8 @@ import path from 'node:path'
 import { ProjectError, setEntryPage, getProjectEntryPage } from './project.js'
 import {
   createDefaultPageData,
+  normalizeControllerBinding,
+  normalizeDataSourceBinding,
   type ArraySubField,
   type DataField,
   type ObjectSubField,
@@ -156,6 +158,17 @@ function optionalTypeRef(raw: unknown): string | undefined {
   if (typeof raw !== 'string') return undefined
   const id = raw.trim()
   return id || undefined
+}
+
+function normalizeGenericArgs(raw: unknown): Record<string, string> | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined
+  const out: Record<string, string> = {}
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    const name = key.trim()
+    if (!name) continue
+    out[name] = typeof value === 'string' ? value.trim() : ''
+  }
+  return Object.keys(out).length ? out : undefined
 }
 
 function optionalItemType(raw: unknown): DataField['itemType'] | undefined {
@@ -401,15 +414,28 @@ function normalizeDataField(raw: unknown): DataField | null {
     type: item.type,
     remark: typeof item.remark === 'string' ? item.remark : '',
     value: resolveFieldValue(item),
-    binding: typeof item.binding === 'string' ? item.binding : '',
+    binding: normalizeDataSourceBinding(item.binding),
   }
 
   if (typeof item.computeBody === 'string') {
     field.computeBody = item.computeBody
   }
 
+  const controllerBinding = normalizeControllerBinding(
+    (item as { controllerBinding?: unknown }).controllerBinding,
+    field.type,
+  )
+  if (controllerBinding && field.binding === 'controller') {
+    field.controllerBinding = controllerBinding
+  }
+
   const typeRef = optionalTypeRef(item.typeRef)
   if (typeRef) field.typeRef = typeRef
+
+  const genericArgs = normalizeGenericArgs(
+    (item as { genericArgs?: unknown }).genericArgs,
+  )
+  if (genericArgs) field.genericArgs = genericArgs
 
   if (field.type === 'array') {
     const itemType = optionalItemType(item.itemType)
@@ -444,6 +470,7 @@ function normalizeDataField(raw: unknown): DataField | null {
   if (field.type === 'ref') {
     field.binding = ''
     delete field.computeBody
+    delete field.controllerBinding
     field.value =
       typeof field.value === 'string' ? field.value : String(field.value ?? '')
   }

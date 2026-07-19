@@ -35,11 +35,18 @@ import {
   findDataTypeDef,
   typeExprToDataFieldType,
 } from '../../utils/named-type-fields'
+import {
+  processorTypeExprToMethodParamType,
+  processorTypeExprToTs,
+  type MethodParam,
+} from '../../types/page-method'
 import DataFieldTypeTreeSelect, {
   type TypeSelectPayload,
 } from './DataFieldTypeTreeSelect.vue'
 import MethodParamsDialog from './MethodParamsDialog.vue'
 import TypeGenericArgsDialog from './TypeGenericArgsDialog.vue'
+import SqlCodeEditor from './SqlCodeEditor.vue'
+import TypedBindingCascader from './method-flow/TypedBindingCascader.vue'
 import { DM } from './edit-data-method-copy'
 
 const PROCESSOR_EXCLUDE_TYPES: DataFieldType[] = ['color', 'ref', 'icon']
@@ -190,7 +197,7 @@ const isInsert = computed(
 )
 const isBatchInsert = computed(() => draft.operation === 'batchInsert')
 /** ?????????? */
-const showConditions = computed(() => !isInsert.value)
+const showConditions = computed(() => !isInsert.value && !isCustom.value)
 const isMysql = computed(() => draft.source === 'mysql')
 
 type ConditionValueUi = 'string' | 'number' | 'boolean' | 'datetime'
@@ -251,30 +258,33 @@ const conditionFieldOptions = computed((): ConditionFieldOption[] => {
 
 type SourceOption = { value: string; label: string }
 
-/** ?????????? */
-const conditionParamOptions = computed((): SourceOption[] => {
-  const opts: SourceOption[] = []
-  for (const p of draftParams.value) {
-    const name = p.name.trim()
-    if (!name) continue
-    const expr = p.typeExpr
-    if (expr.type === 'array') continue
-    if (expr.typeRef) {
-      const def = findDataTypeDef(props.typeLibrary, expr.typeRef)
-      if (def?.kind === 'interface') {
-        for (const f of fieldsOf(def)) {
-          opts.push({
-            value: `${name}.${f.name}`,
-            label: `${name}.${f.name}`,
-          })
-        }
-        continue
-      }
-    }
-    opts.push({ value: name, label: name })
-  }
-  return opts
-})
+/** ?????????? Redis / ?????? */
+const enabledSourceOptions = computed(() =>
+  DATA_METHOD_SOURCE_OPTIONS.filter((o) => !o.disabled),
+)
+
+/** ?????????????? ambient ?? */
+const conditionAmbientVars = computed((): MethodParam[] =>
+  draftParams.value
+    .map((p) => {
+      const name = p.name.trim()
+      if (!name) return null
+      return {
+        name,
+        type: processorTypeExprToMethodParamType(p.typeExpr),
+        typeExpr: p.typeExpr,
+        tsType: processorTypeExprToTs(p.typeExpr, props.typeLibrary),
+      } satisfies MethodParam
+    })
+    .filter((p): p is MethodParam => Boolean(p)),
+)
+
+function conditionTargetType(cond: DataMethodCondition): ProcessorTypeExpr {
+  const ui = conditionValueUi(cond)
+  if (ui === 'number') return createEmptyProcessorTypeExpr('number')
+  if (ui === 'boolean') return createEmptyProcessorTypeExpr('boolean')
+  return createEmptyProcessorTypeExpr('string')
+}
 
 function conditionOpMeta(op: DataMethodConditionOp) {
   return (
@@ -914,7 +924,7 @@ function handleSave() {
         </div>
       </section>
 
-      <section class="dlg-section">
+      <section v-if="!isQuery && !isCustom" class="dlg-section">
         <div class="section-label">{{ DM.output }}</div>
         <div class="section-control">
           <div class="output-row">
@@ -936,6 +946,7 @@ function handleSave() {
               :exclude-types="PROCESSOR_EXCLUDE_TYPES"
               :allow-ref="false"
               clearable
+              size="small"
               :placeholder="DM.outputPh"
               @change="handleOutputChange"
             />
@@ -943,6 +954,7 @@ function handleSave() {
               v-if="genericNamesOf(leafNamedOf(draftOutput)).length"
               type="primary"
               link
+              size="small"
               @click="openOutputGenerics"
             >
               {{ DM.generics }}
@@ -956,14 +968,14 @@ function handleSave() {
         <div class="section-control">
           <el-radio-group
             :model-value="draft.source"
+            size="small"
             class="chip-group"
             @update:model-value="onSourceChange"
           >
             <el-radio-button
-              v-for="opt in DATA_METHOD_SOURCE_OPTIONS"
+              v-for="opt in enabledSourceOptions"
               :key="opt.value"
               :value="opt.value"
-              :disabled="opt.disabled"
             >
               {{ opt.label }}
             </el-radio-button>
@@ -976,6 +988,7 @@ function handleSave() {
         <div class="section-control">
           <el-radio-group
             :model-value="draft.operation"
+            size="small"
             class="chip-group"
             @update:model-value="onOperationChange"
           >
@@ -993,27 +1006,61 @@ function handleSave() {
       <section v-if="isQuery" class="dlg-section dlg-section--block">
         <div class="section-label">{{ DM.queryFields }}</div>
         <div class="section-control">
-          <div v-if="outputFields.length" class="section-actions">
-            <span class="count">
-              {{ selectedCount }} / {{ outputFields.length }}
-            </span>
-            <button
-              type="button"
-              class="text-btn"
-              @click="allSelected ? clearFields() : selectAllFields()"
-            >
-              {{ allSelected ? DM.clear : DM.selectAll }}
-            </button>
-          </div>
-          <div v-if="!outputFields.length" class="empty-box">
-            {{ DM.queryFieldsEmpty }}
-          </div>
-          <div v-else class="field-panel">
-            <div v-if="outputFields[0]?.sourceLabel" class="field-panel-head">
-              <span class="source-tag">{{ outputFields[0].sourceLabel }}</span>
-              <span class="source-hint">{{ DM.outputFieldsHint }}</span>
+          <div class="field-panel">
+            <div class="field-panel-head">
+              <div class="field-panel-type">
+                <DataFieldTypeTreeSelect
+                  class="output-select-mini"
+                  :type="(draftOutput.type || 'string') as DataFieldType"
+                  :type-ref="draftOutput.typeRef"
+                  :item-type="
+                    (draftOutput.itemType || undefined) as
+                      | DataFieldType
+                      | undefined
+                  "
+                  :item-type-ref="draftOutput.itemTypeRef"
+                  :item-item-type="
+                    (draftOutput.itemItemType || undefined) as
+                      | DataFieldType
+                      | undefined
+                  "
+                  :item-item-type-ref="draftOutput.itemItemTypeRef"
+                  :library="typeLibrary"
+                  :exclude-types="PROCESSOR_EXCLUDE_TYPES"
+                  :allow-ref="false"
+                  clearable
+                  size="small"
+                  :placeholder="DM.outputPh"
+                  @change="handleOutputChange"
+                />
+                <el-button
+                  v-if="genericNamesOf(leafNamedOf(draftOutput)).length"
+                  type="primary"
+                  link
+                  size="small"
+                  @click="openOutputGenerics"
+                >
+                  {{ DM.generics }}
+                </el-button>
+                <span class="source-hint">{{ DM.outputFieldsHint }}</span>
+              </div>
+              <div v-if="outputFields.length" class="field-panel-actions">
+                <span class="count">
+                  {{ selectedCount }} / {{ outputFields.length }}
+                </span>
+                <button
+                  type="button"
+                  class="text-btn"
+                  @click="allSelected ? clearFields() : selectAllFields()"
+                >
+                  {{ allSelected ? DM.clear : DM.selectAll }}
+                </button>
+              </div>
             </div>
-            <ul class="field-list">
+            <div v-if="!outputFields.length" class="empty-box empty-box--inset">
+              {{ DM.queryFieldsEmpty }}
+            </div>
+            <ul v-else class="field-list">
               <li
                 v-for="f in outputFields"
                 :key="f.name"
@@ -1171,45 +1218,33 @@ function handleSave() {
                 </el-select>
 
                 <template v-if="cond.valueKind === 'param'">
-                  <el-select
+                  <TypedBindingCascader
                     :model-value="cond.value"
-                    filterable
-                    clearable
-                    :placeholder="DM.pickParam"
                     class="cond-value"
+                    :ambient-vars="conditionAmbientVars"
+                    :target-type="conditionTargetType(cond)"
+                    :type-library="typeLibrary"
+                    :placeholder="DM.pickParam"
                     @update:model-value="
                       patchCondition(group.id, cond.id, {
                         value: String($event ?? ''),
                       })
                     "
-                  >
-                    <el-option
-                      v-for="opt in conditionParamOptions"
-                      :key="opt.value"
-                      :label="opt.label"
-                      :value="opt.value"
-                    />
-                  </el-select>
-                  <el-select
+                  />
+                  <TypedBindingCascader
                     v-if="conditionOpMeta(cond.op).needsValueTo"
                     :model-value="cond.valueTo"
-                    filterable
-                    clearable
-                    :placeholder="DM.pickParamTo"
                     class="cond-value"
+                    :ambient-vars="conditionAmbientVars"
+                    :target-type="conditionTargetType(cond)"
+                    :type-library="typeLibrary"
+                    :placeholder="DM.pickParamTo"
                     @update:model-value="
                       patchCondition(group.id, cond.id, {
                         valueTo: String($event ?? ''),
                       })
                     "
-                  >
-                    <el-option
-                      v-for="opt in conditionParamOptions"
-                      :key="opt.value"
-                      :label="opt.label"
-                      :value="opt.value"
-                    />
-                  </el-select>
+                  />
                 </template>
 
                 <template v-else>
@@ -1390,13 +1425,19 @@ function handleSave() {
                 />
                 <div class="mapping-field">
                   <code class="field-code">{{ row.field }}</code>
-                  <span v-if="row.remark" class="field-desc">{{ row.remark }}</span>
+                  <span
+                    v-if="displayRemark(row.field, row.remark)"
+                    class="field-desc"
+                  >
+                    {{ displayRemark(row.field, row.remark) }}
+                  </span>
                 </div>
-                <span class="mapping-arrow">?</span>
+                <span class="mapping-arrow">{{ DM.arrow }}</span>
                 <el-select
                   :model-value="row.source"
                   clearable
                   filterable
+                  size="small"
                   :placeholder="DM.pickSourceField"
                   class="mapping-input"
                   :disabled="!row.checked"
@@ -1421,43 +1462,84 @@ function handleSave() {
         <section class="dlg-section dlg-section--block">
           <div class="section-label">{{ DM.sql }}</div>
           <div class="section-control">
-            <el-input
+            <SqlCodeEditor
               v-model="draft.sql"
-              type="textarea"
-              :rows="5"
+              :height="160"
               :placeholder="DM.sqlPh"
-              class="sql-input"
+              :param-names="draftParams.map((p) => p.name).filter(Boolean)"
             />
           </div>
         </section>
         <section class="dlg-section dlg-section--block">
           <div class="section-label">{{ DM.fieldMapping }}</div>
           <div class="section-control">
-            <div v-if="outputFields[0]?.sourceLabel" class="section-actions">
-              <span class="count">{{ outputFields[0].sourceLabel }}</span>
-            </div>
-            <div v-if="!outputFields.length" class="empty-box">
-              {{ DM.mappingEmpty }}
-            </div>
-            <div v-else class="mapping-panel">
-              <div
-                v-for="row in mappingRows"
-                :key="row.field"
-                class="mapping-row"
-              >
-                <div class="mapping-field">
-                  <code class="field-code">{{ row.field }}</code>
-                  <span v-if="row.remark" class="field-desc">{{ row.remark }}</span>
+            <div class="field-panel">
+              <div class="field-panel-head">
+                <div class="field-panel-type">
+                  <DataFieldTypeTreeSelect
+                    class="output-select-mini"
+                    :type="(draftOutput.type || 'string') as DataFieldType"
+                    :type-ref="draftOutput.typeRef"
+                    :item-type="
+                      (draftOutput.itemType || undefined) as
+                        | DataFieldType
+                        | undefined
+                    "
+                    :item-type-ref="draftOutput.itemTypeRef"
+                    :item-item-type="
+                      (draftOutput.itemItemType || undefined) as
+                        | DataFieldType
+                        | undefined
+                    "
+                    :item-item-type-ref="draftOutput.itemItemTypeRef"
+                    :library="typeLibrary"
+                    :exclude-types="PROCESSOR_EXCLUDE_TYPES"
+                    :allow-ref="false"
+                    clearable
+                    size="small"
+                    :placeholder="DM.outputPh"
+                    @change="handleOutputChange"
+                  />
+                  <el-button
+                    v-if="genericNamesOf(leafNamedOf(draftOutput)).length"
+                    type="primary"
+                    link
+                    size="small"
+                    @click="openOutputGenerics"
+                  >
+                    {{ DM.generics }}
+                  </el-button>
                 </div>
-                <span class="mapping-arrow">?</span>
-                <el-input
-                  :model-value="row.column"
-                  :placeholder="DM.columnExpr"
-                  class="mapping-input"
-                  @update:model-value="
-                    updateMappingColumn(row.field, String($event ?? ''))
-                  "
-                />
+              </div>
+              <div v-if="!outputFields.length" class="empty-box empty-box--inset">
+                {{ DM.mappingEmpty }}
+              </div>
+              <div v-else class="mapping-panel mapping-panel--inset">
+                <div
+                  v-for="row in mappingRows"
+                  :key="row.field"
+                  class="mapping-row"
+                >
+                  <div class="mapping-field">
+                    <code class="field-code">{{ row.field }}</code>
+                    <span
+                      v-if="displayRemark(row.field, row.remark)"
+                      class="field-desc"
+                    >
+                      {{ displayRemark(row.field, row.remark) }}
+                    </span>
+                  </div>
+                  <span class="mapping-arrow">{{ DM.arrow }}</span>
+                  <el-input
+                    :model-value="row.column"
+                    :placeholder="DM.columnExpr"
+                    size="small"
+                    class="mapping-input"
+                    @update:model-value="
+                      updateMappingColumn(row.field, String($event ?? ''))
+                    "
+                  />
+                </div>
               </div>
             </div>
           </div>
@@ -1577,14 +1659,15 @@ function handleSave() {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  height: 32px;
+  height: 24px;
 }
 
 .chip-group :deep(.el-radio-button__inner) {
-  height: 32px;
-  padding: 0 14px;
-  line-height: 30px;
+  height: 24px;
+  padding: 0 10px;
+  line-height: 22px;
   box-sizing: border-box;
+  font-size: 12px;
 }
 
 .dlg-section :deep(.el-input),
@@ -1624,10 +1707,34 @@ function handleSave() {
 .field-panel-head {
   display: flex;
   align-items: center;
-  gap: 8px;
+  justify-content: space-between;
+  gap: 12px;
   padding: 8px 12px;
   background: #f8fafc;
   border-bottom: 1px solid #ebeef5;
+  min-height: 40px;
+  box-sizing: border-box;
+}
+
+.field-panel-type {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+}
+
+.field-panel-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.output-select-mini {
+  flex: 0 1 280px;
+  min-width: 160px;
+  max-width: 360px;
 }
 
 .source-tag {
@@ -1644,8 +1751,21 @@ function handleSave() {
 }
 
 .source-hint {
+  flex-shrink: 0;
   font-size: 12px;
   color: #94a3b8;
+}
+
+.empty-box--inset {
+  margin: 0;
+  border: none;
+  border-radius: 0;
+}
+
+.mapping-panel--inset {
+  border: none;
+  border-radius: 0;
+  background: #fff;
 }
 
 .field-list {
@@ -1702,16 +1822,10 @@ function handleSave() {
   color: #94a3b8;
 }
 
-.sql-input :deep(textarea) {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 12px;
-  line-height: 1.55;
-}
-
 .mapping-panel {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
   padding: 10px;
   border: 1px solid #ebeef5;
   border-radius: 8px;
@@ -1720,13 +1834,14 @@ function handleSave() {
 
 .mapping-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 20px minmax(0, 1.1fr);
+  grid-template-columns: minmax(0, 1fr) 24px minmax(0, 1.1fr);
   align-items: center;
   gap: 8px;
+  min-height: 32px;
 }
 
 .insert-mapping .mapping-row {
-  grid-template-columns: 22px minmax(0, 1fr) 20px minmax(0, 1.2fr);
+  grid-template-columns: 22px minmax(0, 1fr) 24px minmax(0, 1.2fr);
 }
 
 .insert-mapping .mapping-row.dimmed .mapping-field {
@@ -1735,28 +1850,60 @@ function handleSave() {
 
 .mapping-field {
   display: flex;
-  flex-direction: column;
-  gap: 2px;
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
   min-width: 0;
-  padding: 4px 8px;
+  height: 32px;
+  padding: 0 10px;
   border-radius: 6px;
   background: #fff;
   border: 1px solid #ebeef5;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+.mapping-field .field-code {
+  flex-shrink: 0;
+  font-size: 12px;
+  line-height: 1;
+}
+
+.mapping-field .field-desc {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: #909399;
+  line-height: 1;
 }
 
 .mapping-arrow {
-  text-align: center;
-  color: #cbd5e1;
-  font-size: 13px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 32px;
+  color: #94a3b8;
+  font-size: 14px;
+  line-height: 1;
+  user-select: none;
 }
 
 .mapping-input {
   width: 100%;
 }
 
+.mapping-input :deep(.el-select__wrapper),
+.mapping-input :deep(.el-input__wrapper) {
+  min-height: 32px;
+  height: 32px;
+}
+
 .insert-mapping .mapping-head {
   display: grid;
-  grid-template-columns: 22px minmax(0, 1fr) 20px minmax(0, 1.2fr);
+  grid-template-columns: 22px minmax(0, 1fr) 24px minmax(0, 1.2fr);
   gap: 8px;
   padding: 0 2px 4px;
   font-size: 12px;
@@ -2000,6 +2147,8 @@ function handleSave() {
 .dlg-section .cond-row > .cond-value :deep(.el-select),
 .dlg-section .cond-row > .cond-value :deep(.el-input),
 .dlg-section .cond-row > .cond-value :deep(.el-input__wrapper),
+.dlg-section .cond-row > .cond-value :deep(.el-cascader),
+.dlg-section .cond-row > .cond-value :deep(.typed-binding-wrap),
 .dlg-section .cond-row > .cond-value.el-input-number,
 .dlg-section .cond-row > .cond-value.el-date-editor {
   width: 100%;

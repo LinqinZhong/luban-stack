@@ -53,7 +53,7 @@ export const DM = {
   pickSourceField: '\u9009\u62e9\u6e90\u5b57\u6bb5',
   sql: 'SQL \u8bed\u53e5',
   sqlPh:
-    '\u81ea\u5b9a\u4e49 SQL\uff0c\u5165\u53c2\u7528 {name} \u6216 {{name}}\uff0c\u4f8b\u5982 name LIKE \'%{keyword}%\'',
+    '{TABLE_NAME} \u8868\u540d\uff1b#{keyword} \u53c2\u6570\uff1b<if test="keyword != null and keyword != \'\'"> \u6216 &&</if>\uff1bLIKE \u7528 concat(\'%\', #{keyword}, \'%\')',
   mappingEmpty:
     '\u51fa\u53c2\u6682\u65e0\u5b57\u6bb5\uff0c\u8bf7\u5148\u914d\u7f6e\u51fa\u53c2\u7c7b\u578b',
   columnExpr: '\u5217 / \u8868\u8fbe\u5f0f',
@@ -63,4 +63,6 @@ export const DM = {
   element: '\u5143\u7d20',
   elementSelf: '\u5143\u7d20\u672c\u8eab',
   mid: ' \u00b7 ',
+  /** 映射方向：源 → 目标（展示为左箭头：目标 ← 源） */
+  arrow: '\u2190',
 } as const

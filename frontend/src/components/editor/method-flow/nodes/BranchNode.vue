@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import { Handle, Position, type NodeProps } from '@vue-flow/core'
 import { useFlowDebugNode } from '../use-flow-debug-node'
+import FlowNodePrintBubble from '../FlowNodePrintBubble.vue'
 
 const props = defineProps<NodeProps>()
 const { debugClass } = useFlowDebugNode(props.id)
@@ -37,12 +38,14 @@ const summary = computed(() => {
       :position="Position.Left"
       :style="{ top: '50%', left: '0', transform: 'translate(-50%, -50%)' }"
     />
+    <FlowNodePrintBubble :node-id="id" />
   </div>
 </template>
 
 <style scoped>
 .diamond-wrap {
   position: relative;
+  overflow: visible;
   width: 148px;
   height: 148px;
 }

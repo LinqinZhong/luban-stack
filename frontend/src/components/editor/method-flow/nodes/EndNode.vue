@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import { Handle, Position, type NodeProps } from '@vue-flow/core'
 import { useFlowDebugNode } from '../use-flow-debug-node'
+import FlowNodePrintBubble from '../FlowNodePrintBubble.vue'
 
 const props = defineProps<NodeProps>()
 const { debugClass } = useFlowDebugNode(props.id)
@@ -32,11 +33,14 @@ const needsReturn = computed(() => {
     >
       {{ returnExpr || '未选择返回数据' }}
     </div>
+    <FlowNodePrintBubble :node-id="id" />
   </div>
 </template>
 
 <style scoped>
 .flow-node {
+  position: relative;
+  overflow: visible;
   min-width: 88px;
   max-width: 220px;
   padding: 10px 28px;

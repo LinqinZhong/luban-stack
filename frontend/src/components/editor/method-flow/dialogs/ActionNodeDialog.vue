@@ -1,30 +1,38 @@
 <script setup lang="ts">
-import { computed, reactive, watch } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import type { DataTypeLibrary } from '../../../../types/data-types'
+import type { DataFieldType } from '../../../../types/page-data'
 import type { MethodParam, MethodReturnType } from '../../../../types/page-method'
+import { processorTypeExprToTs } from '../../../../types/page-method'
+import { findDataTypeDef } from '../../../../utils/named-type-fields'
+import {
+  applyPayloadToGenericArgs,
+  dataFieldToMethodParamType,
+  FLOW_TYPE_EXCLUDE,
+  flowDraftToTypeExpr,
+  leafNamedRefFromDraft,
+  leafNamedRefFromPayload,
+  methodTypeToDataField,
+  type FlowTypeSelectPayload,
+} from '../../../../utils/flow-type-select'
+import DataFieldTypeTreeSelect from '../../DataFieldTypeTreeSelect.vue'
 import TsCodeEditor from '../../TsCodeEditor.vue'
+import TypeGenericArgsDialog from '../../TypeGenericArgsDialog.vue'
+import FlowPrintField from '../FlowPrintField.vue'
 
 export type ActionNodeForm = {
   code: string
-  /** 节点卡片上展示的说明 */
   description: string
-  /** 出参类型，默认 void */
+  printExpr: string
   outputType: MethodReturnType
-  /** 具名类型 id（出参选类型库类型时） */
   outputTypeRef: string
-  /** 将本节点输出注入后续节点可访问变量 */
+  outputItemType: string
+  outputItemTypeRef: string
+  outputItemItemType: string
+  outputItemItemTypeRef: string
+  outputGenericArgs: Record<string, string>
   outputVarName: string
 }
-
-const BUILTIN_OUTPUT_TYPES: Array<{ value: MethodReturnType; label: string }> = [
-  { value: 'void', label: 'void' },
-  { value: 'string', label: 'string' },
-  { value: 'number', label: 'number' },
-  { value: 'boolean', label: 'boolean' },
-  { value: 'object', label: 'object' },
-  { value: 'array', label: 'array' },
-  { value: 'any', label: 'any' },
-]
 
 const props = defineProps<{
   modelValue: boolean
@@ -44,15 +52,32 @@ const emit = defineEmits<{
 const draft = reactive<ActionNodeForm>({
   code: '',
   description: '',
+  printExpr: '',
   outputType: 'void',
   outputTypeRef: '',
+  outputItemType: '',
+  outputItemTypeRef: '',
+  outputItemItemType: '',
+  outputItemItemTypeRef: '',
+  outputGenericArgs: {},
   outputVarName: '',
 })
+
+const genericDialogVisible = ref(false)
 
 const visible = computed({
   get: () => props.modelValue,
   set: (v) => emit('update:modelValue', v),
 })
+
+function readGenericArgs(raw: unknown): Record<string, string> {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {}
+  const out: Record<string, string> = {}
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof v === 'string') out[k] = v
+  }
+  return out
+}
 
 watch(
   () => props.modelValue,
@@ -61,21 +86,66 @@ watch(
     Object.assign(draft, {
       code: props.form.code ?? '',
       description: props.form.description ?? '',
+      printExpr: props.form.printExpr ?? '',
       outputType: props.form.outputType || 'void',
       outputTypeRef: props.form.outputTypeRef ?? '',
+      outputItemType: props.form.outputItemType ?? '',
+      outputItemTypeRef: props.form.outputItemTypeRef ?? '',
+      outputItemItemType: props.form.outputItemItemType ?? '',
+      outputItemItemTypeRef: props.form.outputItemItemTypeRef ?? '',
+      outputGenericArgs: {
+        ...readGenericArgs(props.form.outputGenericArgs),
+      },
       outputVarName: props.form.outputVarName ?? '',
     })
   },
 )
 
-const namedTypeOptions = computed(() => {
-  const opts: Array<{ value: string; label: string }> = []
+function genericNamesOf(typeRef: string): string[] {
+  return (findDataTypeDef(props.typeLibrary, typeRef)?.generics ?? [])
+    .map((g) => g.name.trim())
+    .filter(Boolean)
+}
+
+const treeType = computed(
+  (): DataFieldType | 'void' =>
+    methodTypeToDataField(draft.outputType, draft.outputTypeRef),
+)
+
+const treeItemType = computed(
+  () => (draft.outputItemType || undefined) as DataFieldType | undefined,
+)
+const treeItemItemType = computed(
+  () => (draft.outputItemItemType || undefined) as DataFieldType | undefined,
+)
+
+const leafNamed = computed(() =>
+  leafNamedRefFromDraft({
+    type: draft.outputType,
+    typeRef: draft.outputTypeRef,
+    itemType: draft.outputItemType,
+    itemTypeRef: draft.outputItemTypeRef,
+    itemItemType: draft.outputItemItemType,
+    itemItemTypeRef: draft.outputItemItemTypeRef,
+  }),
+)
+
+const outputGenericNames = computed(() => genericNamesOf(leafNamed.value))
+const hasOutputGenerics = computed(() => outputGenericNames.value.length > 0)
+
+const outputTypeName = computed(() => {
+  if (!leafNamed.value) return ''
+  return findDataTypeDef(props.typeLibrary, leafNamed.value)?.name?.trim() || ''
+})
+
+const genericTypeOptions = computed(() => {
+  const opts: Array<{ id: string; label: string }> = []
   for (const group of props.typeLibrary?.groups ?? []) {
     for (const t of group.types) {
       const name = t.name.trim()
       if (!name) continue
       opts.push({
-        value: t.id,
+        id: t.id,
         label: t.remark ? `${name} · ${t.remark}` : name,
       })
     }
@@ -83,39 +153,68 @@ const namedTypeOptions = computed(() => {
   return opts
 })
 
-/** 下拉统一值：void / string / … / named:<id> */
-const outputSelectValue = computed({
-  get() {
-    if (draft.outputTypeRef) return `named:${draft.outputTypeRef}`
-    return draft.outputType || 'void'
-  },
-  set(value: string) {
-    if (value.startsWith('named:')) {
-      draft.outputType = 'object'
-      draft.outputTypeRef = value.slice(6)
-      return
-    }
-    draft.outputType = (value || 'void') as MethodReturnType
+function handleOutputTypeChange(payload: FlowTypeSelectPayload) {
+  const prevNamed = leafNamed.value
+  if (payload.type === 'void') {
+    draft.outputType = 'void'
     draft.outputTypeRef = ''
-    if (draft.outputType === 'void') draft.outputVarName = ''
-  },
-})
+    draft.outputItemType = ''
+    draft.outputItemTypeRef = ''
+    draft.outputItemItemType = ''
+    draft.outputItemItemTypeRef = ''
+    draft.outputGenericArgs = {}
+    draft.outputVarName = ''
+    return
+  }
 
-const hasOutput = computed(() => draft.outputType !== 'void' || Boolean(draft.outputTypeRef))
+  const methodType = dataFieldToMethodParamType(payload.type)
+  draft.outputType = methodType as MethodReturnType
+  draft.outputTypeRef = payload.typeRef ?? ''
+  draft.outputItemType = payload.itemType ?? ''
+  draft.outputItemTypeRef = payload.itemTypeRef ?? ''
+  draft.outputItemItemType = payload.itemItemType ?? ''
+  draft.outputItemItemTypeRef = payload.itemItemTypeRef ?? ''
 
-const editorReturnType = computed<MethodReturnType>(() =>
-  draft.outputTypeRef ? 'object' : draft.outputType || 'void',
+  const named = leafNamedRefFromPayload(payload)
+  const names = genericNamesOf(named)
+  draft.outputGenericArgs = applyPayloadToGenericArgs(
+    payload,
+    prevNamed,
+    draft.outputGenericArgs,
+    names,
+  )
+  if (named && names.length && named !== prevNamed) {
+    genericDialogVisible.value = true
+  }
+}
+
+const hasOutput = computed(
+  () => draft.outputType !== 'void' || Boolean(draft.outputTypeRef),
 )
 
-const editorReturnTypeTs = computed(() => {
-  if (!draft.outputTypeRef) return ''
-  for (const group of props.typeLibrary?.groups ?? []) {
-    const hit = group.types.find((t) => t.id === draft.outputTypeRef)
-    const name = hit?.name?.trim()
-    if (name) return name
-  }
-  return ''
+const editorReturnType = computed<MethodReturnType>(() => {
+  if (draft.outputType === 'void' && !draft.outputTypeRef) return 'void'
+  if (draft.outputTypeRef || draft.outputType === 'object') return 'object'
+  return draft.outputType || 'void'
 })
+
+const editorReturnTypeTs = computed(() => {
+  if (draft.outputType === 'void' && !draft.outputTypeRef) return ''
+  return processorTypeExprToTs(
+    flowDraftToTypeExpr({
+      type: draft.outputType,
+      typeRef: draft.outputTypeRef,
+      itemType: draft.outputItemType,
+      itemTypeRef: draft.outputItemTypeRef,
+      itemItemType: draft.outputItemItemType,
+      itemItemTypeRef: draft.outputItemItemTypeRef,
+      genericArgs: draft.outputGenericArgs,
+    }),
+    props.typeLibrary,
+  )
+})
+
+const outputTypeLabel = computed(() => editorReturnTypeTs.value)
 
 const varNameError = computed(() => {
   if (!hasOutput.value) return ''
@@ -130,19 +229,40 @@ const varNameError = computed(() => {
   return ''
 })
 
+function openGenerics() {
+  if (!hasOutputGenerics.value) return
+  genericDialogVisible.value = true
+}
+
+function saveGenericArgs(args: Record<string, string>) {
+  draft.outputGenericArgs = { ...args }
+}
+
 function handleSave() {
   if (varNameError.value) return
+  const isVoid = draft.outputType === 'void' && !draft.outputTypeRef
   emit('save', {
     code: draft.code,
     description: draft.description.trim(),
-    outputType: draft.outputTypeRef ? 'object' : draft.outputType || 'void',
-    outputTypeRef: draft.outputTypeRef,
+    printExpr: draft.printExpr.trim(),
+    outputType: isVoid
+      ? 'void'
+      : draft.outputTypeRef
+        ? 'object'
+        : draft.outputType || 'void',
+    outputTypeRef: isVoid ? '' : draft.outputTypeRef,
+    outputItemType: isVoid ? '' : draft.outputItemType,
+    outputItemTypeRef: isVoid ? '' : draft.outputItemTypeRef,
+    outputItemItemType: isVoid ? '' : draft.outputItemItemType,
+    outputItemItemTypeRef: isVoid ? '' : draft.outputItemItemTypeRef,
+    outputGenericArgs: leafNamed.value
+      ? { ...(draft.outputGenericArgs ?? {}) }
+      : {},
     outputVarName: hasOutput.value ? draft.outputVarName.trim() : '',
   })
   visible.value = false
 }
 
-/** 阻止弹层 / Vue Flow 抢走空格、Tab */
 function stopEditorKeys(event: KeyboardEvent) {
   if (event.key === ' ' || event.key === 'Tab' || event.code === 'Space') {
     event.stopPropagation()
@@ -176,38 +296,45 @@ function stopEditorKeys(event: KeyboardEvent) {
         />
       </el-form-item>
       <el-form-item label="出参类型">
-        <el-select
-          v-model="outputSelectValue"
-          filterable
-          class="full-width"
-          placeholder="选择出参类型"
-        >
-          <el-option
-            v-for="opt in BUILTIN_OUTPUT_TYPES"
-            :key="opt.value"
-            :label="opt.label"
-            :value="opt.value"
+        <div class="type-row">
+          <DataFieldTypeTreeSelect
+            class="type-select"
+            :type="treeType"
+            :type-ref="draft.outputTypeRef || undefined"
+            :item-type="treeItemType"
+            :item-type-ref="draft.outputItemTypeRef || undefined"
+            :item-item-type="treeItemItemType"
+            :item-item-type-ref="draft.outputItemItemTypeRef || undefined"
+            :library="typeLibrary"
+            :exclude-types="FLOW_TYPE_EXCLUDE"
+            :allow-ref="false"
+            allow-void
+            clearable
+            placeholder="选择出参类型"
+            @change="handleOutputTypeChange"
           />
-          <el-option
-            v-for="opt in namedTypeOptions"
-            :key="opt.value"
-            :label="opt.label"
-            :value="`named:${opt.value}`"
-          />
-        </el-select>
+          <template v-if="hasOutputGenerics">
+            <el-button type="primary" link @click="openGenerics">泛型</el-button>
+            <span class="type-preview" :title="outputTypeLabel">{{
+              outputTypeLabel
+            }}</span>
+          </template>
+        </div>
       </el-form-item>
       <el-form-item label="出参变量名" :error="varNameError || undefined">
         <el-input
           v-model="draft.outputVarName"
           :disabled="!hasOutput"
-          :placeholder="hasOutput ? '后续节点可访问该变量' : '出参为 void 时无需填写'"
+          :placeholder="
+            hasOutput ? '后续节点可访问该变量' : '出参为 void 时无需填写'
+          "
         />
       </el-form-item>
       <el-form-item label="代码">
         <div
           class="editor-wrap nokey"
-          @keydown.capture="stopEditorKeys"
-          @keyup.capture="stopEditorKeys"
+          @keydown="stopEditorKeys"
+          @keyup="stopEditorKeys"
         >
           <TsCodeEditor
             v-if="visible"
@@ -220,15 +347,34 @@ function stopEditorKeys(event: KeyboardEvent) {
           />
         </div>
       </el-form-item>
+      <el-form-item label="打印">
+        <FlowPrintField
+          v-model="draft.printExpr"
+          :ambient-names="ambientVars.map((v) => v.name).filter(Boolean)"
+        />
+      </el-form-item>
     </el-form>
 
     <template #footer>
       <el-button @click="visible = false">取消</el-button>
-      <el-button type="primary" :disabled="Boolean(varNameError)" @click="handleSave">
+      <el-button
+        type="primary"
+        :disabled="Boolean(varNameError)"
+        @click="handleSave"
+      >
         确定
       </el-button>
     </template>
   </el-dialog>
+
+  <TypeGenericArgsDialog
+    v-model="genericDialogVisible"
+    :type-name="outputTypeName"
+    :generic-names="outputGenericNames"
+    :args="draft.outputGenericArgs"
+    :type-options="genericTypeOptions"
+    @save="saveGenericArgs"
+  />
 </template>
 
 <style scoped>
@@ -252,7 +398,31 @@ function stopEditorKeys(event: KeyboardEvent) {
   border-radius: 0;
 }
 
-.full-width {
+.type-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   width: 100%;
+  min-width: 0;
+}
+
+.type-select {
+  flex: 1;
+  min-width: 0;
+}
+
+.type-preview {
+  flex: 0 1 auto;
+  max-width: 180px;
+  font-size: 12px;
+  color: #606266;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.flow-node-form :deep(.el-form-item__content) {
+  flex: 1;
+  min-width: 0;
 }
 </style>

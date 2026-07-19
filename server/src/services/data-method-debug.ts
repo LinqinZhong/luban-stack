@@ -54,17 +54,6 @@ function sqlLiteral(value: unknown): string {
   return `'${String(value).replace(/\\/g, '\\\\').replace(/'/g, "''")}'`
 }
 
-/** 嵌入已有引号内（如 '%{keyword}%'），不加外层引号 */
-function sqlEmbed(value: unknown): string {
-  if (value == null) return ''
-  if (typeof value === 'number' && Number.isFinite(value)) return String(value)
-  if (typeof value === 'boolean') return value ? '1' : '0'
-  if (typeof value === 'object') {
-    return JSON.stringify(value).replace(/\\/g, '\\\\').replace(/'/g, "''")
-  }
-  return String(value).replace(/\\/g, '\\\\').replace(/'/g, "''")
-}
-
 function resolveTableName(
   processor: ServiceProcessor,
   library: DataTypeLibrary,
@@ -208,21 +197,108 @@ function buildQuerySql(
   return { sql, current, pageSize }
 }
 
+/**
+ * 自定义 SQL：对齐 MyBatis 常用写法
+ * - #{name}       → 安全字面量（带引号）
+ * - ${name}       → 直接拼接
+ * - {TABLE_NAME} / ${TABLE_NAME} → 绑定实体表名（反引号）
+ * - <if test="...">...</if> → 动态片段
+ */
 function applyCustomSql(
   template: string,
   params: Record<string, unknown>,
+  tableName: string,
 ): string {
-  // {{name}} → 完整 SQL 字面量（含引号），用于独立占位
-  let sql = template.replace(
-    /\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}/g,
-    (_, key: string) => sqlLiteral(params[key]),
-  )
-  // {name} → 嵌入值（不加外层引号），用于 '%{keyword}%' 这类写法
+  const tableIdent = quoteIdent(tableName)
+  let sql = applyMybatisIfTags(template, params)
+
+  // 表名：{TABLE_NAME} 与 MyBatis ${TABLE_NAME}
+  sql = sql.replace(/\$\{\s*TABLE_NAME\s*\}/gi, tableIdent)
+  sql = sql.replace(/\{\s*TABLE_NAME\s*\}/gi, tableIdent)
+
+  // #{name} / #{a.b} → 安全字面量
   sql = sql.replace(
-    /\{([A-Za-z_][A-Za-z0-9_]*)\}/g,
-    (_, key: string) => sqlEmbed(params[key]),
+    /#\{\s*([A-Za-z_][A-Za-z0-9_.]*)\s*\}/g,
+    (_, key: string) => sqlLiteral(resolveParamValue(params, key)),
   )
+
+  // ${name} → 直接拼接
+  sql = sql.replace(/\$\{\s*([A-Za-z_][A-Za-z0-9_.]*)\s*\}/g, (_, key: string) => {
+    if (key.toUpperCase() === 'TABLE_NAME') return tableIdent
+    const v = resolveParamValue(params, key)
+    return v == null ? '' : String(v)
+  })
+
   return sql
+}
+
+function resolveParamValue(
+  params: Record<string, unknown>,
+  key: string,
+): unknown {
+  if (key.includes('.')) return resolvePath(params, key)
+  return params[key]
+}
+
+/** 简易 MyBatis <if test>：支持 null/空串比较与 and/or */
+function applyMybatisIfTags(
+  sql: string,
+  params: Record<string, unknown>,
+): string {
+  const re = /<if\s+test\s*=\s*"([^"]*)"\s*>([\s\S]*?)<\/if>/gi
+  let prev = ''
+  let cur = sql
+  let guard = 0
+  while (prev !== cur && guard < 32) {
+    prev = cur
+    guard += 1
+    cur = cur.replace(re, (_m, test: string, body: string) =>
+      evalMybatisIfTest(String(test).trim(), params) ? body : '',
+    )
+  }
+  return cur
+}
+
+function evalMybatisIfTest(
+  test: string,
+  params: Record<string, unknown>,
+): boolean {
+  if (!test) return false
+  // 支持 and / or 与 && / ||（MyBatis OGNL 常见写法）
+  const orParts = test.split(/\s*(?:\|\||\bor\b)\s*/i)
+  return orParts.some((orPart) =>
+    orPart
+      .split(/\s*(?:&&|\band\b)\s*/i)
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .every((atom) => evalMybatisIfAtom(atom, params)),
+  )
+}
+
+function evalMybatisIfAtom(
+  atom: string,
+  params: Record<string, unknown>,
+): boolean {
+  const cmp = atom.match(
+    /^([A-Za-z_][A-Za-z0-9_.]*)\s*(!=|==)\s*(null|''|"")\s*$/i,
+  )
+  if (cmp) {
+    const val = resolveParamValue(params, cmp[1]!)
+    const op = cmp[2]!
+    const rhs = cmp[3]!.toLowerCase()
+    if (rhs === 'null') {
+      const isNull = val == null
+      return op === '!=' ? !isNull : isNull
+    }
+    const empty = val == null || String(val) === ''
+    return op === '!=' ? !empty : empty
+  }
+  const nameOnly = atom.match(/^([A-Za-z_][A-Za-z0-9_.]*)$/)
+  if (nameOnly) {
+    const val = resolveParamValue(params, nameOnly[1]!)
+    return val != null && val !== '' && val !== false
+  }
+  return false
 }
 
 /** 解析入参路径：data / data.name */
@@ -508,7 +584,7 @@ export async function debugDataLayerMethod(payload: {
     isWrite = true
   } else if (config.operation === 'custom') {
     if (!config.sql.trim()) throw new ProjectError('请先配置自定义 SQL', 400)
-    sql = applyCustomSql(config.sql, params)
+    sql = applyCustomSql(config.sql, params, table)
   } else {
     throw new ProjectError(
       `操作「${config.operation}」调试稍后实现，请先使用查询、插入、删除或自定义`,

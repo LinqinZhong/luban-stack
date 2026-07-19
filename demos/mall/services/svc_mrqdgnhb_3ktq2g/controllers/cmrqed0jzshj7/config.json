@@ -1,18 +1,101 @@
 {
   "id": "cmrqed0jzshj7",
   "name": "goods",
-  "path": "",
+  "path": "/goods",
   "remark": "",
   "apis": [
     {
       "id": "api_mrqedc08_9iml1r",
-      "name": "api1",
-      "path": "",
-      "remark": "",
+      "name": "page",
+      "path": "/page",
+      "remark": "获取商品分页",
       "method": "GET",
-      "inputDtoRef": "type_common_QueryPageDto",
-      "headers": "",
-      "requireAuth": false
+      "inputs": [
+        {
+          "id": "ain_mrrnpq8f_01htek",
+          "varName": "page",
+          "location": "query",
+          "type": "json",
+          "typeRef": "type_common_QueryPageDto",
+          "required": true,
+          "remark": ""
+        },
+        {
+          "id": "ain_mrrnv3ul_mg8m4l",
+          "varName": "keyword",
+          "location": "query",
+          "type": "string",
+          "typeRef": "",
+          "required": false,
+          "remark": ""
+        }
+      ],
+      "requireAuth": true,
+      "debugParams": {
+        "page": {
+          "current": 1,
+          "pageSize": 10
+        },
+        "keyword": null
+      },
+      "flow": {
+        "nodes": [
+          {
+            "id": "start",
+            "kind": "start",
+            "position": {
+              "x": 293.5,
+              "y": -29
+            },
+            "data": {}
+          },
+          {
+            "id": "input_mrrndwfq_bfnc",
+            "kind": "input",
+            "position": {
+              "x": 251.5,
+              "y": 98.81715732284962
+            },
+            "data": {
+              "dataSource": "other_business",
+              "dataProcessorId": "pmrqfxkatf8jl",
+              "dataMethodId": "method_mrqfxlh1_u651zc",
+              "headerField": "",
+              "varName": "goodsPage",
+              "methodLabel": "goods.page",
+              "paramBindings": {
+                "page": "page",
+                "keyword": "keyword"
+              },
+              "printExpr": ""
+            }
+          },
+          {
+            "id": "end_mrro18yq_vwk1",
+            "kind": "end",
+            "position": {
+              "x": 286.5,
+              "y": 223.79641918900896
+            },
+            "data": {
+              "returnExpr": "goodsPage",
+              "printExpr": ""
+            }
+          }
+        ],
+        "edges": [
+          {
+            "id": "edge_mrrndwfr_vh1f",
+            "source": "start",
+            "target": "input_mrrndwfq_bfnc"
+          },
+          {
+            "id": "edge_mrro18yr_s23s",
+            "source": "input_mrrndwfq_bfnc",
+            "target": "end_mrro18yq_vwk1"
+          }
+        ]
+      }
     }
   ]
 }

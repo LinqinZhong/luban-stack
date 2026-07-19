@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { Delete, Plus, View } from '@element-plus/icons-vue'
+import { Plus, View } from '@element-plus/icons-vue'
 import type { PageMethod } from '../../types/page-method'
 
 const props = defineProps<{
@@ -76,12 +76,9 @@ const panelDesc = computed(() =>
           </el-button>
           <template v-else>
             <el-button type="primary" link @click="emit('edit', method)">编辑</el-button>
-            <el-button
-              type="danger"
-              link
-              :icon="Delete"
-              @click="emit('remove', method)"
-            />
+            <el-button type="danger" link @click="emit('remove', method)">
+              删除
+            </el-button>
           </template>
         </div>
       </div>

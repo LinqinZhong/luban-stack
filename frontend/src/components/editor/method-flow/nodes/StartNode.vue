@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { Handle, Position, type NodeProps } from '@vue-flow/core'
 import { useFlowDebugNode } from '../use-flow-debug-node'
+import FlowNodePrintBubble from '../FlowNodePrintBubble.vue'
 
 const props = defineProps<NodeProps>()
 const { debugClass } = useFlowDebugNode(props.id)
@@ -11,11 +12,14 @@ const { debugClass } = useFlowDebugNode(props.id)
   <div class="flow-node start-node" :class="debugClass">
     <div class="flow-node-title">开始</div>
     <Handle id="default" type="source" :position="Position.Bottom" />
+    <FlowNodePrintBubble :node-id="id" />
   </div>
 </template>
 
 <style scoped>
 .flow-node {
+  position: relative;
+  overflow: visible;
   min-width: 88px;
   padding: 10px 28px;
   border-radius: 999px;

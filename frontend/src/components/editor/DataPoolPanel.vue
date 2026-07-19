@@ -1,13 +1,16 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { Delete, Plus } from '@element-plus/icons-vue'
+import { Plus } from '@element-plus/icons-vue'
 import ArrayFieldsDialog from './ArrayFieldsDialog.vue'
 import ComputedBindingDialog from './ComputedBindingDialog.vue'
+import ControllerBindingDialog from './ControllerBindingDialog.vue'
 import DataFieldTypeTreeSelect from './DataFieldTypeTreeSelect.vue'
 import IconValueSelect from './IconValueSelect.vue'
 import ColorPicker from './ColorPicker.vue'
 import ObjectFieldsDialog from './ObjectFieldsDialog.vue'
+import TypeGenericArgsDialog from './TypeGenericArgsDialog.vue'
 import {
+  createEmptyControllerBinding,
   createEmptyDataField,
   DATA_SOURCE_BINDING_OPTIONS,
   buildArrayValue,
@@ -17,6 +20,7 @@ import {
   resolveArrayFields,
   resolveObjectFields,
   type ArraySubField,
+  type ControllerBindingConfig,
   type DataField,
   type DataFieldType,
   type DataSourceBinding,
@@ -26,9 +30,15 @@ import {
 import { resolveComputedPageData } from '../../utils/compute-runtime'
 import type { DeviceInfo } from '../../utils/device-info'
 import { isReservedDataFieldName } from '../../utils/component-props'
-import type { ComponentPropDef } from '../../types/component'
+import type { ComponentPropDef, ComponentEventDef } from '../../types/component'
 import type { DataTypeLibrary } from '../../types/data-types'
-import { objectFieldsFromTypeRef } from '../../utils/named-type-fields'
+import type { PageMethod } from '../../types/page-method'
+import type { ComponentRenderMap } from '../../types/component-render'
+import type { ComponentMethodsMap } from '../../utils/widget-ref'
+import {
+  findDataTypeDef,
+  objectFieldsFromTypeRef,
+} from '../../utils/named-type-fields'
 import { buildWidgetTreeSelectData } from '../../utils/widget-tree'
 import { ElMessage } from 'element-plus'
 
@@ -45,6 +55,13 @@ const props = defineProps<{
   dollarProps?: Record<string, unknown>
   /** 项目数据类型库（树形类型选择） */
   typeLibrary?: DataTypeLibrary | null
+  /** 项目路径：控制器绑定拉服务列表 */
+  projectPath?: string
+  /** 页面/组件方法：控制器加载事件绑定 */
+  methods?: PageMethod[]
+  componentMap?: ComponentRenderMap
+  componentMethodsMap?: ComponentMethodsMap
+  emitEvents?: ComponentEventDef[]
 }>()
 
 const emit = defineEmits<{
@@ -61,7 +78,108 @@ const fields = computed({
 const objectDialogVisible = ref(false)
 const arrayDialogVisible = ref(false)
 const computeDialogVisible = ref(false)
+const controllerDialogVisible = ref(false)
 const editingIndex = ref(-1)
+
+const genericDialogVisible = ref(false)
+const genericFieldIndex = ref(-1)
+const genericNames = ref<string[]>([])
+const genericTypeName = ref('')
+const genericArgsDraft = ref<Record<string, string>>({})
+
+const typeOptions = computed(() => {
+  const opts: Array<{ id: string; label: string }> = []
+  for (const group of props.typeLibrary?.groups ?? []) {
+    for (const t of group.types) {
+      if (!t.name.trim()) continue
+      const kind =
+        t.kind === 'enum'
+          ? '枚举'
+          : t.category === 'dto'
+            ? 'DTO'
+            : t.category === 'vo'
+              ? 'VO'
+              : t.category === 'entity'
+                ? '实体'
+                : t.kind === 'interface'
+                  ? '接口'
+                  : t.kind
+      opts.push({
+        id: t.id,
+        label: `${t.name}（${kind}）${t.remark ? ` · ${t.remark}` : ''}`,
+      })
+    }
+  }
+  return opts
+})
+
+function leafNamedTypeRef(field: {
+  type?: DataFieldType
+  typeRef?: string
+  itemType?: DataFieldType
+  itemTypeRef?: string
+  itemItemType?: DataFieldType
+  itemItemTypeRef?: string
+}): string {
+  if (field.type === 'array') {
+    if (field.itemType === 'array') return field.itemItemTypeRef || ''
+    return field.itemTypeRef || ''
+  }
+  return field.typeRef || ''
+}
+
+function genericNamesOf(typeRef: string): string[] {
+  return (findDataTypeDef(props.typeLibrary, typeRef)?.generics ?? [])
+    .map((g) => g.name.trim())
+    .filter(Boolean)
+}
+
+function formatFieldTypeWithGenerics(row: DataField): string {
+  const named = leafNamedTypeRef(row)
+  const def = findDataTypeDef(props.typeLibrary, named)
+  if (!def?.name) return ''
+  const names = genericNamesOf(named)
+  const args = row.genericArgs ?? {}
+  const leafLabel = names.length
+    ? `${def.name}<${names
+        .map((n) => {
+          const ref = (args[n] ?? '').trim()
+          if (!ref) return 'any'
+          return findDataTypeDef(props.typeLibrary, ref)?.name || ref
+        })
+        .join(', ')}>`
+    : def.name
+  if (row.type === 'array') {
+    if (row.itemType === 'array') return `${leafLabel}[][]`
+    return `${leafLabel}[]`
+  }
+  return leafLabel
+}
+
+function typeSelectLabel(row: DataField): string {
+  return formatFieldTypeWithGenerics(row)
+}
+
+function openFieldGenerics(index: number) {
+  const row = fields.value[index]
+  if (!row) return
+  const named = leafNamedTypeRef(row)
+  const names = genericNamesOf(named)
+  if (!names.length) return
+  genericFieldIndex.value = index
+  genericNames.value = names
+  genericTypeName.value = findDataTypeDef(props.typeLibrary, named)?.name ?? ''
+  const prev = row.genericArgs ?? {}
+  const next: Record<string, string> = {}
+  for (const n of names) next[n] = prev[n] ?? ''
+  genericArgsDraft.value = next
+  genericDialogVisible.value = true
+}
+
+function saveFieldGenerics(args: Record<string, string>) {
+  if (genericFieldIndex.value < 0) return
+  updateField(genericFieldIndex.value, { genericArgs: { ...args } })
+}
 
 function updateField(index: number, patch: Partial<DataField>) {
   if (typeof patch.name === 'string' && isReservedDataFieldName(patch.name)) {
@@ -86,9 +204,29 @@ function handleTypeChange(
   },
 ) {
   const { type, typeRef, itemType, itemTypeRef, itemItemType, itemItemTypeRef } = payload
+  const named = leafNamedTypeRef({
+    type,
+    typeRef,
+    itemType,
+    itemTypeRef,
+    itemItemType,
+    itemItemTypeRef,
+  })
+  const names = genericNamesOf(named)
+  const prev = fields.value[index]
+  const sameLeaf = leafNamedTypeRef(prev ?? {}) === named
+  const genericArgs: Record<string, string> | undefined = names.length
+    ? Object.fromEntries(
+        names.map((n) => [
+          n,
+          sameLeaf ? (prev?.genericArgs?.[n] ?? '') : '',
+        ]),
+      )
+    : undefined
   updateField(index, {
     type,
     typeRef,
+    genericArgs,
     itemType: type === 'array' ? itemType || 'string' : undefined,
     itemTypeRef: type === 'array' ? itemTypeRef : undefined,
     itemItemType:
@@ -98,8 +236,17 @@ function handleTypeChange(
     value: defaultValue(type),
     arrayFields: undefined,
     objectFields: undefined,
-    ...(type === 'ref' ? { binding: '' as const, computeBody: '' } : {}),
+    ...(type === 'ref'
+      ? {
+          binding: '' as const,
+          computeBody: '',
+          controllerBinding: undefined,
+        }
+      : {}),
   })
+  if (names.length) {
+    openFieldGenerics(index)
+  }
 }
 
 const widgetRefOptions = computed(() =>
@@ -226,8 +373,18 @@ function openComputeEditor(index: number) {
   computeDialogVisible.value = true
 }
 
+function openControllerEditor(index: number) {
+  editingIndex.value = index
+  controllerDialogVisible.value = true
+}
+
+function controllerBindingSummary(row: DataField): string {
+  const cfg = row.controllerBinding
+  if (!cfg?.serviceId || !cfg.controllerId || !cfg.apiId) return '未配置 API'
+  return '已绑定'
+}
+
 function handleBindingChange(index: number, binding: DataSourceBinding) {
-  if (binding === 'api') return
   const field = fields.value[index]
   if (!field || field.type === 'ref') return
   if (binding === 'computed') {
@@ -236,11 +393,25 @@ function handleBindingChange(index: number, binding: DataSourceBinding) {
       computeBody: field.computeBody?.trim()
         ? field.computeBody
         : defaultComputeBody(field.type),
+      controllerBinding: undefined,
     })
     openComputeEditor(index)
     return
   }
-  updateField(index, { binding: '' })
+  if (binding === 'controller') {
+    updateField(index, {
+      binding: 'controller',
+      computeBody: '',
+      controllerBinding:
+        field.controllerBinding ?? createEmptyControllerBinding(field.type),
+    })
+    openControllerEditor(index)
+    return
+  }
+  updateField(index, {
+    binding: '',
+    controllerBinding: undefined,
+  })
 }
 
 function saveComputeBody(body: string) {
@@ -248,6 +419,16 @@ function saveComputeBody(body: string) {
   updateField(editingIndex.value, {
     binding: 'computed',
     computeBody: body,
+    controllerBinding: undefined,
+  })
+}
+
+function saveControllerBinding(config: ControllerBindingConfig) {
+  if (editingIndex.value < 0) return
+  updateField(editingIndex.value, {
+    binding: 'controller',
+    computeBody: '',
+    controllerBinding: config,
   })
 }
 </script>
@@ -274,19 +455,33 @@ function saveComputeBody(body: string) {
           </template>
         </el-table-column>
 
-        <el-table-column label="数据类型" min-width="180">
+        <el-table-column label="数据类型" min-width="200">
           <template #default="{ row, $index }">
-            <DataFieldTypeTreeSelect
-              :type="row.type"
-              :type-ref="row.typeRef"
-              :item-type="row.itemType"
-              :item-type-ref="row.itemTypeRef"
-              :item-item-type="row.itemItemType"
-              :item-item-type-ref="row.itemItemTypeRef"
-              :library="typeLibrary"
-              allow-ref
-              @change="handleTypeChange($index, $event)"
-            />
+            <div class="type-cell">
+              <DataFieldTypeTreeSelect
+                class="type-cell-select"
+                :type="row.type"
+                :type-ref="row.typeRef"
+                :item-type="row.itemType"
+                :item-type-ref="row.itemTypeRef"
+                :item-item-type="row.itemItemType"
+                :item-item-type-ref="row.itemItemTypeRef"
+                :library="typeLibrary"
+                :label-override="typeSelectLabel(row) || null"
+                allow-ref
+                @change="handleTypeChange($index, $event)"
+              />
+              <el-button
+                v-if="genericNamesOf(leafNamedTypeRef(row)).length"
+                type="primary"
+                link
+                size="small"
+                class="type-generic-btn"
+                @click="openFieldGenerics($index)"
+              >
+                泛型
+              </el-button>
+            </div>
           </template>
         </el-table-column>
 
@@ -327,6 +522,18 @@ function saveComputeBody(body: string) {
               <span class="value-preview">计算 · {{ computedValueSummary(row) }}</span>
               <el-button type="primary" link @click="openComputeEditor($index)">
                 编辑逻辑
+              </el-button>
+            </div>
+            <div v-else-if="row.binding === 'controller'" class="complex-value">
+              <span class="value-preview">
+                控制器 · {{ controllerBindingSummary(row) }}
+              </span>
+              <el-button
+                type="primary"
+                link
+                @click="openControllerEditor($index)"
+              >
+                配置
               </el-button>
             </div>
             <el-input
@@ -390,14 +597,16 @@ function saveComputeBody(body: string) {
           </template>
         </el-table-column>
 
-        <el-table-column label="操作" width="72" fixed="right">
+        <el-table-column label="操作" width="72" fixed="right" align="center">
           <template #default="{ $index }">
             <el-button
               type="danger"
               link
-              :icon="Delete"
+              size="small"
               @click="removeField($index)"
-            />
+            >
+              删除
+            </el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -430,6 +639,29 @@ function saveComputeBody(body: string) {
       :component-props="componentProps"
       :type-library="typeLibrary"
       @save="saveComputeBody"
+    />
+    <ControllerBindingDialog
+      v-model="controllerDialogVisible"
+      :field="editingField"
+      :project-path="projectPath || ''"
+      :methods="methods"
+      :data-fields="fields"
+      :xml="xml"
+      :component-map="componentMap"
+      :component-methods-map="componentMethodsMap"
+      :icon-options="iconOptions"
+      :component-props="componentProps"
+      :emit-events="emitEvents"
+      :type-library="typeLibrary"
+      @save="saveControllerBinding"
+    />
+    <TypeGenericArgsDialog
+      v-model="genericDialogVisible"
+      :type-name="genericTypeName"
+      :generic-names="genericNames"
+      :args="genericArgsDraft"
+      :type-options="typeOptions"
+      @save="saveFieldGenerics"
     />
   </div>
 </template>
@@ -469,6 +701,24 @@ function saveComputeBody(body: string) {
   min-height: 0;
   overflow: auto;
   padding: 16px;
+}
+
+.type-cell {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  width: 100%;
+}
+
+.type-cell-select {
+  flex: 1;
+  min-width: 0;
+}
+
+.type-generic-btn {
+  flex-shrink: 0;
+  padding: 0 2px;
 }
 
 .complex-value {

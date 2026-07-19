@@ -130,6 +130,35 @@ export const CONTROLLER_CONFIG_FILE = 'config.json'
 
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH'
 
+/** 控制器 API 入参来源 */
+export type ServiceApiParamLocation =
+  | 'query'
+  | 'param'
+  | 'httpHeader'
+  | 'body'
+
+/** 控制器 API 入参项 */
+export interface ServiceApiParam {
+  id: string
+  /** 变量名（同时作为 HTTP 入参名） */
+  varName: string
+  location: ServiceApiParamLocation
+  /** 基础类型：string / number / boolean / json */
+  type: string
+  /** 具名类型 id（如 DTO）；type 为 json 时可用 */
+  typeRef: string
+  required: boolean
+  remark: string
+}
+
+/** @deprecated 旧版请求头，归一化时迁入 inputs */
+export interface ServiceApiHeader {
+  id: string
+  name: string
+  required: boolean
+  remark: string
+}
+
 /** 控制器下的 API */
 export interface ServiceApi {
   id: string
@@ -137,11 +166,13 @@ export interface ServiceApi {
   path: string
   remark: string
   method: HttpMethod
-  /** 入参 DTO：引用 types/ 库中的类型 id */
-  inputDtoRef: string
-  /** 请求头说明（文本） */
-  headers: string
+  /** 入参列表（含 query / param / header / body） */
+  inputs: ServiceApiParam[]
   requireAuth: boolean
+  /** 调试入参（按变量名持久化） */
+  debugParams: Record<string, unknown>
+  /** API 编排工作流 */
+  flow: MethodFlow
 }
 
 export interface ServiceController {
@@ -163,16 +194,43 @@ function uid(prefix: string): string {
   return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
 }
 
+export function createEmptyServiceApiParam(
+  partial?: Partial<ServiceApiParam>,
+): ServiceApiParam {
+  return {
+    id: uid('ain'),
+    varName: '',
+    location: 'query',
+    type: 'string',
+    typeRef: '',
+    required: false,
+    remark: '',
+    ...partial,
+  }
+}
+
+export function createEmptyServiceApiHeader(
+  name = '',
+): ServiceApiHeader {
+  return {
+    id: uid('hdr'),
+    name,
+    required: false,
+    remark: '',
+  }
+}
+
 export function createEmptyServiceApi(name = ''): ServiceApi {
   return {
     id: uid('api'),
     name,
-    path: '',
+    path: '/',
     remark: '',
     method: 'GET',
-    inputDtoRef: '',
-    headers: '',
+    inputs: [],
     requireAuth: false,
+    debugParams: {},
+    flow: createDefaultMethodFlow(),
   }
 }
 
@@ -193,6 +251,114 @@ function normalizeHttpMethod(value: unknown): HttpMethod {
   return allowed.includes(raw as HttpMethod) ? (raw as HttpMethod) : 'GET'
 }
 
+export function normalizeServiceApiHeader(input: unknown): ServiceApiHeader | null {
+  if (!isPlainObject(input)) return null
+  const name = typeof input.name === 'string' ? input.name.trim() : ''
+  return {
+    id: typeof input.id === 'string' && input.id ? input.id : uid('hdr'),
+    name,
+    required: Boolean(input.required),
+    remark: typeof input.remark === 'string' ? input.remark : '',
+  }
+}
+
+function normalizeServiceApiHeaders(input: unknown): ServiceApiHeader[] {
+  if (Array.isArray(input)) {
+    return input
+      .map(normalizeServiceApiHeader)
+      .filter((x): x is ServiceApiHeader => Boolean(x))
+  }
+  if (typeof input === 'string' && input.trim()) {
+    return [createEmptyServiceApiHeader(input.trim())]
+  }
+  return []
+}
+
+function normalizeServiceApiParamLocation(
+  input: unknown,
+): ServiceApiParamLocation {
+  if (
+    input === 'query' ||
+    input === 'param' ||
+    input === 'httpHeader' ||
+    input === 'body'
+  ) {
+    return input
+  }
+  return 'query'
+}
+
+export function normalizeServiceApiParam(input: unknown): ServiceApiParam | null {
+  if (!isPlainObject(input)) return null
+  const varName =
+    typeof input.varName === 'string'
+      ? input.varName.trim()
+      : typeof input.paramName === 'string' && input.paramName.trim()
+        ? input.paramName.trim()
+        : typeof input.name === 'string'
+          ? input.name.trim()
+          : ''
+  const typeRef =
+    typeof input.typeRef === 'string' ? input.typeRef.trim() : ''
+  let type =
+    typeof input.type === 'string' && input.type.trim()
+      ? input.type.trim()
+      : 'string'
+  if (typeRef && type === 'string') type = 'json'
+  return {
+    id: typeof input.id === 'string' && input.id ? input.id : uid('ain'),
+    varName,
+    location: normalizeServiceApiParamLocation(input.location),
+    type,
+    typeRef,
+    required: Boolean(input.required),
+    remark: typeof input.remark === 'string' ? input.remark : '',
+  }
+}
+
+function migrateLegacyApiInputs(input: Record<string, unknown>): ServiceApiParam[] {
+  const inputs: ServiceApiParam[] = []
+  const dtoRef =
+    typeof input.inputDtoRef === 'string' ? input.inputDtoRef.trim() : ''
+  if (dtoRef) {
+    inputs.push(
+      createEmptyServiceApiParam({
+        varName: 'body',
+        location: 'body',
+        type: 'json',
+        typeRef: dtoRef,
+        required: true,
+        remark: '',
+      }),
+    )
+  }
+  for (const h of normalizeServiceApiHeaders(input.headers)) {
+    if (!h.name) continue
+    inputs.push(
+      createEmptyServiceApiParam({
+        id: h.id || uid('ain'),
+        varName: h.name,
+        location: 'httpHeader',
+        type: 'string',
+        typeRef: '',
+        required: h.required,
+        remark: h.remark,
+      }),
+    )
+  }
+  return inputs
+}
+
+function normalizeServiceApiInputs(input: Record<string, unknown>): ServiceApiParam[] {
+  if (Array.isArray(input.inputs)) {
+    const list = input.inputs
+      .map(normalizeServiceApiParam)
+      .filter((x): x is ServiceApiParam => Boolean(x))
+    if (list.length) return list
+  }
+  return migrateLegacyApiInputs(input)
+}
+
 export function normalizeServiceApi(input: unknown): ServiceApi | null {
   if (!isPlainObject(input)) return null
   const name = typeof input.name === 'string' ? input.name.trim() : ''
@@ -202,9 +368,10 @@ export function normalizeServiceApi(input: unknown): ServiceApi | null {
     path: typeof input.path === 'string' ? input.path.trim() : '',
     remark: typeof input.remark === 'string' ? input.remark : '',
     method: normalizeHttpMethod(input.method),
-    inputDtoRef: typeof input.inputDtoRef === 'string' ? input.inputDtoRef.trim() : '',
-    headers: typeof input.headers === 'string' ? input.headers : '',
+    inputs: normalizeServiceApiInputs(input),
     requireAuth: Boolean(input.requireAuth),
+    debugParams: normalizeDebugParams(input.debugParams),
+    flow: normalizeMethodFlow(input.flow),
   }
 }
 
@@ -533,9 +700,23 @@ export function normalizeDebugParams(input: unknown): Record<string, unknown> {
   return out
 }
 
+export type ProcessorMethodScope = 'private' | 'public'
+
+export const PROCESSOR_METHOD_SCOPE_OPTIONS: Array<{
+  label: string
+  value: ProcessorMethodScope
+}> = [
+  { label: '私有', value: 'private' },
+  { label: '公共', value: 'public' },
+]
+
 export interface ProcessorMethod {
   id: string
   name: string
+  /** 说明 */
+  remark: string
+  /** 作用域：私有 / 公共 */
+  scope: ProcessorMethodScope
   params: ProcessorMethodParam[]
   output: ProcessorTypeExpr
   /** 数据层方法配置 */
@@ -769,6 +950,8 @@ export function createEmptyProcessorMethod(name = ''): ProcessorMethod {
   return {
     id: uid('method'),
     name,
+    remark: '',
+    scope: 'public',
     params: [],
     output: createEmptyProcessorTypeExpr(),
     dataConfig: createEmptyDataMethodConfig(),
@@ -817,6 +1000,10 @@ export function normalizeProcessorMethodParam(
   }
 }
 
+function normalizeProcessorMethodScope(input: unknown): ProcessorMethodScope {
+  return input === 'private' ? 'private' : 'public'
+}
+
 export function normalizeProcessorMethod(input: unknown): ProcessorMethod | null {
   if (!isPlainObject(input)) return null
   const params = Array.isArray(input.params)
@@ -843,6 +1030,8 @@ export function normalizeProcessorMethod(input: unknown): ProcessorMethod | null
   return {
     id: typeof input.id === 'string' && input.id ? input.id : uid('method'),
     name: typeof input.name === 'string' ? input.name.trim() : '',
+    remark: typeof input.remark === 'string' ? input.remark : '',
+    scope: normalizeProcessorMethodScope(input.scope),
     params,
     output,
     dataConfig: normalizeDataMethodConfig(input.dataConfig),

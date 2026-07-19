@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import { Handle, Position, type NodeProps } from '@vue-flow/core'
 import { useFlowDebugNode } from '../use-flow-debug-node'
+import FlowNodePrintBubble from '../FlowNodePrintBubble.vue'
 
 const props = defineProps<NodeProps>()
 const { debugClass } = useFlowDebugNode(props.id)
@@ -26,12 +27,14 @@ const summary = computed(() => {
     <div class="flow-node-kind">定义数据</div>
     <div class="flow-node-summary" :title="summary">{{ summary }}</div>
     <Handle id="default" type="source" :position="Position.Bottom" />
+    <FlowNodePrintBubble :node-id="id" />
   </div>
 </template>
 
 <style scoped>
 .flow-node {
   position: relative;
+  overflow: visible;
   min-width: 140px;
   max-width: 240px;
   padding: 8px 16px;

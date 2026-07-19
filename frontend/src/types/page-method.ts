@@ -77,27 +77,43 @@ function primitiveTsType(type: DataFieldType | undefined | null): string {
   }
 }
 
-/** 数据池字段 → 精确 TypeScript 类型（含具名类型） */
+/** 数据池字段 → 精确 TypeScript 类型（含具名类型与泛型实参） */
 export function dataFieldToTsType(
   field: Pick<
     DataField,
-    'type' | 'typeRef' | 'itemType' | 'itemTypeRef' | 'itemItemType' | 'itemItemTypeRef'
+    | 'type'
+    | 'typeRef'
+    | 'genericArgs'
+    | 'itemType'
+    | 'itemTypeRef'
+    | 'itemItemType'
+    | 'itemItemTypeRef'
   >,
   library?: DataTypeLibrary | null,
 ): string {
+  const args = field.genericArgs
   if (field.type === 'array') {
     if (field.itemType === 'array') {
       const inner =
-        namedTypeName(field.itemItemTypeRef, library) ??
-        primitiveTsType(field.itemItemType)
+        (field.itemItemTypeRef
+          ? namedTypeWithGenerics(field.itemItemTypeRef, args, library)
+          : null) ?? primitiveTsType(field.itemItemType)
       return `${inner}[][]`
     }
     const elem =
-      namedTypeName(field.itemTypeRef, library) ?? primitiveTsType(field.itemType)
+      (field.itemTypeRef
+        ? namedTypeWithGenerics(field.itemTypeRef, args, library)
+        : null) ?? primitiveTsType(field.itemType)
     return `${elem}[]`
   }
   if (field.type === 'json') {
-    return namedTypeName(field.typeRef, library) ?? 'Record<string, any>'
+    if (field.typeRef) {
+      return (
+        namedTypeWithGenerics(field.typeRef, args, library) ??
+        'Record<string, any>'
+      )
+    }
+    return 'Record<string, any>'
   }
   return primitiveTsType(field.type)
 }

@@ -8,6 +8,8 @@
     {
       "id": "method_mrqfmd1j_ah6zjv",
       "name": "list",
+      "remark": "",
+      "scope": "public",
       "params": [
         {
           "id": "param_mrqfn5od_2x0r2s",
@@ -39,10 +41,10 @@
         }
       ],
       "output": {
-        "type": "json",
-        "typeRef": "type_mrnx6ke8_4d7vry",
-        "itemType": "",
-        "itemTypeRef": "",
+        "type": "array",
+        "typeRef": "",
+        "itemType": "json",
+        "itemTypeRef": "type_mrnx6ke8_4d7vry",
         "itemItemType": "",
         "itemItemTypeRef": "",
         "genericArgs": {}
@@ -54,7 +56,8 @@
           "name",
           "id",
           "price",
-          "stock"
+          "stock",
+          "img"
         ],
         "sql": "",
         "fieldMappings": [],
@@ -79,7 +82,7 @@
       "debugParams": {
         "pageDto": {
           "current": 1,
-          "pageSize": 30
+          "pageSize": 2
         },
         "keyword": ""
       },
@@ -101,6 +104,8 @@
     {
       "id": "method_mrqgzrbx_jl23n8",
       "name": "saveBatch",
+      "remark": "",
+      "scope": "public",
       "params": [
         {
           "id": "param_mrqgztqe_3d0ofu",
@@ -133,6 +138,10 @@
         "sql": "",
         "fieldMappings": [
           {
+            "field": "id",
+            "column": "data.id"
+          },
+          {
             "field": "name",
             "column": "data.name"
           },
@@ -143,6 +152,10 @@
           {
             "field": "stock",
             "column": "data.stock"
+          },
+          {
+            "field": "img",
+            "column": "data.img"
           }
         ],
         "batchSourceParam": "data",
@@ -151,16 +164,11 @@
       "debugParams": {
         "data": [
           {
-            "id": "1",
-            "name": "",
-            "price": 0,
-            "stock": 0
-          },
-          {
             "id": "",
-            "name": "",
-            "price": 0,
-            "stock": 0
+            "name": "西瓜",
+            "price": 5,
+            "stock": 0,
+            "img": "https://ts1.tc.mm.bing.net/th/id/OIP-C.VYeFdqnHf_wvawoowpcgaAAAAA?w=108&h=108&c=1&bgcl=6e80fd&r=0&o=7&pid=ImgRC&rm=3"
           }
         ]
       },
@@ -182,6 +190,8 @@
     {
       "id": "method_mrqir4sh_3tqdfb",
       "name": "save",
+      "remark": "",
+      "scope": "public",
       "params": [
         {
           "id": "param_mrqir9lm_425rtw",
@@ -224,6 +234,10 @@
           {
             "field": "stock",
             "column": "data.stock"
+          },
+          {
+            "field": "img",
+            "column": "data.img"
           }
         ],
         "batchSourceParam": "",
@@ -232,9 +246,10 @@
       "debugParams": {
         "data": {
           "id": "",
-          "name": "输入",
-          "price": 4,
-          "stock": 4
+          "name": "哈密瓜",
+          "price": 299.99,
+          "stock": 4,
+          "img": "https://ts3.tc.mm.bing.net/th/id/OIP-C.R1kFUsXP2QVRw6S7sOyPPAAAAA?w=108&h=108&c=1&bgcl=d4ffc6&r=0&o=7&pid=ImgRC&rm=3"
         }
       },
       "flow": {
@@ -255,13 +270,15 @@
     {
       "id": "method_mrqp6qd5_10mqd0",
       "name": "deleteById",
+      "remark": "",
+      "scope": "public",
       "params": [
         {
           "id": "param_mrqp703k_4pjd6t",
           "name": "id",
           "remark": "",
           "typeExpr": {
-            "type": "number",
+            "type": "string",
             "typeRef": "",
             "itemType": "",
             "itemTypeRef": "",
@@ -289,10 +306,10 @@
         "batchSourceParam": "",
         "conditionGroups": [
           {
-            "id": "cg_mrqp7c88_0wdd4q",
+            "id": "cg_mrs1tc6l_btboo7",
             "conditions": [
               {
-                "id": "cond_mrqp7c88_24ofns",
+                "id": "cond_mrs1tc6m_woih4c",
                 "field": "id",
                 "customField": "",
                 "op": "eq",
@@ -305,7 +322,7 @@
         ]
       },
       "debugParams": {
-        "id": 2
+        "id": "34"
       },
       "flow": {
         "nodes": [
@@ -325,6 +342,8 @@
     {
       "id": "method_mrqs4khy_m96gpp",
       "name": "count",
+      "remark": "",
+      "scope": "public",
       "params": [
         {
           "id": "param_mrqs5o1s_3cwjs4",
@@ -354,18 +373,18 @@
         "source": "mysql",
         "operation": "custom",
         "queryFields": [],
-        "sql": "select count(id) as c from goods where name like '%{keyword}%'",
+        "sql": "SELECT COUNT(id) FROM {TABLE_NAME}\r\n<if test=\"keyword != '' && keyword != null\">\r\n  WHERE name LIKE CONCAT('%',#{keyword},'%')\r\n</if>",
         "fieldMappings": [
           {
             "field": "value",
-            "column": "c"
+            "column": "COUNT(id)"
           }
         ],
         "batchSourceParam": "",
         "conditionGroups": []
       },
       "debugParams": {
-        "keyword": "1ds"
+        "keyword": ""
       },
       "flow": {
         "nodes": [

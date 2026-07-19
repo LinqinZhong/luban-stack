@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { Delete, EditPen, Plus, Setting } from '@element-plus/icons-vue'
+import { Plus } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import TypeConfigDialog from './TypeConfigDialog.vue'
 import TypeTsEditDialog from './TypeTsEditDialog.vue'
@@ -501,7 +501,7 @@ const namedOptionsForConfig = computed(() => {
                   <el-button
                     type="primary"
                     link
-                    :icon="EditPen"
+                    size="small"
                     @click="openTsEdit($index)"
                   >
                     {{ isPresetTypeRow(row) ? '查看' : '编辑' }}
@@ -550,30 +550,26 @@ const namedOptionsForConfig = computed(() => {
               </template>
             </el-table-column>
 
-            <el-table-column label="配置" width="100" align="center">
+            <el-table-column label="操作" width="140" align="center" fixed="right">
               <template #default="{ row, $index }">
                 <el-button
                   v-if="kindNeedsConfig(row.kind)"
                   type="primary"
                   link
-                  :icon="Setting"
+                  size="small"
                   @click="openConfig($index)"
                 >
                   {{ isPresetTypeRow(row) ? '查看' : '配置' }}
                 </el-button>
-                <span v-else class="cfg-na">—</span>
-              </template>
-            </el-table-column>
-
-            <el-table-column label="操作" width="72" align="center">
-              <template #default="{ row, $index }">
                 <el-button
                   type="danger"
                   link
-                  :icon="Delete"
+                  size="small"
                   :disabled="isPresetTypeRow(row)"
                   @click="removeType($index)"
-                />
+                >
+                  删除
+                </el-button>
               </template>
             </el-table-column>
           </el-table>
@@ -734,10 +730,6 @@ const namedOptionsForConfig = computed(() => {
 
 .common-readonly-tip {
   flex-shrink: 0;
-}
-
-.cfg-na {
-  color: #c0c4cc;
 }
 
 :deep(.el-table) {

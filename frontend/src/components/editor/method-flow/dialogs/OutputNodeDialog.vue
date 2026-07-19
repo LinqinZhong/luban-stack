@@ -9,6 +9,7 @@ import type { DataTypeLibrary } from '../../../../types/data-types'
 import type { MethodParam } from '../../../../types/page-method'
 import { processorTypeExprToTs } from '../../../../types/page-method'
 import TypedBindingCascader from '../TypedBindingCascader.vue'
+import FlowPrintField from '../FlowPrintField.vue'
 
 /** 输出节点：绑定数据层写入类方法 */
 export type OutputNodeForm = {
@@ -19,6 +20,7 @@ export type OutputNodeForm = {
   /** 可选：写入结果变量名 */
   resultVarName: string
   description: string
+  printExpr: string
 }
 
 const WRITE_OPERATIONS = new Set<DataMethodOperation>([
@@ -58,6 +60,7 @@ const draft = reactive<OutputNodeForm>({
   paramBindings: {},
   resultVarName: '',
   description: '',
+  printExpr: '',
 })
 
 const visible = computed({
@@ -206,6 +209,7 @@ function handleSave() {
     paramBindings,
     resultVarName: draft.resultVarName.trim(),
     description: draft.description.trim(),
+    printExpr: draft.printExpr.trim(),
   })
   visible.value = false
 }
@@ -297,6 +301,12 @@ function handleSave() {
           placeholder="显示在流程节点上"
         />
       </el-form-item>
+      <el-form-item label="打印">
+        <FlowPrintField
+          v-model="draft.printExpr"
+          :ambient-names="ambientVars.map((v) => v.name).filter(Boolean)"
+        />
+      </el-form-item>
     </el-form>
     <template #footer>
       <el-button @click="visible = false">取消</el-button>
@@ -335,26 +345,28 @@ function handleSave() {
 }
 
 .param-row {
+  width: 100%;
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 10px;
 }
 
 .param-name {
   flex: 0 0 128px;
   box-sizing: border-box;
-  min-height: 32px;
-  padding: 4px 8px;
+  height: 32px;
+  padding: 0 8px;
   border: 1px solid #dcdfe6;
   border-radius: 4px;
   background: #f5f7fa;
   font-size: 13px;
   color: #606266;
-  line-height: 1.3;
+  line-height: 30px;
   display: flex;
-  flex-direction: column;
-  justify-content: center;
+  align-items: center;
+  gap: 6px;
   overflow: hidden;
+  white-space: nowrap;
 }
 
 .param-type {
@@ -364,9 +376,16 @@ function handleSave() {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  min-width: 0;
 }
 
 .param-bind {
+  flex: 1 1 0;
+  min-width: 0;
+  width: 0;
+}
+
+.flow-node-form :deep(.el-form-item__content) {
   flex: 1;
   min-width: 0;
 }

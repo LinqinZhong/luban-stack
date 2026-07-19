@@ -12,12 +12,15 @@ import {
   processorTypeExprToMethodParamType,
   processorTypeExprToTs,
 } from '../../../types/page-method'
-import type { MethodParam } from '../../../types/page-method'
+import type { MethodParam, MethodParamType, MethodReturnType } from '../../../types/page-method'
+import { flowDraftToTypeExpr } from '../../../utils/flow-type-select'
 
 export type FlowDebugSnapshot = {
   cursorNodeId: string
   scope: Record<string, unknown>
   visitedNodeIds: string[]
+  /** 各已执行节点的打印文案 */
+  printByNode?: Record<string, string>
 }
 
 export type FlowAmbientVar = MethodParam & {
@@ -72,26 +75,13 @@ export function collectAncestorIds(flow: MethodFlow, targetId: string): Set<stri
   return ancestors
 }
 
-function namedTypeTs(
-  typeRef: string,
-  library: DataTypeLibrary | null | undefined,
-): string {
-  if (!typeRef) return ''
-  for (const group of library?.groups ?? []) {
-    const hit = group.types.find((t) => t.id === typeRef)
-    const name = hit?.name?.trim()
-    if (name) return name
-  }
-  return ''
-}
-
-function findDataMethod(
-  dataProcessors: ServiceProcessor[],
+function findProcessorMethod(
+  processors: ServiceProcessor[],
   processorId: string,
   methodId: string,
 ): ProcessorMethod | null {
   if (!processorId || !methodId) return null
-  const proc = dataProcessors.find((p) => p.id === processorId)
+  const proc = processors.find((p) => p.id === processorId)
   return proc?.methods.find((m) => m.id === methodId) ?? null
 }
 
@@ -99,16 +89,27 @@ function varFromNode(
   node: FlowNode,
   dataProcessors: ServiceProcessor[],
   library: DataTypeLibrary | null | undefined,
+  businessProcessors: ServiceProcessor[] = [],
 ): MethodParam | null {
   const data = asRecord(node.data)
   if (node.kind === 'input') {
     const varName = str(data, 'varName')
     if (!varName) return null
-    const method = findDataMethod(
-      dataProcessors,
-      str(data, 'dataProcessorId'),
-      str(data, 'dataMethodId'),
-    )
+    const dataSource = str(data, 'dataSource')
+    if (dataSource === 'request_header') {
+      return { name: varName, type: 'string', tsType: 'string' }
+    }
+    const method =
+      findProcessorMethod(
+        dataProcessors,
+        str(data, 'dataProcessorId'),
+        str(data, 'dataMethodId'),
+      ) ??
+      findProcessorMethod(
+        businessProcessors,
+        str(data, 'dataProcessorId'),
+        str(data, 'dataMethodId'),
+      )
     if (method?.output) {
       return {
         name: varName,
@@ -122,52 +123,63 @@ function varFromNode(
   if (node.kind === 'define') {
     const varName = str(data, 'varName')
     if (!varName) return null
-    const valueType = str(data, 'valueType') || 'any'
-    const valueTypeRef = str(data, 'valueTypeRef')
-    const tsType = namedTypeTs(valueTypeRef, library)
+    const valueType = (str(data, 'valueType') || 'any') as MethodParamType
+    const genericArgsRaw = asRecord(data.valueGenericArgs)
+    const genericArgs: Record<string, string> = {}
+    for (const [k, v] of Object.entries(genericArgsRaw)) {
+      if (typeof v === 'string') genericArgs[k] = v
+    }
+    const typeExpr = flowDraftToTypeExpr({
+      type: valueType,
+      typeRef: str(data, 'valueTypeRef'),
+      itemType: str(data, 'valueItemType'),
+      itemTypeRef: str(data, 'valueItemTypeRef'),
+      itemItemType: str(data, 'valueItemItemType'),
+      itemItemTypeRef: str(data, 'valueItemItemTypeRef'),
+      genericArgs,
+    })
+    const tsType = processorTypeExprToTs(typeExpr, library)
     return {
       name: varName,
-      type: valueType as MethodParam['type'],
-      typeExpr: {
-        type: valueType === 'object' ? 'json' : valueType,
-        typeRef: valueTypeRef,
-        itemType: valueType === 'array' ? 'any' : '',
-        itemTypeRef: '',
-        itemItemType: '',
-        itemItemTypeRef: '',
-        genericArgs: {},
-      },
+      type: valueType,
+      typeExpr,
       ...(tsType ? { tsType } : {}),
     }
   }
   if (node.kind === 'action') {
     const varName = str(data, 'outputVarName')
     if (!varName) return null
-    const outputType = str(data, 'outputType') || 'void'
+    const outputType = (str(data, 'outputType') || 'void') as MethodReturnType
     const outputTypeRef = str(data, 'outputTypeRef')
     if (outputType === 'void' && !outputTypeRef) return null
-    const tsType = namedTypeTs(outputTypeRef, library)
     const type =
       outputType === 'void' ? 'object' : (outputType as MethodParam['type'])
+    const genericArgsRaw = asRecord(data.outputGenericArgs)
+    const genericArgs: Record<string, string> = {}
+    for (const [k, v] of Object.entries(genericArgsRaw)) {
+      if (typeof v === 'string') genericArgs[k] = v
+    }
+    const typeExpr = flowDraftToTypeExpr({
+      type: outputType === 'void' ? 'object' : outputType,
+      typeRef: outputTypeRef,
+      itemType: str(data, 'outputItemType'),
+      itemTypeRef: str(data, 'outputItemTypeRef'),
+      itemItemType: str(data, 'outputItemItemType'),
+      itemItemTypeRef: str(data, 'outputItemItemTypeRef'),
+      genericArgs,
+    })
+    const tsType = processorTypeExprToTs(typeExpr, library)
     return {
       name: varName,
       type,
-      typeExpr: {
-        type: type === 'object' ? 'json' : type,
-        typeRef: outputTypeRef,
-        itemType: type === 'array' ? 'any' : '',
-        itemTypeRef: '',
-        itemItemType: '',
-        itemItemTypeRef: '',
-        genericArgs: {},
-      },
+      typeExpr,
       ...(tsType ? { tsType } : {}),
     }
   }
   if (node.kind === 'output') {
     const varName = str(data, 'resultVarName')
     if (!varName) return null
-    const method = findDataMethod(
+    const method = findProcessorMethod(
       dataProcessors,
       str(data, 'dataProcessorId'),
       str(data, 'dataMethodId'),
@@ -191,6 +203,7 @@ export function ambientVarsAtNode(options: {
   nodeId: string | null
   methodParams: ProcessorMethodParam[]
   dataProcessors: ServiceProcessor[]
+  businessProcessors?: ServiceProcessor[]
   typeLibrary?: DataTypeLibrary | null
   scope?: Record<string, unknown>
 }): FlowAmbientVar[] {
@@ -199,6 +212,7 @@ export function ambientVarsAtNode(options: {
     nodeId,
     methodParams,
     dataProcessors,
+    businessProcessors = [],
     typeLibrary,
     scope = {},
   } = options
@@ -231,7 +245,12 @@ export function ambientVarsAtNode(options: {
   for (const n of flow.nodes) {
     if (!ancestors.has(n.id)) continue
     // 当前节点产生的变量在「执行完当前」后才可见；选中查看时包含自身定义
-    const param = varFromNode(n, dataProcessors, typeLibrary)
+    const param = varFromNode(
+      n,
+      dataProcessors,
+      typeLibrary,
+      businessProcessors,
+    )
     if (param) push(param)
   }
 
@@ -242,6 +261,49 @@ export function ambientVarsAtNode(options: {
   }
 
   return vars
+}
+
+/**
+ * 从 API / 方法 flow 的 end.returnExpr 推断返回值类型。
+ * 仅当 returnExpr 为合法标识符且能对应前驱变量时给出精确类型，否则 any。
+ */
+export function resolveFlowReturnMethodParam(options: {
+  flow: MethodFlow | null | undefined
+  dataProcessors?: ServiceProcessor[]
+  businessProcessors?: ServiceProcessor[]
+  typeLibrary?: DataTypeLibrary | null
+  methodParams?: ProcessorMethodParam[]
+}): MethodParam {
+  const flow = options.flow
+  const fallback: MethodParam = { name: 'data', type: 'any', tsType: 'any' }
+  if (!flow?.nodes?.length) return fallback
+
+  const end =
+    flow.nodes.find((n) => {
+      if (n.kind !== 'end') return false
+      return Boolean(str(asRecord(n.data), 'returnExpr'))
+    }) ?? flow.nodes.find((n) => n.kind === 'end')
+  if (!end) return fallback
+
+  const returnExpr = str(asRecord(end.data), 'returnExpr')
+  if (!returnExpr || !/^[A-Za-z_$][\w$]*$/.test(returnExpr)) return fallback
+
+  const vars = ambientVarsAtNode({
+    flow,
+    nodeId: end.id,
+    methodParams: options.methodParams ?? [],
+    dataProcessors: options.dataProcessors ?? [],
+    businessProcessors: options.businessProcessors ?? [],
+    typeLibrary: options.typeLibrary,
+  })
+  const hit = vars.find((v) => v.name === returnExpr)
+  if (!hit) return fallback
+  return {
+    name: 'data',
+    type: hit.type,
+    tsType: hit.tsType || 'any',
+    typeExpr: hit.typeExpr,
+  }
 }
 
 function evalInScope(expression: string, scope: Record<string, unknown>): unknown {
@@ -257,11 +319,79 @@ function evalInScope(expression: string, scope: Record<string, unknown>): unknow
 function runActionCode(code: string, scope: Record<string, unknown>): unknown {
   const body = code.trim()
   if (!body) return undefined
-  const keys = Object.keys(scope)
-  const values = keys.map((k) => scope[k])
+  // 仅合法标识符可作为参数；赋值后写回 scope，避免 `x = …` 只改局部变量
+  const keys = Object.keys(scope).filter((k) => /^[A-Za-z_$][\w$]*$/.test(k))
+  const writeBack = keys
+    .map((k) => `scope[${JSON.stringify(k)}] = ${k};`)
+    .join('\n')
   // eslint-disable-next-line no-new-func
-  const fn = new Function(...keys, `"use strict";\n${body}`)
-  return fn(...values)
+  const fn = new Function(
+    ...keys,
+    'scope',
+    `"use strict";\n${body}\n${writeBack}`,
+  )
+  const values = keys.map((k) => scope[k])
+  return fn(...values, scope)
+}
+
+/** 节点「打印」配置：按 console.log 多参求值，多项换行展示 */
+export function evalPrintExpr(
+  printExpr: string,
+  scope: Record<string, unknown>,
+): string | null {
+  const expr = printExpr.trim()
+  if (!expr) return null
+
+  function formatOne(value: unknown): string {
+    if (value === undefined) return 'undefined'
+    if (value === null) return 'null'
+    if (typeof value === 'string') return value
+    if (typeof value === 'number' || typeof value === 'boolean') {
+      return String(value)
+    }
+    try {
+      return JSON.stringify(value, null, 2)
+    } catch {
+      return String(value)
+    }
+  }
+
+  try {
+    const keys = Object.keys(scope)
+    const values = keys.map((k) => scope[k])
+    // 与 console.log(a, b) 一致：逗号分隔多参 → 气泡中换行
+    // eslint-disable-next-line no-new-func
+    const fn = new Function(...keys, `"use strict"; return [${expr}];`)
+    const parts = fn(...values) as unknown
+    if (Array.isArray(parts)) {
+      if (!parts.length) return ''
+      return parts.map(formatOne).join('\n')
+    }
+    return formatOne(parts)
+  } catch (err) {
+    try {
+      return formatOne(evalInScope(expr, scope))
+    } catch {
+      return `Error: ${err instanceof Error ? err.message : String(err)}`
+    }
+  }
+}
+
+function resolvePrintText(
+  data: Record<string, unknown>,
+  scope: Record<string, unknown>,
+): string | null {
+  return evalPrintExpr(str(data, 'printExpr'), scope)
+}
+
+function withPrint(
+  result: FlowStepResult,
+  data: Record<string, unknown>,
+  scope: Record<string, unknown>,
+): FlowStepResult {
+  const printText = resolvePrintText(data, scope)
+  if (printText == null) return result
+  return { ...result, printText }
 }
 
 function resolveParamBindings(
@@ -282,6 +412,76 @@ function resolveParamBindings(
   return out
 }
 
+export function extractFlowReturnValue(
+  flow: MethodFlow,
+  snap: FlowDebugSnapshot,
+): unknown {
+  for (let i = snap.visitedNodeIds.length - 1; i >= 0; i--) {
+    const node = findNode(flow, snap.visitedNodeIds[i]!)
+    if (node?.kind !== 'end') continue
+    const returnExpr = str(asRecord(node.data), 'returnExpr')
+    if (!returnExpr) return undefined
+    try {
+      return evalInScope(returnExpr, snap.scope)
+    } catch (err) {
+      throw new Error(
+        `业务方法返回值求值失败：${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      )
+    }
+  }
+  const end = flow.nodes.find((n) => n.kind === 'end')
+  if (!end) return undefined
+  const returnExpr = str(asRecord(end.data), 'returnExpr')
+  if (!returnExpr) return undefined
+  try {
+    return evalInScope(returnExpr, snap.scope)
+  } catch {
+    return undefined
+  }
+}
+
+/** 调试执行业务方法工作流，返回终止节点配置的返回值 */
+async function debugRunBusinessMethod(
+  ctx: FlowStepContext,
+  processorId: string,
+  methodId: string,
+  params: Record<string, unknown>,
+): Promise<unknown> {
+  const stackKey = `${processorId}::${methodId}`
+  const stack = ctx.businessCallStack ?? []
+  if (stack.includes(stackKey)) {
+    throw new Error(`业务方法循环调用：${stackKey}`)
+  }
+  if (stack.length >= 16) {
+    throw new Error('业务方法调用嵌套过深')
+  }
+  const method = findProcessorMethod(
+    ctx.businessProcessors ?? [],
+    processorId,
+    methodId,
+  )
+  if (!method) {
+    throw new Error(`业务方法不存在：${stackKey}`)
+  }
+  const flow = method.flow
+  if (!flow?.nodes?.length) {
+    throw new Error(
+      `业务方法「${method.name || methodId}」尚未配置工作流`,
+    )
+  }
+  const snap = await runFlowToEnd(
+    {
+      ...ctx,
+      flow,
+      businessCallStack: [...stack, stackKey],
+    },
+    params,
+  )
+  return extractFlowReturnValue(flow, snap)
+}
+
 function defaultForType(type: string): unknown {
   if (type === 'number') return 0
   if (type === 'boolean') return false
@@ -296,7 +496,14 @@ export type FlowStepContext = {
   serviceId: string
   flow: MethodFlow
   dataProcessors: ServiceProcessor[]
+  /** 业务层处理器（输入节点「业务」来源） */
+  businessProcessors?: ServiceProcessor[]
   dryRun: boolean
+  /** 调试用请求头（输入节点「请求头」来源） */
+  requestHeaders?: Record<string, unknown>
+  debugHeaders?: Record<string, unknown>
+  /** 业务方法调用栈，防止循环 */
+  businessCallStack?: string[]
 }
 
 export type FlowStepResult = {
@@ -305,6 +512,8 @@ export type FlowStepResult = {
   nextNodeId: string | null
   /** 分支选择等日志 */
   log?: string
+  /** console.log 打印文案 */
+  printText?: string | null
 }
 
 function outgoingEdges(flow: MethodFlow, sourceId: string): FlowEdge[] {
@@ -356,13 +565,12 @@ export async function executeFlowNode(
 
   const scope = cloneScope(scopeIn)
   const data = asRecord(node.data)
+  let result: FlowStepResult
 
   if (node.kind === 'start') {
     const next = pickNext(ctx.flow, node, scope)
-    return { scope, nextNodeId: next.nextId }
-  }
-
-  if (node.kind === 'define') {
+    result = { scope, nextNodeId: next.nextId }
+  } else if (node.kind === 'define') {
     const varName = str(data, 'varName')
     const initExpr = str(data, 'initExpr')
     const valueType = str(data, 'valueType') || 'any'
@@ -382,36 +590,69 @@ export async function executeFlowNode(
       }
     }
     const next = pickNext(ctx.flow, node, scope)
-    return { scope, nextNodeId: next.nextId, log: next.log }
-  }
-
-  if (node.kind === 'input') {
+    result = { scope, nextNodeId: next.nextId, log: next.log }
+  } else if (node.kind === 'input') {
     const varName = str(data, 'varName')
-    const processorId = str(data, 'dataProcessorId')
-    const methodId = str(data, 'dataMethodId')
+    const dataSource = str(data, 'dataSource') || 'other_data'
     if (!varName) throw new Error('输入节点未配置变量名')
-    if (!processorId || !methodId) throw new Error('输入节点未配置数据方法')
 
-    const bindingsRaw = asRecord(data.paramBindings)
-    const bindings: Record<string, string> = {}
-    for (const [k, v] of Object.entries(bindingsRaw)) {
-      if (typeof v === 'string') bindings[k] = v
+    if (dataSource === 'request_header') {
+      const headerField = str(data, 'headerField') || 'user-id'
+      const headers = {
+        ...asRecord(ctx.debugHeaders),
+        ...asRecord(ctx.requestHeaders),
+      }
+      const headerVal = headers[headerField]
+      scope[varName] = headerVal != null ? headerVal : ''
+      const next = pickNext(ctx.flow, node, scope)
+      result = { scope, nextNodeId: next.nextId, log: next.log }
+    } else if (
+      dataSource === 'current_business' ||
+      dataSource === 'other_business'
+    ) {
+      const processorId = str(data, 'dataProcessorId')
+      const methodId = str(data, 'dataMethodId')
+      if (!processorId || !methodId) {
+        throw new Error('输入节点未配置业务方法')
+      }
+      const bindingsRaw = asRecord(data.paramBindings)
+      const bindings: Record<string, string> = {}
+      for (const [k, v] of Object.entries(bindingsRaw)) {
+        if (typeof v === 'string') bindings[k] = v
+      }
+      const params = resolveParamBindings(bindings, scope)
+      scope[varName] = await debugRunBusinessMethod(
+        ctx,
+        processorId,
+        methodId,
+        params,
+      )
+      const next = pickNext(ctx.flow, node, scope)
+      result = { scope, nextNodeId: next.nextId, log: next.log }
+    } else {
+      const processorId = str(data, 'dataProcessorId')
+      const methodId = str(data, 'dataMethodId')
+      if (!processorId || !methodId) throw new Error('输入节点未配置数据方法')
+
+      const bindingsRaw = asRecord(data.paramBindings)
+      const bindings: Record<string, string> = {}
+      for (const [k, v] of Object.entries(bindingsRaw)) {
+        if (typeof v === 'string') bindings[k] = v
+      }
+      const params = resolveParamBindings(bindings, scope)
+      const apiResult = await debugDataLayerMethod({
+        projectPath: ctx.projectPath,
+        serviceId: ctx.serviceId,
+        processorId,
+        methodId,
+        params,
+        dryRun: ctx.dryRun,
+      })
+      scope[varName] = apiResult.output
+      const next = pickNext(ctx.flow, node, scope)
+      result = { scope, nextNodeId: next.nextId, log: next.log }
     }
-    const params = resolveParamBindings(bindings, scope)
-    const result = await debugDataLayerMethod({
-      projectPath: ctx.projectPath,
-      serviceId: ctx.serviceId,
-      processorId,
-      methodId,
-      params,
-      dryRun: ctx.dryRun,
-    })
-    scope[varName] = result.output
-    const next = pickNext(ctx.flow, node, scope)
-    return { scope, nextNodeId: next.nextId, log: next.log }
-  }
-
-  if (node.kind === 'action') {
+  } else if (node.kind === 'action') {
     const code = str(data, 'code')
     const outputVar = str(data, 'outputVarName')
     try {
@@ -423,15 +664,11 @@ export async function executeFlowNode(
       )
     }
     const next = pickNext(ctx.flow, node, scope)
-    return { scope, nextNodeId: next.nextId, log: next.log }
-  }
-
-  if (node.kind === 'branch') {
+    result = { scope, nextNodeId: next.nextId, log: next.log }
+  } else if (node.kind === 'branch') {
     const next = pickNext(ctx.flow, node, scope)
-    return { scope, nextNodeId: next.nextId, log: next.log }
-  }
-
-  if (node.kind === 'output') {
+    result = { scope, nextNodeId: next.nextId, log: next.log }
+  } else if (node.kind === 'output') {
     const processorId = str(data, 'dataProcessorId')
     const methodId = str(data, 'dataMethodId')
     if (!processorId || !methodId) throw new Error('输出节点未配置数据层写入方法')
@@ -442,7 +679,7 @@ export async function executeFlowNode(
       if (typeof v === 'string') bindings[k] = v
     }
     const params = resolveParamBindings(bindings, scope)
-    const result = await debugDataLayerMethod({
+    const apiResult = await debugDataLayerMethod({
       projectPath: ctx.projectPath,
       serviceId: ctx.serviceId,
       processorId,
@@ -451,18 +688,28 @@ export async function executeFlowNode(
       dryRun: ctx.dryRun,
     })
     const resultVar = str(data, 'resultVarName')
-    if (resultVar) scope[resultVar] = result.output
+    if (resultVar) scope[resultVar] = apiResult.output
     const next = pickNext(ctx.flow, node, scope)
-    return { scope, nextNodeId: next.nextId, log: next.log }
+    result = { scope, nextNodeId: next.nextId, log: next.log }
+  } else if (node.kind === 'end') {
+    const next = pickNext(ctx.flow, node, scope)
+    result = { scope, nextNodeId: next.nextId, log: next.log }
+  } else {
+    const next = pickNext(ctx.flow, node, scope)
+    result = { scope, nextNodeId: next.nextId, log: next.log }
   }
 
-  if (node.kind === 'end') {
-    const next = pickNext(ctx.flow, node, scope)
-    return { scope, nextNodeId: next.nextId, log: next.log }
-  }
+  return withPrint(result, data, result.scope)
+}
 
-  const next = pickNext(ctx.flow, node, scope)
-  return { scope, nextNodeId: next.nextId, log: next.log }
+function mergePrint(
+  prev: Record<string, string> | undefined,
+  nodeId: string,
+  printText: string | null | undefined,
+): Record<string, string> {
+  const next = { ...(prev ?? {}) }
+  if (printText != null && printText !== '') next[nodeId] = printText
+  return next
 }
 
 /** 任选一条从 start 到 target 的简单路径（节点 id 序列） */
@@ -519,17 +766,20 @@ export async function runFlowToNode(
 
   let scope = cloneScope(initialScope)
   const visited: string[] = []
+  let printByNode: Record<string, string> = {}
 
   for (const nodeId of path) {
     const step = await executeFlowNode(ctx, nodeId, scope)
     scope = step.scope
     visited.push(nodeId)
+    printByNode = mergePrint(printByNode, nodeId, step.printText)
   }
 
   return {
     cursorNodeId: targetNodeId,
     scope,
     visitedNodeIds: visited,
+    printByNode,
   }
 }
 
@@ -560,6 +810,11 @@ export async function runFlowNext(
       cursorNodeId: snapshot.cursorNodeId,
       scope: step.scope,
       visitedNodeIds: [...snapshot.visitedNodeIds, snapshot.cursorNodeId],
+      printByNode: mergePrint(
+        snapshot.printByNode,
+        snapshot.cursorNodeId,
+        step.printText,
+      ),
     }
   }
 
@@ -572,7 +827,35 @@ export async function runFlowNext(
     cursorNodeId: nextId,
     scope: step.scope,
     visitedNodeIds: [...snapshot.visitedNodeIds, nextId],
+    printByNode: mergePrint(snapshot.printByNode, nextId, step.printText),
   }
+}
+
+/** 从开始节点一路执行到流程结束（列表调试「执行」） */
+export async function runFlowToEnd(
+  ctx: FlowStepContext,
+  initialScope: Record<string, unknown>,
+): Promise<FlowDebugSnapshot> {
+  const start = findStartNode(ctx.flow)
+  if (!start) throw new Error('工作流缺少开始节点')
+
+  let snap: FlowDebugSnapshot = {
+    cursorNodeId: start.id,
+    scope: cloneScope(initialScope),
+    visitedNodeIds: [],
+    printByNode: {},
+  }
+
+  const maxSteps = Math.max(64, ctx.flow.nodes.length * 4)
+  for (let i = 0; i < maxSteps; i++) {
+    const done = snap.visitedNodeIds.includes(snap.cursorNodeId)
+    if (done) {
+      const nextId = peekNextNodeId(ctx.flow, snap.cursorNodeId, snap.scope)
+      if (!nextId) return snap
+    }
+    snap = await runFlowNext(ctx, snap)
+  }
+  throw new Error('执行步数过多，请检查工作流是否存在环')
 }
 
 /** 类型标签（调试面板展示） */
