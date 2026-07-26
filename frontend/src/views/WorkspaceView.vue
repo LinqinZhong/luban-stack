@@ -1263,13 +1263,19 @@ async function openPage(
       ? { ...detail, xml: migrated.xml }
       : detail
 
-    // 预览数据先离屏准备好，再与页面一并提交，避免先空后满闪一下
+    // 预览：先关生命周期闸门 → 备好并 commit 数据池 → 再换页 → 再放行执行
+    const inPreview = workspaceMode.value === 'preview'
     let nextPreview: import('../types/page-data').PageData | null = null
     let nextCompMap: ComponentRenderMap | null = null
-    if (workspaceMode.value === 'preview') {
+    if (inPreview) {
+      previewLifecycleGate.value = 0
+      await nextTick()
       const prepared = await buildPreviewRuntimeSnapshot(nextPage.data)
       nextPreview = prepared.data
       nextCompMap = prepared.componentMap
+      commitPreviewRuntime(nextPreview, nextCompMap)
+    } else {
+      clearPreviewRuntime()
     }
 
     resourceKind.value = 'page'
@@ -1281,11 +1287,10 @@ async function openPage(
       await handleXmlUpdate(migrated.xml)
     }
 
-    if (workspaceMode.value === 'preview' && nextPreview && nextCompMap) {
-      commitPreviewRuntime(nextPreview, nextCompMap)
+    if (inPreview && nextPreview) {
+      previewLifecycleGate.value += 1
+      await nextTick()
       await fireControllerBindingEvents(nextPreview)
-    } else {
-      clearPreviewRuntime()
     }
     await syncLifecycleSession()
   } catch (err) {
@@ -1316,12 +1321,18 @@ async function openComponent(componentId: string) {
       ? { ...detail, xml: migrated.xml }
       : detail
 
+    const inPreview = workspaceMode.value === 'preview'
     let nextPreview: import('../types/page-data').PageData | null = null
     let nextCompMap: ComponentRenderMap | null = null
-    if (workspaceMode.value === 'preview') {
+    if (inPreview) {
+      previewLifecycleGate.value = 0
+      await nextTick()
       const prepared = await buildPreviewRuntimeSnapshot(nextComponent.data)
       nextPreview = prepared.data
       nextCompMap = prepared.componentMap
+      commitPreviewRuntime(nextPreview, nextCompMap)
+    } else {
+      clearPreviewRuntime()
     }
 
     resourceKind.value = 'component'
@@ -1334,11 +1345,10 @@ async function openComponent(componentId: string) {
       await handleXmlUpdate(migrated.xml)
     }
 
-    if (workspaceMode.value === 'preview' && nextPreview && nextCompMap) {
-      commitPreviewRuntime(nextPreview, nextCompMap)
+    if (inPreview && nextPreview) {
+      previewLifecycleGate.value += 1
+      await nextTick()
       await fireControllerBindingEvents(nextPreview)
-    } else {
-      clearPreviewRuntime()
     }
     await syncLifecycleSession()
   } catch (err) {
