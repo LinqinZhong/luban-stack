@@ -46,7 +46,7 @@ import { Controls } from '@vue-flow/controls'
 import '@vue-flow/core/dist/style.css'
 import '@vue-flow/core/dist/theme-default.css'
 import '@vue-flow/controls/dist/style.css'
-import { ArrowLeft, Plus } from '@element-plus/icons-vue'
+import { Plus } from '@element-plus/icons-vue'
 import type {
   FlowNodeKind,
   MethodFlow,
@@ -87,6 +87,7 @@ import StartNodeDialog from './dialogs/StartNodeDialog.vue'
 import { FLOW_DEBUG_KEY } from './flow-debug-inject'
 import FlowHelperLines from './FlowHelperLines.vue'
 import { getHelperLines } from './helper-lines'
+import BackLink from '../BackLink.vue'
 
 const nodeTypes = methodFlowNodeTypes
 const FLOW_ID = 'method-flow-editor'
@@ -1194,7 +1195,7 @@ onUnmounted(() => {
   <div class="method-flow-editor">
     <header class="flow-toolbar">
       <div class="toolbar-left">
-        <el-button :icon="ArrowLeft" link @click="emit('back')">返回</el-button>
+        <BackLink @click="emit('back')" />
         <span class="method-title"
           >{{ titleKind || '方法' }} {{ methodName || '未命名' }}</span
         >

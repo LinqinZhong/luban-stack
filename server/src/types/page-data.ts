@@ -10,6 +10,8 @@ export type DataFieldType =
   | 'any'
   /** 引用当前页面/组件控件树节点（值为节点 path id） */
   | 'ref'
+  /** 后端控制器 API（组件参数） */
+  | 'api'
 
 export type DataFieldValue =
   | string

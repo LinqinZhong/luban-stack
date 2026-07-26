@@ -5,6 +5,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { dropMysqlTable, listMysqlTables, truncateMysqlTable } from '../../api/projects'
 import MysqlConnectionDialog from './MysqlConnectionDialog.vue'
 import MysqlDesignDialog from './MysqlDesignDialog.vue'
+import MysqlRowsPanel from './MysqlRowsPanel.vue'
 import MysqlTableDialog from './MysqlTableDialog.vue'
 import MysqlToTypeDialog from './MysqlToTypeDialog.vue'
 import {
@@ -44,6 +45,7 @@ const designDialogVisible = ref(false)
 const designingTable = ref<MysqlTableInfo | null>(null)
 const toTypeDialogVisible = ref(false)
 const toTypeTable = ref<MysqlTableInfo | null>(null)
+const viewingTable = ref<MysqlTableInfo | null>(null)
 const busy = ref(false)
 
 watch(
@@ -51,14 +53,20 @@ watch(
   (list) => {
     if (!list.length) {
       activeId.value = ''
+      viewingTable.value = null
       return
     }
     if (!list.some((d) => d.id === activeId.value)) {
       activeId.value = list[0]!.id
+      viewingTable.value = null
     }
   },
   { immediate: true, deep: true },
 )
+
+watch(activeId, () => {
+  viewingTable.value = null
+})
 
 const activeDb = computed(
   () => databases.value.find((d) => d.id === activeId.value) ?? null,
@@ -173,6 +181,15 @@ function openToType(row: MysqlTableInfo) {
   if (!ensureConnection()) return
   toTypeTable.value = row
   toTypeDialogVisible.value = true
+}
+
+function openViewTable(row: MysqlTableInfo) {
+  if (!ensureConnection()) return
+  viewingTable.value = row
+}
+
+function closeViewTable() {
+  viewingTable.value = null
 }
 
 function handleTypeLibrarySave(library: DataTypeLibrary) {
@@ -308,72 +325,83 @@ function formatTime(ts: number | null): string {
       </aside>
 
       <section class="table-pane">
-        <div class="pane-head">
-          <span class="pane-title">数据表</span>
-          <span v-if="activeDb" class="pane-sub">
-            最近同步：{{ formatTime(activeDb.lastTestedAt) }}
-          </span>
-          <el-button
-            v-if="activeDb"
-            type="primary"
-            link
-            :icon="Refresh"
-            @click="refreshTables"
-          >
-            刷新
-          </el-button>
-          <el-button
-            v-if="activeDb"
-            type="primary"
-            link
-            :icon="Plus"
-            @click="openCreateTable"
-          >
-            添加
-          </el-button>
-        </div>
+        <MysqlRowsPanel
+          v-if="viewingTable && connectionPayload"
+          :connection="connectionPayload"
+          :table="viewingTable"
+          @back="closeViewTable"
+        />
+        <template v-else>
+          <div class="pane-head">
+            <span class="pane-title">数据表</span>
+            <span v-if="activeDb" class="pane-sub">
+              最近同步：{{ formatTime(activeDb.lastTestedAt) }}
+            </span>
+            <el-button
+              v-if="activeDb"
+              type="primary"
+              link
+              :icon="Refresh"
+              @click="refreshTables"
+            >
+              刷新
+            </el-button>
+            <el-button
+              v-if="activeDb"
+              type="primary"
+              link
+              :icon="Plus"
+              @click="openCreateTable"
+            >
+              添加
+            </el-button>
+          </div>
 
-        <el-empty
-          v-if="!activeDb"
-          description="请选择或添加左侧数据库"
-          :image-size="64"
-        />
-        <el-empty
-          v-else-if="!tables.length"
-          description="暂无数据表，点击添加创建"
-          :image-size="64"
-        />
-        <div v-else class="table-wrap">
-          <el-table :data="tables" border stripe empty-text="无数据表">
-            <el-table-column prop="name" label="表名" min-width="160" />
-            <el-table-column prop="engine" label="引擎" width="110" />
-            <el-table-column label="行数" width="100" align="right">
-              <template #default="{ row }">
-                {{ row.rows == null ? '—' : row.rows }}
-              </template>
-            </el-table-column>
-            <el-table-column prop="remark" label="备注" min-width="160" />
-            <el-table-column label="操作" width="280" fixed="right">
-              <template #default="{ row }">
-                <el-button type="primary" link @click="openEditTable(row)">
-                  编辑
-                </el-button>
-                <el-button type="primary" link @click="openDesignTable(row)">
-                  设计
-                </el-button>
-                <el-button type="primary" link @click="openToType(row)">
-                  转成类型
-                </el-button>
-                <el-button type="warning" link @click="clearTable(row)">
-                  清空
-                </el-button>
-                <el-button type="danger" link @click="removeTable(row)">
-                  删除
-                </el-button>
-              </template>
-            </el-table-column>
-          </el-table>
-        </div>
+          <el-empty
+            v-if="!activeDb"
+            description="请选择或添加左侧数据库"
+            :image-size="64"
+          />
+          <el-empty
+            v-else-if="!tables.length"
+            description="暂无数据表，点击添加创建"
+            :image-size="64"
+          />
+          <div v-else class="table-wrap">
+            <el-table :data="tables" border stripe empty-text="无数据表">
+              <el-table-column prop="name" label="表名" min-width="160" />
+              <el-table-column prop="engine" label="引擎" width="110" />
+              <el-table-column label="行数" width="100" align="right">
+                <template #default="{ row }">
+                  {{ row.rows == null ? '—' : row.rows }}
+                </template>
+              </el-table-column>
+              <el-table-column prop="remark" label="备注" min-width="160" />
+              <el-table-column label="操作" width="320" fixed="right">
+                <template #default="{ row }">
+                  <el-button type="primary" link @click="openViewTable(row)">
+                    查看
+                  </el-button>
+                  <el-button type="primary" link @click="openEditTable(row)">
+                    编辑
+                  </el-button>
+                  <el-button type="primary" link @click="openDesignTable(row)">
+                    设计
+                  </el-button>
+                  <el-button type="primary" link @click="openToType(row)">
+                    转成类型
+                  </el-button>
+                  <el-button type="warning" link @click="clearTable(row)">
+                    清空
+                  </el-button>
+                  <el-button type="danger" link @click="removeTable(row)">
+                    删除
+                  </el-button>
+                </template>
+              </el-table-column>
+            </el-table>
+          </div>
+        </template>
       </section>
     </div>
 

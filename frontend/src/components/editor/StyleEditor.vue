@@ -45,6 +45,7 @@ const form = reactive({
   borderWidth: '',
   borderColor: '',
   overflow: '',
+  zIndex: '',
   text: '',
   textSize: '',
   textColor: '',
@@ -134,6 +135,7 @@ function syncFromModel(styles: StyleOverrides) {
   form.borderWidth = styles.borderWidth ?? ''
   form.borderColor = styles.borderColor ?? ''
   form.overflow = styles.overflow ?? ''
+  form.zIndex = styles.zIndex ?? ''
   form.text = styles.text ?? ''
   form.textSize = styles.textSize ?? ''
   form.textColor = styles.textColor ?? ''
@@ -180,6 +182,7 @@ function emitStyles() {
   set('borderWidth', form.borderWidth)
   set('borderColor', form.borderColor)
   set('overflow', form.overflow)
+  set('zIndex', form.zIndex)
   set('text', form.text)
   set('textSize', form.textSize)
   set('textColor', form.textColor)
@@ -289,6 +292,13 @@ function onFieldChange() {
     <el-form label-position="top" size="small">
       <el-form-item label="background">
         <ColorPicker v-model="form.background" @change="onFieldChange" />
+      </el-form-item>
+      <el-form-item label="层级 zIndex">
+        <NumericInput
+          v-model="form.zIndex"
+          placeholder="如 10，越大越靠上"
+          @change="onFieldChange"
+        />
       </el-form-item>
       <el-form-item v-if="tag !== 'Modal'" label="gravity">
         <el-select

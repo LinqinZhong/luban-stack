@@ -23,6 +23,10 @@ import {
   truncateMysqlTable,
   getMysqlTableColumns,
   refreshMysqlTables,
+  listMysqlTableRows,
+  updateMysqlTableRow,
+  deleteMysqlTableRow,
+  insertMysqlTableRow,
 } from '../services/mysql.js'
 import {
   readBackendServiceLibrary,
@@ -489,6 +493,56 @@ router.post('/mysql/tables/truncate', async (req, res) => {
     const tableName = String(body.tableName ?? '')
     const tables = await truncateMysqlTable(parseMysqlConnection(body), tableName)
     res.json({ tables })
+  } catch (err) {
+    handleError(res, err)
+  }
+})
+
+router.post('/mysql/tables/rows', async (req, res) => {
+  try {
+    const body = req.body ?? {}
+    const tableName = String(body.tableName ?? '')
+    const result = await listMysqlTableRows(parseMysqlConnection(body), tableName, {
+      current: body.current,
+      pageSize: body.pageSize,
+    })
+    res.json(result)
+  } catch (err) {
+    handleError(res, err)
+  }
+})
+
+router.post('/mysql/tables/rows/update', async (req, res) => {
+  try {
+    const body = req.body ?? {}
+    const tableName = String(body.tableName ?? '')
+    await updateMysqlTableRow(parseMysqlConnection(body), tableName, {
+      key: body.key,
+      values: body.values,
+    })
+    res.json({ ok: true })
+  } catch (err) {
+    handleError(res, err)
+  }
+})
+
+router.post('/mysql/tables/rows/delete', async (req, res) => {
+  try {
+    const body = req.body ?? {}
+    const tableName = String(body.tableName ?? '')
+    await deleteMysqlTableRow(parseMysqlConnection(body), tableName, body.key)
+    res.json({ ok: true })
+  } catch (err) {
+    handleError(res, err)
+  }
+})
+
+router.post('/mysql/tables/rows/insert', async (req, res) => {
+  try {
+    const body = req.body ?? {}
+    const tableName = String(body.tableName ?? '')
+    await insertMysqlTableRow(parseMysqlConnection(body), tableName, body.values)
+    res.json({ ok: true })
   } catch (err) {
     handleError(res, err)
   }

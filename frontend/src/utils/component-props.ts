@@ -6,6 +6,7 @@ import {
 import type { DataTypeLibrary } from '../types/data-types'
 import type { ComponentConfig, ComponentPropDef } from '../types/component'
 import { dataFieldToTsType } from '../types/page-method'
+import { buildApiPropTsType, isApiPropDef } from './api-prop'
 
 /** 组件入参运行时命名空间；数据池字段禁止使用此名 */
 export const DOLLAR_PROPS_NAME = '$props'
@@ -32,23 +33,62 @@ export function buildDollarPropsAmbientDeclaration(
   }
   const fields = props
     .map((item) => {
-      const ts = dataFieldToTsType(
-        {
-          type: item.type,
-          typeRef: item.typeRef,
-          itemType: item.itemType,
-          itemTypeRef: item.itemTypeRef,
-          itemItemType: item.itemItemType,
-          itemItemTypeRef: item.itemItemTypeRef,
-        },
-        typeLibrary,
-      )
+      const ts = isApiPropDef(item)
+        ? buildApiPropTsType(item.apiParams, typeLibrary, item.apiReturnType)
+        : dataFieldToTsType(
+            {
+              type: item.type,
+              typeRef: item.typeRef,
+              itemType: item.itemType,
+              itemTypeRef: item.itemTypeRef,
+              itemItemType: item.itemItemType,
+              itemItemTypeRef: item.itemItemTypeRef,
+            },
+            typeLibrary,
+          )
       return `  ${item.name.trim()}: ${ts};`
     })
     .join('\n')
   return [`interface VoiderDollarProps {`, fields, `}`, `declare const $props: VoiderDollarProps;`].join(
     '\n',
   )
+}
+
+/**
+ * 双向绑定（model）参数的 updateProps 重载：
+ * updateProps('data', value) — 首参字面量补全，次参按该 prop 类型约束。
+ */
+export function buildUpdatePropsAmbientDeclarations(
+  defs: ComponentPropDef[] | null | undefined,
+  typeLibrary?: DataTypeLibrary | null,
+): string {
+  const models = (defs ?? []).filter((item) => {
+    if (!item.twoWay || item.type === 'api') return false
+    const name = item.name.trim()
+    return Boolean(name) && /^[A-Za-z_$][\w$]*$/.test(name)
+  })
+  const lines = [
+    '/** 更新双向绑定（model）参数：updateProps(参数名, 新值) */',
+  ]
+  for (const item of models) {
+    const name = item.name.trim()
+    const ts = isApiPropDef(item)
+      ? 'any'
+      : dataFieldToTsType(
+          {
+            type: item.type,
+            typeRef: item.typeRef,
+            itemType: item.itemType,
+            itemTypeRef: item.itemTypeRef,
+            itemItemType: item.itemItemType,
+            itemItemTypeRef: item.itemItemTypeRef,
+          },
+          typeLibrary,
+        )
+    lines.push(`declare function updateProps(prop: '${name}', value: ${ts}): void;`)
+  }
+  lines.push('declare function updateProps(prop: string, value: any): void;')
+  return `${lines.join('\n')}\n`
 }
 
 /** 将配置里的默认值规范成运行时类型（尤其避免布尔被存成字符串 "false"） */
@@ -73,7 +113,7 @@ export function normalizePropDefaultValue(
     const n = Number(value)
     return Number.isFinite(n) ? n : 0
   }
-  if (type === 'string' || type === 'icon' || type === 'color' || type === 'ref') {
+  if (type === 'string' || type === 'icon' || type === 'color' || type === 'ref' || type === 'api') {
     if (value == null || typeof value === 'object') return ''
     return String(value)
   }
@@ -115,7 +155,7 @@ function coercePropValue(type: DataFieldType, raw: unknown): DataFieldValue {
     return defaultValue(type)
   }
   const str = raw == null ? '' : String(raw)
-  if (type === 'string' || type === 'icon' || type === 'color' || type === 'ref') {
+  if (type === 'string' || type === 'icon' || type === 'color' || type === 'ref' || type === 'api') {
     return str
   }
   if (type === 'number') {

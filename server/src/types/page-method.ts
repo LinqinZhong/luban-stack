@@ -1,3 +1,6 @@
+import type { DataFieldType } from './page-data.js'
+import type { ProcessorTypeExpr } from './backend-services.js'
+
 export type MethodParamType =
   | 'string'
   | 'number'
@@ -11,6 +14,15 @@ export type MethodReturnType = MethodParamType | 'void'
 export interface MethodParam {
   name: string
   type: MethodParamType
+  /** 精确类型表达式（泛型等） */
+  typeExpr?: ProcessorTypeExpr
+  /** 引用 types/ 库具名类型（对象） */
+  typeRef?: string
+  /** type === 'array' 时的元素类型 */
+  itemType?: DataFieldType
+  itemTypeRef?: string
+  itemItemType?: DataFieldType
+  itemItemTypeRef?: string
 }
 
 export interface PageMethod {

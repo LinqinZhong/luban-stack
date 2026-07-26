@@ -150,6 +150,15 @@ export function collectDollarPropsKeysFromComputeBodies(
   return keys
 }
 
+/** api 可调用等不可 JSON 化的值 → 稳定可序列化标记 */
+function serializeDollarPropForDeps(value: unknown): unknown {
+  if (typeof value === 'function') {
+    const mark = (value as { __voiderApiBinding?: string }).__voiderApiBinding
+    return mark != null ? { __api: mark } : { __fn: true }
+  }
+  return value
+}
+
 /** 供 Vue 缓存：仅当计算字段真正依赖的输入变化时字符串才变 */
 export function buildComputeDepsKey(
   data: PageData | undefined | null,
@@ -162,11 +171,15 @@ export function buildComputeDepsKey(
   if (!dollarProps) {
     propsSlice = null
   } else if (propKeys == null) {
-    propsSlice = dollarProps
+    const all: Record<string, unknown> = {}
+    for (const [key, value] of Object.entries(dollarProps)) {
+      all[key] = serializeDollarPropForDeps(value)
+    }
+    propsSlice = all
   } else {
     const slice: Record<string, unknown> = {}
     for (const key of [...propKeys].sort()) {
-      slice[key] = dollarProps[key]
+      slice[key] = serializeDollarPropForDeps(dollarProps[key])
     }
     propsSlice = slice
   }

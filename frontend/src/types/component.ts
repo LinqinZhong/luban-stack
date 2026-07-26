@@ -1,5 +1,6 @@
 import type { DataFieldType, DataFieldValue } from './page-data'
 import type { MethodParam } from './page-method'
+import type { ProcessorTypeExpr } from './backend-services'
 
 /** 组件公开参数：twoWay=false 为 Props，true 为 model（双向） */
 export interface ComponentPropDef {
@@ -18,6 +19,13 @@ export interface ComponentPropDef {
   /** itemType === 'array' 时，内层数组的元素类型 */
   itemItemType?: DataFieldType
   itemItemTypeRef?: string
+  /**
+   * type === 'api'：组件调用该参数时传入的形参约束。
+   * 匹配规则：API 必填入参必须出现且类型一致；可选入参可省略；出参须一致。
+   */
+  apiParams?: MethodParam[]
+  /** type === 'api'：期望的出参类型（含泛型实参） */
+  apiReturnType?: ProcessorTypeExpr
 }
 
 export interface ComponentEventDef {

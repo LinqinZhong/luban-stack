@@ -308,3 +308,42 @@ export function hasControllerBoundFields(
       isValidIdent(f.name.trim()),
   )
 }
+
+/**
+ * 组件 api 参数：按绑定直接调用控制器 API。
+ * `args` 中与 API inputs 同名的字段作为字面量入参。
+ */
+export async function invokeBoundControllerApi(
+  binding: { serviceId: string; controllerId: string; apiId: string },
+  args: Record<string, unknown> | undefined | null,
+  options: ControllerBindingRuntimeOptions,
+): Promise<unknown> {
+  const serviceId = binding.serviceId.trim()
+  const controllerId = binding.controllerId.trim()
+  const apiId = binding.apiId.trim()
+  if (!serviceId || !controllerId || !apiId) {
+    throw new Error('API 参数未选择完整接口')
+  }
+  const cache = new Map<string, ServiceBundle>()
+  const bundle = await loadServiceBundle(options.projectPath, serviceId, cache)
+  const api = findApi(bundle.controllers, controllerId, apiId)
+  if (!api) {
+    throw new Error('找不到绑定的 API（可能已被删除）')
+  }
+  const callArgs = args && typeof args === 'object' && !Array.isArray(args) ? args : {}
+  const inputs: Record<string, ControllerInputParamConfig> = {}
+  for (const [key, value] of Object.entries(callArgs)) {
+    if (!key.trim()) continue
+    inputs[key] = { source: 'literal', literal: value }
+  }
+  const initialScope = assembleControllerApiScope(api, inputs, callArgs)
+  const raw = await fetchApiData(
+    options.projectPath,
+    serviceId,
+    api,
+    bundle,
+    options.dryRun ?? true,
+    initialScope,
+  )
+  return unwrapResultData(raw)
+}

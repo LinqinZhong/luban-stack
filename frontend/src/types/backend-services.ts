@@ -166,6 +166,8 @@ export interface ServiceApiParam {
   type: string
   /** 具名类型 id（如 DTO）；type 为 json 时可用 */
   typeRef: string
+  /** 具名类型的泛型实参；空串表示 any */
+  genericArgs?: Record<string, string>
   required: boolean
   remark: string
 }
@@ -187,6 +189,8 @@ export interface ServiceApi {
   method: HttpMethod
   /** 入参列表（含 query / param / header / body） */
   inputs: ServiceApiParam[]
+  /** 出参类型（组件 api 参数匹配用） */
+  output: ProcessorTypeExpr
   requireAuth: boolean
   /** 调试入参（按变量名持久化） */
   debugParams: Record<string, unknown>
@@ -247,6 +251,15 @@ export function createEmptyServiceApi(name = ''): ServiceApi {
     remark: '',
     method: 'GET',
     inputs: [],
+    output: {
+      type: 'any',
+      typeRef: '',
+      itemType: '',
+      itemTypeRef: '',
+      itemItemType: '',
+      itemItemTypeRef: '',
+      genericArgs: {},
+    },
     requireAuth: false,
     debugParams: {},
     flow: createDefaultMethodFlow(),
@@ -330,6 +343,7 @@ export function normalizeServiceApiParam(input: unknown): ServiceApiParam | null
     location: normalizeServiceApiParamLocation(input.location),
     type,
     typeRef,
+    genericArgs: normalizeGenericArgs(input.genericArgs),
     required: Boolean(input.required),
     remark: typeof input.remark === 'string' ? input.remark : '',
   }
@@ -388,6 +402,22 @@ export function normalizeServiceApi(input: unknown): ServiceApi | null {
     remark: typeof input.remark === 'string' ? input.remark : '',
     method: normalizeHttpMethod(input.method),
     inputs: normalizeServiceApiInputs(input),
+    output:
+      input.output != null ||
+      (typeof input.outputRef === 'string' && Boolean(input.outputRef.trim()))
+        ? normalizeProcessorTypeExpr(
+            input.output,
+            typeof input.outputRef === 'string' ? input.outputRef : undefined,
+          )
+        : {
+            type: 'any',
+            typeRef: '',
+            itemType: '',
+            itemTypeRef: '',
+            itemItemType: '',
+            itemItemTypeRef: '',
+            genericArgs: {},
+          },
     requireAuth: Boolean(input.requireAuth),
     debugParams: normalizeDebugParams(input.debugParams),
     flow: normalizeMethodFlow(input.flow),

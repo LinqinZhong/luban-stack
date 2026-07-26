@@ -725,6 +725,299 @@ export async function truncateMysqlTable(
   })
 }
 
+function serializeCellValue(value: unknown): unknown {
+  if (value == null) return null
+  if (typeof value === 'bigint') return value.toString()
+  if (Buffer.isBuffer(value)) return value.toString('base64')
+  if (value instanceof Date) {
+    const pad = (n: number) => String(n).padStart(2, '0')
+    return `${value.getFullYear()}-${pad(value.getMonth() + 1)}-${pad(value.getDate())} ${pad(value.getHours())}:${pad(value.getMinutes())}:${pad(value.getSeconds())}`
+  }
+  if (typeof value === 'object') {
+    try {
+      return JSON.parse(JSON.stringify(value))
+    } catch {
+      return String(value)
+    }
+  }
+  return value
+}
+
+function normalizeRowRecord(row: Record<string, unknown>): Record<string, unknown> {
+  const next: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(row)) {
+    next[key] = serializeCellValue(value)
+  }
+  return next
+}
+
+/** 解析唯一键列：优先 PRIMARY，否则第一个 UNIQUE 索引 */
+async function resolveUniqueKeyColumns(
+  connection: mysql.Connection,
+  tableName: string,
+): Promise<{ keyName: string; columns: string[] } | null> {
+  const [rows] = await connection.query(
+    `SELECT INDEX_NAME AS indexName,
+            COLUMN_NAME AS columnName,
+            SEQ_IN_INDEX AS seqInIndex,
+            NON_UNIQUE AS nonUnique
+     FROM information_schema.STATISTICS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND NON_UNIQUE = 0
+     ORDER BY CASE WHEN INDEX_NAME = 'PRIMARY' THEN 0 ELSE 1 END,
+              INDEX_NAME,
+              SEQ_IN_INDEX`,
+    [tableName],
+  )
+  const list = Array.isArray(rows) ? (rows as any[]) : []
+  if (!list.length) return null
+
+  const byIndex = new Map<string, { seq: number; column: string }[]>()
+  for (const row of list) {
+    const indexName = String(row.indexName ?? '')
+    const column = String(row.columnName ?? '')
+    if (!indexName || !column || !IDENT_RE.test(column)) continue
+    const bucket = byIndex.get(indexName) ?? []
+    bucket.push({ seq: Number(row.seqInIndex) || 0, column })
+    byIndex.set(indexName, bucket)
+  }
+
+  const preferredName = byIndex.has('PRIMARY')
+    ? 'PRIMARY'
+    : [...byIndex.keys()].sort((a, b) => a.localeCompare(b))[0]
+  if (!preferredName) return null
+  const preferred = byIndex.get(preferredName)
+  if (!preferred?.length) return null
+
+  const columns = [...preferred]
+    .sort((a, b) => a.seq - b.seq)
+    .map((item) => item.column)
+  return { keyName: preferredName, columns }
+}
+
+function parsePositiveInt(value: unknown, fallback: number, max?: number): number {
+  const n = Number(value)
+  if (!Number.isFinite(n) || n < 1) return fallback
+  const i = Math.floor(n)
+  return max != null ? Math.min(i, max) : i
+}
+
+function assertKeyValues(
+  keyColumns: string[],
+  key: unknown,
+): Record<string, unknown> {
+  if (!key || typeof key !== 'object' || Array.isArray(key)) {
+    throw new ProjectError('缺少唯一键取值', 400)
+  }
+  const source = key as Record<string, unknown>
+  const result: Record<string, unknown> = {}
+  for (const col of keyColumns) {
+    if (!(col in source)) {
+      throw new ProjectError(`唯一键缺少列「${col}」`, 400)
+    }
+    result[col] = source[col]
+  }
+  return result
+}
+
+function buildWhereByKey(keyValues: Record<string, unknown>): {
+  sql: string
+  params: unknown[]
+} {
+  const cols = Object.keys(keyValues)
+  const parts: string[] = []
+  const params: unknown[] = []
+  for (const col of cols) {
+    const value = keyValues[col]
+    if (value == null) {
+      parts.push(`${quoteIdent(col)} IS NULL`)
+    } else {
+      parts.push(`${quoteIdent(col)} = ?`)
+      params.push(value)
+    }
+  }
+  return { sql: parts.join(' AND '), params }
+}
+
+export async function listMysqlTableRows(
+  payload: MysqlConnectionPayload,
+  tableName: string,
+  pagination: { current?: unknown; pageSize?: unknown },
+): Promise<{
+  columns: MysqlColumnDef[]
+  keyColumns: string[]
+  keyName: string | null
+  rows: Record<string, unknown>[]
+  total: number
+  current: number
+  pageSize: number
+}> {
+  if (!IDENT_RE.test(tableName)) {
+    throw new ProjectError('表名不合法', 400)
+  }
+  const current = parsePositiveInt(pagination.current, 1)
+  const pageSize = parsePositiveInt(pagination.pageSize, 20, 200)
+  const offset = (current - 1) * pageSize
+
+  return withMysqlConnection(payload, async (connection) => {
+    await useDatabase(connection, payload.database)
+    const columns = await getColumnsOnConnection(connection, tableName)
+    if (!columns.length) {
+      throw new ProjectError(`表「${tableName}」不存在或无列`, 404)
+    }
+    const unique = await resolveUniqueKeyColumns(connection, tableName)
+    const keyColumns = unique?.columns ?? []
+
+    const [countRows] = await connection.query(
+      `SELECT COUNT(*) AS total FROM ${quoteIdent(tableName)}`,
+    )
+    const totalRaw = Array.isArray(countRows) ? (countRows[0] as any)?.total : 0
+    const total = Number(totalRaw) || 0
+
+    const [dataRows] = await connection.query(
+      `SELECT * FROM ${quoteIdent(tableName)} LIMIT ? OFFSET ?`,
+      [pageSize, offset],
+    )
+    const rows = (Array.isArray(dataRows) ? dataRows : []).map((row) =>
+      normalizeRowRecord(row as Record<string, unknown>),
+    )
+
+    return {
+      columns,
+      keyColumns,
+      keyName: unique?.keyName ?? null,
+      rows,
+      total,
+      current,
+      pageSize,
+    }
+  })
+}
+
+export async function updateMysqlTableRow(
+  payload: MysqlConnectionPayload,
+  tableName: string,
+  input: { key: unknown; values: unknown },
+): Promise<void> {
+  if (!IDENT_RE.test(tableName)) {
+    throw new ProjectError('表名不合法', 400)
+  }
+  if (!input.values || typeof input.values !== 'object' || Array.isArray(input.values)) {
+    throw new ProjectError('缺少更新字段', 400)
+  }
+
+  return withMysqlConnection(payload, async (connection) => {
+    await useDatabase(connection, payload.database)
+    const unique = await resolveUniqueKeyColumns(connection, tableName)
+    if (!unique?.columns.length) {
+      throw new ProjectError('该表没有唯一键，无法编辑行', 400)
+    }
+    const keyValues = assertKeyValues(unique.columns, input.key)
+    const columns = await getColumnsOnConnection(connection, tableName)
+    const colNames = new Set(columns.map((c) => c.name))
+    const keySet = new Set(unique.columns)
+
+    const sets: string[] = []
+    const params: unknown[] = []
+    for (const [name, value] of Object.entries(input.values as Record<string, unknown>)) {
+      if (!colNames.has(name) || !IDENT_RE.test(name)) continue
+      if (keySet.has(name)) continue
+      sets.push(`${quoteIdent(name)} = ?`)
+      params.push(value)
+    }
+    if (!sets.length) {
+      throw new ProjectError('没有可更新的字段', 400)
+    }
+
+    const where = buildWhereByKey(keyValues)
+    const [result] = await connection.query(
+      `UPDATE ${quoteIdent(tableName)} SET ${sets.join(', ')} WHERE ${where.sql} LIMIT 1`,
+      [...params, ...where.params],
+    )
+    const affected = (result as { affectedRows?: number })?.affectedRows ?? 0
+    if (!affected) {
+      throw new ProjectError('未找到要更新的行，可能已被删除', 404)
+    }
+  })
+}
+
+export async function deleteMysqlTableRow(
+  payload: MysqlConnectionPayload,
+  tableName: string,
+  key: unknown,
+): Promise<void> {
+  if (!IDENT_RE.test(tableName)) {
+    throw new ProjectError('表名不合法', 400)
+  }
+
+  return withMysqlConnection(payload, async (connection) => {
+    await useDatabase(connection, payload.database)
+    const unique = await resolveUniqueKeyColumns(connection, tableName)
+    if (!unique?.columns.length) {
+      throw new ProjectError('该表没有唯一键，无法删除行', 400)
+    }
+    const keyValues = assertKeyValues(unique.columns, key)
+    const where = buildWhereByKey(keyValues)
+    const [result] = await connection.query(
+      `DELETE FROM ${quoteIdent(tableName)} WHERE ${where.sql} LIMIT 1`,
+      where.params,
+    )
+    const affected = (result as { affectedRows?: number })?.affectedRows ?? 0
+    if (!affected) {
+      throw new ProjectError('未找到要删除的行，可能已被删除', 404)
+    }
+  })
+}
+
+export async function insertMysqlTableRow(
+  payload: MysqlConnectionPayload,
+  tableName: string,
+  valuesInput: unknown,
+): Promise<void> {
+  if (!IDENT_RE.test(tableName)) {
+    throw new ProjectError('表名不合法', 400)
+  }
+  if (
+    !valuesInput ||
+    typeof valuesInput !== 'object' ||
+    Array.isArray(valuesInput)
+  ) {
+    throw new ProjectError('缺少插入字段', 400)
+  }
+
+  return withMysqlConnection(payload, async (connection) => {
+    await useDatabase(connection, payload.database)
+    const columns = await getColumnsOnConnection(connection, tableName)
+    if (!columns.length) {
+      throw new ProjectError(`表「${tableName}」不存在或无列`, 404)
+    }
+    const colNames = new Set(columns.map((c) => c.name))
+    const autoCols = new Set(
+      columns.filter((c) => c.autoIncrement).map((c) => c.name),
+    )
+
+    const names: string[] = []
+    const params: unknown[] = []
+    for (const [name, value] of Object.entries(
+      valuesInput as Record<string, unknown>,
+    )) {
+      if (!colNames.has(name) || !IDENT_RE.test(name)) continue
+      if (autoCols.has(name) && (value == null || value === '')) continue
+      names.push(name)
+      params.push(value)
+    }
+    if (!names.length) {
+      throw new ProjectError('没有可插入的字段', 400)
+    }
+
+    await connection.query(
+      `INSERT INTO ${quoteIdent(tableName)} (${names
+        .map((n) => quoteIdent(n))
+        .join(', ')}) VALUES (${names.map(() => '?').join(', ')})`,
+      params,
+    )
+  })
+}
+
 export function mysqlDatabaseToPayload(
   db: import('../types/mysql.js').MysqlDatabaseConfig,
 ): MysqlConnectionPayload {

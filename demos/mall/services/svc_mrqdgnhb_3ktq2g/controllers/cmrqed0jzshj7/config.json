@@ -17,6 +17,7 @@
           "location": "query",
           "type": "json",
           "typeRef": "type_common_QueryPageDto",
+          "genericArgs": {},
           "required": true,
           "remark": ""
         },
@@ -26,14 +27,26 @@
           "location": "query",
           "type": "string",
           "typeRef": "",
+          "genericArgs": {},
           "required": false,
           "remark": ""
         }
       ],
+      "output": {
+        "type": "json",
+        "typeRef": "type_common_QueryPageVo",
+        "itemType": "",
+        "itemTypeRef": "",
+        "itemItemType": "",
+        "itemItemTypeRef": "",
+        "genericArgs": {
+          "T": "type_mrnx6ke8_4d7vry"
+        }
+      },
       "requireAuth": true,
       "debugParams": {
         "page": {
-          "current": 1,
+          "current": 3,
           "pageSize": 10
         },
         "keyword": null

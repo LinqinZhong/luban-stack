@@ -1,5 +1,9 @@
 import type { DataFieldType, DataFieldValue } from './page-data.js'
 import type { MethodParam } from './page-method.js'
+import {
+  normalizeProcessorTypeExpr,
+  type ProcessorTypeExpr,
+} from './backend-services.js'
 
 /** 组件公开参数：twoWay=false 为 Props，true 为 model（双向） */
 export interface ComponentPropDef {
@@ -19,6 +23,13 @@ export interface ComponentPropDef {
   /** itemType === 'array' 时，内层数组的元素类型 */
   itemItemType?: DataFieldType
   itemItemTypeRef?: string
+  /**
+   * type === 'api'：组件调用该参数时传入的形参约束。
+   * 匹配：必填入参必须出现且类型一致；可选可省略；出参须一致。
+   */
+  apiParams?: MethodParam[]
+  /** type === 'api'：期望出参类型 */
+  apiReturnType?: ProcessorTypeExpr
 }
 
 export interface ComponentEventDef {
@@ -97,6 +108,9 @@ function normalizePropDefault(
       return value as Record<string, unknown>
     }
     return {}
+  }
+  if (type === 'api') {
+    return ''
   }
   if (value == null || typeof value === 'object') return ''
   return String(value)
@@ -198,6 +212,68 @@ export function normalizeComponentConfig(
             ...(type === 'array' && itemType === 'array' && itemItemTypeRef
               ? { itemItemTypeRef }
               : {}),
+            ...(type === 'api' && Array.isArray(row.apiParams)
+              ? {
+                  apiParams: row.apiParams
+                    .filter((p) => p && typeof p === 'object')
+                    .map((p) => {
+                      const param = p as MethodParam
+                      const pTypeRef =
+                        typeof param.typeRef === 'string' && param.typeRef.trim()
+                          ? param.typeRef.trim()
+                          : undefined
+                      const pItemTypeRef =
+                        typeof param.itemTypeRef === 'string' &&
+                        param.itemTypeRef.trim()
+                          ? param.itemTypeRef.trim()
+                          : undefined
+                      const pItemItemTypeRef =
+                        typeof param.itemItemTypeRef === 'string' &&
+                        param.itemItemTypeRef.trim()
+                          ? param.itemItemTypeRef.trim()
+                          : undefined
+                      return {
+                        name: String(param.name ?? '').trim(),
+                        type: (param.type as MethodParam['type']) || 'any',
+                        ...(pTypeRef ? { typeRef: pTypeRef } : {}),
+                        ...(param.itemType ? { itemType: param.itemType } : {}),
+                        ...(pItemTypeRef ? { itemTypeRef: pItemTypeRef } : {}),
+                        ...(param.itemItemType
+                          ? { itemItemType: param.itemItemType }
+                          : {}),
+                        ...(pItemItemTypeRef
+                          ? { itemItemTypeRef: pItemItemTypeRef }
+                          : {}),
+                        ...(param.typeExpr
+                          ? {
+                              typeExpr: normalizeProcessorTypeExpr(
+                                param.typeExpr,
+                              ),
+                            }
+                          : {}),
+                      }
+                    })
+                    .filter((p) => p.name),
+                }
+              : {}),
+            ...(type === 'api'
+              ? {
+                  apiReturnType:
+                    (row as ComponentPropDef).apiReturnType != null
+                      ? normalizeProcessorTypeExpr(
+                          (row as ComponentPropDef).apiReturnType,
+                        )
+                      : {
+                          type: 'any',
+                          typeRef: '',
+                          itemType: '',
+                          itemTypeRef: '',
+                          itemItemType: '',
+                          itemItemTypeRef: '',
+                          genericArgs: {},
+                        },
+                }
+              : {}),
           }
         })
     : []
@@ -211,10 +287,34 @@ export function normalizeComponentConfig(
           const params = Array.isArray(row.params)
             ? row.params
                 .filter((p) => p && typeof p === 'object')
-                .map((p) => ({
-                  name: String((p as MethodParam).name ?? '').trim(),
-                  type: ((p as MethodParam).type as MethodParam['type']) || 'any',
-                }))
+                .map((p) => {
+                  const param = p as MethodParam
+                  const typeRef =
+                    typeof param.typeRef === 'string' && param.typeRef.trim()
+                      ? param.typeRef.trim()
+                      : undefined
+                  const itemTypeRef =
+                    typeof param.itemTypeRef === 'string' &&
+                    param.itemTypeRef.trim()
+                      ? param.itemTypeRef.trim()
+                      : undefined
+                  const itemItemTypeRef =
+                    typeof param.itemItemTypeRef === 'string' &&
+                    param.itemItemTypeRef.trim()
+                      ? param.itemItemTypeRef.trim()
+                      : undefined
+                  return {
+                    name: String(param.name ?? '').trim(),
+                    type: (param.type as MethodParam['type']) || 'any',
+                    ...(typeRef ? { typeRef } : {}),
+                    ...(param.itemType ? { itemType: param.itemType } : {}),
+                    ...(itemTypeRef ? { itemTypeRef } : {}),
+                    ...(param.itemItemType
+                      ? { itemItemType: param.itemItemType }
+                      : {}),
+                    ...(itemItemTypeRef ? { itemItemTypeRef } : {}),
+                  }
+                })
             : []
           return { name: eventName, params }
         })

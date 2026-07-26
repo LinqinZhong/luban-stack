@@ -383,6 +383,9 @@ function openApiDesign(index: number) {
     apiDraft.value = {
       ...api,
       inputs: (api.inputs ?? []).map((p) => ({ ...p })),
+      output: api.output
+        ? { ...api.output, genericArgs: { ...(api.output.genericArgs ?? {}) } }
+        : createEmptyProcessorTypeExpr('any'),
       flow: api.flow ?? createDefaultMethodFlow(),
     }
     selectedApiId.value = api.id
@@ -402,6 +405,7 @@ function saveApiEdit(payload: ServiceApiEditPayload) {
         remark: payload.remark,
         method: payload.method,
         inputs: payload.inputs,
+        output: payload.output,
         requireAuth: payload.requireAuth,
         flow: base.flow ?? createDefaultMethodFlow(),
       },
@@ -417,6 +421,7 @@ function saveApiEdit(payload: ServiceApiEditPayload) {
             remark: payload.remark,
             method: payload.method,
             inputs: payload.inputs,
+            output: payload.output,
             requireAuth: payload.requireAuth,
           }
         : api,
@@ -1010,6 +1015,7 @@ onBeforeUnmount(() => {
       v-model="apiDialogVisible"
       :api="editingApi"
       :dto-options="dtoOptions"
+      :type-library="typeLibrary"
       :reserved-names="apiReservedNames"
       @save="saveApiEdit"
     />

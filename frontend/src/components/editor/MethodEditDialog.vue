@@ -14,6 +14,7 @@ import {
   type PageMethod,
 } from '../../types/page-method'
 import type { DataField } from '../../types/page-data'
+import type { DataTypeLibrary } from '../../types/data-types'
 import type { ComponentRenderMap } from '../../types/component-render'
 import {
   buildRefAmbientDeclarations,
@@ -25,6 +26,8 @@ const props = defineProps<{
   method: PageMethod | null
   /** 当前页面/组件数据池，注入方法体变量提示 */
   dataFields?: DataField[]
+  /** 项目数据类型库：解析具名类型（如 QueryPageDto） */
+  typeLibrary?: DataTypeLibrary | null
   /** 当前 XML，用于解析「引用」指向的节点 */
   xml?: string
   componentMap?: ComponentRenderMap
@@ -34,7 +37,7 @@ const props = defineProps<{
 }>()
 
 const ambientVars = computed(() =>
-  draft.builtin ? [] : dataFieldsToAmbientVars(props.dataFields),
+  draft.builtin ? [] : dataFieldsToAmbientVars(props.dataFields, props.typeLibrary),
 )
 
 const mergedAmbientExtra = computed(() => {

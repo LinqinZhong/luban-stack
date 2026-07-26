@@ -42,6 +42,10 @@ const props = defineProps<{
   dollarProps?: Record<string, unknown>
   /** ????????$route? */
   routeParams?: Record<string, unknown>
+  /** 当前工程路径（组件 api 参数预览） */
+  projectPath?: string
+  /** 预览运行时就绪闸门（递增后触发嵌套组件生命周期） */
+  previewLifecycleGate?: number
   /** ??? Toast????????? */
   toast?: { message: string; id: number } | null
   /** ??? Modal ??????????????? */
@@ -83,6 +87,9 @@ provide(CANVAS_RUNTIME_KEY, {
       platform: scene.value,
       windowWidth: props.canvasWidth,
     }),
+  get projectPath() {
+    return props.projectPath
+  },
 })
 
 watch(
@@ -154,7 +161,9 @@ const MAX_ZOOM = 3
 const zoomPercent = computed(() => Math.round(zoom.value * 100))
 
 const statusBarSelected = computed(
-  () => props.selectedId === STATUS_BAR_NODE_ID,
+  () =>
+    Boolean(props.selectable) &&
+    props.selectedId === STATUS_BAR_NODE_ID,
 )
 
 /** H5 场景固定白底黑字、无沉浸；小程序场景用页面配置 */
@@ -510,7 +519,7 @@ onBeforeUnmount(() => {
           v-else-if="parsed.root"
           :node="parsed.root"
           :node-id="rootId"
-          :selected-id="selectedId"
+          :selected-id="selectable ? selectedId : ''"
           :hovered-id="hoveredNodeId"
           :selectable="selectable"
           :interact-enabled="!selectable"
@@ -521,6 +530,7 @@ onBeforeUnmount(() => {
           :component-map="componentMap"
           :dollar-props="dollarProps"
           :route-params="routeParams"
+          :preview-lifecycle-gate="previewLifecycleGate"
           is-root
           @select="emit('select', $event)"
           @hover="handleHover"

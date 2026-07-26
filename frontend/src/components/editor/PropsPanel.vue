@@ -16,7 +16,7 @@ import {
   INTERACTION_EVENTS,
   ORIENTATION_OPTIONS,
   RELATIVE_BOOL_ATTRS,
-  SCROLL_INTERACTION_EVENT,
+  SCROLL_INTERACTION_EVENTS,
   setNodeAttribute,
   setNodeAttributes,
   SIZE_OPTIONS,
@@ -43,6 +43,7 @@ import {
   listRepeatItemIconOptions,
 } from '../../utils/data-field-paths'
 import IconValueSelect from './IconValueSelect.vue'
+import ApiPropBindField from './ApiPropBindField.vue'
 import type { ComponentRenderMap } from '../../types/component-render'
 import type { ComponentPropDef } from '../../types/component'
 import { DATA_FIELD_TYPE_OPTIONS, COMPOSABLE_FIELD_TYPE_OPTIONS, type DataFieldType } from '../../types/page-data'
@@ -75,6 +76,10 @@ const props = defineProps<{
   componentMap?: ComponentRenderMap
   /** 各组件方法列表（引用类型 ambient / 暴露方法签名） */
   componentMethodsMap?: import('../../utils/widget-ref').ComponentMethodsMap
+  /** 当前工程路径（后端 API 参数绑定） */
+  projectPath?: string
+  /** 数据类型库（事件自定义代码 $props / 具名类型 ambient） */
+  typeLibrary?: import('../../types/data-types').DataTypeLibrary | null
   /** 自增请求：切换到动态并打开重复弹窗 */
   openRepeatRequest?: number
   /** 页面状态栏配置 */
@@ -277,17 +282,16 @@ const selectableEvents = computed(() => {
     key: item.key,
     label: item.label,
   }))
-  // 可滚动布局才展示滚动事件
+  // 可滚动布局才展示滚动 / 触底 / 触顶 / 触屏
   const overflow = selectedNode.value?.attrs.overflow?.trim().toLowerCase()
   const tag = selectedNode.value?.tag
   if (
     overflow === 'scroll' &&
     (tag === 'LinearLayout' || tag === 'RelativeLayout')
   ) {
-    list.push({
-      key: SCROLL_INTERACTION_EVENT.key,
-      label: SCROLL_INTERACTION_EVENT.label,
-    })
+    for (const item of SCROLL_INTERACTION_EVENTS) {
+      list.push({ key: item.key, label: item.label })
+    }
   }
   return list
 })
@@ -330,6 +334,7 @@ const layoutForm = reactive({
   borderWidth: '',
   borderColor: '',
   overflow: 'visible',
+  zIndex: '',
   gravity: '',
   orientation: 'vertical',
   gap: '',
@@ -422,6 +427,7 @@ function syncLayoutForm() {
   layoutForm.borderWidth = node.attrs.borderWidth ?? ''
   layoutForm.borderColor = node.attrs.borderColor ?? ''
   layoutForm.overflow = node.attrs.overflow || 'visible'
+  layoutForm.zIndex = node.attrs.zIndex ?? ''
   layoutForm.gravity = node.attrs.gravity ?? ''
   layoutForm.orientation = node.attrs.orientation || 'vertical'
   layoutForm.gap = node.attrs.gap ?? ''
@@ -520,7 +526,11 @@ function openEventBind(key: string, label: string) {
     eventBindParams.value = (def?.params ?? [])
       .filter((item) => item.name.trim())
       .map((item) => ({ name: item.name.trim(), type: item.type }))
-  } else if (key === 'onScroll') {
+  } else if (
+    key === 'onScroll' ||
+    key === 'onScrollToLower' ||
+    key === 'onScrollToUpper'
+  ) {
     eventBindParams.value = [
       { name: 'scrollTop', type: 'number' },
       { name: 'scrollLeft', type: 'number' },
@@ -528,6 +538,13 @@ function openEventBind(key: string, label: string) {
       { name: 'scrollWidth', type: 'number' },
       { name: 'clientHeight', type: 'number' },
       { name: 'clientWidth', type: 'number' },
+    ]
+  } else if (key === 'onTouchStart') {
+    eventBindParams.value = [
+      { name: 'clientX', type: 'number' },
+      { name: 'clientY', type: 'number' },
+      { name: 'pageX', type: 'number' },
+      { name: 'pageY', type: 'number' },
     ]
   } else {
     eventBindParams.value = []
@@ -1293,6 +1310,13 @@ function saveVisibilityConfig(config: VisibilityConditionConfig) {
                 @change="commitAttr('background', layoutForm.background)"
               />
             </el-form-item>
+            <el-form-item label="层级 zIndex">
+              <NumericInput
+                v-model="layoutForm.zIndex"
+                placeholder="如 10，越大越靠上"
+                @change="commitAttr('zIndex', layoutForm.zIndex)"
+              />
+            </el-form-item>
             <el-form-item v-if="!showModalProps" label="gravity">
               <el-select
                 v-model="layoutForm.gravity"
@@ -1770,6 +1794,8 @@ function saveVisibilityConfig(config: VisibilityConditionConfig) {
             :component-map="componentMap"
             :component-methods-map="componentMethodsMap"
             :icon-options="iconOptions"
+            :component-props="componentProps"
+            :type-library="typeLibrary"
             @save="handleEventBindSave"
           />
         </div>
@@ -1829,6 +1855,14 @@ function saveVisibilityConfig(config: VisibilityConditionConfig) {
                     :placeholder="`默认：${propDefaultPreview(def)}`"
                     @change="commitComponentProp(def.name)"
                   />
+                  <ApiPropBindField
+                    v-else-if="def.type === 'api'"
+                    v-model="componentPropForm[def.name]"
+                    :project-path="projectPath || ''"
+                    :api-params="def.apiParams"
+                    :api-return-type="def.apiReturnType"
+                    @change="commitComponentProp(def.name)"
+                  />
                   <template v-else-if="def.type === 'color'">
                     <ColorPicker
                       v-if="!looksLikeDataBinding(componentPropForm[def.name])"
@@ -1876,6 +1910,10 @@ function saveVisibilityConfig(config: VisibilityConditionConfig) {
                     :placeholder="`默认：${propDefaultPreview(def)}；可用 {item.字段} 或 {数据池字段}`"
                     @change="commitComponentProp(def.name)"
                   />
+                  <p v-if="def.type === 'api'" class="hint">
+                    选择后端服务 → 控制器 → API。匹配：必填入参名/类型一致；可选入参可省略；出参类型须一致。组件内调用
+                    <code>$props.{{ def.name }}(args)</code>
+                  </p>
                   <p v-if="def.remark" class="prop-remark">{{ def.remark }}</p>
                 </el-form-item>
               </el-form>

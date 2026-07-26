@@ -165,12 +165,17 @@
               "y": 212.63445791783107
             },
             "data": {
-              "code": "goodsPage = {\n  total,\n  records: goodsList,\n  hasNext: true,\n  current: page.current,\n  pageSize: page.pageSize\n}",
+              "code": "goodsPage = {\n  total,\n  records: goodsList,\n  hasNext: page.pageSize*page.current < total,\n  current: page.current,\n  pageSize: page.pageSize\n}",
               "description": "赋值goodsPage",
               "outputType": "void",
               "outputTypeRef": "",
               "outputVarName": "",
-              "outputGenericArgs": {}
+              "outputGenericArgs": {},
+              "printExpr": "",
+              "outputItemType": "",
+              "outputItemTypeRef": "",
+              "outputItemItemType": "",
+              "outputItemItemTypeRef": ""
             }
           }
         ],

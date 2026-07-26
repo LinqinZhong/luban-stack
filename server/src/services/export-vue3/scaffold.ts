@@ -1117,6 +1117,14 @@ export async function runEventBindings(
           },
           navigateBack: () => ctx.router.back(),
           setData: (prop: string, value: any) => ctx.store.setData(prop, value),
+          updateProps: (prop: string, value: any) => {
+            const name = String(prop ?? '').trim()
+            if (!name) return
+            if (ctx.props && typeof ctx.props === 'object') {
+              ;(ctx.props as Record<string, any>)[name] = value
+            }
+            ctx.emit?.(\`update:\${name}\`, value)
+          },
           showToast: (msg?: string, duration?: string) => {
             const d = duration === 'long' ? 'long' : 'short'
             if (ctx.showToast) ctx.showToast(String(msg ?? ''), d)
@@ -1175,6 +1183,21 @@ export async function runEventBindings(
         payload[key] = value
       }
       ctx.emit?.(eventName, payload)
+      continue
+    }
+    if (binding.method === 'updateProps') {
+      const prop = (args.prop ?? '').trim()
+      if (!prop) continue
+      let value: any = args.value ?? ''
+      try {
+        value = JSON.parse(args.value ?? '')
+      } catch {
+        // keep string
+      }
+      if (ctx.props && typeof ctx.props === 'object') {
+        ;(ctx.props as Record<string, any>)[prop] = value
+      }
+      ctx.emit?.(\`update:\${prop}\`, value)
       continue
     }
     console.warn('[voider] unknown event method:', binding.method)

@@ -14,6 +14,7 @@ import {
 } from '../../utils/component-props'
 import { findDataTypeDef, typeExprToDataFieldType } from '../../utils/named-type-fields'
 import ColorPicker from './ColorPicker.vue'
+import ApiPropBindField from './ApiPropBindField.vue'
 
 export type EmitLogEntry = {
   id: number
@@ -33,7 +34,7 @@ type ObjectFieldForm = {
 
 type PropFormModel = {
   def: ComponentPropDef
-  mode: 'scalar' | 'object' | 'json' | 'array'
+  mode: 'scalar' | 'object' | 'json' | 'array' | 'api'
   typeLabel: string
   fields: ObjectFieldForm[]
   itemKind?: FieldKind
@@ -49,6 +50,7 @@ const props = defineProps<{
   propValues?: Record<string, unknown>
   emitLogs?: EmitLogEntry[]
   typeLibrary?: DataTypeLibrary | null
+  projectPath?: string
 }>()
 
 const emit = defineEmits<{
@@ -204,6 +206,16 @@ function resolvePropForm(def: ComponentPropDef): PropFormModel {
       def,
       mode: 'json',
       typeLabel: ref ? namedTypeLabel(ref) : '对象',
+      fields: [],
+    }
+  }
+
+  if (def.type === 'api') {
+    const n = def.apiParams?.length ?? 0
+    return {
+      def,
+      mode: 'api',
+      typeLabel: n ? `后端API · ${n} 形参` : '后端API',
       fields: [],
     }
   }
@@ -552,6 +564,14 @@ watch(
               v-else-if="form.mode === 'scalar' && form.def.type === 'color'"
               :model-value="String(propDisplayValue(form.def) ?? '')"
               placeholder="#409eff / rgba(...)"
+              @update:model-value="onPropInput(form.def, $event)"
+            />
+            <ApiPropBindField
+              v-else-if="form.mode === 'api'"
+              :model-value="String(propDisplayValue(form.def) ?? '')"
+              :project-path="projectPath || ''"
+              :api-params="form.def.apiParams"
+              :api-return-type="form.def.apiReturnType"
               @update:model-value="onPropInput(form.def, $event)"
             />
             <el-input

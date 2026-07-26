@@ -27,6 +27,102 @@ export interface MethodParam {
   tsType?: string
   /** 精确类型表达式（级联绑定 / 类型匹配） */
   typeExpr?: ProcessorTypeExpr
+  /** 引用 types/ 库具名类型（对象） */
+  typeRef?: string
+  /** type === 'array' 时的元素类型 */
+  itemType?: DataFieldType
+  itemTypeRef?: string
+  /** itemType === 'array' 时，内层数组的元素类型 */
+  itemItemType?: DataFieldType
+  itemItemTypeRef?: string
+}
+
+/** MethodParam.type ↔ 数据池 DataFieldType（对象用 object / json） */
+export function methodParamToDataFieldType(type: MethodParamType): DataFieldType {
+  switch (type) {
+    case 'number':
+      return 'number'
+    case 'boolean':
+      return 'boolean'
+    case 'array':
+      return 'array'
+    case 'object':
+      return 'json'
+    case 'any':
+      return 'any'
+    default:
+      return 'string'
+  }
+}
+
+/** 按 emit / 方法形参类型规范化取值（字符串 JSON → 对象等） */
+export function coerceEmitParamValue(
+  type: MethodParamType,
+  raw: unknown,
+): unknown {
+  if (type === 'any') {
+    if (typeof raw === 'string') {
+      const text = raw.trim()
+      if (
+        (text.startsWith('{') && text.endsWith('}')) ||
+        (text.startsWith('[') && text.endsWith(']'))
+      ) {
+        try {
+          return JSON.parse(text)
+        } catch {
+          return raw
+        }
+      }
+    }
+    return raw
+  }
+  if (type === 'object') {
+    if (raw && typeof raw === 'object' && !Array.isArray(raw)) return raw
+    if (typeof raw === 'string') {
+      try {
+        const parsed = JSON.parse(raw)
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          return parsed
+        }
+      } catch {
+        // ignore
+      }
+    }
+    return {}
+  }
+  if (type === 'array') {
+    if (Array.isArray(raw)) return raw
+    if (typeof raw === 'string') {
+      try {
+        const parsed = JSON.parse(raw)
+        if (Array.isArray(parsed)) return parsed
+      } catch {
+        // ignore
+      }
+    }
+    return []
+  }
+  if (type === 'number') {
+    if (typeof raw === 'number' && Number.isFinite(raw)) return raw
+    const n = Number(raw)
+    return Number.isFinite(n) ? n : 0
+  }
+  if (type === 'boolean') {
+    if (typeof raw === 'boolean') return raw
+    const s = String(raw ?? '').trim().toLowerCase()
+    if (s === 'true' || s === '1') return true
+    if (s === 'false' || s === '0' || s === '') return false
+    return Boolean(raw)
+  }
+  if (raw == null) return ''
+  if (typeof raw === 'object') {
+    try {
+      return JSON.stringify(raw)
+    } catch {
+      return String(raw)
+    }
+  }
+  return String(raw)
 }
 
 /** 数据池字段类型 → 方法 ambient / 形参类型 */
@@ -75,6 +171,7 @@ function primitiveTsType(type: DataFieldType | undefined | null): string {
     case 'color':
     case 'ref':
     case 'string':
+    case 'api':
     default:
       return 'string'
   }
@@ -370,6 +467,20 @@ export const COMPONENT_BUILTIN_METHODS: PageMethod[] = [
       "// 例如事件 onClick 定义了参数 id，则：emit('onClick', id)",
     builtin: true,
   },
+  {
+    name: 'updateProps',
+    params: [
+      { name: 'prop', type: 'string' },
+      { name: 'value', type: 'any' },
+    ],
+    returnType: 'void',
+    body:
+      '// 更新双向绑定（model）参数并通知父级\n' +
+      "// 用法：updateProps(参数名, 新值)\n" +
+      '// 参数名须为组件设置中开启「双向绑定」的参数；新值类型与该参数一致\n' +
+      "// 例如：updateProps('data', list)",
+    builtin: true,
+  },
 ]
 
 export function builtinsForRoot(root: 'pages' | 'components'): PageMethod[] {
@@ -497,6 +608,7 @@ function mapAmbientTsType(type: string): string {
  */
 export function buildEmitAmbientDeclarations(
   events: Array<{ name: string; params: MethodParam[] }>,
+  library?: DataTypeLibrary | null,
 ): string {
   const lines: string[] = [
     '/** 向父页面抛出组件事件：emit(事件名, ...事件参数) */',
@@ -509,13 +621,71 @@ export function buildEmitAmbientDeclarations(
       .map((item) => {
         const name = item.name.trim().replace(/^\.\.\./, '')
         const safe = /^[A-Za-z_$][\w$]*$/.test(name) ? name : 'arg'
-        return `${safe}: ${mapAmbientTsType(item.type)}`
+        const ts =
+          item.tsType?.trim() ||
+          dataFieldToTsType(
+            {
+              type: methodParamToDataFieldType(item.type),
+              typeRef: item.typeRef,
+              itemType: item.itemType,
+              itemTypeRef: item.itemTypeRef,
+              itemItemType: item.itemItemType,
+              itemItemTypeRef: item.itemItemTypeRef,
+            },
+            library,
+          )
+        return `${safe}: ${ts}`
       })
     const paramList = params.length ? `, ${params.join(', ')}` : ''
     lines.push(`declare function emit(event: '${eventName}'${paramList}): void;`)
   }
   lines.push('declare function emit(event: string, ...args: any[]): void;')
   return `${lines.join('\n')}\n`
+}
+
+/**
+ * 当前页面/组件的自定义方法 ambient，供事件/方法体里互相调用（如 loadData()）。
+ */
+export function buildLocalMethodsAmbientDeclarations(
+  methods: PageMethod[] | undefined,
+  library?: DataTypeLibrary | null,
+): string {
+  const lines: string[] = []
+  for (const method of methods ?? []) {
+    if (method.builtin) continue
+    const name = method.name.trim()
+    if (!name || !/^[A-Za-z_$][\w$]*$/.test(name)) continue
+    const params = (method.params ?? [])
+      .filter((item) => {
+        const n = item.name.trim()
+        return n && !n.startsWith('...')
+      })
+      .map((item) => {
+        const safe = item.name.trim()
+        const ts =
+          item.tsType?.trim() ||
+          dataFieldToTsType(
+            {
+              type: methodParamToDataFieldType(item.type),
+              typeRef: item.typeRef,
+              itemType: item.itemType,
+              itemTypeRef: item.itemTypeRef,
+              itemItemType: item.itemItemType,
+              itemItemTypeRef: item.itemItemTypeRef,
+            },
+            library,
+          )
+        return `${safe}: ${ts}`
+      })
+    const ret =
+      method.returnType === 'void'
+        ? 'void'
+        : mapAmbientTsType(method.returnType || 'void')
+    lines.push(
+      `declare function ${name}(${params.join(', ')}): ${ret};`,
+    )
+  }
+  return lines.length ? `${lines.join('\n')}\n` : ''
 }
 
 /** 事件绑定：内联自定义方法体（下拉里的「自定义」） */
@@ -605,7 +775,14 @@ export function countEventBindings(raw: string | undefined): number {
   return parseEventBindings(raw).length
 }
 
-export const INTERACTION_EVENT_KEYS = ['onClick', 'onLongClick', 'onScroll'] as const
+export const INTERACTION_EVENT_KEYS = [
+  'onClick',
+  'onLongClick',
+  'onScroll',
+  'onScrollToLower',
+  'onScrollToUpper',
+  'onTouchStart',
+] as const
 
 export function countNodeEventBindings(
   attrs: Record<string, string | undefined>,

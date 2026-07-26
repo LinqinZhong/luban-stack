@@ -15,19 +15,34 @@ const props = defineProps<{
   contentStyle?: CSSProperties
 }>()
 
+type ScrollDetail = {
+  scrollTop: number
+  scrollLeft: number
+  scrollHeight: number
+  scrollWidth: number
+  clientHeight: number
+  clientWidth: number
+}
+
+type TouchStartDetail = {
+  clientX: number
+  clientY: number
+  pageX: number
+  pageY: number
+}
+
 const emit = defineEmits<{
   wheel: [event: WheelEvent]
-  scroll: [
-    detail: {
-      scrollTop: number
-      scrollLeft: number
-      scrollHeight: number
-      scrollWidth: number
-      clientHeight: number
-      clientWidth: number
-    },
-  ]
+  scroll: [detail: ScrollDetail]
+  scrollToLower: [detail: ScrollDetail]
+  scrollToUpper: [detail: ScrollDetail]
+  touchStart: [detail: TouchStartDetail]
 }>()
+
+/** 触底 / 触顶判定阈值（px） */
+const EDGE_THRESHOLD_PX = 50
+let atLowerEdge = false
+let atUpperEdge = true
 
 const bodyRef = ref<HTMLElement | null>(null)
 const thumbVisible = ref(false)
@@ -185,18 +200,43 @@ function revealThumb() {
   scheduleHide()
 }
 
-function onScroll() {
-  if (!props.enabled) return
-  revealThumb()
-  const el = bodyRef.value
-  if (!el) return
-  emit('scroll', {
+function scrollDetail(el: HTMLElement): ScrollDetail {
+  return {
     scrollTop: el.scrollTop,
     scrollLeft: el.scrollLeft,
     scrollHeight: el.scrollHeight,
     scrollWidth: el.scrollWidth,
     clientHeight: el.clientHeight,
     clientWidth: el.clientWidth,
+  }
+}
+
+function onScroll() {
+  if (!props.enabled) return
+  revealThumb()
+  const el = bodyRef.value
+  if (!el) return
+  const detail = scrollDetail(el)
+  emit('scroll', detail)
+
+  const maxScroll = Math.max(0, el.scrollHeight - el.clientHeight)
+  const nowLower = maxScroll > 0 && el.scrollTop >= maxScroll - EDGE_THRESHOLD_PX
+  const nowUpper = el.scrollTop <= EDGE_THRESHOLD_PX
+  if (nowLower && !atLowerEdge) emit('scrollToLower', detail)
+  if (nowUpper && !atUpperEdge) emit('scrollToUpper', detail)
+  atLowerEdge = nowLower
+  atUpperEdge = nowUpper
+}
+
+function onTouchStart(event: TouchEvent) {
+  if (!props.enabled) return
+  const t = event.touches[0]
+  if (!t) return
+  emit('touchStart', {
+    clientX: t.clientX,
+    clientY: t.clientY,
+    pageX: t.pageX,
+    pageY: t.pageY,
   })
 }
 
@@ -349,6 +389,8 @@ watch(
   async (enabled) => {
     stopMomentum()
     unbindObservers()
+    atLowerEdge = false
+    atUpperEdge = true
     await nextTick()
     if (enabled) {
       bindObservers()
@@ -375,6 +417,7 @@ watch(
       ]"
       :style="contentStyle"
       @scroll="onScroll"
+      @touchstart="onTouchStart"
       @wheel="onWheel"
       @pointerdown="onPointerDown"
       @pointermove="onPointerMove"

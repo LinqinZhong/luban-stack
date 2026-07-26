@@ -1000,6 +1000,7 @@ function handleSave() {
     :icon-options="iconOptions"
     :emit-events="emitEvents"
     :type-library="typeLibrary"
+    :component-props="componentProps"
     @save="saveEventBind"
   />
 </template>

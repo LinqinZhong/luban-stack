@@ -336,6 +336,61 @@ export function truncateMysqlTable(
   )
 }
 
+export function listMysqlTableRows(
+  payload: MysqlConnectionPayload & {
+    tableName: string
+    current?: number
+    pageSize?: number
+  },
+) {
+  return mysqlTableRequest<{
+    columns: MysqlColumnDef[]
+    keyColumns: string[]
+    keyName: string | null
+    rows: Record<string, unknown>[]
+    total: number
+    current: number
+    pageSize: number
+  }>('/api/projects/mysql/tables/rows', payload)
+}
+
+export function updateMysqlTableRow(
+  payload: MysqlConnectionPayload & {
+    tableName: string
+    key: Record<string, unknown>
+    values: Record<string, unknown>
+  },
+) {
+  return mysqlTableRequest<{ ok: boolean }>(
+    '/api/projects/mysql/tables/rows/update',
+    payload,
+  )
+}
+
+export function deleteMysqlTableRow(
+  payload: MysqlConnectionPayload & {
+    tableName: string
+    key: Record<string, unknown>
+  },
+) {
+  return mysqlTableRequest<{ ok: boolean }>(
+    '/api/projects/mysql/tables/rows/delete',
+    payload,
+  )
+}
+
+export function insertMysqlTableRow(
+  payload: MysqlConnectionPayload & {
+    tableName: string
+    values: Record<string, unknown>
+  },
+) {
+  return mysqlTableRequest<{ ok: boolean }>(
+    '/api/projects/mysql/tables/rows/insert',
+    payload,
+  )
+}
+
 export function setProjectEntryPage(payload: {
   projectPath: string
   pageId: string | null

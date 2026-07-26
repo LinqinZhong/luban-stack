@@ -44,7 +44,7 @@ const props = defineProps<{
   /** 预览态滚动容器：壳层需要压住高度，否则子内容撑开后无法滚 */
   scrollPort?: boolean
   /**
-   * 位于纵向滚动列内部：match_parent 高度按内容堆叠，
+   * 位于纵向滚动列内部：未声明「占满剩余」时按内容堆叠，
    * 不要 flex:1/height:0，否则兄弟会叠在同一视口。
    */
   insideScrollPort?: boolean
@@ -86,6 +86,12 @@ const shellStyle = computed<CSSProperties>(() => {
     cursor: props.interactive ? 'pointer' : undefined,
     ...marginStyle(props.marginAttrs),
     ...(props.extraStyle ?? {}),
+  }
+
+  const zRaw = props.marginAttrs.zIndex?.trim()
+  if (zRaw) {
+    const n = Number(zRaw.replace(/px$/i, ''))
+    if (Number.isFinite(n)) style.zIndex = n
   }
 
   // 绝对定位子节点：按自身 width/height，勿强制撑满父级
@@ -211,8 +217,8 @@ const fillHeight = computed(
 const stackByContent = computed(
   () =>
     !props.scrollPort &&
-    (props.insideScrollPort ||
-      (props.parentVertical && !props.fillRemainingHeight)),
+    !props.fillRemainingHeight &&
+    (props.insideScrollPort || props.parentVertical),
 )
 
 /** 仅占满/滚动时才允许缩到内容以下；堆叠项保持内容最小高度 */

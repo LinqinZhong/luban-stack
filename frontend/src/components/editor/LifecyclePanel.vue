@@ -11,9 +11,10 @@ import {
   type PageMethod,
 } from '../../types/page-method'
 import type { DataField } from '../../types/page-data'
-import type { ComponentEventDef } from '../../types/component'
+import type { ComponentEventDef, ComponentPropDef } from '../../types/component'
 import type { ComponentRenderMap } from '../../types/component-render'
 import type { ComponentMethodsMap } from '../../utils/widget-ref'
+import type { DataTypeLibrary } from '../../types/data-types'
 
 const props = defineProps<{
   lifecycle: LifecycleConfig
@@ -25,6 +26,9 @@ const props = defineProps<{
   iconOptions?: Array<{ id: string; label: string }>
   emitEvents?: ComponentEventDef[]
   forComponent?: boolean
+  /** 组件参数：自定义代码中 $props 提示 */
+  componentProps?: ComponentPropDef[] | null
+  typeLibrary?: DataTypeLibrary | null
 }>()
 
 const emit = defineEmits<{
@@ -105,6 +109,8 @@ function handleBindSave(value: string) {
       :component-map="componentMap"
       :component-methods-map="componentMethodsMap"
       :icon-options="iconOptions"
+      :component-props="componentProps"
+      :type-library="typeLibrary"
       @save="handleBindSave"
     />
   </div>

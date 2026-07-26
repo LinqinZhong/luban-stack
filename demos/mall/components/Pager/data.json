@@ -1,3 +1,44 @@
 {
-  "fields": []
+  "fields": [
+    {
+      "name": "pagination",
+      "type": "json",
+      "remark": "",
+      "value": {
+        "current": 1,
+        "pageSize": 10
+      },
+      "binding": "",
+      "computeBody": "",
+      "typeRef": "type_common_QueryPageDto",
+      "objectFields": [
+        {
+          "name": "current",
+          "type": "number",
+          "value": 1
+        },
+        {
+          "name": "pageSize",
+          "type": "number",
+          "value": 10
+        }
+      ]
+    },
+    {
+      "name": "loading",
+      "type": "boolean",
+      "remark": "",
+      "value": false,
+      "binding": "",
+      "computeBody": ""
+    },
+    {
+      "name": "hasNext",
+      "type": "boolean",
+      "remark": "",
+      "value": true,
+      "binding": "",
+      "computeBody": ""
+    }
+  ]
 }

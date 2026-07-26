@@ -11,7 +11,7 @@ import {
   type MethodReturnType,
 } from '../../types/page-method'
 import { buildGetDeviceInfoAmbientDeclaration } from '../../utils/device-info'
-import { buildDollarPropsAmbientDeclaration } from '../../utils/component-props'
+import { buildDollarPropsAmbientDeclaration, buildUpdatePropsAmbientDeclarations } from '../../utils/component-props'
 import type { ComponentPropDef } from '../../types/component'
 import type { DataTypeLibrary } from '../../types/data-types'
 
@@ -54,6 +54,7 @@ const ambientExtra = computed(() =>
     buildTypeLibraryAmbientDeclarations(props.typeLibrary),
     buildGetDeviceInfoAmbientDeclaration(),
     buildDollarPropsAmbientDeclaration(props.componentProps, props.typeLibrary),
+    buildUpdatePropsAmbientDeclarations(props.componentProps, props.typeLibrary),
   ]
     .filter(Boolean)
     .join('\n'),

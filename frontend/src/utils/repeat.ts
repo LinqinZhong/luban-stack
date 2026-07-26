@@ -65,6 +65,26 @@ export function interpolateTemplate(
   })
 }
 
+/**
+ * 属性插值：整段 `{item}` 且值为对象时保留占位符，交给运行时按 scope 取原生对象
+ *（避免 stringify 后再被误当成绑定表达式）。
+ */
+function interpolateAttrTemplate(
+  template: string,
+  item: unknown,
+  index: number,
+): string {
+  const trimmed = template.trim()
+  if (
+    trimmed === '{item}' &&
+    item != null &&
+    typeof item === 'object'
+  ) {
+    return '{item}'
+  }
+  return interpolateTemplate(template, item, index)
+}
+
 function applyItemScope(
   node: XmlNode,
   item: unknown,
@@ -78,7 +98,7 @@ function applyItemScope(
       attrs[key] = value
       continue
     }
-    attrs[key] = interpolateTemplate(value, item, index)
+    attrs[key] = interpolateAttrTemplate(value, item, index)
   }
 
   const scoped: XmlNode = {

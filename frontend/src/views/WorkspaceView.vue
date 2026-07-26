@@ -77,6 +77,7 @@ import MysqlIcon from '../components/icons/MysqlIcon.vue'
 import DevelopIcon from '../components/icons/DevelopIcon.vue'
 import BackendIcon from '../components/icons/BackendIcon.vue'
 import ComponentMetaPanel from '../components/editor/ComponentMetaPanel.vue'
+import BackLink from '../components/editor/BackLink.vue'
 import PreviewDebugPanel, {
   type EmitLogEntry,
 } from '../components/editor/PreviewDebugPanel.vue'
@@ -86,8 +87,10 @@ import WidgetTree from '../components/xml/WidgetTree.vue'
 import { useProjectStore } from '../stores/project'
 import {
   buildEmitAmbientDeclarations,
+  buildLocalMethodsAmbientDeclarations,
   buildTypeLibraryAmbientDeclarations,
   builtinsForRoot,
+  coerceEmitParamValue,
   createEmptyMethod,
   CUSTOM_EVENT_METHOD,
   serializeEventBindings,
@@ -106,7 +109,8 @@ import {
   resolveStatusBarConfig,
   type StatusBarConfig,
 } from '../utils/status-bar'
-import { buildDollarProps, buildDollarPropsAmbientDeclaration } from '../utils/component-props'
+import { buildDollarProps, buildDollarPropsAmbientDeclaration, buildUpdatePropsAmbientDeclarations, normalizePropDefaultValue } from '../utils/component-props'
+import { hydrateApiDollarProps } from '../utils/api-prop'
 import { getDeviceInfo } from '../utils/device-info'
 import { clonePageData, type DataFieldValue } from '../types/page-data'
 import {
@@ -241,6 +245,8 @@ const editingMethod = ref<PageMethod | null>(null)
 /** 预览态是否已跑过挂载生命周期序列 */
 let lifecycleSessionActive = false
 let lifecycleSaveTimer: ReturnType<typeof setTimeout> | null = null
+/** 预览运行时就绪后递增，驱动嵌套 Component 挂载生命周期 */
+const previewLifecycleGate = ref(0)
 /** 预览态 navigateTo / navigateBack 历史（含路由参数） */
 const pageHistory = ref<Array<{ pageId: string; params: Record<string, unknown> }>>([])
 /** 预览态当前页跳转参数（navigateTo 传入） */
@@ -342,6 +348,7 @@ function cloneComponentRenderMap(map: ComponentRenderMap): ComponentRenderMap {
       ...info,
       config: { ...info.config },
       data: clonePageData(info.data),
+      lifecycle: info.lifecycle ? { ...info.lifecycle } : undefined,
     }
   }
   return next
@@ -403,8 +410,8 @@ const editorConditionComponentProps = computed(() =>
   isComponentResource.value ? (activeComponent.value?.config.props ?? []) : null,
 )
 
-/** 编辑/预览组件时：用 config.props 默认值 + 调试覆盖作为 $props */
-const editorDollarProps = computed(() => {
+/** 编辑/预览组件时：用 config.props 默认值 + 调试覆盖作为 $props（原始值，含 api 绑定 JSON） */
+const editorDollarPropsRaw = computed(() => {
   if (!isComponentResource.value || !activeComponent.value) return undefined
   return {
     ...buildDollarProps(activeComponent.value.config),
@@ -412,7 +419,18 @@ const editorDollarProps = computed(() => {
   }
 })
 
-const previewDebugDollarProps = computed(() => editorDollarProps.value ?? {})
+/** 画布 / 自定义代码运行时：api 参数为可调用函数 */
+const editorDollarProps = computed(() => {
+  const raw = editorDollarPropsRaw.value
+  if (!raw || !activeComponent.value) return raw
+  return hydrateApiDollarProps(
+    raw,
+    activeComponent.value.config.props,
+    projectStore.path,
+  )
+})
+
+const previewDebugDollarProps = computed(() => editorDollarPropsRaw.value ?? {})
 
 const canPreviewGoBack = computed(
   () => workspaceMode.value === 'preview' && pageHistory.value.length > 0,
@@ -455,30 +473,49 @@ function createPreviewDebugEmit() {
 
 let debugPropsSaveTimer: ReturnType<typeof setTimeout> | null = null
 
+/**
+ * 调试面板手动改 Props：写入预览覆盖，并作为「测试基线」持久化到 debugProps。
+ * （生命周期里的 updateProps 不要走这里，否则会把运行时累加结果存进基线。）
+ */
 function handlePreviewPropUpdate(name: string, value: unknown) {
   previewPropOverrides.value = {
     ...previewPropOverrides.value,
     [name]: value,
   }
   if (isComponentResource.value && activeComponent.value) {
+    const nextDebug = {
+      ...(activeComponent.value.config.debugProps ?? {}),
+      [name]: value,
+    }
     activeComponent.value = {
       ...activeComponent.value,
       config: {
         ...activeComponent.value.config,
-        debugProps: { ...previewPropOverrides.value },
+        debugProps: nextDebug,
       },
     }
     if (debugPropsSaveTimer) clearTimeout(debugPropsSaveTimer)
     debugPropsSaveTimer = setTimeout(() => {
-      void persistComponentDebugProps()
+      void persistComponentDebugPropsBaseline()
     }, 400)
   }
   void runLifecycleUpdateSequence()
 }
 
-async function persistComponentDebugProps() {
+/** 预览运行时 updateProps：只改内存中的 $props，不回写 debugProps 基线 */
+function applyPreviewPropRuntimeOverride(name: string, value: unknown) {
+  previewPropOverrides.value = {
+    ...previewPropOverrides.value,
+    [name]: value,
+  }
+}
+
+async function persistComponentDebugPropsBaseline() {
   if (!projectStore.path || !activeComponent.value || !isComponentResource.value) {
     return
+  }
+  const baseline = {
+    ...(activeComponent.value.config.debugProps ?? {}),
   }
   try {
     const saved = await saveComponentConfig({
@@ -486,10 +523,9 @@ async function persistComponentDebugProps() {
       componentId: activeComponent.value.id,
       config: {
         ...activeComponent.value.config,
-        debugProps: { ...previewPropOverrides.value },
+        debugProps: baseline,
       },
     })
-    // 保留内存中的其它未保存字段，合并服务端规范化后的 config
     if (activeComponent.value?.id === saved.id) {
       activeComponent.value = {
         ...activeComponent.value,
@@ -497,7 +533,7 @@ async function persistComponentDebugProps() {
           ...saved.config,
           debugProps: {
             ...(saved.config.debugProps ?? {}),
-            ...previewPropOverrides.value,
+            ...baseline,
           },
         },
       }
@@ -574,7 +610,7 @@ function invokeActiveExposedMethod(methodName: string, args: unknown[]) {
 
   void runPreviewBindings(raw, {
     eventArgs,
-    dollarProps: previewDebugDollarProps.value,
+    dollarProps: editorDollarProps.value,
     emitFn: createPreviewDebugEmit(),
   })
 }
@@ -601,12 +637,28 @@ const methodAmbientExtra = computed(() => {
     isComponentResource.value ? activeComponent.value?.config.props : null,
     dataTypeLibrary.value,
   )
+  const updatePropsAmbient = isComponentResource.value
+    ? buildUpdatePropsAmbientDeclarations(
+        activeComponent.value?.config.props,
+        dataTypeLibrary.value,
+      )
+    : ''
   const typeAmbient = buildTypeLibraryAmbientDeclarations(dataTypeLibrary.value)
-  const base = [deviceAmbient, typeAmbient, propsAmbient].filter(Boolean).join('\n') + '\n'
+  const localMethodsAmbient = buildLocalMethodsAmbientDeclarations(
+    pageMethods.value,
+    dataTypeLibrary.value,
+  )
+  const base =
+    [deviceAmbient, typeAmbient, propsAmbient, updatePropsAmbient, localMethodsAmbient]
+      .filter(Boolean)
+      .join('\n') + '\n'
   if (!isComponentResource.value || !activeComponent.value) {
     return base
   }
-  return `${base}${buildEmitAmbientDeclarations(activeComponent.value.config.events ?? [])}`
+  return `${base}${buildEmitAmbientDeclarations(
+    activeComponent.value.config.events ?? [],
+    dataTypeLibrary.value,
+  )}`
 })
 
 /** 展示用方法列表（保证含最新预置方法；剔除已废弃的内置方法） */
@@ -1016,6 +1068,20 @@ async function refreshComponentMap() {
     const details = await Promise.all(
       list.map((item) => getComponent(projectStore.path!, item.id)),
     )
+    const lifecycleEntries = await Promise.all(
+      details.map(async (detail) => {
+        try {
+          const { lifecycle } = await getComponentLifecycle(
+            projectStore.path!,
+            detail.id,
+          )
+          return [detail.id, lifecycle ?? createEmptyLifecycleConfig()] as const
+        } catch {
+          return [detail.id, createEmptyLifecycleConfig()] as const
+        }
+      }),
+    )
+    const lifecycleById = Object.fromEntries(lifecycleEntries)
     const next: ComponentRenderMap = {}
     for (const detail of details) {
       next[detail.id] = {
@@ -1026,6 +1092,7 @@ async function refreshComponentMap() {
           getDeviceInfo: previewGetDeviceInfo,
           dollarProps: buildDollarProps(detail.config),
         }),
+        lifecycle: lifecycleById[detail.id] ?? createEmptyLifecycleConfig(),
       }
     }
     componentMap.value = next
@@ -1117,6 +1184,14 @@ async function handleLifecycleUpdate(lifecycle: LifecycleConfig) {
           lifecycle: lifecycleConfig.value,
         })
         lifecycleConfig.value = result.lifecycle
+        const cid = activeDoc.value.id
+        const prev = componentMap.value[cid]
+        if (prev) {
+          componentMap.value = {
+            ...componentMap.value,
+            [cid]: { ...prev, lifecycle: result.lifecycle },
+          }
+        }
       } else {
         const result = await savePageLifecycle({
           projectPath: projectStore.path,
@@ -1696,6 +1771,73 @@ function applyComponentPreviewSetData(
   }
 }
 
+/** 解析 Component 属性上的纯数据池绑定：`{field}` */
+function parseSimpleDataBinding(raw: string | undefined | null): string | null {
+  const text = String(raw ?? '').trim()
+  const m = text.match(/^\{([A-Za-z_$][\w$]*)\}$/)
+  return m?.[1] ?? null
+}
+
+/**
+ * 预览态 updateProps：校验 model 参数 → 更新本地 $props / 调试 Props →
+ * 若父级属性为 `{field}` 则回写父级数据池。
+ */
+function applyPreviewUpdateProps(
+  prop: string,
+  value: unknown,
+  options?: {
+    componentId?: string
+    hostAttrs?: Record<string, string>
+    /** 父级数据池所属组件；空则页面 */
+    hostDataOwnerId?: string
+    config?: import('../types/component').ComponentConfig | null
+  },
+) {
+  const name = prop.trim()
+  if (!name) return
+  const config =
+    options?.config ??
+    (options?.componentId
+      ? canvasComponentMap.value[options.componentId]?.config
+      : null) ??
+    (isComponentResource.value ? activeComponent.value?.config : null)
+  const def = config?.props?.find((item) => item.name.trim() === name)
+  if (!def) {
+    ElMessage.warning(`组件参数不存在：${name}`)
+    return
+  }
+  if (!def.twoWay) {
+    ElMessage.warning(`「${name}」未开启双向绑定，无法 updateProps`)
+    return
+  }
+  if (def.type === 'api') {
+    ElMessage.warning(`「${name}」为后端 API 参数，无法 updateProps`)
+    return
+  }
+
+  const coerced = normalizePropDefaultValue(def.type, value)
+
+  // 正在编辑该组件：仅更新预览态 $props，不污染 debugProps 测试基线
+  if (
+    isComponentResource.value &&
+    (!options?.componentId ||
+      options.componentId === activeComponentId.value)
+  ) {
+    applyPreviewPropRuntimeOverride(name, coerced)
+  }
+
+  // 父级绑定 `{field}` → 回写数据池
+  const boundField = parseSimpleDataBinding(options?.hostAttrs?.[name])
+  if (boundField) {
+    const hostOwner = options?.hostDataOwnerId?.trim() || ''
+    if (hostOwner) {
+      applyComponentPreviewSetData(hostOwner, boundField, coerced)
+    } else {
+      applyPreviewSetData(boundField, coerced)
+    }
+  }
+}
+
 /** 父页通过引用调用组件「暴露方法」 */
 function runComponentExposedMethod(
   componentId: string,
@@ -1747,7 +1889,11 @@ function runComponentExposedMethod(
       (componentMethodsMap.value[componentId] ?? []).find(
         (item) => item.name === name && !item.builtin,
       ),
+    localMethods: (componentMethodsMap.value[componentId] ?? []).filter(
+      (item) => !item.builtin,
+    ),
     eventArgs,
+    dollarProps: buildDollarProps(info.config),
     hasPage: (pageId) => pages.value.some((item) => item.id === pageId),
     navigateTo: async () => {
       ElMessage.info('组件内暂不支持 navigateTo')
@@ -1758,12 +1904,19 @@ function runComponentExposedMethod(
     setData: (prop, value) => {
       applyComponentPreviewSetData(componentId, prop, value)
     },
+    updateProps: (prop, value) => {
+      applyPreviewUpdateProps(prop, value, {
+        componentId,
+        config: info.config,
+      })
+    },
     showToast: (message, duration) => {
       showPreviewToast(message, duration)
     },
     getDeviceInfo: previewGetDeviceInfo,
     onUnknownMethod: (name) => {
       if (name.startsWith('自定义方法')) ElMessage.error(name)
+      else if (name.startsWith('updateProps')) ElMessage.warning(name)
     },
   })
 }
@@ -1775,27 +1928,66 @@ async function runPreviewBindings(
     eventArgs?: Record<string, unknown>
     dollarProps?: Record<string, unknown>
     emitFn?: (event: string, ...args: unknown[]) => void
-    emitWithArgs?: (event: string, args: Record<string, string>) => void
+    emitWithArgs?: (event: string, args: Record<string, unknown>) => void
+    /**
+     * 事件绑定写在该组件定义内时，setData / 数据池 / 方法解析走组件数据池。
+     * 空则走当前页面（或正在编辑的组件资源）数据池。
+     */
+    dataOwnerComponentId?: string
+    /** updateProps 回写父级：Component 节点原始 attrs */
+    updatePropsHostAttrs?: Record<string, string>
+    /** updateProps 回写父级数据池所属组件 id */
+    updatePropsHostDataOwnerId?: string
   },
 ) {
   if (!activeDoc.value) return
+  const ownerId = options?.dataOwnerComponentId?.trim() || ''
+  const ownerInfo = ownerId ? canvasComponentMap.value[ownerId] : null
+  if (ownerId && !ownerInfo) {
+    ElMessage.warning(`组件不存在：${ownerId}`)
+    return
+  }
+
   const debugEmit = options?.emitFn ?? createPreviewDebugEmit()
   const debugEmitWithArgs =
     options?.emitWithArgs ??
     (isComponentResource.value
-      ? (eventName: string, args: Record<string, string>) => {
-          pushPreviewEmitLog(eventName, { ...args })
+      ? (eventName: string, args: Record<string, unknown>) => {
+          const params =
+            activeComponent.value?.config.events?.find(
+              (item) => item.name.trim() === eventName,
+            )?.params ?? []
+          const packed: Record<string, unknown> = {}
+          for (const param of params) {
+            const key = param.name.trim()
+            if (!key || key.startsWith('...')) continue
+            if (key in args) {
+              packed[key] = coerceEmitParamValue(param.type, args[key])
+            }
+          }
+          for (const [key, value] of Object.entries(args)) {
+            if (!(key in packed)) packed[key] = value
+          }
+          pushPreviewEmitLog(eventName, packed)
         }
       : undefined)
+
   await runEventBindings(raw, {
-    pageData: resolvedPageData.value,
-    xml: activeDoc.value.xml,
+    pageData: ownerInfo ? ownerInfo.data : resolvedPageData.value,
+    xml: ownerInfo ? ownerInfo.xml : activeDoc.value.xml,
     modalStack,
     componentMap: canvasComponentMap.value,
     componentMethodsMap: componentMethodsMap.value,
     runComponentMethod: runComponentExposedMethod,
     resolveMethod: (name) =>
-      pageMethods.value.find((item) => item.name === name && !item.builtin),
+      ownerId
+        ? (componentMethodsMap.value[ownerId] ?? []).find(
+            (item) => item.name === name && !item.builtin,
+          )
+        : pageMethods.value.find((item) => item.name === name && !item.builtin),
+    localMethods: ownerId
+      ? (componentMethodsMap.value[ownerId] ?? []).filter((item) => !item.builtin)
+      : pageMethods.value.filter((item) => !item.builtin),
     scope: options?.scope,
     eventArgs: options?.eventArgs,
     dollarProps: options?.dollarProps ?? editorDollarProps.value,
@@ -1829,7 +2021,19 @@ async function runPreviewBindings(
       })
     },
     setData: (prop, value) => {
-      applyPreviewSetData(prop, value)
+      if (ownerId) {
+        applyComponentPreviewSetData(ownerId, prop, value)
+      } else {
+        applyPreviewSetData(prop, value)
+      }
+    },
+    updateProps: (prop, value) => {
+      applyPreviewUpdateProps(prop, value, {
+        componentId: ownerId || undefined,
+        config: ownerInfo?.config ?? activeComponent.value?.config,
+        hostAttrs: options?.updatePropsHostAttrs,
+        hostDataOwnerId: options?.updatePropsHostDataOwnerId,
+      })
     },
     showToast: (message, duration) => {
       showPreviewToast(message, duration)
@@ -1840,6 +2044,8 @@ async function runPreviewBindings(
         ElMessage.warning(name.replace(/^navigateTo:\s*/, ''))
       } else if (name.startsWith('自定义方法')) {
         ElMessage.error(name)
+      } else if (name.startsWith('updateProps')) {
+        ElMessage.warning(name)
       }
     },
   })
@@ -1929,6 +2135,30 @@ async function preparePreviewRuntime() {
     clearPreviewRuntime()
     return
   }
+  // 组件预览：先从磁盘同步 debugProps 基线，再跑生命周期（updateProps 只改内存）
+  if (
+    isComponentResource.value &&
+    activeComponentId.value &&
+    projectStore.path
+  ) {
+    try {
+      const detail = await getComponent(
+        projectStore.path,
+        activeComponentId.value,
+      )
+      if (activeComponent.value?.id === detail.id) {
+        activeComponent.value = {
+          ...activeComponent.value,
+          config: {
+            ...activeComponent.value.config,
+            debugProps: { ...(detail.config.debugProps ?? {}) },
+          },
+        }
+      }
+    } catch (err) {
+      console.warn('[voider] 同步组件调试 Props 失败:', err)
+    }
+  }
   const snap = await buildPreviewRuntimeSnapshot(activeDoc.value.data)
   if (workspaceMode.value !== 'preview') return
   commitPreviewRuntime(snap.data, snap.componentMap)
@@ -1938,7 +2168,45 @@ async function preparePreviewRuntime() {
 async function runLifecycleHook(key: LifecycleHookKey) {
   const raw = lifecycleConfig.value[key]
   if (!raw?.trim()) return
-  await runPreviewBindings(raw)
+  await runPreviewBindings(raw, {
+    dollarProps: editorDollarProps.value,
+  })
+}
+
+async function runNestedComponentLifecycle(
+  phase: 'mount' | 'unmount',
+  payload: PreviewInteractPayload,
+) {
+  if (!activeDoc.value) return
+  if (phase === 'mount' && workspaceMode.value !== 'preview') return
+  const componentId = payload.componentEmit?.componentId?.trim() || ''
+  if (!componentId) return
+  const lifecycle = canvasComponentMap.value[componentId]?.lifecycle
+  if (!lifecycle) return
+  const keys = phase === 'unmount' ? LIFECYCLE_UNMOUNT_KEYS : LIFECYCLE_MOUNT_KEYS
+  for (const key of keys) {
+    const raw = lifecycle[key]
+    if (!raw?.trim()) continue
+    // 卸载钩子在离开预览时仍需执行，绕过 handlePreviewInteract 的 preview 门闩
+    if (phase === 'unmount' && workspaceMode.value !== 'preview') {
+      await runPreviewBindings(raw, {
+        scope: payload.scope,
+        dollarProps: payload.dollarProps,
+        dataOwnerComponentId: componentId,
+        updatePropsHostAttrs: payload.componentEmit?.hostAttrs,
+        updatePropsHostDataOwnerId:
+          payload.componentEmit?.outer?.componentId?.trim() || undefined,
+      })
+      continue
+    }
+    await handlePreviewInteract({
+      eventKey: key,
+      raw,
+      scope: payload.scope,
+      dollarProps: payload.dollarProps,
+      componentEmit: payload.componentEmit,
+    })
+  }
 }
 
 async function teardownLifecycleSession() {
@@ -1973,12 +2241,14 @@ async function runLifecycleUpdateSequence() {
 
 watch(workspaceMode, async (mode, prev) => {
   if (prev === 'preview' && mode !== 'preview') {
+    previewLifecycleGate.value = 0
     await teardownLifecycleSession()
     clearPreviewRuntime()
     return
   }
   if (mode === 'preview' && prev !== 'preview') {
     await preparePreviewRuntime()
+    previewLifecycleGate.value += 1
     await nextTick()
     await syncLifecycleSession()
   }
@@ -1998,64 +2268,124 @@ watch(
 )
 
 async function handlePreviewInteract(payload: PreviewInteractPayload) {
+  if (payload.eventKey === '__lifecycle') {
+    const phase = payload.eventArgs?.phase
+    if (phase === 'mount') {
+      if (workspaceMode.value !== 'preview' || !activeDoc.value) return
+      await runNestedComponentLifecycle('mount', payload)
+    } else if (phase === 'unmount') {
+      // 离开预览时 mode 可能已切走，仍允许跑卸载钩子
+      if (!activeDoc.value) return
+      await runNestedComponentLifecycle('unmount', payload)
+    }
+    return
+  }
+
   if (workspaceMode.value !== 'preview' || !activeDoc.value) return
 
   if (payload.eventKey === '__setData') {
     const prop = payload.eventArgs?.prop
     const value = payload.eventArgs?.value
     if (typeof prop === 'string' && prop.trim()) {
-      applyPreviewSetData(
-        prop.trim(),
-        value as import('../types/page-data').DataFieldValue,
-      )
+      const ownerId = payload.componentEmit?.componentId?.trim()
+      if (ownerId) {
+        applyComponentPreviewSetData(
+          ownerId,
+          prop.trim(),
+          value as import('../types/page-data').DataFieldValue,
+        )
+      } else {
+        applyPreviewSetData(
+          prop.trim(),
+          value as import('../types/page-data').DataFieldValue,
+        )
+      }
     }
     return
   }
 
-  const hostEmit = payload.componentEmit
+  type EmitLayer = NonNullable<PreviewInteractPayload['componentEmit']>
 
-  const dispatchHostEvent = (
+  function packEmitArgs(
+    layer: EmitLayer,
     eventName: string,
     args: Record<string, unknown>,
-  ) => {
-    if (!hostEmit) return
-    const raw = hostEmit.hostAttrs[eventName]
-    if (!raw?.trim()) return
-    void runPreviewBindings(raw, {
-      scope: hostEmit.hostScope ?? payload.scope,
-      eventArgs: args,
-    })
+  ): Record<string, unknown> {
+    const params =
+      layer.events.find((item) => item.name.trim() === eventName)?.params ?? []
+    const packed: Record<string, unknown> = {}
+    for (const param of params) {
+      const key = param.name.trim()
+      if (!key || key.startsWith('...')) continue
+      if (key in args) packed[key] = coerceEmitParamValue(param.type, args[key])
+    }
+    for (const [key, value] of Object.entries(args)) {
+      if (!(key in packed)) packed[key] = value
+    }
+    return packed
   }
 
+  /** 沿 outer 找到声明了该事件绑定的外层组件 */
+  function findOuterWithEvent(
+    start: EmitLayer | undefined,
+    eventName: string,
+  ): EmitLayer | undefined {
+    let layer = start
+    while (layer) {
+      if (layer.hostAttrs[eventName]?.trim()) return layer
+      layer = layer.outer
+    }
+    return undefined
+  }
+
+  function createLayerEmitWithArgs(layer: EmitLayer) {
+    return (eventName: string, args: Record<string, unknown>) => {
+      const packed = packEmitArgs(layer, eventName, args)
+      const raw = layer.hostAttrs[eventName]
+      if (!raw?.trim()) return
+      const parent = findOuterWithEvent(layer.outer, eventName)
+      // hostAttrs 写在父级 XML 上：有 outer 则父组件数据池，否则页面数据池
+      const hostDataOwner = layer.outer?.componentId?.trim() || undefined
+      void runPreviewBindings(raw, {
+        scope: layer.hostScope ?? payload.scope,
+        eventArgs: packed,
+        dataOwnerComponentId: hostDataOwner,
+        // 再 emit 时交给外层（GoodsCard → GoodsList → 页面）
+        emitWithArgs: parent
+          ? createLayerEmitWithArgs(parent)
+          : isComponentResource.value
+            ? (name, nextArgs) => {
+                pushPreviewEmitLog(name, packEmitArgs(layer, name, nextArgs))
+              }
+            : undefined,
+        emitFn: parent
+          ? createComponentEmit(parent.events, (name, nextArgs) => {
+              createLayerEmitWithArgs(parent)(name, nextArgs)
+            })
+          : createPreviewDebugEmit(),
+      })
+    }
+  }
+
+  const hostEmit = payload.componentEmit
+  const emitWithArgs = hostEmit ? createLayerEmitWithArgs(hostEmit) : undefined
   const emitFn = hostEmit
-    ? createComponentEmit(hostEmit.events, dispatchHostEvent)
+    ? createComponentEmit(hostEmit.events, (eventName, args) => {
+        createLayerEmitWithArgs(hostEmit)(eventName, args)
+      })
     : undefined
 
-  const emitWithArgs = hostEmit
-    ? (eventName: string, args: Record<string, string>) => {
-        // 按事件形参名打包；未声明的键一并带上
-        const params =
-          hostEmit.events.find((item) => item.name.trim() === eventName)
-            ?.params ?? []
-        const packed: Record<string, unknown> = {}
-        for (const param of params) {
-          const key = param.name.trim()
-          if (!key || key.startsWith('...')) continue
-          if (key in args) packed[key] = args[key]
-        }
-        for (const [key, value] of Object.entries(args)) {
-          if (!(key in packed)) packed[key] = value
-        }
-        dispatchHostEvent(eventName, packed)
-      }
-    : undefined
-
+  // 绑定写在组件定义内（如 Pager 的 onScrollToLower）→ 写组件数据池
   await runPreviewBindings(payload.raw, {
     scope: payload.scope,
     eventArgs: payload.eventArgs,
     dollarProps: payload.dollarProps,
     emitFn,
     emitWithArgs,
+    dataOwnerComponentId: payload.componentEmit?.componentId?.trim() || undefined,
+    updatePropsHostAttrs: payload.componentEmit?.hostAttrs,
+    updatePropsHostDataOwnerId:
+      payload.componentEmit?.outer?.componentId?.trim() || undefined,
   })
 }
 
@@ -2987,6 +3317,8 @@ watch(
           :component-methods-map="componentMethodsMap"
           :icon-options="iconOptions"
           :emit-events="isComponentResource ? activeComponent?.config.events : undefined"
+          :component-props="editorConditionComponentProps"
+          :type-library="dataTypeLibrary"
           @update:lifecycle="handleLifecycleUpdate"
         />
         <PageCanvas
@@ -3010,6 +3342,8 @@ watch(
           :component-map="canvasComponentMap"
           :dollar-props="editorDollarProps"
           :route-params="routeParams"
+          :project-path="projectStore.path || undefined"
+          :preview-lifecycle-gate="previewLifecycleGate"
           :hidden-node-ids="isEditMode ? editorHiddenNodeIds : undefined"
           :toast="workspaceMode === 'preview' ? previewToast : null"
           :show-device-chrome="!isComponentResource"
@@ -3056,9 +3390,9 @@ watch(
         @update:config="handleComponentConfigUpdate"
       />
       <div v-else class="props-with-back">
-        <button type="button" class="back-component-meta" @click="selectedNodeId = ''">
-          ← 返回组件设置
-        </button>
+        <div class="back-bar">
+          <BackLink label="返回组件设置" @click="selectedNodeId = ''" />
+        </div>
         <PropsPanel
           v-model:tab="propsTab"
           :xml="activeDoc.xml"
@@ -3071,6 +3405,8 @@ watch(
           :route-params="null"
           :component-map="componentMap"
           :component-methods-map="componentMethodsMap"
+          :project-path="projectStore.path || undefined"
+          :type-library="dataTypeLibrary"
           :open-repeat-request="openRepeatRequest"
           @update:xml="handleXmlUpdate"
         />
@@ -3088,6 +3424,8 @@ watch(
       :route-params="routeParams"
       :component-map="componentMap"
       :component-methods-map="componentMethodsMap"
+      :project-path="projectStore.path || undefined"
+      :type-library="dataTypeLibrary"
       :open-repeat-request="openRepeatRequest"
       :status-bar-config="isPageResource ? pageStatusBarConfig : null"
       :canvas-scene="canvasScene"
@@ -3104,6 +3442,7 @@ watch(
       :prop-values="previewDebugDollarProps"
       :emit-logs="previewEmitLogs"
       :type-library="dataTypeLibrary"
+      :project-path="projectStore.path || undefined"
       @back="handlePreviewNavigateBack"
       @go-entry="handlePreviewGoEntry"
       @refresh="handlePreviewRefresh"
@@ -3146,6 +3485,7 @@ watch(
       v-model="methodDialogVisible"
       :method="editingMethod"
       :data-fields="activeDoc?.data?.fields ?? []"
+      :type-library="dataTypeLibrary"
       :xml="activeDoc?.xml"
       :component-map="componentMap"
       :component-methods-map="componentMethodsMap"
@@ -3572,20 +3912,13 @@ watch(
   border-left: 1px solid #ebeef5;
 }
 
-.back-component-meta {
+.back-bar {
   flex-shrink: 0;
-  border: none;
+  display: flex;
+  align-items: center;
+  padding: 8px 14px;
   background: #f8fafc;
   border-bottom: 1px solid #ebeef5;
-  text-align: left;
-  padding: 10px 14px;
-  font-size: 12px;
-  color: #409eff;
-  cursor: pointer;
-}
-
-.back-component-meta:hover {
-  background: #ecf5ff;
 }
 
 .props-with-back :deep(.props-panel) {

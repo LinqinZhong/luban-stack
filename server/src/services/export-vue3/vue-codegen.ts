@@ -61,7 +61,16 @@ const LAYOUT_ATTRS = new Set([
   'closeOnClick',
 ])
 
-const INTERACTION_ATTRS = new Set(['onClick', 'onLongClick', 'onScroll'])
+const INTERACTION_ATTRS = new Set([
+  'onClick',
+  'onLongClick',
+  'onScroll',
+  'onScrollToLower',
+  'onScrollToUpper',
+  'onTouchStart',
+])
+
+const NON_SCROLL_INTERACTION_ATTRS = ['onClick', 'onLongClick', 'onTouchStart'] as const
 
 const TEXT_STYLE_ATTRS = new Set(['textSize', 'textColor', 'color'])
 
@@ -98,6 +107,8 @@ export interface CodegenContext {
   refFields: PageRefField[]
   methods: GeneratedMethod[]
   methodSeq: number
+  /** 事件辅助脚本（如滚动触边状态） */
+  extraScript: string[]
   indent: number
   /** 是否使用导出的 VoiderIcon 组件 */
   needsVoiderIcon: boolean
@@ -838,6 +849,9 @@ function vueEventName(key: string): string {
   if (key === 'onClick') return 'click'
   if (key === 'onLongClick') return 'contextmenu.prevent'
   if (key === 'onScroll') return 'scroll'
+  if (key === 'onScrollToLower') return 'scroll'
+  if (key === 'onScrollToUpper') return 'scroll'
+  if (key === 'onTouchStart') return 'touchstart'
   return key.replace(/^on/, '').replace(/^[A-Z]/, (c) => c.toLowerCase())
 }
 
@@ -901,6 +915,21 @@ function transformCustomSetData(line: string, fieldNames: readonly string[]): st
   )
 }
 
+/** 组件内 updateProps('x', v) → emit('update:x', v) */
+function transformCustomUpdateProps(line: string, kind: 'page' | 'component'): string {
+  if (kind !== 'component') {
+    return line.replace(
+      /\bupdateProps\s*\(/g,
+      '(() => { throw new Error("updateProps 仅可在组件内使用") })(',
+    )
+  }
+  return line.replace(
+    /\bupdateProps\s*\(\s*['"]([\w$]+)['"]\s*,\s*([\s\S]*?)\s*\)\s*;?/g,
+    (_match, prop: string, value: string) =>
+      `emit('update:${prop}' as any, ${value.trim()})`,
+  )
+}
+
 function transformCustomRefAccess(line: string, refNames: readonly string[]): string {
   let result = line
   for (const name of refNames) {
@@ -958,6 +987,7 @@ function transformCustomLine(
 ): string {
   const refNames = ctx.refFields.map((f) => f.name)
   let next = transformCustomRefAccess(line, refNames)
+  next = transformCustomUpdateProps(next, ctx.kind)
   if (ctx.kind === 'page') {
     next = transformCustomSetData(next, ctx.dataFieldNames)
     next = transformCustomDataReads(next, ctx.dataFieldNames)
@@ -1231,6 +1261,32 @@ function emitBindingStatements(
     return lines
   }
 
+  if (method === 'updateProps') {
+    const propRaw = binding.args.prop?.trim() || ''
+    const valueRaw = binding.args.value ?? ''
+    let valueExpr: string
+    if (valueRaw.includes('{')) {
+      valueExpr = templateToExpr(valueRaw, inRepeat, hasPayload, ctx)
+    } else {
+      try {
+        valueExpr = JSON.stringify(JSON.parse(valueRaw))
+      } catch {
+        valueExpr = `'${escapeTsString(valueRaw)}'`
+      }
+    }
+    if (ctx.kind !== 'component') {
+      lines.push(`  console.warn('updateProps 仅可在组件内使用')`)
+      return lines
+    }
+    if (propRaw && !propRaw.includes('{')) {
+      lines.push(`  emit('update:${escapeTsString(propRaw)}' as any, ${valueExpr})`)
+      return lines
+    }
+    const propExpr = templateToExpr(propRaw, inRepeat, hasPayload, ctx)
+    lines.push(`  emit(('update:' + String(${propExpr})) as any, ${valueExpr})`)
+    return lines
+  }
+
   lines.push(`  console.warn('unknown method: ${escapeTsString(method)}')`)
   return lines
 }
@@ -1279,8 +1335,27 @@ function eventHandler(
   ctx: CodegenContext,
 ): string {
   if (!raw?.trim()) return ''
-  const isScroll = eventKey === 'onScroll'
+  const isScroll =
+    eventKey === 'onScroll' ||
+    eventKey === 'onScrollToLower' ||
+    eventKey === 'onScrollToUpper'
+  const isTouch = eventKey === 'onTouchStart'
   const bindings = parseBindings(raw)
+
+  if (isTouch) {
+    const methodName = registerEventMethod(ctx, 'touchstart', raw, {
+      inRepeat,
+      hasPayload: true,
+      isScroll: false,
+    })
+    const payloadExpr =
+      '{ clientX: e.touches?.[0]?.clientX ?? 0, clientY: e.touches?.[0]?.clientY ?? 0, pageX: e.touches?.[0]?.pageX ?? 0, pageY: e.touches?.[0]?.pageY ?? 0 }'
+    if (inRepeat) {
+      return `@touchstart="(e) => ${methodName}(item, index, ${payloadExpr})"`
+    }
+    return `@touchstart="(e) => ${methodName}(${payloadExpr})"`
+  }
+
   const inline = tryInlineEventHandler(
     bindings,
     { inRepeat, hasPayload: false, isScroll },
@@ -1306,6 +1381,105 @@ function eventHandler(
     return `@${vueEventName(eventKey)}="() => ${methodName}(item, index)"`
   }
   return `@${vueEventName(eventKey)}="${methodName}"`
+}
+
+/** 合并 onScroll / 触底 / 触顶，避免多个 @scroll 冲突 */
+function mergedScrollEventHandler(
+  attrs: Record<string, string>,
+  inRepeat: boolean,
+  ctx: CodegenContext,
+): string {
+  const hasScroll = Boolean(attrs.onScroll?.trim())
+  const hasLower = Boolean(attrs.onScrollToLower?.trim())
+  const hasUpper = Boolean(attrs.onScrollToUpper?.trim())
+  if (!hasScroll && !hasLower && !hasUpper) return ''
+
+  if (hasScroll && !hasLower && !hasUpper) {
+    return eventHandler('onScroll', attrs.onScroll, inRepeat, ctx)
+  }
+
+  const scrollName = hasScroll
+    ? registerEventMethod(ctx, 'scroll', attrs.onScroll!, {
+        inRepeat,
+        hasPayload: false,
+        isScroll: true,
+      })
+    : null
+  const lowerName = hasLower
+    ? registerEventMethod(ctx, 'scrollToLower', attrs.onScrollToLower!, {
+        inRepeat,
+        hasPayload: false,
+        isScroll: true,
+      })
+    : null
+  const upperName = hasUpper
+    ? registerEventMethod(ctx, 'scrollToUpper', attrs.onScrollToUpper!, {
+        inRepeat,
+        hasPayload: false,
+        isScroll: true,
+      })
+    : null
+
+  ctx.methodSeq += 1
+  const edgeVar = `_scrollEdge${ctx.methodSeq}`
+  const dispatchName = `onScrollDispatch${ctx.methodSeq}`
+  ctx.extraScript.push(`const ${edgeVar} = { atLower: false, atUpper: true }`)
+
+  const lines: string[] = [
+    '  const el = e.currentTarget as HTMLElement | null',
+    '  if (!el) return',
+  ]
+  if (scrollName) {
+    lines.push(inRepeat ? `  ${scrollName}(item, index, e)` : `  ${scrollName}(e)`)
+  }
+  if (hasLower || hasUpper) {
+    lines.push('  const threshold = 50')
+    lines.push('  const maxScroll = Math.max(0, el.scrollHeight - el.clientHeight)')
+    lines.push('  const nowLower = maxScroll > 0 && el.scrollTop >= maxScroll - threshold')
+    lines.push('  const nowUpper = el.scrollTop <= threshold')
+  }
+  if (lowerName) {
+    lines.push(`  if (nowLower && !${edgeVar}.atLower) {`)
+    lines.push(inRepeat ? `    ${lowerName}(item, index, e)` : `    ${lowerName}(e)`)
+    lines.push('  }')
+    lines.push(`  ${edgeVar}.atLower = nowLower`)
+  }
+  if (upperName) {
+    lines.push(`  if (nowUpper && !${edgeVar}.atUpper) {`)
+    lines.push(inRepeat ? `    ${upperName}(item, index, e)` : `    ${upperName}(e)`)
+    lines.push('  }')
+    lines.push(`  ${edgeVar}.atUpper = nowUpper`)
+  }
+
+  const params = inRepeat
+    ? 'item: Record<string, any>, index: number, e: Event'
+    : 'e: Event'
+
+  ctx.methods.push({
+    name: dispatchName,
+    params,
+    body: lines.join('\n'),
+  })
+
+  if (inRepeat) {
+    return `@scroll="(e) => ${dispatchName}(item, index, e)"`
+  }
+  return `@scroll="${dispatchName}"`
+}
+
+function collectInteractionEventAttrs(
+  attrs: Record<string, string>,
+  inRepeat: boolean,
+  ctx: CodegenContext,
+): string[] {
+  const out: string[] = []
+  for (const key of NON_SCROLL_INTERACTION_ATTRS) {
+    const h = eventHandler(key, attrs[key], inRepeat, ctx)
+    if (h) out.push(h)
+  }
+  const scroll = mergedScrollEventHandler(attrs, inRepeat, ctx)
+  if (scroll) out.push(scroll)
+  return out
 }
 
 function componentEventHandler(
@@ -1343,6 +1517,11 @@ function renderGeneratedMethods(methods: GeneratedMethod[]): string {
       .map((m) => `function ${m.name}(${m.params}) {\n${m.body}\n}\n`)
       .join('\n')
   )
+}
+
+function renderExtraScript(lines: string[]): string {
+  if (!lines.length) return ''
+  return '\n' + lines.join('\n') + '\n'
 }
 
 function renderChildren(
@@ -1522,8 +1701,23 @@ ${pad}</template>`
       if (key === 'componentId' || key === 'name') continue
       if (config?.events.some((e) => e.name === key)) continue
       const isLayout = LAYOUT_ATTRS.has(key)
-      const isDeclaredProp = config?.props.some((p) => p.name === key)
+      const propDef = config?.props.find((p) => p.name === key)
+      const isDeclaredProp = Boolean(propDef)
       if (isLayout && !isDeclaredProp) continue
+      // 双向绑定 + `{field}` → v-model:prop
+      if (
+        propDef?.twoWay &&
+        propDef.type !== 'api' &&
+        /^\{\s*[A-Za-z_$][\w$]*\s*\}$/.test(value.trim())
+      ) {
+        const field = value.trim().slice(1, -1).trim()
+        const expr =
+          ctx.kind === 'page' || ctx.dataFieldNames.includes(field)
+            ? field
+            : `store.${field}`
+        propAttrs.push(`v-model:${key}="${expr}"`)
+        continue
+      }
       propAttrs.push(attrBinding(key, value, ctx, inRepeat))
     }
     const eventAttrs: string[] = []
@@ -1533,11 +1727,7 @@ ${pad}</template>`
         eventAttrs.push(componentEventHandler(evt.name, raw, inRepeat, ctx))
       }
     }
-    for (const key of INTERACTION_ATTRS) {
-      if (attrs[key]?.trim()) {
-        eventAttrs.push(eventHandler(key, attrs[key], inRepeat, ctx))
-      }
-    }
+    eventAttrs.push(...collectInteractionEventAttrs(attrs, inRepeat, ctx))
     const componentRoot = ctx.componentRoots.get(componentId)
     const outOfFlow = Boolean(componentRoot && isOutOfFlowTree(componentRoot))
     const tw = outOfFlow
@@ -1728,9 +1918,7 @@ ${pad}</template>`
       if (tc) textExtra.push(tc)
     }
     const tw = twWithRelative(attrs, parentTag, textExtra, twOpts)
-    const events = [...INTERACTION_ATTRS]
-      .map((k) => eventHandler(k, attrs[k], inRepeat, ctx))
-      .filter(Boolean)
+    const events = collectInteractionEventAttrs(attrs, inRepeat, ctx)
     const style = colorRes.static
       ? ''
       : styleAttr([`color: ${colorRes.expr}`])
@@ -1776,9 +1964,7 @@ ${pad}</template>`
     if (ts != null) extra.push(`text-[${ts}px]`)
     else extra.push('text-[14px]')
     const tw = twWithRelative(attrs, parentTag, extra, twOpts)
-    const events = [...INTERACTION_ATTRS]
-      .map((k) => eventHandler(k, attrs[k], inRepeat, ctx))
-      .filter(Boolean)
+    const events = collectInteractionEventAttrs(attrs, inRepeat, ctx)
     const styleParts: string[] = []
     if (bgRaw.includes('{')) {
       styleParts.push(`backgroundColor: String(${bindingToExpr(bgRaw, ctx, inRepeat)} ?? '')`)
@@ -1842,9 +2028,7 @@ ${pad}</template>`
     if (ts != null) extra.push(`text-[${ts}px]`)
     else extra.push('text-[14px]')
     const tw = twWithRelative(attrs, parentTag, extra, twOpts)
-    const events = [...INTERACTION_ATTRS]
-      .map((k) => eventHandler(k, attrs[k], inRepeat, ctx))
-      .filter(Boolean)
+    const events = collectInteractionEventAttrs(attrs, inRepeat, ctx)
     const styleParts: string[] = []
     if (bgRaw.includes('{')) {
       styleParts.push(`backgroundColor: String(${bindingToExpr(bgRaw, ctx, inRepeat)} ?? '')`)
@@ -1879,9 +2063,7 @@ ${pad}</template>`
   if (tag === 'Image') {
     const srcRaw = attrs.src ?? ''
     const srcTrimmed = srcRaw.trim()
-    const events = [...INTERACTION_ATTRS]
-      .map((k) => eventHandler(k, attrs[k], inRepeat, ctx))
-      .filter(Boolean)
+    const events = collectInteractionEventAttrs(attrs, inRepeat, ctx)
     const extra: string[] = []
     if (attrs.objectFit && attrs.objectFit !== 'null') {
       const fit = attrs.objectFit.trim()
@@ -1949,9 +2131,7 @@ ${pad}</template>`
     const iconRaw = attrs.iconId ?? 'help'
     const size = parseNumber(attrs.size) ?? 16
     const colorRes = resolveColorExpr('color', attrs.color, attrs, ctx, inRepeat, '#333')
-    const events = [...INTERACTION_ATTRS]
-      .map((k) => eventHandler(k, attrs[k], inRepeat, ctx))
-      .filter(Boolean)
+    const events = collectInteractionEventAttrs(attrs, inRepeat, ctx)
     const tw = twWithRelative(
       attrs,
       parentTag,
@@ -2005,9 +2185,7 @@ ${pad}</template>`
     parentTag,
     parentOrientation,
   })
-  const events = [...INTERACTION_ATTRS]
-    .map((k) => eventHandler(k, attrs[k], inRepeat, ctx))
-    .filter(Boolean)
+  const events = collectInteractionEventAttrs(attrs, inRepeat, ctx)
 
   const childPad = depth + 1
   const childrenHtml = renderChildren(
@@ -2076,6 +2254,7 @@ export function generateViewSfc(options: {
     refFields: options.pageRefFields,
     methods: [],
     methodSeq: 0,
+    extraScript: [],
     indent: 0,
     needsVoiderIcon: false,
     needsVoiderSwiper: false,
@@ -2107,7 +2286,7 @@ export function generateViewSfc(options: {
     .map((n) => `  '${escapeTsString(n)}': false,`)
     .join('\n')
 
-  const methodsSource = renderGeneratedMethods(ctx.methods)
+  const methodsSource = `${renderExtraScript(ctx.extraScript)}${renderGeneratedMethods(ctx.methods)}`
   const scriptAndTemplate = `${methodsSource}\n${templateBody}\n${pageData.source}`
   const needsInterpolate = scriptAndTemplate.includes('interpolate(')
   const needsEvalVShow = templateBody.includes('evalVShow(')
@@ -2231,6 +2410,7 @@ export function generateComponentSfc(options: {
     refFields: [],
     methods: [],
     methodSeq: 0,
+    extraScript: [],
     indent: 0,
     needsVoiderIcon: false,
     needsVoiderSwiper: false,
@@ -2268,16 +2448,21 @@ export function generateComponentSfc(options: {
     })
     .filter(Boolean)
 
-  const emitLines = options.config.events
+  const modelEmitLines = options.config.props
+    .filter((p) => p.twoWay && p.name.trim() && p.type !== 'api')
+    .map((p) => `  'update:${p.name}': [value: ${propTsType(p.type)}]`)
+
+  const eventEmitLines = options.config.events
     .filter((e) => e.name.trim())
     .map((e) => `  ${e.name}: [payload: Record<string, any>]`)
-    .join('\n')
+
+  const emitLines = [...modelEmitLines, ...eventEmitLines].join('\n')
 
   const modalInit = [...ctx.modalNames]
     .map((n) => `  '${escapeTsString(n)}': false,`)
     .join('\n')
 
-  const methodsSource = renderGeneratedMethods(ctx.methods)
+  const methodsSource = `${renderExtraScript(ctx.extraScript)}${renderGeneratedMethods(ctx.methods)}`
   const scriptAndTemplate = `${methodsSource}\n${templateBody}\n${pageData.source}`
   const needsNavigateTo = /\bnavigateTo\s*\(/.test(scriptAndTemplate)
   const needsNavigateBack = /\bnavigateBack\s*\(/.test(scriptAndTemplate)
@@ -2402,6 +2587,8 @@ function propTsType(type: string): string {
       return 'any[]'
     case 'json':
       return 'Record<string, any>'
+    case 'api':
+      return '((args?: Record<string, any>) => Promise<any>)'
     default:
       return 'string'
   }
@@ -2409,6 +2596,7 @@ function propTsType(type: string): string {
 
 /** withDefaults 字面量；布尔 false 必须能写出，不能被 || 吃掉 */
 function propDefaultLiteral(type: string, value: unknown): string | null {
+  if (type === 'api') return null
   if (type === 'boolean') {
     if (value === true || value === 'true' || value === 1 || value === '1') return 'true'
     return 'false'

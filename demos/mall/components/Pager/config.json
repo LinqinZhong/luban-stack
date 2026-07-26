@@ -2,8 +2,65 @@
   "name": "分页器",
   "title": "分页器",
   "width": "match_parent",
-  "height": "wrap_content",
-  "props": [],
+  "height": "match_parent",
+  "props": [
+    {
+      "name": "bottomText",
+      "type": "string",
+      "remark": "",
+      "defaultValue": "没有更多了~",
+      "twoWay": false,
+      "required": false
+    },
+    {
+      "name": "fetchApi",
+      "type": "api",
+      "remark": "",
+      "defaultValue": "",
+      "twoWay": false,
+      "required": true,
+      "apiParams": [
+        {
+          "name": "page",
+          "type": "object",
+          "typeRef": "type_common_QueryPageDto",
+          "typeExpr": {
+            "type": "json",
+            "typeRef": "type_common_QueryPageDto",
+            "itemType": "",
+            "itemTypeRef": "",
+            "itemItemType": "",
+            "itemItemTypeRef": "",
+            "genericArgs": {}
+          }
+        }
+      ],
+      "apiReturnType": {
+        "type": "json",
+        "typeRef": "type_common_QueryPageVo",
+        "itemType": "",
+        "itemTypeRef": "",
+        "itemItemType": "",
+        "itemItemTypeRef": "",
+        "genericArgs": {
+          "T": "type_mrnx6ke8_4d7vry"
+        }
+      }
+    },
+    {
+      "name": "data",
+      "type": "array",
+      "remark": "",
+      "defaultValue": [],
+      "twoWay": true,
+      "required": true,
+      "itemType": "json"
+    }
+  ],
   "events": [],
-  "exposedMethods": []
+  "exposedMethods": [],
+  "debugProps": {
+    "fetchApi": "{\"serviceId\":\"svc_mrqdgnhb_3ktq2g\",\"controllerId\":\"cmrqed0jzshj7\",\"apiId\":\"api_mrqedc08_9iml1r\"}",
+    "data": []
+  }
 }

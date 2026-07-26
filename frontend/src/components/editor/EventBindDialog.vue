@@ -4,6 +4,7 @@ import { Delete, Plus } from '@element-plus/icons-vue'
 import {
   CUSTOM_EVENT_METHOD,
   buildEmitAmbientDeclarations,
+  buildLocalMethodsAmbientDeclarations,
   buildTypeLibraryAmbientDeclarations,
   dataFieldsToAmbientVars,
   isCustomEventMethod,
@@ -13,7 +14,7 @@ import {
   type MethodParam,
   type PageMethod,
 } from '../../types/page-method'
-import type { ComponentEventDef } from '../../types/component'
+import type { ComponentEventDef, ComponentPropDef } from '../../types/component'
 import {
   DATA_FIELD_TYPE_OPTIONS,
   buildArrayValue,
@@ -35,6 +36,7 @@ import {
   buildRefAmbientDeclarations,
   type ComponentMethodsMap,
 } from '../../utils/widget-ref'
+import { buildDollarPropsAmbientDeclaration, buildUpdatePropsAmbientDeclarations } from '../../utils/component-props'
 
 const props = defineProps<{
   modelValue: boolean
@@ -55,6 +57,8 @@ const props = defineProps<{
   eventKey?: string
   /** 项目数据类型库：具名类型 ambient（事件形参 tsType） */
   typeLibrary?: import('../../types/data-types').DataTypeLibrary | null
+  /** 组件参数定义：注入 $props 代码提示（组件内生命周期/事件自定义代码） */
+  componentProps?: ComponentPropDef[] | null
 }>()
 
 const emit = defineEmits<{
@@ -205,10 +209,22 @@ const customAmbientExtra = computed(() => {
     'declare function getDeviceInfo(): DeviceInfo;',
   ]
   const typeLib = buildTypeLibraryAmbientDeclarations(props.typeLibrary)
+  const propsAmbient = buildDollarPropsAmbientDeclaration(
+    props.componentProps,
+    props.typeLibrary,
+  )
+  const updatePropsAmbient = buildUpdatePropsAmbientDeclarations(
+    props.componentProps,
+    props.typeLibrary,
+  )
+  const localMethodsAmbient = buildLocalMethodsAmbientDeclarations(
+    props.methods,
+    props.typeLibrary,
+  )
   const base = props.emitEvents?.length
-    ? `${lines.join('\n')}\n${buildEmitAmbientDeclarations(props.emitEvents)}`
+    ? `${lines.join('\n')}\n${buildEmitAmbientDeclarations(props.emitEvents, props.typeLibrary)}`
     : `${lines.join('\n')}\n`
-  return `${typeLib ? `${typeLib}\n` : ''}${buildRefAmbientDeclarations(
+  return `${typeLib ? `${typeLib}\n` : ''}${propsAmbient}\n${updatePropsAmbient}${localMethodsAmbient}${buildRefAmbientDeclarations(
     props.dataFields,
     props.xml,
     props.componentMap,
@@ -522,7 +538,7 @@ function handleClear() {
 
           <div v-if="isCustom(binding.method)" class="custom-body">
           <p class="arg-hint">
-            编写 TypeScript 方法体；可调用 navigateTo / setData / showToast；数据池字段可按名引用。Modal 引用
+            编写 TypeScript 方法体；可调用 navigateTo / setData / updateProps / showToast，以及本页/组件已定义的自定义方法；数据池字段可按名引用。Modal 引用
             .show()/.hide()，组件引用为其「暴露方法」。
           </p>
           <TsCodeEditor

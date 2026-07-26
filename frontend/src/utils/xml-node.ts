@@ -661,14 +661,19 @@ export const INTERACTION_EVENTS = [
 ] as const
 
 /** 仅 overflow=scroll 的布局容器可配置 */
-export const SCROLL_INTERACTION_EVENT = {
-  key: 'onScroll',
-  label: '滚动 (onScroll)',
-} as const
+export const SCROLL_INTERACTION_EVENTS = [
+  { key: 'onScroll', label: '滚动 (onScroll)' },
+  { key: 'onScrollToLower', label: '触底 (onScrollToLower)' },
+  { key: 'onScrollToUpper', label: '触顶 (onScrollToUpper)' },
+  { key: 'onTouchStart', label: '触屏 (onTouchStart)' },
+] as const
+
+/** @deprecated 使用 SCROLL_INTERACTION_EVENTS */
+export const SCROLL_INTERACTION_EVENT = SCROLL_INTERACTION_EVENTS[0]!
 
 export type InteractionEventKey =
   | (typeof INTERACTION_EVENTS)[number]['key']
-  | typeof SCROLL_INTERACTION_EVENT.key
+  | (typeof SCROLL_INTERACTION_EVENTS)[number]['key']
 
 export const SIZE_OPTIONS = [
   { label: 'match_parent', value: 'match_parent' },

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, inject, onBeforeUnmount, provide, ref, shallowRef, watch, type CSSProperties } from 'vue'
+import { computed, inject, onBeforeUnmount, onMounted, provide, ref, shallowRef, watch, type CSSProperties } from 'vue'
 import type { IconLibrary } from '../../types/icon-library'
 import { findIcon, iconSymbolId } from '../../types/icon-library'
 import type { PageData } from '../../types/page-data'
@@ -25,6 +25,7 @@ import {
   buildDollarProps,
   interpolateDollarProps,
 } from '../../utils/component-props'
+import { hydrateApiDollarProps } from '../../utils/api-prop'
 import { resolveComputedPageData, buildComputeDepsKey } from '../../utils/compute-runtime'
 import { expandRepeatTree } from '../../utils/repeat'
 import { CANVAS_RUNTIME_KEY } from '../../composables/useCanvasRuntime'
@@ -54,6 +55,12 @@ export type VoiderSlotScope = {
   /** 宿主（填写插槽的一侧）数据池 / $props，不是组件定义内部的 */
   hostPageData?: PageData
   hostDollarProps?: Record<string, unknown>
+  /**
+   * 外层 Component 的插槽作用域。
+   * 用于「插槽转发」：定义里把 `<Slot name="header" slot="header"/>` 传给内层组件时，
+   * 内层填入的 Slot 仍要能读到更外层（如页面）写入的 header 内容。
+   */
+  parent?: VoiderSlotScope | null
 }
 
 const SKIP_DOLLAR_PROPS_ATTRS = new Set<string>([
@@ -72,8 +79,14 @@ const props = defineProps<{
   parentHorizontal?: boolean
   /** 父级为纵向 LinearLayout */
   parentVertical?: boolean
-  /** 祖先纵向可滚动 LinearLayout（其子节点勿再用 flex:1 抢视口） */
+  /** 祖先纵向可滚动 LinearLayout（深处子节点勿再用 flex:1 抢视口） */
   parentScrollable?: boolean
+  /**
+   * 直接父级是 overflow=scroll 的布局容器。
+   * 此时 match_parent 应占满滚动视口剩余高度（与 header 等兄弟共存），
+   * 而不是 min-height:100% 与父级同高导致溢出。
+   */
+  parentIsScrollPort?: boolean
   /** 页面根节点 */
   isRoot?: boolean
   /** RelativeLayout 子节点定位样式 */
@@ -89,10 +102,12 @@ const props = defineProps<{
   /** 路由参数运行时对象（$route） */
   routeParams?: Record<string, unknown>
   /**
-   * 是否执行 onClick / onLongClick / onScroll。
+   * 是否执行 onClick / onLongClick / onScroll / 触底触顶触屏。
    * 编辑态为 false（含 Component 内部 selectable=false 的节点），避免抢走选中。
    */
   interactEnabled?: boolean
+  /** 预览运行时就绪闸门（WorkspaceView 在 preparePreviewRuntime 后递增） */
+  previewLifecycleGate?: number
   /** 预览态展开 repeat（页面根与组件定义树都需要） */
   expandRepeat?: boolean
   /** 祖先 Component 注入的插槽内容（显式下传；勿用 slotScope 名） */
@@ -138,6 +153,7 @@ const effectiveSlotScope = computed<VoiderSlotScope | null>(() => {
       // 插槽内容属于宿主 XML，必须用宿主上下文（而非定义内 Pager 的空 $props）
       hostPageData: props.pageData,
       hostDollarProps: props.dollarProps,
+      parent: props.voiderSlotScope ?? null,
     }
   }
   return props.voiderSlotScope ?? null
@@ -288,12 +304,13 @@ const isHovered = computed(() => {
   return props.hoveredId === props.nodeId
 })
 
-/** 纵向父布局中 height=match_parent：占满剩余高度（滚动列内除外） */
+/** 纵向父布局中 height=match_parent：占满剩余高度 */
 const fillRemainingHeight = computed(
   () =>
     height.value === 'match_parent' &&
     Boolean(props.parentVertical) &&
-    !Boolean(props.parentScrollable),
+    // 滚动列深处仍按内容堆叠；直接挂在滚动容器下时占满剩余视口
+    (!Boolean(props.parentScrollable) || Boolean(props.parentIsScrollPort)),
 )
 
 /**
@@ -399,7 +416,12 @@ const instanceDollarProps = computed(() => {
     }
     resolved[key] = interpolateDataBindings(value, props.pageData, scope)
   }
-  return buildDollarProps(config, resolved)
+  const built = buildDollarProps(config, resolved)
+  return hydrateApiDollarProps(
+    built,
+    propDefs,
+    canvasRuntime?.projectPath,
+  )
 })
 
 /**
@@ -506,7 +528,9 @@ const componentStyle = computed(() => {
   const stackHeight =
     insideScrollColumn.value || stackInVerticalParent.value
   const fillHostHeight =
-    !stackHeight && componentHostHeight.value === 'match_parent'
+    componentHostHeight.value === 'match_parent' &&
+    !stackInVerticalParent.value &&
+    (!insideScrollColumn.value || fillRemainingHeight.value)
   // 自身或子孙（含插槽注入内容）被选中时，避免 overflow 裁掉选中框
   const keepSelectionVisible =
     props.selectable ||
@@ -1067,6 +1091,17 @@ const slotFillEntries = computed(() => {
 
 const slotHasFill = computed(() => slotFillEntries.value.length > 0)
 
+/**
+ * 预览时空插槽不占位：仅当「作为组件实例使用」（有插槽作用域）且未填入时隐藏。
+ * 编辑组件定义本身时没有宿主作用域，仍显示占位，避免整页空白。
+ */
+const hideEmptySlotInPreview = computed(
+  () =>
+    Boolean(props.interactEnabled) &&
+    !slotHasFill.value &&
+    Boolean(effectiveSlotScope.value),
+)
+
 /** 插槽注入内容：父侧在编辑 Component 实例时即可选中 */
 const slotFillSelectable = computed(() =>
   Boolean(effectiveSlotScope.value?.selectable),
@@ -1200,17 +1235,42 @@ function emitInteract(
   })
 }
 
-function handleScroll(detail: {
+type ScrollEventDetail = {
   scrollTop: number
   scrollLeft: number
   scrollHeight: number
   scrollWidth: number
   clientHeight: number
   clientWidth: number
-}) {
+}
+
+function handleScroll(detail: ScrollEventDetail) {
   if (!props.interactEnabled || props.selectable) return
   if (countEventBindings(props.node.attrs.onScroll) <= 0) return
   emitInteract('onScroll', { ...detail })
+}
+
+function handleScrollToLower(detail: ScrollEventDetail) {
+  if (!props.interactEnabled || props.selectable) return
+  if (countEventBindings(props.node.attrs.onScrollToLower) <= 0) return
+  emitInteract('onScrollToLower', { ...detail })
+}
+
+function handleScrollToUpper(detail: ScrollEventDetail) {
+  if (!props.interactEnabled || props.selectable) return
+  if (countEventBindings(props.node.attrs.onScrollToUpper) <= 0) return
+  emitInteract('onScrollToUpper', { ...detail })
+}
+
+function handleTouchStart(detail: {
+  clientX: number
+  clientY: number
+  pageX: number
+  pageY: number
+}) {
+  if (!props.interactEnabled || props.selectable) return
+  if (countEventBindings(props.node.attrs.onTouchStart) <= 0) return
+  emitInteract('onTouchStart', { ...detail })
 }
 
 function handleSelect(event: MouseEvent) {
@@ -1320,21 +1380,130 @@ function forwardInteract(payload: PreviewInteractPayload) {
   emit('interact', payload)
 }
 
-/** Component 子树交互：补上 emit 回写上下文后再向上抛 */
+/** Component 子树交互：补上 emit 回写上下文后再向上抛（嵌套时挂 outer 链） */
 function forwardComponentInteract(payload: PreviewInteractPayload) {
+  const componentId = props.node.attrs.componentId?.trim() || ''
+  const self: NonNullable<PreviewInteractPayload['componentEmit']> = {
+    componentId,
+    events: componentDetail.value?.config.events ?? [],
+    // 用原始节点 attrs，避免动态样式/$props 插值改写事件绑定 JSON
+    hostAttrs: { ...props.node.attrs },
+    hostScope: props.node.scope
+      ? {
+          item: props.node.scope.item,
+          index: props.node.scope.index ?? 0,
+        }
+      : undefined,
+  }
+
+  function appendOuter(
+    inner: NonNullable<PreviewInteractPayload['componentEmit']>,
+    outer: NonNullable<PreviewInteractPayload['componentEmit']>,
+  ): NonNullable<PreviewInteractPayload['componentEmit']> {
+    if (!inner.outer) return { ...inner, outer }
+    return { ...inner, outer: appendOuter(inner.outer, outer) }
+  }
+
+  const componentEmit = payload.componentEmit
+    ? appendOuter(payload.componentEmit, self)
+    : self
+
   emit('interact', {
     ...payload,
-    componentEmit: payload.componentEmit ?? {
-      events: componentDetail.value?.config.events ?? [],
-      // 用原始节点 attrs，避免动态样式/$props 插值改写事件绑定 JSON
-      hostAttrs: { ...props.node.attrs },
-      hostScope: props.node.scope,
-    },
+    componentEmit,
   })
 }
 
+function buildSelfComponentEmit(): NonNullable<PreviewInteractPayload['componentEmit']> | null {
+  if (props.node.tag !== 'Component') return null
+  const componentId = props.node.attrs.componentId?.trim() || ''
+  if (!componentId) return null
+  return {
+    componentId,
+    events: componentDetail.value?.config.events ?? [],
+    hostAttrs: { ...props.node.attrs },
+    hostScope: props.node.scope
+      ? {
+          item: props.node.scope.item,
+          index: props.node.scope.index ?? 0,
+        }
+      : undefined,
+  }
+}
+
+/** 预览态：嵌套 Component 挂载/卸载时触发该组件 lifecycle.json */
+function emitComponentLifecycle(phase: 'mount' | 'unmount') {
+  if (!props.interactEnabled || props.node.tag !== 'Component') return
+  const componentEmit = buildSelfComponentEmit()
+  if (!componentEmit) return
+  emit('interact', {
+    eventKey: '__lifecycle',
+    raw: '',
+    eventArgs: { phase },
+    dollarProps: instanceDollarProps.value,
+    scope: props.node.scope
+      ? {
+          item: props.node.scope.item,
+          index: props.node.scope.index ?? 0,
+        }
+      : undefined,
+    componentEmit,
+  })
+}
+
+/**
+ * 编辑→预览时节点常不销毁，仅 interactEnabled / gate 变化。
+ * 预览中新建的 Component 走 onMounted。
+ */
+watch(
+  () =>
+    [Boolean(props.interactEnabled), props.previewLifecycleGate ?? 0] as const,
+  ([enabled, gate], prev) => {
+    if (props.node.tag !== 'Component') return
+    if (!enabled || gate <= 0) return
+    const prevEnabled = prev?.[0] ?? false
+    const prevGate = prev?.[1] ?? 0
+    // 进入预览（gate 递增）或预览中节点从不可交互变为可交互
+    if (gate !== prevGate || (enabled && !prevEnabled)) {
+      emitComponentLifecycle('mount')
+    }
+  },
+)
+
+watch(
+  () => Boolean(props.interactEnabled),
+  (enabled, wasEnabled) => {
+    if (props.node.tag !== 'Component') return
+    if (enabled || !wasEnabled) return
+    // 离开预览：interactEnabled 已是 false，直接发 unmount
+    const componentEmit = buildSelfComponentEmit()
+    if (!componentEmit) return
+    emit('interact', {
+      eventKey: '__lifecycle',
+      raw: '',
+      eventArgs: { phase: 'unmount' as const },
+      dollarProps: instanceDollarProps.value,
+      scope: props.node.scope
+        ? {
+            item: props.node.scope.item,
+            index: props.node.scope.index ?? 0,
+          }
+        : undefined,
+      componentEmit,
+    })
+  },
+)
+
+onMounted(() => {
+  // 仅预览中新建的实例；编辑态创建时 interactEnabled=false 会跳过
+  if ((props.previewLifecycleGate ?? 0) > 0) {
+    emitComponentLifecycle('mount')
+  }
+})
+
 onBeforeUnmount(() => {
   clearLongPress()
+  emitComponentLifecycle('unmount')
 })
 </script>
 
@@ -1363,6 +1532,7 @@ onBeforeUnmount(() => {
       :hovered-id="hoveredId"
       :selectable="selectable"
       :interact-enabled="interactEnabled"
+        :preview-lifecycle-gate="previewLifecycleGate"
       :parent-horizontal="false"
       :parent-vertical="true"
       :parent-scrollable="parentScrollable"
@@ -1602,7 +1772,7 @@ onBeforeUnmount(() => {
     :extra-style="shellExtraStyle"
     :repeat-badge="showRepeatBadge"
     :event-badge-count="eventBadgeCount"
-    :visually-hidden="visuallyHidden"
+    :visually-hidden="visuallyHidden || hideEmptySlotInPreview"
     :interactive="previewInteractive || slotOutletSelectable"
     :inside-scroll-port="insideScrollColumn"
     :fill-remaining-height="fillRemainingHeight"
@@ -1623,6 +1793,7 @@ onBeforeUnmount(() => {
         :hovered-id="hoveredId"
         :selectable="slotFillSelectable"
         :interact-enabled="interactEnabled && !slotFillSelectable"
+        :preview-lifecycle-gate="previewLifecycleGate"
         :parent-horizontal="false"
         :parent-vertical="true"
         :parent-scrollable="inScrollColumn"
@@ -1633,6 +1804,7 @@ onBeforeUnmount(() => {
         :dollar-props="slotFillDollarProps"
         :route-params="routeParams"
         :expand-repeat="expandRepeat"
+        :voider-slot-scope="effectiveSlotScope?.parent ?? null"
         @select="forwardSelect"
         @hover="forwardHover"
         @open-repeat="forwardOpenRepeat"
@@ -1676,6 +1848,7 @@ onBeforeUnmount(() => {
         :hovered-id="hoveredId"
         :selectable="false"
         :interact-enabled="interactEnabled"
+        :preview-lifecycle-gate="previewLifecycleGate"
         :parent-vertical="true"
         :parent-scrollable="inScrollColumn"
         :icon-library="iconLibrary"
@@ -1745,6 +1918,7 @@ onBeforeUnmount(() => {
             :hovered-id="hoveredId"
             :selectable="selectable"
             :interact-enabled="interactEnabled"
+        :preview-lifecycle-gate="previewLifecycleGate"
             :parent-horizontal="false"
             :parent-vertical="true"
             :parent-scrollable="inScrollColumn"
@@ -1794,6 +1968,7 @@ onBeforeUnmount(() => {
             :hovered-id="hoveredId"
             :selectable="selectable"
             :interact-enabled="interactEnabled"
+        :preview-lifecycle-gate="previewLifecycleGate"
             :extra-style="childRelativeStyle(child)"
             :icon-library="iconLibrary"
             :page-data="pageData"
@@ -1849,6 +2024,9 @@ onBeforeUnmount(() => {
       :content-style="linearStyle"
       @wheel="$event.stopPropagation()"
       @scroll="handleScroll"
+      @scroll-to-lower="handleScrollToLower"
+      @scroll-to-upper="handleScrollToUpper"
+      @touch-start="handleTouchStart"
     >
       <XmlNodeView
         v-for="(child, index) in node.children"
@@ -1859,9 +2037,11 @@ onBeforeUnmount(() => {
         :hovered-id="hoveredId"
         :selectable="selectable"
         :interact-enabled="interactEnabled"
+        :preview-lifecycle-gate="previewLifecycleGate"
         :parent-horizontal="isHorizontalLinear"
         :parent-vertical="!isHorizontalLinear"
         :parent-scrollable="inScrollColumn"
+        :parent-is-scroll-port="hasScrollAttr && !isHorizontalLinear"
         :icon-library="iconLibrary"
         :page-data="pageData"
         :hidden-node-ids="hiddenNodeIds"
@@ -1909,6 +2089,9 @@ onBeforeUnmount(() => {
       :content-style="relativeStyle"
       @wheel="$event.stopPropagation()"
       @scroll="handleScroll"
+      @scroll-to-lower="handleScrollToLower"
+      @scroll-to-upper="handleScrollToUpper"
+      @touch-start="handleTouchStart"
     >
       <!--
         绝对定位子节点相对 padding edge 定位、不受父级 padding 影响。
@@ -1924,8 +2107,10 @@ onBeforeUnmount(() => {
           :hovered-id="hoveredId"
           :selectable="selectable"
           :interact-enabled="interactEnabled"
+        :preview-lifecycle-gate="previewLifecycleGate"
           :extra-style="childRelativeStyle(child)"
           :parent-scrollable="inScrollColumn"
+          :parent-is-scroll-port="hasScrollAttr"
           :icon-library="iconLibrary"
           :page-data="pageData"
           :hidden-node-ids="hiddenNodeIds"

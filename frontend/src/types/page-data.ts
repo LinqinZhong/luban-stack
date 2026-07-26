@@ -10,6 +10,8 @@ export type DataFieldType =
   | 'any'
   /** 引用当前页面/组件控件树节点（值为节点 path id） */
   | 'ref'
+  /** 后端控制器 API（组件参数：可调用；父级绑定具体接口） */
+  | 'api'
 
 export type DataFieldValue =
   | string
@@ -136,11 +138,17 @@ export const DATA_FIELD_TYPE_OPTIONS: { label: string; value: DataFieldType }[] 
   { label: '数组', value: 'array' },
   { label: '任意', value: 'any' },
   { label: '引用', value: 'ref' },
+  { label: '后端API', value: 'api' },
 ]
 
 /** 组件参数 / 数组项等：不含「引用」（引用仅数据池顶层） */
 export const COMPOSABLE_FIELD_TYPE_OPTIONS = DATA_FIELD_TYPE_OPTIONS.filter(
   (item) => item.value !== 'ref',
+)
+
+/** 数据池顶层可选类型：不含后端 API（API 仅作组件参数） */
+export const DATA_POOL_FIELD_TYPE_OPTIONS = DATA_FIELD_TYPE_OPTIONS.filter(
+  (item) => item.value !== 'api',
 )
 
 /** 对象字段可选类型（对象内不再嵌套「对象」） */
@@ -291,6 +299,7 @@ export function defaultValue(type: DataFieldType): DataFieldValue {
     case 'icon':
     case 'color':
     case 'ref':
+    case 'api':
       return ''
     default:
       return ''

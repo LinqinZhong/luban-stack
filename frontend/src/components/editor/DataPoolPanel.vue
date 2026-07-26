@@ -469,6 +469,7 @@ function saveControllerBinding(config: ControllerBindingConfig) {
                 :library="typeLibrary"
                 :label-override="typeSelectLabel(row) || null"
                 allow-ref
+                :exclude-types="['api']"
                 @change="handleTypeChange($index, $event)"
               />
               <el-button

@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { reactive, ref, watch } from 'vue'
 import { Delete, Plus } from '@element-plus/icons-vue'
-import { DATA_FIELD_TYPE_OPTIONS } from '../../types/page-data'
 import {
-  METHOD_PARAM_TYPE_OPTIONS,
+  dataFieldToMethodParamType,
+  methodParamToDataFieldType,
+  type MethodParam,
   type PageMethod,
 } from '../../types/page-method'
 import {
@@ -16,7 +17,9 @@ import {
 import { SIZE_OPTIONS } from '../../utils/xml-node'
 import NumericInput from './NumericInput.vue'
 import ComponentPropDialog from './ComponentPropDialog.vue'
+import DataFieldTypeTreeSelect from './DataFieldTypeTreeSelect.vue'
 import type { DataTypeLibrary } from '../../types/data-types'
+import { DATA_FIELD_TYPE_OPTIONS, type DataFieldType } from '../../types/page-data'
 
 const props = defineProps<{
   config: ComponentConfig
@@ -166,8 +169,18 @@ function propTypeLabel(type: string): string {
 function propSummary(row: ComponentPropDef): string {
   const parts = [propTypeLabel(row.type)]
   if (row.required) parts.push('必填')
-  if (row.twoWay) parts.push('model')
-  else parts.push('props')
+  if (row.type === 'api') {
+    const n = row.apiParams?.length ?? 0
+    parts.push(n ? `${n} 个形参` : '无形参')
+    if (row.apiReturnType?.typeRef || (row.apiReturnType?.type && row.apiReturnType.type !== 'any')) {
+      parts.push('有出参')
+    }
+    parts.push('props')
+  } else if (row.twoWay) {
+    parts.push('model')
+  } else {
+    parts.push('props')
+  }
   return parts.join(' · ')
 }
 
@@ -188,6 +201,33 @@ function addEventParam(event: ComponentEventDef) {
 
 function removeEventParam(event: ComponentEventDef, index: number) {
   event.params.splice(index, 1)
+  commit()
+}
+
+function onEventParamTypeChange(
+  param: MethodParam,
+  payload: {
+    type: DataFieldType | 'void'
+    typeRef?: string
+    itemType?: DataFieldType
+    itemTypeRef?: string
+    itemItemType?: DataFieldType
+    itemItemTypeRef?: string
+  },
+) {
+  const fieldType = payload.type === 'void' ? 'any' : payload.type
+  param.type = dataFieldToMethodParamType(fieldType)
+  param.typeRef = payload.typeRef
+  param.itemType = fieldType === 'array' ? payload.itemType || 'string' : undefined
+  param.itemTypeRef = fieldType === 'array' ? payload.itemTypeRef : undefined
+  param.itemItemType =
+    fieldType === 'array' && payload.itemType === 'array'
+      ? payload.itemItemType || 'string'
+      : undefined
+  param.itemItemTypeRef =
+    fieldType === 'array' && payload.itemType === 'array'
+      ? payload.itemItemTypeRef
+      : undefined
   commit()
 }
 
@@ -291,14 +331,18 @@ const customMethodOptions = () =>
               placeholder="参数名"
               @change="commit"
             />
-            <el-select v-model="param.type" style="width: 120px" @change="commit">
-              <el-option
-                v-for="opt in METHOD_PARAM_TYPE_OPTIONS"
-                :key="opt.value"
-                :label="opt.label"
-                :value="opt.value"
-              />
-            </el-select>
+            <DataFieldTypeTreeSelect
+              :type="methodParamToDataFieldType(param.type)"
+              :type-ref="param.typeRef"
+              :item-type="param.itemType"
+              :item-type-ref="param.itemTypeRef"
+              :item-item-type="param.itemItemType"
+              :item-item-type-ref="param.itemItemTypeRef"
+              :library="typeLibrary"
+              composable
+              size="small"
+              @change="onEventParamTypeChange(param, $event)"
+            />
             <el-button
               type="danger"
               link
@@ -468,7 +512,7 @@ const customMethodOptions = () =>
 
 .param-row {
   display: grid;
-  grid-template-columns: 1fr 120px 28px;
+  grid-template-columns: minmax(72px, 1fr) minmax(140px, 1.4fr) 28px;
   gap: 6px;
   align-items: center;
 }
