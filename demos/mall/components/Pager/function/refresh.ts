@@ -7,7 +7,6 @@
 */
 
 if(loading) return
-updateProps('data', [])
 setData('hasNext', true)
 setData('pagination',{
   current: 1,

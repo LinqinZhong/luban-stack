@@ -61,6 +61,49 @@
   "exposedMethods": [],
   "debugProps": {
     "fetchApi": "{\"serviceId\":\"svc_mrqdgnhb_3ktq2g\",\"controllerId\":\"cmrqed0jzshj7\",\"apiId\":\"api_mrqedc08_9iml1r\"}",
-    "data": []
+    "data": [
+      {
+        "name": "菠萝",
+        "id": 42,
+        "price": "20.10",
+        "stock": 1,
+        "img": "https://fastly.picsum.photos/id/1035/300/200.jpg?grayscale&hmac=B5GlKNNsp3gs6Cb9c3aIUJwED3cUrijCb0MKbzpd7fc"
+      },
+      {
+        "name": "菠萝",
+        "id": 43,
+        "price": "20.10",
+        "stock": 1,
+        "img": "https://fastly.picsum.photos/id/1035/300/200.jpg?grayscale&hmac=B5GlKNNsp3gs6Cb9c3aIUJwED3cUrijCb0MKbzpd7fc"
+      },
+      {
+        "name": "菠萝",
+        "id": 44,
+        "price": "20.10",
+        "stock": 1,
+        "img": "https://fastly.picsum.photos/id/1035/300/200.jpg?grayscale&hmac=B5GlKNNsp3gs6Cb9c3aIUJwED3cUrijCb0MKbzpd7fc"
+      },
+      {
+        "name": "香蕉",
+        "id": 45,
+        "price": "20.10",
+        "stock": 1,
+        "img": "https://fastly.picsum.photos/id/1035/300/200.jpg?grayscale&hmac=B5GlKNNsp3gs6Cb9c3aIUJwED3cUrijCb0MKbzpd7fc"
+      },
+      {
+        "name": "西瓜",
+        "id": 46,
+        "price": "4.10",
+        "stock": 4,
+        "img": "https://ts1.tc.mm.bing.net/th/id/OIP-C.VYeFdqnHf_wvawoowpcgaAAAAA?w=108&h=108&c=1&bgcl=6e80fd&r=0&o=7&pid=ImgRC&rm=3"
+      },
+      {
+        "name": "哈密瓜",
+        "id": 47,
+        "price": "299.99",
+        "stock": 4,
+        "img": "https://ts3.tc.mm.bing.net/th/id/OIP-C.R1kFUsXP2QVRw6S7sOyPPAAAAA?w=108&h=108&c=1&bgcl=d4ffc6&r=0&o=7&pid=ImgRC&rm=3"
+      }
+    ]
   }
 }

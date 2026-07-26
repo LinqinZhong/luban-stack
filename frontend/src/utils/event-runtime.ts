@@ -67,6 +67,11 @@ export interface ComponentEmitContext {
 
 export interface RunEventBindingsContext {
   pageData: PageData
+  /**
+   * 实时数据池（每次读取最新）。
+   * setData 会替换 previewRuntimeData 引用时，必须用此回调，否则同链 loadData / setTimeout 仍读到旧快照。
+   */
+  getPageData?: () => PageData
   /** 当前页面/组件 XML，用于解析数据池「引用」字段 */
   xml?: string
   /** Modal 堆栈（引用字段 .show / .hide） */
@@ -280,6 +285,14 @@ function findField(pageData: PageData, prop: string): DataField | undefined {
   return pageData.fields.find((item) => item.name === name)
 }
 
+function livePageData(ctx: RunEventBindingsContext): PageData {
+  try {
+    return ctx.getPageData?.() ?? ctx.pageData
+  } catch {
+    return ctx.pageData
+  }
+}
+
 function parseParamsObject(raw: string): Record<string, unknown> | undefined {
   if (!raw.trim()) return undefined
   try {
@@ -394,8 +407,9 @@ function buildCustomScope(ctx: RunEventBindingsContext): Record<string, unknown>
       : {}
 
   /** 数据池字段作为自由变量（引用 → Modal.show/hide 或组件暴露方法） */
+  const data = livePageData(ctx)
   const dataVars: Record<string, unknown> = {}
-  for (const field of ctx.pageData.fields ?? []) {
+  for (const field of data.fields ?? []) {
     const name = field.name.trim()
     if (!name || !isValidIdent(name)) continue
     dataVars[name] =
@@ -423,13 +437,17 @@ function buildCustomScope(ctx: RunEventBindingsContext): Record<string, unknown>
     setData: (prop: string, value: unknown) => {
       const name = String(prop ?? '').trim()
       if (!name) return
-      const field = findField(ctx.pageData, name)
+      const live = livePageData(ctx)
+      const field = findField(live, name)
       const next: DataFieldValue =
         typeof value === 'string' && field
           ? coerceFieldValue(field.type, value)
           : (value as DataFieldValue)
-      // 同步写回当前运行中的 pageData，否则同链调用的 loadData() 仍读到旧快照
+      // 先写运行时数据池，再通知宿主（宿主可能替换 pageData 引用）
       if (field) field.value = next
+      // 兼容仍持有旧快照的 ctx.pageData
+      const snap = findField(ctx.pageData, name)
+      if (snap && snap !== field) snap.value = next
       ctx.setData(name, next)
     },
     updateProps: (prop: string, value: unknown) => {
@@ -510,12 +528,24 @@ function runCustomBody(
       has(target, prop) {
         if (typeof prop !== 'string') return Reflect.has(target, prop)
         if (Reflect.has(target, prop)) return true
-        return Boolean(findField(ctx.pageData, prop))
+        return Boolean(findField(livePageData(ctx), prop))
       },
       get(target, prop, receiver) {
         if (typeof prop === 'string' && isValidIdent(prop)) {
-          const field = findField(ctx.pageData, prop)
-          if (field) return field.value
+          // 每次从最新数据池读取，避免 setData 后仍用启动快照
+          const field = findField(livePageData(ctx), prop)
+          if (field) {
+            if (field.type === 'ref') {
+              return resolveRefFieldValue(field, {
+                xml: ctx.xml,
+                modalStack: ctx.modalStack,
+                componentMap: ctx.componentMap,
+                componentMethodsMap: ctx.componentMethodsMap,
+                runComponentMethod: ctx.runComponentMethod,
+              })
+            }
+            return field.value
+          }
         }
         return Reflect.get(target, prop, receiver)
       },

@@ -16,7 +16,12 @@ $props.fetchApi({
     current: res.current+1,
     pageSize: res.pageSize
   })
-  updateProps('data', [...$props.data ,...res.records])
+  if(refreshing){
+    updateProps('data', res.records)
+    showToast('刷新成功')
+  }else{
+    updateProps('data', [...$props.data ,...res.records])
+  }
 }).finally(() => {
   setData('refreshing', false)
   setData('loading', false)

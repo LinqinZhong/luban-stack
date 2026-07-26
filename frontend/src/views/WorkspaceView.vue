@@ -1769,12 +1769,29 @@ function applyComponentPreviewSetData(
     return
   }
   const fields = [...(info.data.fields ?? [])]
-  const index = fields.findIndex((item) => item.name === prop)
+  const index = fields.findIndex((item) => item.name.trim() === prop.trim())
   if (index < 0) {
     ElMessage.warning(`组件数据池不存在字段：${prop}`)
     return
   }
-  fields[index] = { ...fields[index], value }
+  const prev = fields[index]!
+  let objectFields = prev.objectFields
+  if (
+    prev.type === 'json' &&
+    value &&
+    typeof value === 'object' &&
+    !Array.isArray(value) &&
+    Array.isArray(prev.objectFields) &&
+    prev.objectFields.length
+  ) {
+    const obj = value as Record<string, unknown>
+    objectFields = prev.objectFields.map((sub) => {
+      const key = sub.name.trim()
+      if (!key || !(key in obj)) return sub
+      return { ...sub, value: obj[key] as DataFieldValue }
+    })
+  }
+  fields[index] = { ...prev, value, objectFields }
   previewComponentMap.value = {
     ...map,
     [componentId]: {
@@ -1899,6 +1916,8 @@ function runComponentExposedMethod(
 
   void runEventBindings(raw, {
     pageData: info.data,
+    getPageData: () =>
+      previewComponentMap.value?.[componentId]?.data ?? info.data,
     xml: info.xml,
     modalStack,
     componentMap: canvasComponentMap.value,
@@ -1991,8 +2010,21 @@ async function runPreviewBindings(
         }
       : undefined)
 
+  const readLivePageData = () => {
+    if (ownerId) {
+      return (
+        previewComponentMap.value?.[ownerId]?.data ??
+        ownerInfo?.data ??
+        activeDoc.value!.data
+      )
+    }
+    // 必须读 previewRuntimeData（setData 写入处），不能用 resolved 快照
+    return previewRuntimeData.value ?? activeDoc.value!.data
+  }
+
   await runEventBindings(raw, {
-    pageData: ownerInfo ? ownerInfo.data : resolvedPageData.value,
+    pageData: readLivePageData(),
+    getPageData: readLivePageData,
     xml: ownerInfo ? ownerInfo.xml : activeDoc.value.xml,
     modalStack,
     componentMap: canvasComponentMap.value,
@@ -2407,12 +2439,30 @@ function applyPreviewSetData(prop: string, value: import('../types/page-data').D
   if (!activeDoc.value || workspaceMode.value !== 'preview') return
   if (!previewRuntimeData.value) resetPreviewRuntime()
   const fields = [...(previewRuntimeData.value?.fields ?? [])]
-  const index = fields.findIndex((item) => item.name === prop)
+  const index = fields.findIndex((item) => item.name.trim() === prop.trim())
   if (index < 0) {
     ElMessage.warning(`数据池不存在字段：${prop}`)
     return
   }
-  fields[index] = { ...fields[index], value }
+  const prev = fields[index]!
+  // json 对象同步 objectFields，避免面板/后续逻辑读到旧嵌套值
+  let objectFields = prev.objectFields
+  if (
+    prev.type === 'json' &&
+    value &&
+    typeof value === 'object' &&
+    !Array.isArray(value) &&
+    Array.isArray(prev.objectFields) &&
+    prev.objectFields.length
+  ) {
+    const obj = value as Record<string, unknown>
+    objectFields = prev.objectFields.map((sub) => {
+      const key = sub.name.trim()
+      if (!key || !(key in obj)) return sub
+      return { ...sub, value: obj[key] as import('../types/page-data').DataFieldValue }
+    })
+  }
+  fields[index] = { ...prev, value, objectFields }
   previewRuntimeData.value = { fields }
   void runLifecycleUpdateSequence()
 }
