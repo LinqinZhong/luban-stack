@@ -103,7 +103,7 @@ const props = defineProps<{
   /** 路由参数运行时对象（$route） */
   routeParams?: Record<string, unknown>
   /**
-   * 是否执行 onClick / onLongClick / onScroll / 触底触顶触屏。
+   * 是否执行 onClick / onLongClick / onScroll / 触底触顶触摸。
    * 编辑态为 false（含 Component 内部 selectable=false 的节点），避免抢走选中。
    */
   interactEnabled?: boolean
@@ -1349,15 +1349,29 @@ function handleScrollToUpper(detail: ScrollEventDetail) {
   emitInteract('onScrollToUpper', { ...detail })
 }
 
-function handleTouchStart(detail: {
+type TouchEventDetail = {
   clientX: number
   clientY: number
   pageX: number
   pageY: number
-}) {
+}
+
+function handleTouchStart(detail: TouchEventDetail) {
   if (!props.interactEnabled || props.selectable) return
   if (countEventBindings(props.node.attrs.onTouchStart) <= 0) return
   emitInteract('onTouchStart', { ...detail })
+}
+
+function handleTouchMove(detail: TouchEventDetail) {
+  if (!props.interactEnabled || props.selectable) return
+  if (countEventBindings(props.node.attrs.onTouchMove) <= 0) return
+  emitInteract('onTouchMove', { ...detail })
+}
+
+function handleTouchEnd(detail: TouchEventDetail) {
+  if (!props.interactEnabled || props.selectable) return
+  if (countEventBindings(props.node.attrs.onTouchEnd) <= 0) return
+  emitInteract('onTouchEnd', { ...detail })
 }
 
 function handleSelect(event: MouseEvent) {
@@ -2222,6 +2236,8 @@ onBeforeUnmount(() => {
       @scroll-to-lower="handleScrollToLower"
       @scroll-to-upper="handleScrollToUpper"
       @touch-start="handleTouchStart"
+      @touch-move="handleTouchMove"
+      @touch-end="handleTouchEnd"
     >
       <XmlNodeView
         v-for="(child, index) in node.children"
@@ -2288,6 +2304,8 @@ onBeforeUnmount(() => {
       @scroll-to-lower="handleScrollToLower"
       @scroll-to-upper="handleScrollToUpper"
       @touch-start="handleTouchStart"
+      @touch-move="handleTouchMove"
+      @touch-end="handleTouchEnd"
     >
       <!--
         绝对定位子节点相对 padding edge 定位、不受父级 padding 影响。

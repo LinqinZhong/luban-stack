@@ -24,7 +24,7 @@ type ScrollDetail = {
   clientWidth: number
 }
 
-type TouchStartDetail = {
+type TouchDetail = {
   clientX: number
   clientY: number
   pageX: number
@@ -36,7 +36,9 @@ const emit = defineEmits<{
   scroll: [detail: ScrollDetail]
   scrollToLower: [detail: ScrollDetail]
   scrollToUpper: [detail: ScrollDetail]
-  touchStart: [detail: TouchStartDetail]
+  touchStart: [detail: TouchDetail]
+  touchMove: [detail: TouchDetail]
+  touchEnd: [detail: TouchDetail]
 }>()
 
 /** 触底 / 触顶判定阈值（px） */
@@ -228,16 +230,56 @@ function onScroll() {
   atUpperEdge = nowUpper
 }
 
-function onTouchStart(event: TouchEvent) {
-  if (!props.enabled) return
-  const t = event.touches[0]
-  if (!t) return
-  emit('touchStart', {
+function touchDetail(event: TouchEvent, preferChanged: boolean): TouchDetail | null {
+  const t = preferChanged
+    ? (event.changedTouches[0] ?? event.touches[0])
+    : (event.touches[0] ?? event.changedTouches[0])
+  if (!t) return null
+  return {
     clientX: t.clientX,
     clientY: t.clientY,
     pageX: t.pageX,
     pageY: t.pageY,
-  })
+  }
+}
+
+function detailFromPointer(event: PointerEvent): TouchDetail {
+  return {
+    clientX: event.clientX,
+    clientY: event.clientY,
+    pageX: event.pageX,
+    pageY: event.pageY,
+  }
+}
+
+/** 鼠标/笔模拟触摸（桌面预览没有原生 TouchEvent） */
+let simTouchPointerId: number | null = null
+
+function onTouchStart(event: TouchEvent) {
+  if (!props.enabled) return
+  const detail = touchDetail(event, false)
+  if (!detail) return
+  emit('touchStart', detail)
+}
+
+function onTouchMove(event: TouchEvent) {
+  if (!props.enabled) return
+  const detail = touchDetail(event, false)
+  if (!detail) return
+  emit('touchMove', detail)
+}
+
+function onTouchEnd(event: TouchEvent) {
+  if (!props.enabled) return
+  const detail = touchDetail(event, true)
+  if (!detail) return
+  emit('touchEnd', detail)
+}
+
+function endSimTouch(event: PointerEvent) {
+  if (simTouchPointerId == null || event.pointerId !== simTouchPointerId) return
+  emit('touchEnd', detailFromPointer(event))
+  simTouchPointerId = null
 }
 
 function onWheel(event: WheelEvent) {
@@ -283,9 +325,13 @@ function endDrag(el?: HTMLElement | null, withInertia = false) {
 
 function onPointerDown(event: PointerEvent) {
   if (!props.enabled) return
-  // 真触摸交给浏览器原生惯性滚动；鼠标/笔用拖拽滚动
+  // 真触摸走 TouchEvent；鼠标/笔在此模拟触摸并拖拽滚动
   if (event.pointerType === 'touch') return
   if (event.pointerType === 'mouse' && event.button !== 0) return
+
+  simTouchPointerId = event.pointerId
+  emit('touchStart', detailFromPointer(event))
+
   const el = bodyRef.value
   if (!el) return
   stopMomentum()
@@ -303,6 +349,10 @@ function onPointerDown(event: PointerEvent) {
 }
 
 function onPointerMove(event: PointerEvent) {
+  if (simTouchPointerId != null && event.pointerId === simTouchPointerId) {
+    emit('touchMove', detailFromPointer(event))
+  }
+
   if (dragPointerId == null || event.pointerId !== dragPointerId) return
   const el = bodyRef.value
   if (!el) return
@@ -328,12 +378,14 @@ function onPointerMove(event: PointerEvent) {
 }
 
 function onPointerUp(event: PointerEvent) {
+  endSimTouch(event)
   if (dragPointerId == null || event.pointerId !== dragPointerId) return
   pushVelocitySample(event.clientY)
   endDrag(bodyRef.value, true)
 }
 
 function onPointerCancel(event: PointerEvent) {
+  endSimTouch(event)
   if (dragPointerId == null || event.pointerId !== dragPointerId) return
   endDrag(bodyRef.value, false)
 }
@@ -381,6 +433,7 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   stopMomentum()
   endDrag()
+  simTouchPointerId = null
   unbindObservers()
 })
 
@@ -418,6 +471,8 @@ watch(
       :style="contentStyle"
       @scroll="onScroll"
       @touchstart="onTouchStart"
+      @touchmove="onTouchMove"
+      @touchend="onTouchEnd"
       @wheel="onWheel"
       @pointerdown="onPointerDown"
       @pointermove="onPointerMove"

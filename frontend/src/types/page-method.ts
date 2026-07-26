@@ -782,6 +782,8 @@ export const INTERACTION_EVENT_KEYS = [
   'onScrollToLower',
   'onScrollToUpper',
   'onTouchStart',
+  'onTouchMove',
+  'onTouchEnd',
 ] as const
 
 export function countNodeEventBindings(

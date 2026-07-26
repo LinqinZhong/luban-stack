@@ -3,7 +3,7 @@ import { computed, reactive, ref, watch } from 'vue'
 import { Delete, EditPen, Plus, RefreshRight } from '@element-plus/icons-vue'
 import type { ComponentConfig, ComponentPropDef } from '../../types/component'
 import type { MethodParam, PageMethod } from '../../types/page-method'
-import type { DataFieldValue } from '../../types/page-data'
+import type { DataField, DataFieldValue, PageData } from '../../types/page-data'
 import type {
   DataTypeLibrary,
   InterfaceField,
@@ -48,6 +48,8 @@ const props = defineProps<{
   config?: ComponentConfig | null
   methods?: PageMethod[]
   propValues?: Record<string, unknown>
+  /** 预览运行时数据池（含 setData / 计算字段实时值） */
+  pageData?: PageData | null
   emitLogs?: EmitLogEntry[]
   typeLibrary?: DataTypeLibrary | null
   projectPath?: string
@@ -58,9 +60,53 @@ const emit = defineEmits<{
   'go-entry': []
   refresh: []
   'update:prop': [name: string, value: unknown]
+  'update:data-field': [name: string, value: DataFieldValue]
   'invoke-method': [payload: { name: string; args: unknown[] }]
   'clear-emit-logs': []
 }>()
+
+const dataFields = computed(() =>
+  (props.pageData?.fields ?? []).filter((item) => item.name.trim()),
+)
+
+function isComputedField(field: DataField): boolean {
+  return field.binding === 'computed'
+}
+
+function isReadonlyDataField(field: DataField): boolean {
+  return isComputedField(field) || field.type === 'ref' || field.type === 'api'
+}
+
+function dataFieldTypeLabel(field: DataField): string {
+  const parts = [field.type]
+  if (field.binding === 'computed') parts.push('计算')
+  else if (field.binding === 'controller') parts.push('控制器')
+  if (field.remark?.trim()) parts.push(field.remark.trim())
+  return parts.join(' · ')
+}
+
+function onDataFieldInput(field: DataField, raw: unknown) {
+  if (isReadonlyDataField(field)) return
+  const name = field.name.trim()
+  if (!name) return
+  emit('update:data-field', name, raw as DataFieldValue)
+}
+
+function onDataJsonBlur(field: DataField, text: string) {
+  if (isReadonlyDataField(field)) return
+  const name = field.name.trim()
+  if (!name) return
+  const raw = text.trim()
+  if (!raw) {
+    emit('update:data-field', name, field.type === 'array' ? [] : {})
+    return
+  }
+  try {
+    emit('update:data-field', name, JSON.parse(raw) as DataFieldValue)
+  } catch {
+    // keep previous
+  }
+}
 
 const propDefs = computed(() =>
   (props.config?.props ?? []).filter((item) => item.name.trim()),
@@ -520,8 +566,8 @@ watch(
   <aside class="preview-debug">
     <div class="panel-header">调试</div>
 
-    <div v-if="mode === 'page'" class="panel-body">
-      <div class="section">
+    <div class="panel-body">
+      <div v-if="mode === 'page'" class="section">
         <div class="section-title">页面导航</div>
         <div class="nav-actions">
           <el-button @click="emit('back')" :disabled="!canGoBack">返回</el-button>
@@ -531,9 +577,8 @@ watch(
           <el-button :icon="RefreshRight" @click="emit('refresh')">刷新</el-button>
         </div>
       </div>
-    </div>
 
-    <div v-else class="panel-body">
+      <template v-if="mode === 'component'">
       <div class="section">
         <div class="section-title">Props</div>
         <el-empty
@@ -774,6 +819,97 @@ watch(
             <pre class="emit-args">{{ formatJson(item.args) }}</pre>
           </li>
         </ul>
+      </div>
+      </template>
+
+      <div class="section">
+        <div class="section-title row">
+          <span>数据池</span>
+          <el-button
+            v-if="mode === 'component'"
+            :icon="RefreshRight"
+            link
+            type="primary"
+            @click="emit('refresh')"
+          >
+            刷新
+          </el-button>
+        </div>
+        <el-empty
+          v-if="!dataFields.length"
+          description="暂无数据池字段"
+          :image-size="48"
+        />
+        <div v-else class="prop-list">
+          <div
+            v-for="field in dataFields"
+            :key="field.name"
+            class="prop-row"
+          >
+            <div class="prop-label">
+              <span class="prop-name">{{ field.name }}</span>
+              <span class="prop-type">{{ dataFieldTypeLabel(field) }}</span>
+            </div>
+
+            <template v-if="isReadonlyDataField(field)">
+              <el-switch
+                v-if="field.type === 'boolean'"
+                :model-value="field.value === true"
+                disabled
+              />
+              <pre
+                v-else-if="field.type === 'json' || field.type === 'array'"
+                class="data-readonly-json"
+              >{{ formatJson(field.value) }}</pre>
+              <el-input
+                v-else
+                :model-value="
+                  field.value == null ? '' : String(field.value)
+                "
+                readonly
+              />
+            </template>
+            <template v-else>
+              <el-switch
+                v-if="field.type === 'boolean'"
+                :model-value="field.value === true"
+                @update:model-value="onDataFieldInput(field, $event === true)"
+              />
+              <el-input-number
+                v-else-if="field.type === 'number'"
+                :model-value="Number(field.value ?? 0)"
+                controls-position="right"
+                style="width: 100%"
+                @update:model-value="onDataFieldInput(field, $event ?? 0)"
+              />
+              <ColorPicker
+                v-else-if="field.type === 'color'"
+                :model-value="String(field.value ?? '')"
+                placeholder="#409eff / rgba(...)"
+                @update:model-value="onDataFieldInput(field, $event)"
+              />
+              <el-input
+                v-else-if="field.type === 'json' || field.type === 'array'"
+                type="textarea"
+                :rows="3"
+                :model-value="formatJson(field.value)"
+                @blur="
+                  onDataJsonBlur(
+                    field,
+                    ($event.target as HTMLTextAreaElement).value,
+                  )
+                "
+              />
+              <el-input
+                v-else
+                :model-value="
+                  field.value == null ? '' : String(field.value)
+                "
+                @update:model-value="onDataFieldInput(field, $event)"
+              />
+            </template>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -1016,6 +1152,21 @@ watch(
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+
+.data-readonly-json {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: #f5f7fa;
+  border: 1px solid #ebeef5;
+  font-size: 12px;
+  line-height: 1.45;
+  color: #606266;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 160px;
+  overflow: auto;
 }
 
 .prop-row {

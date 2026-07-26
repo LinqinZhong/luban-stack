@@ -14,6 +14,7 @@ import {
   IMAGE_LOADING_OPTIONS,
   IMAGE_OBJECT_FIT_OPTIONS,
   INTERACTION_EVENTS,
+  interactionEventParams,
   ORIENTATION_OPTIONS,
   RELATIVE_BOOL_ATTRS,
   SCROLL_INTERACTION_EVENTS,
@@ -282,7 +283,7 @@ const selectableEvents = computed(() => {
     key: item.key,
     label: item.label,
   }))
-  // 可滚动布局才展示滚动 / 触底 / 触顶 / 触屏
+  // 可滚动布局才展示滚动 / 触底 / 触顶 / 触摸
   const overflow = selectedNode.value?.attrs.overflow?.trim().toLowerCase()
   const tag = selectedNode.value?.tag
   if (
@@ -290,7 +291,13 @@ const selectableEvents = computed(() => {
     (tag === 'LinearLayout' || tag === 'RelativeLayout')
   ) {
     for (const item of SCROLL_INTERACTION_EVENTS) {
-      list.push({ key: item.key, label: item.label })
+      const params = item.params
+        .map((p) => `${p.name}: ${p.type}`)
+        .join(', ')
+      list.push({
+        key: item.key,
+        label: params ? `${item.label}(${params})` : `${item.label} (${item.key})`,
+      })
     }
   }
   return list
@@ -530,28 +537,8 @@ function openEventBind(key: string, label: string) {
     eventBindParams.value = (def?.params ?? [])
       .filter((item) => item.name.trim())
       .map((item) => ({ name: item.name.trim(), type: item.type }))
-  } else if (
-    key === 'onScroll' ||
-    key === 'onScrollToLower' ||
-    key === 'onScrollToUpper'
-  ) {
-    eventBindParams.value = [
-      { name: 'scrollTop', type: 'number' },
-      { name: 'scrollLeft', type: 'number' },
-      { name: 'scrollHeight', type: 'number' },
-      { name: 'scrollWidth', type: 'number' },
-      { name: 'clientHeight', type: 'number' },
-      { name: 'clientWidth', type: 'number' },
-    ]
-  } else if (key === 'onTouchStart') {
-    eventBindParams.value = [
-      { name: 'clientX', type: 'number' },
-      { name: 'clientY', type: 'number' },
-      { name: 'pageX', type: 'number' },
-      { name: 'pageY', type: 'number' },
-    ]
   } else {
-    eventBindParams.value = []
+    eventBindParams.value = interactionEventParams(key)
   }
   eventBindVisible.value = true
 }

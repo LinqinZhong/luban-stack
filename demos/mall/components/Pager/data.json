@@ -47,6 +47,38 @@
       "value": true,
       "binding": "",
       "computeBody": ""
+    },
+    {
+      "name": "pullText",
+      "type": "string",
+      "remark": "",
+      "value": "",
+      "binding": "computed",
+      "computeBody": "// 可直接使用同级数据池字段名作为变量（无需形参）\n// return 的值即为该字段的计算值\nreturn pullHeight > 100 ? '释放即可刷新' : '下拉刷新'\n"
+    },
+    {
+      "name": "pullHeight",
+      "type": "number",
+      "remark": "",
+      "value": 0,
+      "binding": "",
+      "computeBody": ""
+    },
+    {
+      "name": "touchStartY",
+      "type": "number",
+      "remark": "",
+      "value": 0,
+      "binding": "",
+      "computeBody": ""
+    },
+    {
+      "name": "refreshing",
+      "type": "boolean",
+      "remark": "",
+      "value": false,
+      "binding": "",
+      "computeBody": ""
     }
   ]
 }

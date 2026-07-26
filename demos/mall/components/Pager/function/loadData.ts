@@ -18,5 +18,6 @@ $props.fetchApi({
   })
   updateProps('data', [...$props.data ,...res.records])
 }).finally(() => {
+  setData('refreshing', false)
   setData('loading', false)
 })

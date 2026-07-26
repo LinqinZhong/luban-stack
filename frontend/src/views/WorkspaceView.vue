@@ -3490,6 +3490,7 @@ watch(
       :config="activeComponent?.config"
       :methods="editorMethods"
       :prop-values="previewDebugDollarProps"
+      :page-data="resolvedPageData"
       :emit-logs="previewEmitLogs"
       :type-library="dataTypeLibrary"
       :project-path="projectStore.path || undefined"
@@ -3497,6 +3498,7 @@ watch(
       @go-entry="handlePreviewGoEntry"
       @refresh="handlePreviewRefresh"
       @update:prop="handlePreviewPropUpdate"
+      @update:data-field="applyPreviewSetData"
       @invoke-method="invokeActiveExposedMethod($event.name, $event.args)"
       @clear-emit-logs="previewEmitLogs = []"
     />

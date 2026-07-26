@@ -30,6 +30,8 @@ export type PreviewEventKey =
   | 'onScrollToLower'
   | 'onScrollToUpper'
   | 'onTouchStart'
+  | 'onTouchMove'
+  | 'onTouchEnd'
 
 export interface EventScope {
   item?: unknown
@@ -422,11 +424,13 @@ function buildCustomScope(ctx: RunEventBindingsContext): Record<string, unknown>
       const name = String(prop ?? '').trim()
       if (!name) return
       const field = findField(ctx.pageData, name)
-      if (typeof value === 'string' && field) {
-        ctx.setData(name, coerceFieldValue(field.type, value))
-      } else {
-        ctx.setData(name, value as DataFieldValue)
-      }
+      const next: DataFieldValue =
+        typeof value === 'string' && field
+          ? coerceFieldValue(field.type, value)
+          : (value as DataFieldValue)
+      // 同步写回当前运行中的 pageData，否则同链调用的 loadData() 仍读到旧快照
+      if (field) field.value = next
+      ctx.setData(name, next)
     },
     updateProps: (prop: string, value: unknown) => {
       const name = String(prop ?? '').trim()
@@ -495,7 +499,30 @@ function runCustomBody(
   const trimmed = body.trim()
   if (!trimmed) return
   try {
-    runComputeBody(trimmed, { ...buildCustomScope(ctx), ...extraScope })
+    const base = { ...buildCustomScope(ctx), ...extraScope }
+    /**
+     * 用 with + Proxy 做数据池实时读：
+     * - setData 后同链的 loadData() 能读到新值
+     * - setTimeout / Promise 回调里访问 pagination 等也不会锁死旧快照
+     * （不用 "use strict"，否则 with 非法）
+     */
+    const env = new Proxy(base, {
+      has(target, prop) {
+        if (typeof prop !== 'string') return Reflect.has(target, prop)
+        if (Reflect.has(target, prop)) return true
+        return Boolean(findField(ctx.pageData, prop))
+      },
+      get(target, prop, receiver) {
+        if (typeof prop === 'string' && isValidIdent(prop)) {
+          const field = findField(ctx.pageData, prop)
+          if (field) return field.value
+        }
+        return Reflect.get(target, prop, receiver)
+      },
+    })
+    // eslint-disable-next-line no-new-func
+    const fn = new Function('__env', `with (__env) {\n${trimmed}\n}`)
+    fn(env)
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     ctx.onUnknownMethod?.(`自定义方法执行失败：${msg}`)

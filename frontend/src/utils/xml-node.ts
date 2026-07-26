@@ -708,12 +708,30 @@ export const INTERACTION_EVENTS = [
   { key: 'onLongClick', label: '长按 (onLongClick)' },
 ] as const
 
+const SCROLL_EVENT_PARAMS = [
+  { name: 'scrollTop', type: 'number' },
+  { name: 'scrollLeft', type: 'number' },
+  { name: 'scrollHeight', type: 'number' },
+  { name: 'scrollWidth', type: 'number' },
+  { name: 'clientHeight', type: 'number' },
+  { name: 'clientWidth', type: 'number' },
+] as const
+
+const TOUCH_EVENT_PARAMS = [
+  { name: 'clientX', type: 'number' },
+  { name: 'clientY', type: 'number' },
+  { name: 'pageX', type: 'number' },
+  { name: 'pageY', type: 'number' },
+] as const
+
 /** 仅 overflow=scroll 的布局容器可配置 */
 export const SCROLL_INTERACTION_EVENTS = [
-  { key: 'onScroll', label: '滚动 (onScroll)' },
-  { key: 'onScrollToLower', label: '触底 (onScrollToLower)' },
-  { key: 'onScrollToUpper', label: '触顶 (onScrollToUpper)' },
-  { key: 'onTouchStart', label: '触屏 (onTouchStart)' },
+  { key: 'onScroll', label: '滚动', params: SCROLL_EVENT_PARAMS },
+  { key: 'onScrollToLower', label: '触底', params: SCROLL_EVENT_PARAMS },
+  { key: 'onScrollToUpper', label: '触顶', params: SCROLL_EVENT_PARAMS },
+  { key: 'onTouchStart', label: '触摸开始', params: TOUCH_EVENT_PARAMS },
+  { key: 'onTouchMove', label: '触摸移动', params: TOUCH_EVENT_PARAMS },
+  { key: 'onTouchEnd', label: '触摸结束', params: TOUCH_EVENT_PARAMS },
 ] as const
 
 /** @deprecated 使用 SCROLL_INTERACTION_EVENTS */
@@ -722,6 +740,15 @@ export const SCROLL_INTERACTION_EVENT = SCROLL_INTERACTION_EVENTS[0]!
 export type InteractionEventKey =
   | (typeof INTERACTION_EVENTS)[number]['key']
   | (typeof SCROLL_INTERACTION_EVENTS)[number]['key']
+
+/** 内置交互事件形参（绑定对话框 / 自定义方法签名） */
+export function interactionEventParams(
+  key: string,
+): Array<{ name: string; type: 'number' | 'string' | 'boolean' | 'object' | 'array' | 'any' }> {
+  const scroll = SCROLL_INTERACTION_EVENTS.find((item) => item.key === key)
+  if (!scroll) return []
+  return scroll.params.map((item) => ({ name: item.name, type: item.type }))
+}
 
 export const SIZE_OPTIONS = [
   { label: 'match_parent', value: 'match_parent' },

@@ -68,9 +68,17 @@ const INTERACTION_ATTRS = new Set([
   'onScrollToLower',
   'onScrollToUpper',
   'onTouchStart',
+  'onTouchMove',
+  'onTouchEnd',
 ])
 
-const NON_SCROLL_INTERACTION_ATTRS = ['onClick', 'onLongClick', 'onTouchStart'] as const
+const NON_SCROLL_INTERACTION_ATTRS = [
+  'onClick',
+  'onLongClick',
+  'onTouchStart',
+  'onTouchMove',
+  'onTouchEnd',
+] as const
 
 const TEXT_STYLE_ATTRS = new Set(['textSize', 'textColor', 'color'])
 
@@ -864,6 +872,8 @@ function vueEventName(key: string): string {
   if (key === 'onScrollToLower') return 'scroll'
   if (key === 'onScrollToUpper') return 'scroll'
   if (key === 'onTouchStart') return 'touchstart'
+  if (key === 'onTouchMove') return 'touchmove'
+  if (key === 'onTouchEnd') return 'touchend'
   return key.replace(/^on/, '').replace(/^[A-Z]/, (c) => c.toLowerCase())
 }
 
@@ -1307,7 +1317,13 @@ function registerEventMethod(
   ctx: CodegenContext,
   nameHint: string,
   raw: string,
-  options: { inRepeat: boolean; hasPayload: boolean; isScroll?: boolean },
+  options: {
+    inRepeat: boolean
+    hasPayload: boolean
+    isScroll?: boolean
+    /** 从 payload 展开的具名形参（如触摸 clientX） */
+    payloadLocals?: string[]
+  },
 ): string {
   ctx.methodSeq += 1
   const safeHint = nameHint.replace(/[^A-Za-z0-9_]/g, '') || 'event'
@@ -1318,6 +1334,11 @@ function registerEventMethod(
       isScroll: options.isScroll,
     }),
   )
+
+  const locals = (options.payloadLocals ?? []).filter((item) => /^[A-Za-z_]\w*$/.test(item))
+  const localPrelude = locals.length
+    ? locals.map((key) => `  const ${key} = payload?.${key}`).join('\n')
+    : ''
 
   let params = ''
   if (options.isScroll) {
@@ -1332,10 +1353,15 @@ function registerEventMethod(
     params = 'payload?: Record<string, any>'
   }
 
+  const bodyParts = [
+    localPrelude,
+    statements.length ? statements.join('\n') : '  // empty binding',
+  ].filter(Boolean)
+
   ctx.methods.push({
     name,
     params,
-    body: statements.length ? statements.join('\n') : '  // empty binding',
+    body: bodyParts.join('\n'),
   })
   return name
 }
@@ -1351,21 +1377,31 @@ function eventHandler(
     eventKey === 'onScroll' ||
     eventKey === 'onScrollToLower' ||
     eventKey === 'onScrollToUpper'
-  const isTouch = eventKey === 'onTouchStart'
+  const isTouch =
+    eventKey === 'onTouchStart' ||
+    eventKey === 'onTouchMove' ||
+    eventKey === 'onTouchEnd'
   const bindings = parseBindings(raw)
 
   if (isTouch) {
-    const methodName = registerEventMethod(ctx, 'touchstart', raw, {
+    const domEvent = vueEventName(eventKey)
+    const methodName = registerEventMethod(ctx, domEvent, raw, {
       inRepeat,
       hasPayload: true,
       isScroll: false,
+      /** 触摸形参展开为具名变量，与编辑器自定义方法签名一致 */
+      payloadLocals: ['clientX', 'clientY', 'pageX', 'pageY'],
     })
-    const payloadExpr =
-      '{ clientX: e.touches?.[0]?.clientX ?? 0, clientY: e.touches?.[0]?.clientY ?? 0, pageX: e.touches?.[0]?.pageX ?? 0, pageY: e.touches?.[0]?.pageY ?? 0 }'
+    // touchend 时 touches 可能为空，优先 changedTouches
+    const touchExpr =
+      eventKey === 'onTouchEnd'
+        ? '(e.changedTouches?.[0] ?? e.touches?.[0])'
+        : '(e.touches?.[0] ?? e.changedTouches?.[0])'
+    const payloadExpr = `{ clientX: ${touchExpr}?.clientX ?? 0, clientY: ${touchExpr}?.clientY ?? 0, pageX: ${touchExpr}?.pageX ?? 0, pageY: ${touchExpr}?.pageY ?? 0 }`
     if (inRepeat) {
-      return `@touchstart="(e) => ${methodName}(item, index, ${payloadExpr})"`
+      return `@${domEvent}="(e) => ${methodName}(item, index, ${payloadExpr})"`
     }
-    return `@touchstart="(e) => ${methodName}(${payloadExpr})"`
+    return `@${domEvent}="(e) => ${methodName}(${payloadExpr})"`
   }
 
   const inline = tryInlineEventHandler(
