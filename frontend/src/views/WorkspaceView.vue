@@ -125,6 +125,7 @@ import {
   appendComponent,
   appendWidget,
   canDeleteNode,
+  findXmlNodeById,
   moveWidget,
   removeWidget,
   migrateLegacyMaskToModal,
@@ -132,6 +133,7 @@ import {
   type MovePosition,
   type WidgetTag,
 } from '../utils/xml-node'
+import { parsePageXml } from '../utils/xml'
 import {
   isSlotOutletNodeId,
   parseSlotOutletNodeId,
@@ -194,7 +196,6 @@ const activePage = ref<PageDetail | null>(null)
 const activeComponent = ref<ComponentDetail | null>(null)
 const selectedNodeId = ref('')
 const workspaceMode = ref<WorkspaceMode>('preview')
-const addComponentVisible = ref(false)
 const componentMap = ref<ComponentRenderMap>({})
 /** 各组件方法（含暴露方法签名 / 预览调用） */
 const componentMethodsMap = ref<Record<string, PageMethod[]>>({})
@@ -204,7 +205,10 @@ const loadingPages = ref(false)
 const loadingPage = ref(false)
 const createVisible = ref(false)
 const creating = ref(false)
-const addWidgetVisible = ref(false)
+const addDialogVisible = ref(false)
+const addDialogTab = ref<'widget' | 'component'>('widget')
+/** 打开添加弹窗时是否写入当前插槽的调试子节点 */
+const addIntoSlotDebug = ref(false)
 const iconLibrary = ref<IconLibrary>(createEmptyIconLibrary())
 const dataTypeLibrary = ref<DataTypeLibrary>(createEmptyDataTypeLibrary())
 const mysqlLibrary = ref<MysqlLibrary>(createEmptyMysqlLibrary())
@@ -327,12 +331,16 @@ const canvasWidth = computed(
 const isPageResource = computed(() => resourceKind.value === 'page')
 const isComponentResource = computed(() => resourceKind.value === 'component')
 
-/** 页面不可添加 Slot；仅组件资源可选 */
-const addWidgetOptions = computed(() =>
-  isComponentResource.value
-    ? WIDGET_OPTIONS
-    : WIDGET_OPTIONS.filter((item) => item.tag !== 'Slot'),
-)
+/** 页面不可添加 Slot；仅组件资源可选；插槽调试也不嵌套 Slot */
+const addWidgetOptions = computed(() => {
+  let list = isComponentResource.value
+    ? [...WIDGET_OPTIONS]
+    : WIDGET_OPTIONS.filter((item) => item.tag !== 'Slot')
+  if (addIntoSlotDebug.value) {
+    list = list.filter((item) => item.tag !== 'Slot')
+  }
+  return list
+})
 const activeDoc = computed(() =>
   isPageResource.value ? activePage.value : activeComponent.value,
 )
@@ -735,9 +743,20 @@ const canDeleteSelected = computed(
     canDeleteNode(selectedNodeId.value),
 )
 
-const showAddComponentButton = computed(
-  () => isEditMode.value && Boolean(activeDoc.value),
-)
+/** 组件定义中选中 Slot 时，可添加调试预览元素 */
+const showAddDebugButton = computed(() => {
+  if (!isEditMode.value || !isComponentResource.value || !activeDoc.value) {
+    return false
+  }
+  const id = selectedNodeId.value
+  if (!id || isSlotOutletNodeId(id)) return false
+  try {
+    const root = parsePageXml(activeDoc.value.xml)
+    return findXmlNodeById(root, id)?.tag === 'Slot'
+  } catch {
+    return false
+  }
+})
 
 const iconOptions = computed(() =>
   iconLibrary.value.icons.map((item) => ({
@@ -2255,12 +2274,7 @@ watch(workspaceMode, async (mode, prev) => {
 })
 
 watch(
-  () =>
-    [
-      isComponentResource.value,
-      activeComponentId.value,
-      activeComponent.value?.config.debugProps,
-    ] as const,
+  () => [isComponentResource.value, activeComponentId.value] as const,
   () => {
     if (!isComponentResource.value || !activeComponentId.value) return
     previewPropOverrides.value = restoreComponentDebugProps()
@@ -2763,14 +2777,20 @@ async function handleRemoveMethod(method: PageMethod) {
   }
 }
 
-function openAddWidgetDialog() {
+function openAddDialog(options?: { intoSlotDebug?: boolean; tab?: 'widget' | 'component' }) {
   if (!activeDoc.value) return
-  addWidgetVisible.value = true
+  addIntoSlotDebug.value = Boolean(options?.intoSlotDebug)
+  addDialogTab.value = options?.tab ?? 'widget'
+  addDialogVisible.value = true
 }
 
-function openAddComponentDialog() {
-  if (!activeDoc.value) return
-  addComponentVisible.value = true
+function openAddWidgetDialog() {
+  openAddDialog({ intoSlotDebug: false, tab: 'widget' })
+}
+
+function openAddDebugDialog() {
+  if (!showAddDebugButton.value) return
+  openAddDialog({ intoSlotDebug: true, tab: 'widget' })
 }
 
 /** 组件内嵌组件时，排除自身，避免直接循环引用 */
@@ -2802,7 +2822,10 @@ async function handleAddComponentInstance(component: ComponentSummary) {
     } catch {
       // defaults
     }
-    const outlet = parseSlotOutletNodeId(selectedNodeId.value)
+    const intoSlotDebug = addIntoSlotDebug.value
+    const outlet = intoSlotDebug
+      ? null
+      : parseSlotOutletNodeId(selectedNodeId.value)
     const appendTarget = outlet?.hostId ?? selectedNodeId.value
     const { xml, newNodeId } = appendComponent(
       activeDoc.value.xml,
@@ -2812,14 +2835,18 @@ async function handleAddComponentInstance(component: ComponentSummary) {
         name,
         width,
         height,
-        allowRootSiblings: isComponentResource.value && !outlet,
+        allowRootSiblings: isComponentResource.value && !outlet && !intoSlotDebug,
         slot: outlet?.slotName,
+        intoSlotDebug,
       },
     )
     selectedNodeId.value = newNodeId
-    addComponentVisible.value = false
+    addDialogVisible.value = false
+    addIntoSlotDebug.value = false
     await handleXmlUpdate(xml)
-    ElMessage.success(`已添加组件 ${name}`)
+    ElMessage.success(
+      intoSlotDebug ? `已添加调试组件 ${name}` : `已添加组件 ${name}`,
+    )
   } catch (err) {
     ElMessage.error(err instanceof Error ? err.message : '添加组件失败')
   }
@@ -2837,21 +2864,26 @@ async function handleAddWidget(tag: WidgetTag) {
   if (!activeDoc.value) return
 
   try {
-    const outlet = parseSlotOutletNodeId(selectedNodeId.value)
+    const intoSlotDebug = addIntoSlotDebug.value
+    const outlet = intoSlotDebug
+      ? null
+      : parseSlotOutletNodeId(selectedNodeId.value)
     const appendTarget = outlet?.hostId ?? selectedNodeId.value
     const { xml, newNodeId } = appendWidget(
       activeDoc.value.xml,
       appendTarget,
       tag,
       {
-        allowRootSiblings: resourceKind.value === 'component' && !outlet,
+        allowRootSiblings: resourceKind.value === 'component' && !outlet && !intoSlotDebug,
         slot: outlet?.slotName,
+        intoSlotDebug,
       },
     )
-    addWidgetVisible.value = false
+    addDialogVisible.value = false
+    addIntoSlotDebug.value = false
     selectedNodeId.value = newNodeId
     await handleXmlUpdate(xml)
-    ElMessage.success(`已添加 ${tag}`)
+    ElMessage.success(intoSlotDebug ? `已添加调试 ${tag}` : `已添加 ${tag}`)
   } catch (err) {
     ElMessage.error(err instanceof Error ? err.message : '添加控件失败')
   }
@@ -3351,7 +3383,7 @@ watch(
           :selected-id="selectedNodeId"
           :selectable="isEditMode"
           :show-add-button="isEditMode"
-          :show-add-component-button="showAddComponentButton"
+          :show-add-debug-button="showAddDebugButton"
           :show-delete-button="canDeleteSelected"
           :expand-repeat="workspaceMode === 'preview'"
           :page-data="resolvedPageData"
@@ -3373,7 +3405,7 @@ watch(
           @add-window="handleAddMultiWindow"
           @interact="handlePreviewInteract"
           @add="openAddWidgetDialog"
-          @add-component="openAddComponentDialog"
+          @add-debug="openAddDebugDialog"
           @delete="handleDeleteWidget"
         />
         </template>
@@ -3583,59 +3615,64 @@ watch(
     </el-dialog>
 
     <el-dialog
-      v-model="addComponentVisible"
-      title="添加组件"
-      width="480px"
-      destroy-on-close
-    >
-      <p class="add-hint">从组件列表选择，插入为 Component 节点。</p>
-      <el-empty
-        v-if="!addableComponents.length"
-        :description="
-          isComponentResource
-            ? '暂无其它组件可嵌套'
-            : '暂无组件，请先在「组件」中新建'
-        "
-        :image-size="64"
-      />
-      <div v-else class="widget-options">
-        <button
-          v-for="item in addableComponents"
-          :key="item.id"
-          type="button"
-          class="widget-option"
-          @click="handleAddComponentInstance(item)"
-        >
-          <div class="widget-option-title">{{ item.name }}</div>
-          <div class="widget-option-desc">{{ item.id }}</div>
-        </button>
-      </div>
-    </el-dialog>
-
-    <el-dialog
-      v-model="addWidgetVisible"
-      title="添加控件"
+      v-model="addDialogVisible"
+      :title="addIntoSlotDebug ? '添加调试元素' : '添加'"
       width="560px"
       destroy-on-close
       class="add-widget-dialog"
+      @closed="addIntoSlotDebug = false"
     >
-      <p class="add-hint">
-        将添加到当前选中的布局容器；若选中的是 Text/Button/Input，则添加到其父布局。选中 Component 时可添加插槽内容子节点。
+      <p v-if="addIntoSlotDebug" class="add-hint">
+        写入当前插槽的调试预览内容，便于组件编辑时查看布局；导出 Vue 时插槽仍为空
+        <code>&lt;slot&gt;</code>，不含这些子节点。
       </p>
-      <div class="widget-options widget-options--tiles">
-        <button
-          v-for="item in addWidgetOptions"
-          :key="item.tag"
-          type="button"
-          class="widget-option widget-option--tile"
-          :title="item.description"
-          @click="handleAddWidget(item.tag)"
-        >
-          <div class="widget-option-title">{{ item.label.split(/\s+/)[0] }}</div>
-          <div class="widget-option-tag">{{ item.tag }}</div>
-          <div class="widget-option-desc">{{ item.description }}</div>
-        </button>
-      </div>
+      <p v-else class="add-hint">
+        将添加到当前选中的布局容器；若选中的是 Text/Button/Input，则添加到其父布局。选中
+        Component 时可添加插槽内容子节点。
+      </p>
+      <el-tabs v-model="addDialogTab" class="add-dialog-tabs">
+        <el-tab-pane label="控件" name="widget">
+          <div class="widget-options widget-options--tiles">
+            <button
+              v-for="item in addWidgetOptions"
+              :key="item.tag"
+              type="button"
+              class="widget-option widget-option--tile"
+              :title="item.description"
+              @click="handleAddWidget(item.tag)"
+            >
+              <div class="widget-option-title">{{ item.label.split(/\s+/)[0] }}</div>
+              <div class="widget-option-tag">{{ item.tag }}</div>
+              <div class="widget-option-desc">{{ item.description }}</div>
+            </button>
+          </div>
+        </el-tab-pane>
+        <el-tab-pane label="组件" name="component">
+          <el-empty
+            v-if="!addableComponents.length"
+            :description="
+              isComponentResource
+                ? '暂无其它组件可嵌套'
+                : '暂无组件，请先在「组件」中新建'
+            "
+            :image-size="64"
+          />
+          <div v-else class="widget-options widget-options--tiles">
+            <button
+              v-for="item in addableComponents"
+              :key="item.id"
+              type="button"
+              class="widget-option widget-option--tile"
+              :title="item.id"
+              @click="handleAddComponentInstance(item)"
+            >
+              <div class="widget-option-title">{{ item.name }}</div>
+              <div class="widget-option-tag">{{ item.id }}</div>
+              <div class="widget-option-desc">插入为 Component 节点</div>
+            </button>
+          </div>
+        </el-tab-pane>
+      </el-tabs>
     </el-dialog>
   </div>
 </template>
@@ -3972,6 +4009,10 @@ watch(
   margin: 0 0 12px;
   font-size: 13px;
   color: #64748b;
+}
+
+.add-dialog-tabs :deep(.el-tabs__header) {
+  margin-bottom: 12px;
 }
 
 .widget-options {

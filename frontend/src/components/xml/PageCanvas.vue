@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, provide, ref, watch } from 'vue'
-import { Box, Delete, Plus, RefreshRight } from '@element-plus/icons-vue'
+import { Delete, Plus, RefreshRight } from '@element-plus/icons-vue'
 import { colorPickState } from '../../composables/useColorPick'
 import {
   BADGE_HOST_KEY,
@@ -26,7 +26,8 @@ const props = defineProps<{
   selectedId?: string
   selectable?: boolean
   showAddButton?: boolean
-  showAddComponentButton?: boolean
+  /** 选中插槽时：添加调试元素 */
+  showAddDebugButton?: boolean
   showDeleteButton?: boolean
   /** ????? repeat??? v-for? */
   expandRepeat?: boolean
@@ -65,7 +66,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   select: [id: string]
   add: []
-  'add-component': []
+  'add-debug': []
   delete: []
   'open-repeat': [id: string]
   'add-window': [parentId: string]
@@ -100,13 +101,21 @@ watch(
   },
 )
 const parsed = computed<{ root: XmlNode | null; error: string }>(() => {
+  // 深度依赖 $props（含数组内容），避免仅改 data 项时不触发重新展开
+  try {
+    void JSON.stringify(props.dollarProps ?? null)
+  } catch {
+    void props.dollarProps
+  }
   if (!props.xml.trim()) {
     return { root: null, error: '?? XML ??' }
   }
   try {
     const root = parsePageXml(props.xml)
     const viewRoot =
-      props.expandRepeat && root ? expandRepeatTree(root, props.pageData) : root
+      props.expandRepeat && root
+        ? expandRepeatTree(root, props.pageData, props.dollarProps)
+        : root
     return { root: viewRoot, error: '' }
   } catch (err) {
     return {
@@ -408,16 +417,29 @@ onBeforeUnmount(() => {
       :library="iconLibrary"
     />
     <div
-      v-if="showAddButton || showAddComponentButton || showDeleteButton"
+      v-if="showAddButton || showAddDebugButton || showDeleteButton"
       class="stage-toolbar color-pick-ignore"
     >
-      <el-tooltip v-if="showAddButton" content="????" placement="left">
+      <el-tooltip v-if="showAddDebugButton" content="添加调试元素" placement="left">
+        <el-button type="warning" circle class="btn-plus-bug" @click="emit('add-debug')">
+          <span class="plus-bug-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="18" height="18">
+              <path
+                fill="currentColor"
+                d="M11 3h2v2.06c1.72.34 3.1 1.5 3.74 3.09L19 7.5l1 1.73-2.1 1.21c.07.41.1.84.1 1.28v.5h2.5v2H18v.5c0 .44-.03.87-.1 1.28L20 17.77 19 19.5l-2.26-.65A5.98 5.98 0 0 1 13 18.94V21h-2v-2.06a5.98 5.98 0 0 1-3.74-3.09L5 19.5l-1-1.73 2.1-1.21A7.4 7.4 0 0 1 6 13.5v-.5H3.5v-2H6v-.5c0-.44.03-.87.1-1.28L4 9.23 5 7.5l2.26.65A5.98 5.98 0 0 1 11 5.06V3zm1 4a4 4 0 0 0-4 4v2a4 4 0 0 0 8 0v-2a4 4 0 0 0-4-4zm-1 3h2v4h-2v-4z"
+              />
+              <path
+                fill="currentColor"
+                d="M17.5 2.5h1.5v1.5H20.5v1.5h-1.5V7h-1.5V5.5H16V4h1.5z"
+              />
+            </svg>
+          </span>
+        </el-button>
+      </el-tooltip>
+      <el-tooltip v-if="showAddButton" content="添加控件 / 组件" placement="left">
         <el-button type="primary" circle :icon="Plus" @click="emit('add')" />
       </el-tooltip>
-      <el-tooltip v-if="showAddComponentButton" content="????" placement="left">
-        <el-button type="success" circle :icon="Box" @click="emit('add-component')" />
-      </el-tooltip>
-      <el-tooltip v-if="showDeleteButton" content="????" placement="left">
+      <el-tooltip v-if="showDeleteButton" content="删除" placement="left">
         <el-button type="danger" circle :icon="Delete" @click="emit('delete')" />
       </el-tooltip>
     </div>
@@ -652,6 +674,23 @@ onBeforeUnmount(() => {
   z-index: 2;
   display: flex;
   gap: 8px;
+}
+
+.btn-plus-bug :deep(span) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.plus-bug-icon {
+  display: inline-flex;
+  width: 18px;
+  height: 18px;
+  line-height: 0;
+}
+
+.plus-bug-icon svg {
+  display: block;
 }
 
 .stage-status {

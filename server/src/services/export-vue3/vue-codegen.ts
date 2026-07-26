@@ -308,6 +308,17 @@ function bindingToExpr(
   return `'${escapeTsString(trimmed)}'`
 }
 
+/** v-for 列表表达式：数据池字段或 $props.xxx */
+function repeatListExpr(field: string, ctx: CodegenContext): string {
+  const trimmed = field.trim()
+  if (trimmed.startsWith('$props.')) {
+    const path = trimmed.slice('$props.'.length).trim()
+    return path ? `props.${path}` : 'props'
+  }
+  if (ctx.kind === 'page' || ctx.dataFieldNames.includes(trimmed)) return trimmed
+  return `store.${trimmed}`
+}
+
 /** 布局属性 → Tailwind class（不写 style） */
 function buildTwClasses(
   attrs: Record<string, string>,
@@ -1664,7 +1675,7 @@ function renderNode(
       parentOrientation,
     )
     return `${pad}<template v-for="(item, index) in ${
-      ctx.kind === 'page' || ctx.dataFieldNames.includes(field) ? field : `store.${field}`
+      repeatListExpr(field, ctx)
     }" :key="index">
 ${inner}
 ${pad}</template>`

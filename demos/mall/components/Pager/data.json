@@ -39,6 +39,14 @@
       "value": true,
       "binding": "",
       "computeBody": ""
+    },
+    {
+      "name": "isReachTop",
+      "type": "boolean",
+      "remark": "",
+      "value": true,
+      "binding": "",
+      "computeBody": ""
     }
   ]
 }

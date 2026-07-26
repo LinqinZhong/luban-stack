@@ -29,7 +29,8 @@ function statusBarTreeNode(): TreeNodeData {
 function nodeLabel(node: XmlNode): string {
   if (node.tag === 'Slot') {
     const slotName = node.attrs.name?.trim() || 'default'
-    return `插槽(${slotName})`
+    const n = node.children.length
+    return n ? `插槽(${slotName}) · 调试${n}` : `插槽(${slotName})`
   }
   const name = node.attrs.name?.trim()
   if (name) {

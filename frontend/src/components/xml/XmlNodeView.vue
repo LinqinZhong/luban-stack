@@ -464,10 +464,20 @@ const componentRoot = computed(() => {
   const detail = componentDetail.value
   if (!detail?.xml?.trim()) return null
   try {
+    // 深度依赖实例 $props，保证 repeat="$props.xxx" 随调试数据刷新
+    try {
+      void JSON.stringify(instanceDollarProps.value ?? null)
+    } catch {
+      void instanceDollarProps.value
+    }
     const root = parsePageXml(detail.xml)
-    // 页面内嵌组件时，定义树里的 repeat 也要按组件数据池展开
+    // 页面内嵌组件时，定义树里的 repeat 也要按组件数据池 / $props 展开
     if (props.expandRepeat) {
-      return expandRepeatTree(root, componentPageData.value ?? detail.data)
+      return expandRepeatTree(
+        root,
+        componentPageData.value ?? detail.data,
+        instanceDollarProps.value,
+      )
     }
     return root
   } catch {
@@ -1894,6 +1904,39 @@ onBeforeUnmount(() => {
         @add-window="forwardAddWindow"
       />
     </div>
+    <div
+      v-else-if="node.children.length && !effectiveSlotScope"
+      class="widget slot-debug"
+      :style="slotFillStyle"
+    >
+      <XmlNodeView
+        v-for="(child, index) in node.children"
+        :key="childId(index, child.tag)"
+        :node="child"
+        :node-id="childId(index, child.tag)"
+        :selected-id="selectedId"
+        :hovered-id="hoveredId"
+        :selectable="selectable"
+        :interact-enabled="interactEnabled"
+        :preview-lifecycle-gate="previewLifecycleGate"
+        :parent-horizontal="false"
+        :parent-vertical="true"
+        :parent-scrollable="inScrollColumn"
+        :icon-library="iconLibrary"
+        :page-data="pageData"
+        :hidden-node-ids="hiddenNodeIds"
+        :component-map="componentMap"
+        :dollar-props="dollarProps"
+        :route-params="routeParams"
+        :expand-repeat="expandRepeat"
+        :voider-slot-scope="childVoiderSlotScope"
+        @select="forwardSelect"
+        @hover="forwardHover"
+        @open-repeat="forwardOpenRepeat"
+        @interact="forwardInteract"
+        @add-window="forwardAddWindow"
+      />
+    </div>
     <div v-else class="widget slot-placeholder" :style="slotPlaceholderStyle">
       插槽 · {{ attrs.name?.trim() || 'default' }}
     </div>
@@ -2376,7 +2419,20 @@ onBeforeUnmount(() => {
 
 /* 尺寸主要由 slotFillStyle 控制；此处仅兜底 */
 .slot-fill {
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
   box-sizing: border-box;
+}
+
+.slot-debug {
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  box-sizing: border-box;
+  outline: 1px dashed rgba(230, 162, 60, 0.55);
+  outline-offset: -1px;
+  border-radius: 4px;
 }
 
 .unsupported {

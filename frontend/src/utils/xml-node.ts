@@ -406,7 +406,12 @@ export function appendWidget(
   xml: string,
   selectedId: string,
   tag: WidgetTag,
-  options?: { allowRootSiblings?: boolean; slot?: string },
+  options?: {
+    allowRootSiblings?: boolean
+    slot?: string
+    /** 选中 Slot 时：作为插槽调试子节点追加（不走父容器回退） */
+    intoSlotDebug?: boolean
+  },
 ): { xml: string; newNodeId: string } {
   const parser = new DOMParser()
   const doc = parser.parseFromString(xml, 'application/xml')
@@ -434,7 +439,13 @@ export function appendWidget(
       throw new Error('未找到选中节点')
     }
 
-    if (isAppendParentAllowed(selected.tagName) && !isFragmentTag(selected.tagName)) {
+    if (options?.intoSlotDebug) {
+      if (selected.tagName !== 'Slot') {
+        throw new Error('请先选中插槽节点再添加调试元素')
+      }
+      parentEl = selected
+      parentId = selectedId
+    } else if (isAppendParentAllowed(selected.tagName) && !isFragmentTag(selected.tagName)) {
       // Fragment 不在控件树中展示，不能作为「选中容器」追加；走子节点的父级逻辑
       parentEl = selected
       parentId = selectedId
@@ -454,7 +465,10 @@ export function appendWidget(
     throw new Error('未找到可添加的父容器')
   }
 
-  if (!isAppendParentAllowed(parentEl.tagName)) {
+  if (
+    !isAppendParentAllowed(parentEl.tagName) &&
+    !(options?.intoSlotDebug && parentEl.tagName === 'Slot')
+  ) {
     throw new Error(
       '只能向 LinearLayout / RelativeLayout / Swiper / MultiWindow / Modal / Component 添加子控件',
     )
@@ -512,11 +526,13 @@ export function appendComponent(
     height?: string
     allowRootSiblings?: boolean
     slot?: string
+    intoSlotDebug?: boolean
   },
 ): { xml: string; newNodeId: string } {
   const result = appendWidget(xml, selectedId, 'Component', {
     allowRootSiblings: options.allowRootSiblings,
-    slot: options.slot,
+    slot: options.intoSlotDebug ? undefined : options.slot,
+    intoSlotDebug: options.intoSlotDebug,
   })
   const patched = setNodeAttributes(result.xml, result.newNodeId, {
     componentId: options.componentId,

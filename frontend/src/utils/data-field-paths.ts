@@ -54,9 +54,28 @@ export function collectIconFieldNamesFromArray(field: DataField | undefined): st
 export function listRepeatItemIconOptions(
   fields: DataField[],
   listName: string | null | undefined,
+  componentProps?: ComponentPropDef[] | null,
 ): Array<{ id: string; label: string }> {
   if (!listName?.trim()) return []
-  const field = fields.find((item) => item.name.trim() === listName.trim())
+  const key = listName.trim()
+  if (key.startsWith('$props.')) {
+    const propName = key.slice('$props.'.length).trim()
+    const def = (componentProps ?? []).find((item) => item.name.trim() === propName)
+    if (!def || def.type !== 'array') return []
+    const asField: DataField = {
+      name: propName,
+      type: 'array',
+      remark: '',
+      value: Array.isArray(def.defaultValue) ? def.defaultValue : [],
+      binding: 'literal',
+    }
+    const iconNames = collectIconFieldNamesFromArray(asField)
+    return iconNames.map((name) => ({
+      id: `{item.${name}}`,
+      label: `重复项 · ${name}`,
+    }))
+  }
+  const field = fields.find((item) => item.name.trim() === key)
   const iconNames = collectIconFieldNamesFromArray(field)
   return iconNames.map((name) => ({
     id: `{item.${name}}`,
@@ -119,37 +138,62 @@ function buildFromUnknown(
 function buildRepeatItemTree(
   listName: string,
   fields: DataField[],
+  componentProps?: ComponentPropDef[] | null,
 ): FieldPathTreeNode | null {
-  const field = fields.find((item) => item.name.trim() === listName)
-  if (!field || field.type !== 'array' || !Array.isArray(field.value)) {
-    return {
-      id: '__repeat__',
-      label: `重复 · ${listName}`,
-      value: `__repeat__${listName}`,
-      type: 'json',
-      selectable: false,
-      children: [
-        {
-          id: 'index',
-          label: 'index（索引）',
-          value: 'index',
-          type: 'index',
-          selectable: true,
-        },
-        {
-          id: 'item',
-          label: 'item',
-          value: 'item',
-          type: 'json',
-          selectable: true,
-        },
-      ],
+  let sample: unknown
+  let itemType: DataFieldType | 'index' = 'json'
+
+  if (listName.startsWith('$props.')) {
+    const propName = listName.slice('$props.'.length).trim()
+    const def = (componentProps ?? []).find((item) => item.name.trim() === propName)
+    const raw =
+      def?.defaultValue === '' || def?.defaultValue === undefined
+        ? defaultValue('array')
+        : def.defaultValue
+    const arr = Array.isArray(raw) ? raw : []
+    sample = arr.find(
+      (item) => item && typeof item === 'object' && !Array.isArray(item),
+    )
+    itemType = sample
+      ? 'json'
+      : arr.length
+        ? inferValueType(arr[0])
+        : 'json'
+  } else {
+    const field = fields.find((item) => item.name.trim() === listName)
+    if (!field || field.type !== 'array' || !Array.isArray(field.value)) {
+      return {
+        id: '__repeat__',
+        label: `重复 · ${listName}`,
+        value: `__repeat__${listName}`,
+        type: 'json',
+        selectable: false,
+        children: [
+          {
+            id: 'index',
+            label: 'index（索引）',
+            value: 'index',
+            type: 'index',
+            selectable: true,
+          },
+          {
+            id: 'item',
+            label: 'item',
+            value: 'item',
+            type: 'json',
+            selectable: true,
+          },
+        ],
+      }
     }
+    sample = field.value.find(
+      (item) => item && typeof item === 'object' && !Array.isArray(item),
+    )
+    itemType = sample
+      ? 'json'
+      : inferValueType(field.value[0])
   }
 
-  const sample = field.value.find(
-    (item) => item && typeof item === 'object' && !Array.isArray(item),
-  )
   const itemChildren: FieldPathTreeNode[] = [
     {
       id: 'index',
@@ -162,7 +206,7 @@ function buildRepeatItemTree(
       id: 'item',
       label: 'item',
       value: 'item',
-      type: sample ? 'json' : inferValueType(field.value[0]),
+      type: itemType,
       selectable: true,
       children:
         sample && typeof sample === 'object' && !Array.isArray(sample)
@@ -250,7 +294,11 @@ export function buildConditionFieldTree(
   if (routeRoot) roots.push(routeRoot)
 
   if (repeatListName) {
-    const repeatRoot = buildRepeatItemTree(repeatListName, fields)
+    const repeatRoot = buildRepeatItemTree(
+      repeatListName,
+      fields,
+      componentProps,
+    )
     if (repeatRoot) roots.push(repeatRoot)
   }
 

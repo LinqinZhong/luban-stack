@@ -93,6 +93,10 @@ function applyItemScope(
 ): XmlNode {
   const attrs: Record<string, string> = {}
   for (const [key, value] of Object.entries(node.attrs)) {
+    if (key === 'repeat' || key === 'repeatIndex') {
+      // 展开后去掉，避免二次展开 / 树路径错乱
+      continue
+    }
     if (SKIP_INTERPOLATE_ATTRS.has(key)) {
       // 事件绑定等延迟到运行时按 scope 解析，避免破坏 JSON
       attrs[key] = value
@@ -114,9 +118,30 @@ function applyItemScope(
   return applyDynamicStyleOverrides(scoped, pageData, { item, index })
 }
 
-function resolveArrayValue(pageData: PageData | undefined, name: string): unknown[] {
-  if (!pageData || !name) return []
-  const field = pageData.fields.find((item) => item.name.trim() === name)
+function resolveArrayValue(
+  pageData: PageData | undefined,
+  name: string,
+  dollarProps?: Record<string, unknown>,
+): unknown[] {
+  const key = name.trim()
+  if (!key) return []
+  if (key.startsWith('$props.')) {
+    const path = key.slice('$props.'.length).trim()
+    if (!path) return []
+    const value = getByPath(dollarProps, path)
+    if (Array.isArray(value)) return value
+    // 兼容可迭代的响应式数组代理
+    if (value != null && typeof value === 'object' && Symbol.iterator in (value as object)) {
+      try {
+        return Array.from(value as Iterable<unknown>)
+      } catch {
+        return []
+      }
+    }
+    return []
+  }
+  if (!pageData) return []
+  const field = pageData.fields.find((item) => item.name.trim() === key)
   if (!field || field.type !== 'array') return []
   return Array.isArray(field.value) ? field.value : []
 }
@@ -124,41 +149,48 @@ function resolveArrayValue(pageData: PageData | undefined, name: string): unknow
 /**
  * 按 repeat / repeatIndex 展开子树（预览用）。
  * 展开后写入 scope，并应用 dynamicStyles。
+ * repeat 可为数据池字段名，或 `$props.xxx`（组件入参数组）。
  */
 export function expandRepeatTree(
   root: XmlNode,
   pageData: PageData | undefined,
+  dollarProps?: Record<string, unknown>,
 ): XmlNode {
-  return expandNode(root, pageData)
+  return expandNode(root, pageData, dollarProps)
 }
 
-function expandNode(node: XmlNode, pageData: PageData | undefined): XmlNode {
+function expandNode(
+  node: XmlNode,
+  pageData: PageData | undefined,
+  dollarProps?: Record<string, unknown>,
+): XmlNode {
   const next = cloneNode(node)
-  next.children = expandChildren(next.children, pageData)
+  next.children = expandChildren(next.children, pageData, dollarProps)
   return applyDynamicStyleOverrides(next, pageData, next.scope)
 }
 
 function expandChildren(
   children: XmlNode[],
   pageData: PageData | undefined,
+  dollarProps?: Record<string, unknown>,
 ): XmlNode[] {
   const result: XmlNode[] = []
 
   for (const child of children) {
     const listName = child.attrs.repeat?.trim()
     if (!listName) {
-      result.push(expandNode(child, pageData))
+      result.push(expandNode(child, pageData, dollarProps))
       continue
     }
 
-    const items = resolveArrayValue(pageData, listName)
+    const items = resolveArrayValue(pageData, listName, dollarProps)
     const indexAttr = child.attrs.repeatIndex?.trim() ?? ''
 
     // 模板：只克隆结构，不在此处套无 scope 的动态样式
     const template = cloneNode(child)
     // 子树若还有嵌套 repeat，先让子层在 applyItemScope 前展开
     // 通过 expandNode 处理 template 的 children，但跳过自身的 dynamicStyles 无 scope 求值
-    const prepared = prepareRepeatTemplate(template, pageData)
+    const prepared = prepareRepeatTemplate(template, pageData, dollarProps)
 
     if (indexAttr !== '') {
       const fixed = Number(indexAttr)
@@ -180,9 +212,10 @@ function expandChildren(
 function prepareRepeatTemplate(
   node: XmlNode,
   pageData: PageData | undefined,
+  dollarProps?: Record<string, unknown>,
 ): XmlNode {
   const next = cloneNode(node)
-  next.children = expandChildren(next.children, pageData)
+  next.children = expandChildren(next.children, pageData, dollarProps)
   return next
 }
 

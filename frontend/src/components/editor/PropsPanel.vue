@@ -693,7 +693,11 @@ function clearComponentProp(name: string) {
 const iconSelectOptions = computed(() => {
   const library = props.iconOptions ?? []
   const repeatList = findNearestRepeatListName(props.xml, props.selectedId)
-  const itemIcons = listRepeatItemIconOptions(props.dataFields ?? [], repeatList)
+  const itemIcons = listRepeatItemIconOptions(
+    props.dataFields ?? [],
+    repeatList,
+    props.componentProps,
+  )
   // 重复项图标放前面，方便选择；库图标在后
   const seen = new Set<string>()
   const merged: Array<{ id: string; label: string }> = []
@@ -737,11 +741,28 @@ const overflowOptionsForNode = computed(() => {
   return OVERFLOW_OPTIONS
 })
 
-const arrayFieldOptions = computed(() =>
-  (props.dataFields ?? [])
-    .filter((field) => field.type === 'array' && field.name.trim())
-    .map((field) => field.name.trim()),
-)
+const arrayFieldOptions = computed(() => {
+  const options: Array<{ value: string; label: string }> = []
+  for (const field of props.dataFields ?? []) {
+    if (field.type !== 'array' || !field.name.trim()) continue
+    const name = field.name.trim()
+    const remark = field.remark?.trim()
+    options.push({
+      value: name,
+      label: remark ? `数据池 · ${name} · ${remark}` : `数据池 · ${name}`,
+    })
+  }
+  for (const def of props.componentProps ?? []) {
+    if (def.type !== 'array' || !def.name.trim()) continue
+    const name = def.name.trim()
+    const remark = def.remark?.trim()
+    options.push({
+      value: `$props.${name}`,
+      label: remark ? `$props · ${name} · ${remark}` : `$props · ${name}`,
+    })
+  }
+  return options
+})
 
 /** Input 双向绑定：仅数据池顶层 string 字段 */
 const stringFieldOptions = computed(() =>
@@ -2060,7 +2081,9 @@ function saveVisibilityConfig(config: VisibilityConditionConfig) {
               </el-form-item>
             </el-form>
             <p class="hint">
-              类似 Vue 的 v-for：预览时按绑定数组展开当前节点。文本中写
+              类似 Vue 的 v-for：预览时按绑定数组展开当前节点。可选数据池数组，或组件
+              <code>$props</code>
+              中的数组参数。文本中写
               <code>{'{item.字段名}'}</code>
               才会替换为列表项数据，其他内容原样显示；也可用
               <code>{'{index}'}</code>。
@@ -2160,13 +2183,14 @@ function saveVisibilityConfig(config: VisibilityConditionConfig) {
             v-model="repeatForm.list"
             clearable
             filterable
-            placeholder="选择数据池中的数组字段"
+            placeholder="选择数据池或 $props 数组字段"
+            style="width: 100%"
           >
             <el-option
-              v-for="name in arrayFieldOptions"
-              :key="name"
-              :label="name"
-              :value="name"
+              v-for="opt in arrayFieldOptions"
+              :key="opt.value"
+              :label="opt.label"
+              :value="opt.value"
             />
           </el-select>
         </el-form-item>
