@@ -2485,7 +2485,14 @@ function applyPreviewSetData(prop: string, value: import('../types/page-data').D
     })
   }
   fields[index] = { ...prev, value, objectFields }
-  previewRuntimeData.value = { fields }
+  // 与组件路径一致：写入时重算，避免 pullText 等仍停在旧值
+  previewRuntimeData.value = resolveComputedPageData(
+    { fields },
+    {
+      getDeviceInfo: previewGetDeviceInfo,
+      dollarProps: editorDollarProps.value ?? {},
+    },
+  )
   scheduleLifecycleUpdate()
 }
 

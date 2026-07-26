@@ -13,7 +13,7 @@ import {
   type PageData,
 } from '../types/page-data'
 import { interpolateTemplate } from './repeat'
-import { runComputeBody } from './compute-runtime'
+import { runComputeBody, sameJson } from './compute-runtime'
 import { interpolateDollarProps, resolveDollarPropsPath } from './component-props'
 import type { ComponentRenderMap } from '../types/component-render'
 import {
@@ -443,12 +443,15 @@ function buildCustomScope(ctx: RunEventBindingsContext): Record<string, unknown>
         typeof value === 'string' && field
           ? coerceFieldValue(field.type, value)
           : (value as DataFieldValue)
-      // 先写运行时数据池，再通知宿主（宿主可能替换 pageData 引用）
-      if (field) field.value = next
-      // 兼容仍持有旧快照的 ctx.pageData
-      const snap = findField(ctx.pageData, name)
-      if (snap && snap !== field) snap.value = next
+      // 先判等再写入：若先改 field.value 再交给宿主，宿主 sameJson 会误判跳过，
+      // 计算字段（如 pullText 依赖 refreshing）就不会重算，界面停在「刷新中...」
+      if (field && sameJson(field.value, next)) return
       ctx.setData(name, next)
+      // 宿主替换引用后，再同步旧快照上的同名字段，保证同链读取一致
+      const after = findField(livePageData(ctx), name)
+      if (after) after.value = next
+      const snap = findField(ctx.pageData, name)
+      if (snap && snap !== after) snap.value = next
     },
     updateProps: (prop: string, value: unknown) => {
       const name = String(prop ?? '').trim()
