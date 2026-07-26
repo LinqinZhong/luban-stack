@@ -1,4 +1,4 @@
-import { access, mkdir, readdir, readFile, writeFile, stat } from 'node:fs/promises'
+import { access, mkdir, readdir, readFile, writeFile, stat, rm, rename } from 'node:fs/promises'
 import { constants } from 'node:fs'
 import path from 'node:path'
 import { ProjectError } from './project.js'
@@ -288,4 +288,138 @@ export async function saveComponentData(options: {
     throw new ProjectError(`无法写入 ${DATA_FILE}`, 500)
   }
   return getComponent(projectPath, id)
+}
+
+export async function deleteComponent(options: {
+  projectPath: string
+  componentId: string
+}): Promise<{ ok: boolean }> {
+  const projectPath = await assertProjectDir(options.projectPath)
+  const componentId = assertSafeId(options.componentId)
+  const dir = componentDir(projectPath, componentId)
+
+  try {
+    const info = await stat(dir)
+    if (!info.isDirectory()) throw new ProjectError('组件不存在', 404)
+  } catch (err) {
+    if (err instanceof ProjectError) throw err
+    throw new ProjectError('组件不存在', 404)
+  }
+
+  try {
+    await rm(dir, { recursive: true, force: true })
+  } catch {
+    throw new ProjectError('删除组件失败', 500)
+  }
+
+  return { ok: true }
+}
+
+async function rewriteComponentIdInXmlFiles(
+  projectPath: string,
+  oldId: string,
+  newId: string,
+): Promise<number> {
+  const roots = [
+    path.join(projectPath, 'pages'),
+    path.join(projectPath, COMPONENTS_DIR),
+  ]
+  let updated = 0
+  const patterns = [
+    `componentId="${oldId}"`,
+    `componentId='${oldId}'`,
+  ]
+  const replacements = [
+    `componentId="${newId}"`,
+    `componentId='${newId}'`,
+  ]
+
+  for (const root of roots) {
+    let names: string[]
+    try {
+      names = await readdir(root)
+    } catch {
+      continue
+    }
+    for (const name of names) {
+      if (name.startsWith('.')) continue
+      const xmlPath = path.join(root, name, XML_FILE)
+      try {
+        const raw = await readFile(xmlPath, 'utf-8')
+        let next = raw
+        for (let i = 0; i < patterns.length; i += 1) {
+          if (next.includes(patterns[i])) {
+            next = next.split(patterns[i]).join(replacements[i])
+          }
+        }
+        if (next !== raw) {
+          await writeFile(xmlPath, next, 'utf-8')
+          updated += 1
+        }
+      } catch {
+        // skip missing / unreadable
+      }
+    }
+  }
+  return updated
+}
+
+export async function renameComponent(options: {
+  projectPath: string
+  componentId: string
+  newId: string
+  name?: string
+}): Promise<ComponentDetail & { refsUpdated: number }> {
+  const projectPath = await assertProjectDir(options.projectPath)
+  const oldId = assertSafeId(options.componentId)
+  const newId = assertSafeId(options.newId)
+  const sourceDir = componentDir(projectPath, oldId)
+  const targetDir = componentDir(projectPath, newId)
+
+  try {
+    const info = await stat(sourceDir)
+    if (!info.isDirectory()) throw new ProjectError('组件不存在', 404)
+  } catch (err) {
+    if (err instanceof ProjectError) throw err
+    throw new ProjectError('组件不存在', 404)
+  }
+
+  const idChanged = oldId !== newId
+  if (idChanged) {
+    try {
+      await access(targetDir, constants.F_OK)
+      throw new ProjectError(`组件 ${newId} 已存在`)
+    } catch (err) {
+      if (err instanceof ProjectError) throw err
+    }
+    try {
+      await rename(sourceDir, targetDir)
+    } catch {
+      throw new ProjectError('重命名组件目录失败', 500)
+    }
+  }
+
+  const detail = await getComponent(projectPath, newId)
+  const name = options.name?.trim()
+  let config = detail.config
+  if (name && name !== config.name) {
+    config = {
+      ...config,
+      name,
+      title:
+        config.title === config.name || !config.title ? name : config.title,
+    }
+    await writeFile(
+      path.join(componentDir(projectPath, newId), CONFIG_FILE),
+      `${JSON.stringify(config, null, 2)}\n`,
+      'utf-8',
+    )
+  }
+
+  const refsUpdated = idChanged
+    ? await rewriteComponentIdInXmlFiles(projectPath, oldId, newId)
+    : 0
+
+  const result = await getComponent(projectPath, newId)
+  return { ...result, refsUpdated }
 }

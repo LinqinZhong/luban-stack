@@ -54,6 +54,18 @@ export const DATA_SOURCE_BINDING_OPTIONS: {
   { label: '计算', value: 'computed' },
 ]
 
+/** 控制器绑定：API 入参来源 */
+export type ControllerInputSource = 'literal' | 'binding'
+
+/** 控制器绑定：单个 API 入参配置（key 外层为 varName） */
+export interface ControllerInputParamConfig {
+  source: ControllerInputSource
+  /** source === 'literal' 时的字面量 */
+  literal?: unknown
+  /** source === 'binding' 时的绑定路径（如 pageDto / keyword） */
+  binding?: string
+}
+
 /** 控制器绑定配置（数据池字段） */
 export interface ControllerBindingConfig {
   serviceId: string
@@ -65,6 +77,8 @@ export interface ControllerBindingConfig {
   onLoading: string
   onSuccess: string
   onError: string
+  /** key = API input.varName */
+  inputs?: Record<string, ControllerInputParamConfig>
 }
 
 export interface DataField {
@@ -194,6 +208,7 @@ export function createEmptyControllerBinding(
     onLoading: '',
     onSuccess: '',
     onError: '',
+    inputs: {},
   }
 }
 
@@ -203,12 +218,40 @@ export function normalizeDataSourceBinding(raw: unknown): DataSourceBinding {
   return ''
 }
 
+export function normalizeControllerInputParam(
+  raw: unknown,
+): ControllerInputParamConfig | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
+  const item = raw as Record<string, unknown>
+  const source: ControllerInputSource =
+    item.source === 'binding' ? 'binding' : 'literal'
+  const out: ControllerInputParamConfig = { source }
+  if ('literal' in item) out.literal = item.literal
+  if (typeof item.binding === 'string') out.binding = item.binding.trim()
+  return out
+}
+
+export function normalizeControllerInputs(
+  raw: unknown,
+): Record<string, ControllerInputParamConfig> | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined
+  const out: Record<string, ControllerInputParamConfig> = {}
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    const varName = key.trim()
+    if (!varName) continue
+    const param = normalizeControllerInputParam(value)
+    if (param) out[varName] = param
+  }
+  return Object.keys(out).length ? out : undefined
+}
+
 export function normalizeControllerBinding(
   input: unknown,
   fieldType: DataFieldType = 'string',
 ): ControllerBindingConfig | undefined {
   if (!input || typeof input !== 'object' || Array.isArray(input)) return undefined
   const raw = input as Record<string, unknown>
+  const inputs = normalizeControllerInputs(raw.inputs)
   return {
     serviceId: typeof raw.serviceId === 'string' ? raw.serviceId.trim() : '',
     controllerId:
@@ -221,6 +264,7 @@ export function normalizeControllerBinding(
     onLoading: typeof raw.onLoading === 'string' ? raw.onLoading : '',
     onSuccess: typeof raw.onSuccess === 'string' ? raw.onSuccess : '',
     onError: typeof raw.onError === 'string' ? raw.onError : '',
+    ...(inputs ? { inputs } : {}),
   }
 }
 

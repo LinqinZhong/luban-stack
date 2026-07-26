@@ -10,6 +10,7 @@ import {
   isContainerTag,
   type MovePosition,
 } from '../../utils/xml-node'
+import { isSlotOutletNodeId, parseSlotOutletNodeId } from '../../utils/slot-outlet'
 import RepeatBadge from './RepeatBadge.vue'
 import EventBadge from './EventBadge.vue'
 
@@ -24,12 +25,21 @@ const props = defineProps<{
   hiddenIds?: string[]
   /** 页面预览时在树顶插入状态栏虚拟节点 */
   includeStatusBar?: boolean
+  /** 用于展开 Component 下的插槽子节点 */
+  componentMap?: import('../../types/component-render').ComponentRenderMap
 }>()
 
 const emit = defineEmits<{
   select: [id: string]
   'open-repeat': [id: string]
-  move: [payload: { sourceId: string; targetId: string; position: MovePosition }]
+  move: [
+    payload: {
+      sourceId: string
+      targetId: string
+      position: MovePosition
+      slot?: string
+    },
+  ]
   'toggle-hidden': [id: string]
 }>()
 
@@ -47,17 +57,35 @@ function cloneTree(nodes: TreeNodeData[]): TreeNodeData[] {
 function syncTreeFromXml() {
   const result = buildWidgetTree(props.xml, {
     includeStatusBar: props.includeStatusBar,
+    componentMap: props.componentMap,
   })
   treeError.value = result.error
   treeData.value = cloneTree(result.tree)
 }
 
+function findAncestorIds(nodes: TreeNodeData[], id: string, trail: string[] = []): string[] | null {
+  for (const node of nodes) {
+    const next = [...trail, node.id]
+    if (node.id === id) return next
+    if (node.children?.length) {
+      const found = findAncestorIds(node.children, id, next)
+      if (found) return found
+    }
+  }
+  return null
+}
+
 function collectExpandedKeys(selectedId?: string): string[] {
   const keys = new Set(treeData.value.map((node) => node.id))
   if (selectedId) {
-    const parts = selectedId.split('/')
-    for (let i = 1; i <= parts.length; i += 1) {
-      keys.add(parts.slice(0, i).join('/'))
+    const ancestors = findAncestorIds(treeData.value, selectedId)
+    if (ancestors) {
+      for (const id of ancestors) keys.add(id)
+    } else {
+      const parts = selectedId.split('/')
+      for (let i = 1; i <= parts.length; i += 1) {
+        keys.add(parts.slice(0, i).join('/'))
+      }
     }
   }
   return Array.from(keys)
@@ -84,6 +112,7 @@ function allowDrag(node: TreeNode) {
   if (!props.editable) return false
   const id = (node.data as TreeNodeData).id
   if (id === STATUS_BAR_NODE_ID) return false
+  if (isSlotOutletNodeId(id)) return false
   return Boolean(id && id.includes('/'))
 }
 
@@ -93,11 +122,22 @@ function allowDrop(draggingNode: TreeNode, dropNode: TreeNode, type: AllowDropTy
   const sourceId = (draggingNode.data as TreeNodeData).id
   const target = dropNode.data as TreeNodeData
   if (target.id === STATUS_BAR_NODE_ID || sourceId === STATUS_BAR_NODE_ID) return false
+  if (isSlotOutletNodeId(sourceId)) return false
+
   const position: MovePosition =
     type === 'prev' ? 'before' : type === 'next' ? 'after' : 'inner'
 
+  // 虚拟插槽：仅允许放入内部
+  if (isSlotOutletNodeId(target.id)) {
+    return position === 'inner'
+  }
+
   // 叶子节点可拖入（显示落地指示），落点确认时改为同级
-  if (position === 'inner' && !isContainerTag(target.tag)) {
+  if (
+    position === 'inner' &&
+    !isContainerTag(target.tag) &&
+    target.tag !== 'Component'
+  ) {
     return canMoveWidget(sourceId, target.id, 'after', target.tag) === null
   }
 
@@ -125,9 +165,39 @@ async function handleNodeDrop(
   await nextTick()
   restoreSelectionAndExpand()
 
+  // 拖入虚拟插槽 → 挂到 Component 下对应 slot
+  if (isSlotOutletNodeId(target.id) && position === 'inner') {
+    const outlet = parseSlotOutletNodeId(target.id)
+    if (!outlet) return
+    try {
+      await ElMessageBox.confirm(
+        `确定将「${source.label}」放入插槽「${outlet.slotName}」吗？`,
+        '调整控件结构',
+        {
+          type: 'info',
+          confirmButtonText: '确定',
+          cancelButtonText: '取消',
+        },
+      )
+    } catch {
+      return
+    }
+    emit('move', {
+      sourceId: source.id,
+      targetId: outlet.hostId,
+      position: 'inner',
+      slot: outlet.slotName,
+    })
+    return
+  }
+
   const invalid = canMoveWidget(source.id, target.id, position, target.tag)
   if (invalid) {
-    if (position === 'inner' && !isContainerTag(target.tag)) {
+    if (
+      position === 'inner' &&
+      !isContainerTag(target.tag) &&
+      target.tag !== 'Component'
+    ) {
       try {
         await ElMessageBox.confirm(
           `「${target.tag}」不支持子节点，是否改为放到其后面？`,
@@ -195,7 +265,7 @@ function treeHasId(nodes: TreeNodeData[], id: string): boolean {
 }
 
 watch(
-  () => [props.xml, props.includeStatusBar] as const,
+  () => [props.xml, props.includeStatusBar, props.componentMap] as const,
   () => {
     syncTreeFromXml()
     if (!props.selectedId) return
@@ -205,7 +275,7 @@ watch(
       emit('select', '')
     }
   },
-  { immediate: true },
+  { immediate: true, deep: true },
 )
 
 watch(
@@ -266,7 +336,11 @@ watch(
               @click="handleOpenRepeat((data as TreeNodeData).id)"
             />
             <button
-              v-if="editable && (data as TreeNodeData).id !== STATUS_BAR_NODE_ID"
+              v-if="
+                editable &&
+                (data as TreeNodeData).id !== STATUS_BAR_NODE_ID &&
+                !isSlotOutletNodeId((data as TreeNodeData).id)
+              "
               type="button"
               class="eye-btn"
               :title="isHidden((data as TreeNodeData).id) ? '显示（仅编辑态）' : '隐藏（仅编辑态）'"

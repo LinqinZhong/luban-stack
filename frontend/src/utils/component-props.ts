@@ -3,8 +3,9 @@ import {
   type DataFieldType,
   type DataFieldValue,
 } from '../types/page-data'
+import type { DataTypeLibrary } from '../types/data-types'
 import type { ComponentConfig, ComponentPropDef } from '../types/component'
-import { dataFieldToMethodParamType } from '../types/page-method'
+import { dataFieldToTsType } from '../types/page-method'
 
 /** 组件入参运行时命名空间；数据池字段禁止使用此名 */
 export const DOLLAR_PROPS_NAME = '$props'
@@ -13,27 +14,14 @@ export function isReservedDataFieldName(name: string): boolean {
   return name.trim() === DOLLAR_PROPS_NAME
 }
 
-function mapAmbientTsType(type: DataFieldType): string {
-  switch (dataFieldToMethodParamType(type)) {
-    case 'number':
-      return 'number'
-    case 'boolean':
-      return 'boolean'
-    case 'array':
-      return 'unknown[]'
-    case 'object':
-      return 'Record<string, unknown>'
-    default:
-      return 'string'
-  }
-}
-
 /**
  * Monaco ambient：`declare const $props: { ... }`，按组件参数定义生成属性提示。
+ * 会尊重 array/json 的 itemTypeRef、typeRef（如 GoodsItem[]），避免一律 unknown[]。
  * 页面（无参数定义）时声明为空对象，与运行时一致。
  */
 export function buildDollarPropsAmbientDeclaration(
   defs: ComponentPropDef[] | null | undefined,
+  typeLibrary?: DataTypeLibrary | null,
 ): string {
   const props = (defs ?? []).filter((item) => {
     const name = item.name.trim()
@@ -43,7 +31,20 @@ export function buildDollarPropsAmbientDeclaration(
     return 'declare const $props: Record<string, never>;'
   }
   const fields = props
-    .map((item) => `  ${item.name.trim()}: ${mapAmbientTsType(item.type)};`)
+    .map((item) => {
+      const ts = dataFieldToTsType(
+        {
+          type: item.type,
+          typeRef: item.typeRef,
+          itemType: item.itemType,
+          itemTypeRef: item.itemTypeRef,
+          itemItemType: item.itemItemType,
+          itemItemTypeRef: item.itemItemTypeRef,
+        },
+        typeLibrary,
+      )
+      return `  ${item.name.trim()}: ${ts};`
+    })
     .join('\n')
   return [`interface VoiderDollarProps {`, fields, `}`, `declare const $props: VoiderDollarProps;`].join(
     '\n',
@@ -97,6 +98,22 @@ function coercePropValue(type: DataFieldType, raw: unknown): DataFieldValue {
     if (s === 'false' || s === '0' || s === '') return false
     return false
   }
+  // 已是结构化值（数据池绑定解析结果）：直接规范化
+  if (type === 'array') {
+    if (Array.isArray(raw)) return raw
+    if (raw && typeof raw === 'object') return [raw]
+  }
+  if (type === 'json') {
+    if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+      return raw as Record<string, unknown>
+    }
+    if (Array.isArray(raw)) return { items: raw }
+  }
+  if (typeof raw !== 'string' && typeof raw !== 'number' && typeof raw !== 'boolean') {
+    if (type === 'array') return []
+    if (type === 'json') return {}
+    return defaultValue(type)
+  }
   const str = raw == null ? '' : String(raw)
   if (type === 'string' || type === 'icon' || type === 'color' || type === 'ref') {
     return str
@@ -109,7 +126,9 @@ function coercePropValue(type: DataFieldType, raw: unknown): DataFieldValue {
   try {
     return JSON.parse(str) as DataFieldValue
   } catch {
-    return str as unknown as DataFieldValue
+    // 绑定未解析时的字面量（如 {goodsPageData.records}）勿当成 prop 值
+    if (/^\s*\{[^{}]+\}\s*$/.test(str)) return defaultValue(type)
+    return type === 'array' || type === 'json' ? defaultValue(type) : (str as unknown as DataFieldValue)
   }
 }
 
@@ -129,13 +148,12 @@ function defaultsFromDefs(defs: ComponentPropDef[]): Record<string, unknown> {
 /**
  * 组装组件运行时 `$props`：
  * - 先用 config.props 的 defaultValue
- * - 再用 Component 实例属性中与「已声明 prop」同名的值覆盖（字符串按类型转换）
- * - 实例属性留空（或未写）则保留默认值；布尔 false 也能正确覆盖默认 true
- * - 与宿主布局属性同名时（如 background）仍写入 $props，因为控件树里用 {$props.background}
+ * - 再用 Component 实例属性中与「已声明 prop」同名的值覆盖
+ * - instanceAttrs 值可以是字符串，也可以是已解析的数组/对象（数据池绑定）
  */
 export function buildDollarProps(
   config: ComponentConfig | null | undefined,
-  instanceAttrs?: Record<string, string>,
+  instanceAttrs?: Record<string, unknown>,
 ): Record<string, unknown> {
   const defs = config?.props ?? []
   const result = defaultsFromDefs(defs)
@@ -150,9 +168,8 @@ export function buildDollarProps(
   for (const [key, raw] of Object.entries(instanceAttrs)) {
     const def = byName.get(key)
     if (!def) continue
-    // 留空 = 使用默认值（与属性面板「留空则用默认」一致）
-    // 注意：不能把空串收成 false，否则会盖掉默认 true
-    if (raw == null || String(raw).trim() === '') continue
+    if (raw == null) continue
+    if (typeof raw === 'string' && raw.trim() === '') continue
     result[key] = coercePropValue(def.type, raw)
   }
   return result

@@ -23,6 +23,7 @@ const SUPPORTED_TAGS = new Set([
   'Swiper',
   'Modal',
   'Component',
+  'Slot',
   FRAGMENT_TAG,
 ])
 

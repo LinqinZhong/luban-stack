@@ -2,6 +2,11 @@ import type { XmlNode } from './xml'
 import { FRAGMENT_TAG, isFragmentTag, parsePageXml } from './xml'
 import { countNodeEventBindings } from '../types/page-method'
 import { STATUS_BAR_NODE_ID } from './status-bar'
+import type { ComponentRenderMap } from '../types/component-render'
+import {
+  collectSlotNamesFromXml,
+  makeSlotOutletNodeId,
+} from './slot-outlet'
 
 export interface TreeNodeData {
   id: string
@@ -22,6 +27,10 @@ function statusBarTreeNode(): TreeNodeData {
 }
 
 function nodeLabel(node: XmlNode): string {
+  if (node.tag === 'Slot') {
+    const slotName = node.attrs.name?.trim() || 'default'
+    return `插槽(${slotName})`
+  }
   const name = node.attrs.name?.trim()
   if (name) {
     return name.length > 20 ? `${name.slice(0, 20)}…` : name
@@ -73,7 +82,63 @@ function nodeLabel(node: XmlNode): string {
   return node.tag
 }
 
-function toTreeNode(node: XmlNode, path: string): TreeNodeData {
+function resolveComponentSlotNames(
+  node: XmlNode,
+  componentMap?: ComponentRenderMap,
+): string[] {
+  const componentId = node.attrs.componentId?.trim()
+  const fromDef =
+    componentId && componentMap?.[componentId]?.xml
+      ? collectSlotNamesFromXml(componentMap[componentId].xml)
+      : []
+  const fromChildren: string[] = []
+  const seen = new Set(fromDef)
+  for (const child of node.children) {
+    const name = child.attrs.slot?.trim() || 'default'
+    if (seen.has(name)) continue
+    seen.add(name)
+    fromChildren.push(name)
+  }
+  if (fromDef.length) return [...fromDef, ...fromChildren]
+  if (fromChildren.length) return fromChildren
+  return []
+}
+
+function toTreeNode(
+  node: XmlNode,
+  path: string,
+  componentMap?: ComponentRenderMap,
+): TreeNodeData {
+  if (node.tag === 'Component') {
+    const slotNames = resolveComponentSlotNames(node, componentMap)
+    const bySlot = new Map<string, Array<{ child: XmlNode; index: number }>>()
+    node.children.forEach((child, index) => {
+      const name = child.attrs.slot?.trim() || 'default'
+      const list = bySlot.get(name) ?? []
+      list.push({ child, index })
+      bySlot.set(name, list)
+    })
+    const slotNodes: TreeNodeData[] = slotNames.map((slotName) => {
+      const fills = bySlot.get(slotName) ?? []
+      return {
+        id: makeSlotOutletNodeId(path, slotName),
+        label: `插槽(${slotName})`,
+        tag: 'Slot',
+        children: fills.map(({ child, index }) =>
+          toTreeNode(child, `${path}/${index}:${child.tag}`, componentMap),
+        ),
+      }
+    })
+    return {
+      id: path,
+      label: nodeLabel(node),
+      tag: node.tag,
+      hasRepeat: Boolean(node.attrs.repeat?.trim()),
+      eventBindingCount: countNodeEventBindings(node.attrs),
+      children: slotNodes,
+    }
+  }
+
   return {
     id: path,
     label: nodeLabel(node),
@@ -81,14 +146,17 @@ function toTreeNode(node: XmlNode, path: string): TreeNodeData {
     hasRepeat: Boolean(node.attrs.repeat?.trim()),
     eventBindingCount: countNodeEventBindings(node.attrs),
     children: node.children.map((child, index) =>
-      toTreeNode(child, `${path}/${index}:${child.tag}`),
+      toTreeNode(child, `${path}/${index}:${child.tag}`, componentMap),
     ),
   }
 }
 
 export function buildWidgetTree(
   xml: string,
-  options?: { includeStatusBar?: boolean },
+  options?: {
+    includeStatusBar?: boolean
+    componentMap?: ComponentRenderMap
+  },
 ): {
   tree: TreeNodeData[]
   error: string
@@ -100,17 +168,22 @@ export function buildWidgetTree(
   try {
     const root = parsePageXml(xml)
     const includeStatusBar = Boolean(options?.includeStatusBar)
+    const componentMap = options?.componentMap
     // Fragment 多根：树中平铺顶层子节点
     if (isFragmentTag(root.tag)) {
       const children = root.children.map((child, index) =>
-        toTreeNode(child, `0:${FRAGMENT_TAG}/${index}:${child.tag}`),
+        toTreeNode(
+          child,
+          `0:${FRAGMENT_TAG}/${index}:${child.tag}`,
+          componentMap,
+        ),
       )
       return {
         tree: includeStatusBar ? [statusBarTreeNode(), ...children] : children,
         error: '',
       }
     }
-    const pageTree = [toTreeNode(root, `0:${root.tag}`)]
+    const pageTree = [toTreeNode(root, `0:${root.tag}`, componentMap)]
     return {
       tree: includeStatusBar ? [statusBarTreeNode(), ...pageTree] : pageTree,
       error: '',

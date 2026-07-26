@@ -1376,6 +1376,63 @@ function renderChildren(
     .join('\n')
 }
 
+function parseSlotParams(
+  raw: string | undefined,
+): Array<{ name: string; type: string; typeRef?: string }> {
+  if (!raw?.trim()) return []
+  try {
+    const parsed = JSON.parse(raw) as unknown
+    if (!Array.isArray(parsed)) return []
+    const rows: Array<{ name: string; type: string; typeRef?: string }> = []
+    for (const item of parsed) {
+      if (!item || typeof item !== 'object') continue
+      const row = item as Record<string, unknown>
+      const name = typeof row.name === 'string' ? row.name.trim() : ''
+      if (!name) continue
+      const type = typeof row.type === 'string' ? row.type : 'any'
+      const typeRef =
+        typeof row.typeRef === 'string' && row.typeRef.trim()
+          ? row.typeRef.trim()
+          : undefined
+      rows.push(typeRef ? { name, type, typeRef } : { name, type })
+    }
+    return rows
+  } catch {
+    return []
+  }
+}
+
+function findSlotNode(root: XmlNode | undefined, slotName: string): XmlNode | null {
+  if (!root) return null
+  if (root.tag === 'Slot') {
+    const name = root.attrs.name?.trim() || 'default'
+    if (name === slotName) return root
+  }
+  for (const child of root.children) {
+    const found = findSlotNode(child, slotName)
+    if (found) return found
+  }
+  return null
+}
+
+function stripSlotAttr(node: XmlNode): XmlNode {
+  if (!node.attrs.slot) return node
+  const { slot: _slot, ...rest } = node.attrs
+  return { ...node, attrs: rest }
+}
+
+function groupChildrenBySlot(children: XmlNode[]): Map<string, XmlNode[]> {
+  const map = new Map<string, XmlNode[]>()
+  for (const child of children) {
+    if (child.tag === '#text' && !child.text?.trim()) continue
+    const name = child.attrs.slot?.trim() || 'default'
+    const list = map.get(name) ?? []
+    list.push(stripSlotAttr(child))
+    map.set(name, list)
+  }
+  return map
+}
+
 function renderNode(
   node: XmlNode,
   ctx: CodegenContext,
@@ -1438,6 +1495,21 @@ ${pad}</template>`
     inScrollColumn ||
     (isScrollContainer && attrs.orientation !== 'horizontal')
 
+  if (tag === 'Slot') {
+    const slotName = attrs.name?.trim() || 'default'
+    const params = parseSlotParams(attrs.params)
+    const scopedBinds = params.map((p) => `:${p.name}="${p.name}"`)
+    return formatVueElement({
+      pad,
+      tag: 'slot',
+      attrs: [
+        slotName === 'default' ? '' : `name="${escapeHtmlAttr(slotName)}"`,
+        ...scopedBinds,
+      ],
+      selfClosing: true,
+    })
+  }
+
   if (tag === 'Component') {
     const componentId = attrs.componentId?.trim()
     if (!componentId) return `${pad}<!-- Component missing componentId -->`
@@ -1472,6 +1544,38 @@ ${pad}</template>`
       ? 'absolute top-0 left-0 w-0 h-0 m-0 overflow-visible pointer-events-none'
       : twWithRelative(attrs, parentTag, undefined, twOpts)
     const refName = ctx.refPathMap.get(nodePath)
+    const slotGroups = groupChildrenBySlot(node.children)
+    const slotInnerPad = depth + 1
+    const slotTemplates: string[] = []
+    for (const [slotName, kids] of slotGroups) {
+      const inner = renderChildren(
+        kids,
+        ctx,
+        compName,
+        inRepeat,
+        scopeVar,
+        slotInnerPad + 1,
+        nodePath,
+        childScrollColumn,
+        parentOrientation,
+      )
+      const hashName = slotName === 'default' ? 'default' : slotName
+      const slotDef = findSlotNode(componentRoot, slotName)
+      const slotParams = parseSlotParams(slotDef?.attrs.params)
+        .map((p) => p.name)
+        .filter(Boolean)
+      const slotBind = slotParams.length
+        ? `#${hashName}="{ ${slotParams.join(', ')} }"`
+        : `#${hashName}`
+      slotTemplates.push(
+        formatVueElement({
+          pad: '  '.repeat(slotInnerPad),
+          tag: 'template',
+          attrs: [slotBind],
+          inner,
+        }),
+      )
+    }
     return formatVueElement({
       pad,
       tag: compName,
@@ -1482,7 +1586,8 @@ ${pad}</template>`
         ...propAttrs,
         ...eventAttrs,
       ],
-      selfClosing: true,
+      selfClosing: slotTemplates.length === 0,
+      inner: slotTemplates.length ? slotTemplates.join('\n') : undefined,
     })
   }
 

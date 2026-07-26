@@ -12,6 +12,7 @@ export type WidgetTag =
   | 'Swiper'
   | 'Modal'
   | 'Component'
+  | 'Slot'
 
 export type MovePosition = 'before' | 'after' | 'inner'
 
@@ -24,6 +25,11 @@ const CONTAINER_TAGS = new Set<string>([
 
 export function isContainerTag(tag: string): boolean {
   return CONTAINER_TAGS.has(tag)
+}
+
+/** 可挂子节点：布局容器 / Fragment / Component（插槽内容） */
+export function canAcceptChildWidgets(tag: string): boolean {
+  return isContainerTag(tag) || isFragmentTag(tag) || tag === 'Component'
 }
 
 /**
@@ -50,7 +56,7 @@ function ensureFragmentRoot(doc: Document): Element {
 }
 
 function isAppendParentAllowed(tag: string): boolean {
-  return isContainerTag(tag) || isFragmentTag(tag)
+  return canAcceptChildWidgets(tag)
 }
 
 /**
@@ -149,6 +155,11 @@ export const WIDGET_OPTIONS: Array<{
     tag: 'Modal',
     label: '弹层 Modal',
     description: '全屏弹层（相对布局）；数据池引用后可用 .show() / .hide()',
+  },
+  {
+    tag: 'Slot',
+    label: '插槽 Slot',
+    description: '组件内容插槽；父页面通过 Component 子节点注入',
   },
 ]
 
@@ -359,6 +370,11 @@ function createWidgetElement(doc: Document, tag: WidgetTag): Element {
     el.setAttribute('componentId', '')
     el.setAttribute('width', 'match_parent')
     el.setAttribute('height', 'wrap_content')
+  } else if (tag === 'Slot') {
+    el.setAttribute('name', 'default')
+    el.setAttribute('params', '[]')
+    el.setAttribute('width', 'match_parent')
+    el.setAttribute('height', 'wrap_content')
   }
 
   return el
@@ -379,7 +395,7 @@ export function appendWidget(
   xml: string,
   selectedId: string,
   tag: WidgetTag,
-  options?: { allowRootSiblings?: boolean },
+  options?: { allowRootSiblings?: boolean; slot?: string },
 ): { xml: string; newNodeId: string } {
   const parser = new DOMParser()
   const doc = parser.parseFromString(xml, 'application/xml')
@@ -428,13 +444,20 @@ export function appendWidget(
   }
 
   if (!isAppendParentAllowed(parentEl.tagName)) {
-    throw new Error('只能向 LinearLayout / RelativeLayout / Swiper / Modal 添加子控件')
+    throw new Error(
+      '只能向 LinearLayout / RelativeLayout / Swiper / Modal / Component 添加子控件',
+    )
   }
 
   const widget = createWidgetElement(doc, tag)
   // Modal 为相对布局：新建子节点默认居中，避免弹层内容落在角落
   if (parentEl.tagName === 'Modal') {
     widget.setAttribute('layout_centerInParent', 'true')
+  }
+  // Component 子节点为插槽内容
+  if (parentEl.tagName === 'Component') {
+    const slotName = options?.slot?.trim() || 'default'
+    widget.setAttribute('slot', slotName)
   }
   parentEl.appendChild(widget)
   const index = parentEl.children.length - 1
@@ -456,10 +479,12 @@ export function appendComponent(
     width?: string
     height?: string
     allowRootSiblings?: boolean
+    slot?: string
   },
 ): { xml: string; newNodeId: string } {
   const result = appendWidget(xml, selectedId, 'Component', {
     allowRootSiblings: options.allowRootSiblings,
+    slot: options.slot,
   })
   const patched = setNodeAttributes(result.xml, result.newNodeId, {
     componentId: options.componentId,
@@ -557,7 +582,7 @@ export function canMoveWidget(
   if (sourceId === targetId) return '不能拖到自身'
   if (isAncestorId(sourceId, targetId)) return '不能拖到自身的子节点内'
   if (position === 'inner') {
-    if (!isContainerTag(targetTag)) {
+    if (!isContainerTag(targetTag) && targetTag !== 'Component') {
       return `${targetTag} 不支持子节点`
     }
   } else if (!targetId.includes('/')) {
@@ -575,6 +600,7 @@ export function moveWidget(
   sourceId: string,
   targetId: string,
   position: MovePosition,
+  options?: { slot?: string },
 ): { xml: string; newNodeId: string } {
   const parser = new DOMParser()
   const doc = parser.parseFromString(xml, 'application/xml')
@@ -609,6 +635,14 @@ export function moveWidget(
 
   if (position === 'inner') {
     targetEl.appendChild(sourceEl)
+    if (targetEl.tagName === 'Component') {
+      const slotName = options?.slot?.trim()
+      if (slotName) {
+        sourceEl.setAttribute('slot', slotName)
+      } else if (!sourceEl.hasAttribute('slot')) {
+        sourceEl.setAttribute('slot', 'default')
+      }
+    }
   } else if (position === 'before') {
     targetEl.parentElement?.insertBefore(sourceEl, targetEl)
   } else {

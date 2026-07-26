@@ -37,6 +37,7 @@ const draft = reactive<ComponentConfig>({
   props: [],
   events: [],
   exposedMethods: [],
+  debugProps: {},
 })
 
 const widthMode = reactive({ mode: 'match_parent', value: 200 })
@@ -62,6 +63,7 @@ watch(
       params: item.params.map((p) => ({ ...p })),
     }))
     draft.exposedMethods = [...config.exposedMethods]
+    draft.debugProps = { ...(config.debugProps ?? {}) }
     Object.assign(widthMode, parseSize(config.width, 200))
     Object.assign(heightMode, parseSize(config.height, 80))
   },
@@ -121,6 +123,7 @@ function commit() {
       })),
     })),
     exposedMethods: [...draft.exposedMethods],
+    debugProps: { ...(draft.debugProps ?? props.config.debugProps ?? {}) },
   })
 }
 

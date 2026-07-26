@@ -33,6 +33,11 @@ export interface ComponentConfig {
   props: ComponentPropDef[]
   events: ComponentEventDef[]
   exposedMethods: string[]
+  /**
+   * 组件预览调试用的 $props 覆盖值（按 prop 名持久化，写入 config.json）
+   * 与后端方法 debugParams 同理
+   */
+  debugProps?: Record<string, unknown>
 }
 
 export interface ComponentSummary {
@@ -69,5 +74,20 @@ export function createDefaultComponentConfig(name: string): ComponentConfig {
     props: [],
     events: [],
     exposedMethods: [],
+    debugProps: {},
   }
+}
+
+/** 规范化调试 Props（仅保留合法键名） */
+export function normalizeComponentDebugProps(
+  input: unknown,
+): Record<string, unknown> {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return {}
+  const out: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(input as Record<string, unknown>)) {
+    const name = key.trim()
+    if (!name) continue
+    out[name] = value
+  }
+  return out
 }

@@ -42,6 +42,16 @@ export interface ArraySubField {
 /** 数据源绑定：控制器 = 绑定后端 API；计算 = 方法体 return 值 */
 export type DataSourceBinding = '' | 'controller' | 'computed'
 
+/** 控制器绑定：API 入参来源 */
+export type ControllerInputSource = 'literal' | 'binding'
+
+/** 控制器绑定：单个 API 入参配置 */
+export interface ControllerInputParamConfig {
+  source: ControllerInputSource
+  literal?: unknown
+  binding?: string
+}
+
 /** 控制器绑定配置（数据池字段） */
 export interface ControllerBindingConfig {
   serviceId: string
@@ -53,6 +63,8 @@ export interface ControllerBindingConfig {
   onLoading: string
   onSuccess: string
   onError: string
+  /** key = API input.varName */
+  inputs?: Record<string, ControllerInputParamConfig>
 }
 
 export interface DataField {
@@ -110,12 +122,40 @@ function defaultControllerParseBody(type: DataField['type']): string {
   return `// data 为接口 Result.data\n// return 的值写入本数据池字段\nreturn data ?? ${sample}\n`
 }
 
+function normalizeControllerInputParam(
+  raw: unknown,
+): ControllerInputParamConfig | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
+  const item = raw as Record<string, unknown>
+  const source: ControllerInputSource =
+    item.source === 'binding' ? 'binding' : 'literal'
+  const out: ControllerInputParamConfig = { source }
+  if ('literal' in item) out.literal = item.literal
+  if (typeof item.binding === 'string') out.binding = item.binding.trim()
+  return out
+}
+
+function normalizeControllerInputs(
+  raw: unknown,
+): Record<string, ControllerInputParamConfig> | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined
+  const out: Record<string, ControllerInputParamConfig> = {}
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    const varName = key.trim()
+    if (!varName) continue
+    const param = normalizeControllerInputParam(value)
+    if (param) out[varName] = param
+  }
+  return Object.keys(out).length ? out : undefined
+}
+
 export function normalizeControllerBinding(
   input: unknown,
   fieldType: DataField['type'] = 'string',
 ): ControllerBindingConfig | undefined {
   if (!input || typeof input !== 'object' || Array.isArray(input)) return undefined
   const raw = input as Record<string, unknown>
+  const inputs = normalizeControllerInputs(raw.inputs)
   return {
     serviceId: typeof raw.serviceId === 'string' ? raw.serviceId.trim() : '',
     controllerId:
@@ -128,5 +168,6 @@ export function normalizeControllerBinding(
     onLoading: typeof raw.onLoading === 'string' ? raw.onLoading : '',
     onSuccess: typeof raw.onSuccess === 'string' ? raw.onSuccess : '',
     onError: typeof raw.onError === 'string' ? raw.onError : '',
+    ...(inputs ? { inputs } : {}),
   }
 }

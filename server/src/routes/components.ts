@@ -2,8 +2,10 @@ import { Router } from 'express'
 import { ProjectError } from '../services/project.js'
 import {
   createComponent,
+  deleteComponent,
   getComponent,
   listComponents,
+  renameComponent,
   saveComponentConfig,
   saveComponentData,
   saveComponentXml,
@@ -105,6 +107,32 @@ router.delete('/:componentId/functions/:name', async (req, res) => {
 router.get('/:componentId', async (req, res) => {
   try {
     const component = await getComponent(getProjectPath(req), req.params.componentId)
+    res.json(component)
+  } catch (err) {
+    handleError(res, err)
+  }
+})
+
+router.delete('/:componentId', async (req, res) => {
+  try {
+    const result = await deleteComponent({
+      projectPath: getProjectPath(req),
+      componentId: req.params.componentId,
+    })
+    res.json(result)
+  } catch (err) {
+    handleError(res, err)
+  }
+})
+
+router.post('/:componentId/rename', async (req, res) => {
+  try {
+    const component = await renameComponent({
+      projectPath: getProjectPath(req),
+      componentId: req.params.componentId,
+      newId: req.body?.newId,
+      name: req.body?.name,
+    })
     res.json(component)
   } catch (err) {
     handleError(res, err)

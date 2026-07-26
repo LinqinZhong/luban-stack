@@ -166,9 +166,19 @@
         "controllerId": "cmrqed0jzshj7",
         "apiId": "api_mrqedc08_9iml1r",
         "parseBody": "// data 为接口返回值\n// return 的值写入本数据池字段\nreturn data\n",
-        "onLoading": "[{\"id\":\"bind_1784479733218_e054v\",\"method\":\"showToast\",\"args\":{\"message\":\"开始加载\",\"duration\":\"short\"}}]",
-        "onSuccess": "[{\"id\":\"bind_1784479742898_f9ptz\",\"method\":\"showToast\",\"args\":{\"message\":\"加载成功\",\"duration\":\"short\"}}]",
-        "onError": ""
+        "onLoading": "",
+        "onSuccess": "",
+        "onError": "",
+        "inputs": {
+          "page": {
+            "source": "binding",
+            "binding": "pagination"
+          },
+          "keyword": {
+            "source": "literal",
+            "literal": ""
+          }
+        }
       },
       "typeRef": "type_common_QueryPageVo",
       "genericArgs": {
@@ -176,24 +186,28 @@
       }
     },
     {
-      "name": "goodsList1",
-      "type": "array",
-      "remark": "商品列表-左",
-      "value": [],
-      "binding": "computed",
-      "computeBody": "\nif(!goodsPageData?.records) return []\nreturn goodsPageData.records.filter((a, i) => (i&1) === 1)",
-      "itemType": "json",
-      "itemTypeRef": "type_mrnx6ke8_4d7vry"
-    },
-    {
-      "name": "goodsList2",
-      "type": "array",
-      "remark": "商品列表-右",
-      "value": [],
-      "binding": "computed",
-      "computeBody": "if(!goodsPageData?.records) return []\nreturn goodsPageData.records.filter((a, i) => (i&1) === 0)",
-      "itemType": "json",
-      "itemTypeRef": "type_mrnx6ke8_4d7vry"
+      "name": "pagination",
+      "type": "json",
+      "remark": "",
+      "value": {
+        "current": 1,
+        "pageSize": 10
+      },
+      "binding": "",
+      "computeBody": "",
+      "typeRef": "type_common_QueryPageDto",
+      "objectFields": [
+        {
+          "name": "current",
+          "type": "number",
+          "value": 1
+        },
+        {
+          "name": "pageSize",
+          "type": "number",
+          "value": 10
+        }
+      ]
     }
   ]
 }

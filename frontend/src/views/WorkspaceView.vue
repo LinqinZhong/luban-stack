@@ -32,11 +32,13 @@ import {
 import { createModalStack } from '../composables/useModalStack'
 import {
   createComponent,
+  deleteComponent,
   deleteComponentMethod,
   getComponent,
   getComponentLifecycle,
   listComponentMethods,
   listComponents,
+  renameComponent,
   saveComponentConfig,
   saveComponentData,
   saveComponentLifecycle,
@@ -84,6 +86,7 @@ import WidgetTree from '../components/xml/WidgetTree.vue'
 import { useProjectStore } from '../stores/project'
 import {
   buildEmitAmbientDeclarations,
+  buildTypeLibraryAmbientDeclarations,
   builtinsForRoot,
   createEmptyMethod,
   CUSTOM_EVENT_METHOD,
@@ -125,6 +128,10 @@ import {
   type MovePosition,
   type WidgetTag,
 } from '../utils/xml-node'
+import {
+  isSlotOutletNodeId,
+  parseSlotOutletNodeId,
+} from '../utils/slot-outlet'
 import type { ComponentConfig, ComponentSummary } from '../types/component'
 import type { ComponentRenderMap } from '../types/component-render'
 import type { PageData } from '../types/page-data'
@@ -287,12 +294,39 @@ const createRules = {
 
 const createFormRef = ref()
 
+const renameComponentVisible = ref(false)
+const renamingComponent = ref(false)
+const renameComponentTarget = ref<ComponentSummary | null>(null)
+const renameComponentForm = reactive({
+  id: '',
+  name: '',
+})
+const renameComponentFormRef = ref()
+const renameComponentRules = {
+  id: [
+    { required: true, message: '请输入组件 ID', trigger: 'blur' },
+    {
+      pattern: /^[a-zA-Z0-9_-]+$/,
+      message: '仅支持字母、数字、下划线和短横线',
+      trigger: 'blur',
+    },
+  ],
+  name: [{ required: true, message: '请输入组件名称', trigger: 'blur' }],
+}
+
 const canvasWidth = computed(
   () => projectStore.config?.canvas.width ?? 375,
 )
 
 const isPageResource = computed(() => resourceKind.value === 'page')
 const isComponentResource = computed(() => resourceKind.value === 'component')
+
+/** 页面不可添加 Slot；仅组件资源可选 */
+const addWidgetOptions = computed(() =>
+  isComponentResource.value
+    ? WIDGET_OPTIONS
+    : WIDGET_OPTIONS.filter((item) => item.tag !== 'Slot'),
+)
 const activeDoc = computed(() =>
   isPageResource.value ? activePage.value : activeComponent.value,
 )
@@ -313,6 +347,13 @@ function cloneComponentRenderMap(map: ComponentRenderMap): ComponentRenderMap {
   return next
 }
 
+function restoreComponentDebugProps(): Record<string, unknown> {
+  if (!isComponentResource.value || !activeComponent.value) return {}
+  const saved = activeComponent.value.config.debugProps
+  if (!saved || typeof saved !== 'object' || Array.isArray(saved)) return {}
+  return { ...saved }
+}
+
 function resetPreviewRuntime() {
   if (!activeDoc.value) {
     previewRuntimeData.value = null
@@ -323,14 +364,19 @@ function resetPreviewRuntime() {
   }
   previewRuntimeData.value = clonePageData(activeDoc.value.data ?? { fields: [] })
   previewComponentMap.value = cloneComponentRenderMap(componentMap.value)
-  previewPropOverrides.value = {}
+  // 组件调试 Props 从 config.debugProps 恢复
+  previewPropOverrides.value = isComponentResource.value
+    ? restoreComponentDebugProps()
+    : {}
   previewEmitLogs.value = []
 }
 
 function clearPreviewRuntime() {
   previewRuntimeData.value = null
   previewComponentMap.value = null
-  previewPropOverrides.value = {}
+  previewPropOverrides.value = isComponentResource.value
+    ? restoreComponentDebugProps()
+    : {}
   previewEmitLogs.value = []
 }
 
@@ -407,12 +453,58 @@ function createPreviewDebugEmit() {
   )
 }
 
+let debugPropsSaveTimer: ReturnType<typeof setTimeout> | null = null
+
 function handlePreviewPropUpdate(name: string, value: unknown) {
   previewPropOverrides.value = {
     ...previewPropOverrides.value,
     [name]: value,
   }
+  if (isComponentResource.value && activeComponent.value) {
+    activeComponent.value = {
+      ...activeComponent.value,
+      config: {
+        ...activeComponent.value.config,
+        debugProps: { ...previewPropOverrides.value },
+      },
+    }
+    if (debugPropsSaveTimer) clearTimeout(debugPropsSaveTimer)
+    debugPropsSaveTimer = setTimeout(() => {
+      void persistComponentDebugProps()
+    }, 400)
+  }
   void runLifecycleUpdateSequence()
+}
+
+async function persistComponentDebugProps() {
+  if (!projectStore.path || !activeComponent.value || !isComponentResource.value) {
+    return
+  }
+  try {
+    const saved = await saveComponentConfig({
+      projectPath: projectStore.path,
+      componentId: activeComponent.value.id,
+      config: {
+        ...activeComponent.value.config,
+        debugProps: { ...previewPropOverrides.value },
+      },
+    })
+    // 保留内存中的其它未保存字段，合并服务端规范化后的 config
+    if (activeComponent.value?.id === saved.id) {
+      activeComponent.value = {
+        ...activeComponent.value,
+        config: {
+          ...saved.config,
+          debugProps: {
+            ...(saved.config.debugProps ?? {}),
+            ...previewPropOverrides.value,
+          },
+        },
+      }
+    }
+  } catch (err) {
+    console.error('[voider] 保存组件调试 Props 失败:', err)
+  }
 }
 
 async function handlePreviewNavigateBack() {
@@ -507,8 +599,10 @@ const methodAmbientExtra = computed(() => {
   ].join('\n')
   const propsAmbient = buildDollarPropsAmbientDeclaration(
     isComponentResource.value ? activeComponent.value?.config.props : null,
+    dataTypeLibrary.value,
   )
-  const base = `${deviceAmbient}\n${propsAmbient}\n`
+  const typeAmbient = buildTypeLibraryAmbientDeclarations(dataTypeLibrary.value)
+  const base = [deviceAmbient, typeAmbient, propsAmbient].filter(Boolean).join('\n') + '\n'
   if (!isComponentResource.value || !activeComponent.value) {
     return base
   }
@@ -585,11 +679,12 @@ const canDeleteSelected = computed(
   () =>
     isEditMode.value &&
     Boolean(activeDoc.value) &&
+    !isSlotOutletNodeId(selectedNodeId.value) &&
     canDeleteNode(selectedNodeId.value),
 )
 
 const showAddComponentButton = computed(
-  () => isEditMode.value && isPageResource.value && Boolean(activePage.value),
+  () => isEditMode.value && Boolean(activeDoc.value),
 )
 
 const iconOptions = computed(() =>
@@ -1361,6 +1456,92 @@ async function handlePageMenuCommand(command: PageMenuCommand, page: PageSummary
   }
 }
 
+type ComponentMenuCommand = 'rename' | 'delete'
+
+function openRenameComponentDialog(component: ComponentSummary) {
+  renameComponentTarget.value = component
+  renameComponentForm.id = component.id
+  renameComponentForm.name = component.name
+  renameComponentVisible.value = true
+}
+
+async function handleRenameComponentConfirm() {
+  const form = renameComponentFormRef.value
+  const target = renameComponentTarget.value
+  if (!form || !target || !projectStore.path) return
+
+  await form.validate(async (valid: boolean) => {
+    if (!valid) return
+    renamingComponent.value = true
+    try {
+      const renamed = await renameComponent({
+        projectPath: projectStore.path!,
+        componentId: target.id,
+        newId: renameComponentForm.id.trim(),
+        name: renameComponentForm.name.trim(),
+      })
+      const refsHint =
+        renamed.refsUpdated > 0
+          ? `，已更新 ${renamed.refsUpdated} 处引用`
+          : ''
+      ElMessage.success(`已重命名${refsHint}`)
+      renameComponentVisible.value = false
+      if (activeComponentId.value === target.id) {
+        activeComponentId.value = renamed.id
+      }
+      await loadPages(renamed.id)
+    } catch (err) {
+      ElMessage.error(err instanceof Error ? err.message : '重命名失败')
+    } finally {
+      renamingComponent.value = false
+    }
+  })
+}
+
+async function handleComponentMenuCommand(
+  command: ComponentMenuCommand,
+  component: ComponentSummary,
+) {
+  if (!projectStore.path) return
+
+  try {
+    if (command === 'rename') {
+      openRenameComponentDialog(component)
+      return
+    }
+
+    if (command === 'delete') {
+      await ElMessageBox.confirm(
+        `确定删除组件「${component.name}」（${component.id}）吗？此操作不可恢复。`,
+        '删除组件',
+        {
+          type: 'warning',
+          confirmButtonText: '删除',
+          cancelButtonText: '取消',
+          confirmButtonClass: 'el-button--danger',
+        },
+      )
+      await deleteComponent({
+        projectPath: projectStore.path,
+        componentId: component.id,
+      })
+      ElMessage.success('已删除')
+      const nextSelect =
+        activeComponentId.value === component.id
+          ? components.value.find((item) => item.id !== component.id)?.id
+          : activeComponentId.value
+      if (activeComponentId.value === component.id) {
+        activeComponentId.value = ''
+        activeComponent.value = null
+      }
+      await loadPages(nextSelect || undefined)
+    }
+  } catch (err) {
+    if (err === 'cancel' || err === 'close') return
+    ElMessage.error(err instanceof Error ? err.message : '操作失败')
+  }
+}
+
 async function handleCreatePage() {
   const form = createFormRef.value
   if (!form || !projectStore.path) return
@@ -1702,7 +1883,9 @@ function commitPreviewRuntime(
 ) {
   previewRuntimeData.value = data
   previewComponentMap.value = map
-  previewPropOverrides.value = {}
+  previewPropOverrides.value = isComponentResource.value
+    ? restoreComponentDebugProps()
+    : {}
   previewEmitLogs.value = []
 }
 
@@ -1713,7 +1896,9 @@ async function fireControllerBindingEvents(
   for (const field of data.fields) {
     if (field.binding !== 'controller') continue
     const raw = field.controllerBinding?.onSuccess?.trim()
-    if (raw) await runPreviewBindings(raw)
+    if (raw) {
+      await runPreviewBindings(raw, { eventArgs: { res: field.value } })
+    }
   }
 }
 
@@ -1728,7 +1913,8 @@ async function hydratePreviewControllerBindings() {
     const next = await loadControllerBoundPageData(runtime, {
       projectPath: path,
       dryRun: true,
-      runEvents: (raw) => runPreviewBindings(raw),
+      runEvents: (raw, eventArgs) =>
+        runPreviewBindings(raw, { eventArgs }),
     })
     if (seq !== previewControllerHydrateSeq) return
     if (workspaceMode.value !== 'preview') return
@@ -1797,6 +1983,19 @@ watch(workspaceMode, async (mode, prev) => {
     await syncLifecycleSession()
   }
 })
+
+watch(
+  () =>
+    [
+      isComponentResource.value,
+      activeComponentId.value,
+      activeComponent.value?.config.debugProps,
+    ] as const,
+  () => {
+    if (!isComponentResource.value || !activeComponentId.value) return
+    previewPropOverrides.value = restoreComponentDebugProps()
+  },
+)
 
 async function handlePreviewInteract(payload: PreviewInteractPayload) {
   if (workspaceMode.value !== 'preview' || !activeDoc.value) return
@@ -1925,13 +2124,23 @@ async function handleDataUpdate(data: import('../types/page-data').PageData) {
 
 async function handleComponentConfigUpdate(config: ComponentConfig) {
   if (!projectStore.path || !activeComponent.value) return
-  activeComponent.value = { ...activeComponent.value, config }
+  // 元信息面板保存时保留当前调试 Props，避免被覆盖清空
+  const nextConfig: ComponentConfig = {
+    ...config,
+    debugProps: {
+      ...(activeComponent.value.config.debugProps ?? {}),
+      ...(config.debugProps ?? {}),
+      ...previewPropOverrides.value,
+    },
+  }
+  activeComponent.value = { ...activeComponent.value, config: nextConfig }
   try {
     activeComponent.value = await saveComponentConfig({
       projectPath: projectStore.path,
       componentId: activeComponent.value.id,
-      config,
+      config: nextConfig,
     })
+    previewPropOverrides.value = restoreComponentDebugProps()
     await refreshComponentMap()
   } catch (err) {
     ElMessage.error(err instanceof Error ? err.message : '保存组件配置失败')
@@ -2230,12 +2439,27 @@ function openAddWidgetDialog() {
 }
 
 function openAddComponentDialog() {
-  if (!activePage.value) return
+  if (!activeDoc.value) return
   addComponentVisible.value = true
 }
 
+/** 组件内嵌组件时，排除自身，避免直接循环引用 */
+const addableComponents = computed(() => {
+  if (!isComponentResource.value || !activeComponentId.value) {
+    return components.value
+  }
+  return components.value.filter((item) => item.id !== activeComponentId.value)
+})
+
 async function handleAddComponentInstance(component: ComponentSummary) {
-  if (!activePage.value || !projectStore.path) return
+  if (!activeDoc.value || !projectStore.path) return
+  if (
+    isComponentResource.value &&
+    component.id === activeComponentId.value
+  ) {
+    ElMessage.warning('不能将组件添加到自身')
+    return
+  }
   try {
     let width = 'match_parent'
     let height = 'wrap_content'
@@ -2248,14 +2472,18 @@ async function handleAddComponentInstance(component: ComponentSummary) {
     } catch {
       // defaults
     }
+    const outlet = parseSlotOutletNodeId(selectedNodeId.value)
+    const appendTarget = outlet?.hostId ?? selectedNodeId.value
     const { xml, newNodeId } = appendComponent(
-      activePage.value.xml,
-      selectedNodeId.value,
+      activeDoc.value.xml,
+      appendTarget,
       {
         componentId: component.id,
         name,
         width,
         height,
+        allowRootSiblings: isComponentResource.value && !outlet,
+        slot: outlet?.slotName,
       },
     )
     selectedNodeId.value = newNodeId
@@ -2279,11 +2507,16 @@ async function handleAddWidget(tag: WidgetTag) {
   if (!activeDoc.value) return
 
   try {
+    const outlet = parseSlotOutletNodeId(selectedNodeId.value)
+    const appendTarget = outlet?.hostId ?? selectedNodeId.value
     const { xml, newNodeId } = appendWidget(
       activeDoc.value.xml,
-      selectedNodeId.value,
+      appendTarget,
       tag,
-      { allowRootSiblings: resourceKind.value === 'component' },
+      {
+        allowRootSiblings: resourceKind.value === 'component' && !outlet,
+        slot: outlet?.slotName,
+      },
     )
     addWidgetVisible.value = false
     selectedNodeId.value = newNodeId
@@ -2295,7 +2528,13 @@ async function handleAddWidget(tag: WidgetTag) {
 }
 
 async function handleDeleteWidget() {
-  if (!activeDoc.value || !canDeleteNode(selectedNodeId.value)) return
+  if (
+    !activeDoc.value ||
+    isSlotOutletNodeId(selectedNodeId.value) ||
+    !canDeleteNode(selectedNodeId.value)
+  ) {
+    return
+  }
 
   const node = selectedNodeId.value
   try {
@@ -2326,6 +2565,7 @@ async function handleMoveWidget(payload: {
   sourceId: string
   targetId: string
   position: MovePosition
+  slot?: string
 }) {
   if (!activeDoc.value || !isEditMode.value) return
 
@@ -2335,6 +2575,7 @@ async function handleMoveWidget(payload: {
       payload.sourceId,
       payload.targetId,
       payload.position,
+      payload.slot ? { slot: payload.slot } : undefined,
     )
     selectedNodeId.value = newNodeId
     await handleXmlUpdate(xml)
@@ -2499,20 +2740,38 @@ watch(
               :image-size="64"
             />
             <div v-else class="page-list">
-              <button
+              <el-dropdown
                 v-for="item in components"
                 :key="item.id"
-                type="button"
-                class="page-item"
-                :class="{ active: item.id === activeComponentId }"
-                @click="openComponent(item.id)"
+                trigger="contextmenu"
+                class="page-dropdown"
+                @command="
+                  (cmd) =>
+                    handleComponentMenuCommand(cmd as ComponentMenuCommand, item)
+                "
               >
-                <el-icon><Box /></el-icon>
-                <div class="page-meta">
-                  <div class="page-name">{{ item.name }}</div>
-                  <div class="page-id">{{ item.id }}</div>
-                </div>
-              </button>
+                <button
+                  type="button"
+                  class="page-item"
+                  :class="{ active: item.id === activeComponentId }"
+                  @click="openComponent(item.id)"
+                  @contextmenu.prevent
+                >
+                  <el-icon><Box /></el-icon>
+                  <div class="page-meta">
+                    <div class="page-name">{{ item.name }}</div>
+                    <div class="page-id">{{ item.id }}</div>
+                  </div>
+                </button>
+                <template #dropdown>
+                  <el-dropdown-menu>
+                    <el-dropdown-item command="rename">重命名</el-dropdown-item>
+                    <el-dropdown-item command="delete" divided>
+                      删除
+                    </el-dropdown-item>
+                  </el-dropdown-menu>
+                </template>
+              </el-dropdown>
             </div>
           </template>
         </div>
@@ -2525,6 +2784,7 @@ watch(
         :editable="isEditMode"
         :hidden-ids="editorHiddenNodeIds"
         :include-status-bar="isPageResource"
+        :component-map="componentMap"
         @select="selectedNodeId = $event"
         @open-repeat="handleOpenRepeatConfig"
         @move="handleMoveWidget"
@@ -2843,6 +3103,7 @@ watch(
       :methods="editorMethods"
       :prop-values="previewDebugDollarProps"
       :emit-logs="previewEmitLogs"
+      :type-library="dataTypeLibrary"
       @back="handlePreviewNavigateBack"
       @go-entry="handlePreviewGoEntry"
       @refresh="handlePreviewRefresh"
@@ -2924,6 +3185,46 @@ watch(
     </el-dialog>
 
     <el-dialog
+      v-model="renameComponentVisible"
+      title="重命名组件"
+      width="480px"
+      destroy-on-close
+    >
+      <el-form
+        ref="renameComponentFormRef"
+        :model="renameComponentForm"
+        :rules="renameComponentRules"
+        label-width="88px"
+      >
+        <el-form-item label="组件 ID" prop="id">
+          <el-input
+            v-model="renameComponentForm.id"
+            placeholder="例如：GoodsList"
+          />
+        </el-form-item>
+        <el-form-item label="组件名称" prop="name">
+          <el-input
+            v-model="renameComponentForm.name"
+            placeholder="例如：商品列表"
+          />
+        </el-form-item>
+      </el-form>
+      <p class="add-hint">
+        修改 ID 会重命名组件目录，并自动更新页面中的 componentId 引用。
+      </p>
+      <template #footer>
+        <el-button @click="renameComponentVisible = false">取消</el-button>
+        <el-button
+          type="primary"
+          :loading="renamingComponent"
+          @click="handleRenameComponentConfirm"
+        >
+          确定
+        </el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog
       v-model="addComponentVisible"
       title="添加组件"
       width="480px"
@@ -2931,13 +3232,17 @@ watch(
     >
       <p class="add-hint">从组件列表选择，插入为 Component 节点。</p>
       <el-empty
-        v-if="!components.length"
-        description="暂无组件，请先在「组件」中新建"
+        v-if="!addableComponents.length"
+        :description="
+          isComponentResource
+            ? '暂无其它组件可嵌套'
+            : '暂无组件，请先在「组件」中新建'
+        "
         :image-size="64"
       />
       <div v-else class="widget-options">
         <button
-          v-for="item in components"
+          v-for="item in addableComponents"
           :key="item.id"
           type="button"
           class="widget-option"
@@ -2956,11 +3261,11 @@ watch(
       destroy-on-close
     >
       <p class="add-hint">
-        将添加到当前选中的布局容器；若选中的是 Text/Button/Input，则添加到其父布局。
+        将添加到当前选中的布局容器；若选中的是 Text/Button/Input，则添加到其父布局。选中 Component 时可添加插槽内容子节点。
       </p>
       <div class="widget-options">
         <button
-          v-for="item in WIDGET_OPTIONS"
+          v-for="item in addWidgetOptions"
           :key="item.tag"
           type="button"
           class="widget-option"

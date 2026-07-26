@@ -45,13 +45,16 @@ import {
 import IconValueSelect from './IconValueSelect.vue'
 import type { ComponentRenderMap } from '../../types/component-render'
 import type { ComponentPropDef } from '../../types/component'
-import { DATA_FIELD_TYPE_OPTIONS } from '../../types/page-data'
+import { DATA_FIELD_TYPE_OPTIONS, COMPOSABLE_FIELD_TYPE_OPTIONS, type DataFieldType } from '../../types/page-data'
 import {
   isStatusBarNodeId,
   normalizeStatusBarConfig,
   statusBarCoverIsOn,
   type StatusBarConfig,
 } from '../../utils/status-bar'
+import {
+  parseSlotOutletNodeId,
+} from '../../utils/slot-outlet'
 
 export type PropsTab = 'style' | 'event' | 'dynamic'
 
@@ -87,6 +90,8 @@ const emit = defineEmits<{
 }>()
 
 const isStatusBarSelected = computed(() => isStatusBarNodeId(props.selectedId))
+const slotOutletInfo = computed(() => parseSlotOutletNodeId(props.selectedId))
+const isSlotOutletSelected = computed(() => Boolean(slotOutletInfo.value))
 
 const statusBarForm = reactive({
   textStyle: 'black',
@@ -139,7 +144,9 @@ const statusBarCoverIsBinding = computed(() =>
 )
 
 const selectedNode = computed(() =>
-  props.selectedId && !isStatusBarSelected.value
+  props.selectedId &&
+  !isStatusBarSelected.value &&
+  !isSlotOutletSelected.value
     ? findNodeFromXml(props.xml, props.selectedId)
     : null,
 )
@@ -158,6 +165,87 @@ const isRelativeChild = computed(
 )
 
 const isComponentNode = computed(() => selectedNode.value?.tag === 'Component')
+
+const isSlotNode = computed(() => selectedNode.value?.tag === 'Slot')
+
+/** 挂在 Component 下的插槽内容节点 */
+const isSlotContentNode = computed(
+  () => parentTag.value === 'Component' && !isComponentNode.value,
+)
+
+interface SlotParamRow {
+  name: string
+  type: DataFieldType
+  typeRef?: string
+}
+
+function parseSlotParams(raw: string | undefined): SlotParamRow[] {
+  if (!raw?.trim()) return []
+  try {
+    const parsed = JSON.parse(raw) as unknown
+    if (!Array.isArray(parsed)) return []
+    return parsed
+      .map((item) => {
+        if (!item || typeof item !== 'object') return null
+        const row = item as Record<string, unknown>
+        const name = typeof row.name === 'string' ? row.name.trim() : ''
+        if (!name) return null
+        const type = (
+          typeof row.type === 'string' ? row.type : 'string'
+        ) as DataFieldType
+        const typeRef =
+          typeof row.typeRef === 'string' && row.typeRef.trim()
+            ? row.typeRef.trim()
+            : undefined
+        return { name, type, typeRef } satisfies SlotParamRow
+      })
+      .filter((item): item is SlotParamRow => Boolean(item))
+  } catch {
+    return []
+  }
+}
+
+function serializeSlotParams(rows: SlotParamRow[]): string {
+  return JSON.stringify(
+    rows
+      .map((row) => ({
+        name: row.name.trim(),
+        type: row.type,
+        ...(row.typeRef?.trim() ? { typeRef: row.typeRef.trim() } : {}),
+      }))
+      .filter((row) => row.name),
+  )
+}
+
+const slotParamRows = ref<SlotParamRow[]>([])
+
+function syncSlotParamRows() {
+  if (!isSlotNode.value || !selectedNode.value) {
+    slotParamRows.value = []
+    return
+  }
+  slotParamRows.value = parseSlotParams(selectedNode.value.attrs.params)
+}
+
+function commitSlotParams() {
+  commitAttr('params', serializeSlotParams(slotParamRows.value))
+}
+
+function addSlotParam() {
+  slotParamRows.value.push({ name: '', type: 'string' })
+  commitSlotParams()
+}
+
+function removeSlotParam(index: number) {
+  slotParamRows.value.splice(index, 1)
+  commitSlotParams()
+}
+
+function commitSlotName(value: string) {
+  const name = value.trim() || 'default'
+  layoutForm.name = name
+  commitAttr('name', name)
+}
 
 const selectedComponentDetail = computed(() => {
   if (!isComponentNode.value || !selectedNode.value) return null
@@ -383,6 +471,7 @@ watch(
   () => {
     syncEventForm()
     syncLayoutForm()
+    syncSlotParamRows()
     void nextTick(() => stripModalLayoutAttrsIfNeeded())
   },
   { immediate: true },
@@ -391,7 +480,10 @@ watch(
 watch(
   () => props.xml,
   () => {
-    if (props.tab === 'style') syncLayoutForm()
+    if (props.tab === 'style') {
+      syncLayoutForm()
+      syncSlotParamRows()
+    }
     if (props.tab === 'event') syncEventForm()
   },
 )
@@ -897,7 +989,22 @@ function saveVisibilityConfig(config: VisibilityConditionConfig) {
 
     <div class="panel-body">
       <template v-if="tab === 'style'">
-        <div v-if="isStatusBarSelected" class="layout-form">
+        <div v-if="isSlotOutletSelected" class="layout-form">
+          <div class="node-brief">
+            <div class="node-tag">Slot</div>
+            <div class="node-id">{{ selectedId }}</div>
+          </div>
+          <div class="section-title">插槽</div>
+          <el-form label-position="top" size="small">
+            <el-form-item label="插槽名称">
+              <el-input :model-value="slotOutletInfo?.slotName || 'default'" disabled />
+            </el-form-item>
+          </el-form>
+          <p class="hint">
+            在此选中插槽后添加控件，内容会注入到该插槽。也可从控件树将节点拖入插槽。
+          </p>
+        </div>
+        <div v-else-if="isStatusBarSelected" class="layout-form">
           <div class="node-brief">
             <div class="node-tag">StatusBar</div>
             <div class="node-id">系统状态栏</div>
@@ -984,7 +1091,15 @@ function saveVisibilityConfig(config: VisibilityConditionConfig) {
 
           <div class="section-title">基本</div>
           <el-form label-position="top" size="small">
-            <el-form-item label="name">
+            <el-form-item v-if="isSlotNode" label="插槽名称">
+              <el-input
+                v-model="layoutForm.name"
+                clearable
+                placeholder="默认 default"
+                @change="commitSlotName"
+              />
+            </el-form-item>
+            <el-form-item v-else label="name">
               <el-input
                 v-model="layoutForm.name"
                 clearable
@@ -992,7 +1107,66 @@ function saveVisibilityConfig(config: VisibilityConditionConfig) {
                 @change="commitAttr('name', layoutForm.name)"
               />
             </el-form-item>
+            <el-form-item v-if="isSlotContentNode" label="注入插槽 slot">
+              <el-input
+                :model-value="selectedNode.attrs.slot || 'default'"
+                clearable
+                placeholder="默认 default"
+                @change="(v: string) => commitAttr('slot', (v ?? '').trim() || 'default')"
+              />
+              <p class="hint">对应组件内 Slot 的 name</p>
+            </el-form-item>
           </el-form>
+
+          <template v-if="isSlotNode">
+            <div class="section-title">传参（作用域）</div>
+            <el-form label-position="top" size="small">
+              <div class="slot-param-list">
+                <div
+                  v-for="(row, index) in slotParamRows"
+                  :key="index"
+                  class="slot-param-row"
+                >
+                  <el-input
+                    v-model="row.name"
+                    placeholder="参数名"
+                    @change="commitSlotParams"
+                  />
+                  <el-select
+                    v-model="row.type"
+                    style="width: 120px"
+                    @change="commitSlotParams"
+                  >
+                    <el-option
+                      v-for="opt in COMPOSABLE_FIELD_TYPE_OPTIONS"
+                      :key="opt.value"
+                      :label="opt.label"
+                      :value="opt.value"
+                    />
+                  </el-select>
+                  <el-button
+                    type="danger"
+                    link
+                    :icon="Delete"
+                    @click="removeSlotParam(index)"
+                  />
+                </div>
+                <el-button type="primary" link :icon="Plus" @click="addSlotParam">
+                  添加传参
+                </el-button>
+                <p v-if="!slotParamRows.length" class="hint">
+                  声明作用域参数（如 item）。导出为
+                  <code>&lt;slot :item="item" /&gt;</code>
+                  ，父侧
+                  <code>#default="{ item }"</code>。
+                  画布上插槽内容使用宿主组件的数据池与 $props。
+                </p>
+                <p v-else class="hint">
+                  导出时父侧会解构这些参数；画布插槽内容走宿主 $props / 数据池。
+                </p>
+              </div>
+            </el-form>
+          </template>
 
           <template v-if="showSizeProps">
             <div class="section-title">尺寸</div>
@@ -1542,6 +1716,11 @@ function saveVisibilityConfig(config: VisibilityConditionConfig) {
           :image-size="64"
         />
         <el-empty
+          v-else-if="isSlotOutletSelected"
+          description="插槽本身不支持事件绑定，请选中插槽内的控件"
+          :image-size="64"
+        />
+        <el-empty
           v-else-if="!selectedNode"
           description="请在控件树中选择节点"
           :image-size="64"
@@ -1600,6 +1779,11 @@ function saveVisibilityConfig(config: VisibilityConditionConfig) {
         <el-empty
           v-if="isStatusBarSelected"
           description="状态栏不支持动态样式"
+          :image-size="64"
+        />
+        <el-empty
+          v-else-if="isSlotOutletSelected"
+          description="插槽本身不支持动态样式，请选中插槽内的控件"
           :image-size="64"
         />
         <el-empty
@@ -2065,6 +2249,23 @@ function saveVisibilityConfig(config: VisibilityConditionConfig) {
   flex-direction: column;
   gap: 8px;
   width: 100%;
+}
+
+.slot-param-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.slot-param-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.slot-param-row .el-input {
+  flex: 1;
+  min-width: 0;
 }
 
 .quad-grid {

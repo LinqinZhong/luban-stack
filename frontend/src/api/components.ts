@@ -52,6 +52,35 @@ export function saveComponentConfig(payload: {
   )
 }
 
+export function deleteComponent(payload: {
+  projectPath: string
+  componentId: string
+}) {
+  return request<{ ok: boolean }>(
+    `/api/components/${encodeURIComponent(payload.componentId)}?projectPath=${encodeURIComponent(payload.projectPath)}`,
+    { method: 'DELETE' },
+  )
+}
+
+export function renameComponent(payload: {
+  projectPath: string
+  componentId: string
+  newId: string
+  name?: string
+}) {
+  return request<ComponentDetail & { refsUpdated: number }>(
+    `/api/components/${encodeURIComponent(payload.componentId)}/rename`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        projectPath: payload.projectPath,
+        newId: payload.newId,
+        name: payload.name,
+      }),
+    },
+  )
+}
+
 export function saveComponentXml(payload: {
   projectPath: string
   componentId: string

@@ -53,7 +53,7 @@ const ambientExtra = computed(() =>
   [
     buildTypeLibraryAmbientDeclarations(props.typeLibrary),
     buildGetDeviceInfoAmbientDeclaration(),
-    buildDollarPropsAmbientDeclaration(props.componentProps),
+    buildDollarPropsAmbientDeclaration(props.componentProps, props.typeLibrary),
   ]
     .filter(Boolean)
     .join('\n'),

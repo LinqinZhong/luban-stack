@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, inject, onBeforeUnmount, provide, ref, shallowRef, watch, type CSSProperties, type ComputedRef } from 'vue'
+import { computed, inject, onBeforeUnmount, provide, ref, shallowRef, watch, type CSSProperties } from 'vue'
 import type { IconLibrary } from '../../types/icon-library'
 import { findIcon, iconSymbolId } from '../../types/icon-library'
 import type { PageData } from '../../types/page-data'
@@ -20,12 +20,13 @@ import {
   overflowStyle,
   paddingStyle,
 } from '../../utils/xml'
-import { resolveMatchingStyleOverrides, evaluateScenarios, interpolateDataBindings } from '../../utils/dynamic-style-runtime'
+import { resolveMatchingStyleOverrides, evaluateScenarios, interpolateDataBindings, resolveAttrBindingValue } from '../../utils/dynamic-style-runtime'
 import {
   buildDollarProps,
   interpolateDollarProps,
 } from '../../utils/component-props'
 import { resolveComputedPageData, buildComputeDepsKey } from '../../utils/compute-runtime'
+import { expandRepeatTree } from '../../utils/repeat'
 import { CANVAS_RUNTIME_KEY } from '../../composables/useCanvasRuntime'
 import {
   DYNAMIC_STYLES_ATTR,
@@ -38,10 +39,22 @@ import { MODAL_HOST_KEY, MODAL_STACK_KEY } from '../../composables/useModalStack
 import WidgetSelectShell from './WidgetSelectShell.vue'
 import OverlayScrollPort from './OverlayScrollPort.vue'
 import SwiperPort from './SwiperPort.vue'
-import XmlNodeView from './XmlNodeView.vue'
+import { makeSlotOutletNodeId } from '../../utils/slot-outlet'
 
 /** 纵向滚动列标记：子孙节点 match_parent 高度勿再 flex 抢视口 */
 const SCROLL_COLUMN_KEY = 'voiderVerticalScrollColumn'
+
+/** Component → Slot：父侧子节点按 slot 名注入（经 props 下传，避免 inject 失效） */
+type SlotContentEntry = { node: XmlNode; nodeId: string }
+/** 勿命名 slotScope：模板里 slot-scope 易与 Vue 历史插槽语法混淆 */
+export type VoiderSlotScope = {
+  map: Record<string, SlotContentEntry[]>
+  selectable: boolean
+  hostId: string
+  /** 宿主（填写插槽的一侧）数据池 / $props，不是组件定义内部的 */
+  hostPageData?: PageData
+  hostDollarProps?: Record<string, unknown>
+}
 
 const SKIP_DOLLAR_PROPS_ATTRS = new Set<string>([
   DYNAMIC_STYLES_ATTR,
@@ -80,6 +93,10 @@ const props = defineProps<{
    * 编辑态为 false（含 Component 内部 selectable=false 的节点），避免抢走选中。
    */
   interactEnabled?: boolean
+  /** 预览态展开 repeat（页面根与组件定义树都需要） */
+  expandRepeat?: boolean
+  /** 祖先 Component 注入的插槽内容（显式下传；勿用 slotScope 名） */
+  voiderSlotScope?: VoiderSlotScope | null
 }>()
 
 const emit = defineEmits<{
@@ -92,6 +109,54 @@ const emit = defineEmits<{
 const modalStack = inject(MODAL_STACK_KEY, null)
 const modalHostRef = inject(MODAL_HOST_KEY, null)
 const canvasRuntime = inject(CANVAS_RUNTIME_KEY, null)
+
+function buildSlotContentMap(
+  host: XmlNode,
+  hostId: string,
+): Record<string, SlotContentEntry[]> {
+  const map: Record<string, SlotContentEntry[]> = {}
+  host.children.forEach((child, index) => {
+    const name = child.attrs.slot?.trim() || 'default'
+    ;(map[name] ??= []).push({
+      node: child,
+      nodeId: `${hostId}/${index}:${child.tag}`,
+    })
+  })
+  return map
+}
+
+/**
+ * 当前作用域：若本节点是 Component，用自身子节点覆盖；
+ * 否则透传祖先 voiderSlotScope（供定义内 Slot 读取）。
+ */
+const effectiveSlotScope = computed<VoiderSlotScope | null>(() => {
+  if (props.node.tag === 'Component') {
+    return {
+      map: buildSlotContentMap(props.node, props.nodeId),
+      selectable: Boolean(props.selectable),
+      hostId: props.nodeId,
+      // 插槽内容属于宿主 XML，必须用宿主上下文（而非定义内 Pager 的空 $props）
+      hostPageData: props.pageData,
+      hostDollarProps: props.dollarProps,
+    }
+  }
+  return props.voiderSlotScope ?? null
+})
+
+/** 继续下传给子树的 scope（Component 内部定义树用自身 scope） */
+const childVoiderSlotScope = computed(() => effectiveSlotScope.value)
+
+const slotOutletNodeId = computed(() => {
+  if (props.node.tag !== 'Slot') return null
+  const scope = effectiveSlotScope.value
+  if (!scope) return null
+  const name = props.node.attrs.name?.trim() || 'default'
+  return makeSlotOutletNodeId(scope.hostId, name)
+})
+
+const slotOutletSelectable = computed(
+  () => Boolean(slotOutletNodeId.value && effectiveSlotScope.value?.selectable),
+)
 
 const isEditorHidden = computed(() =>
   (props.hiddenNodeIds ?? []).includes(props.nodeId),
@@ -188,7 +253,8 @@ const attrs = computed(() => {
     }
     // 编辑态也解析 {数据池字段}，方便画布直接看到绑定效果
     let resolved = interpolateDataBindings(value, props.pageData, runtimeScope.value)
-    if (!props.selectable && props.dollarProps) {
+    // 有 $props 时始终插值（含编辑态）；组装 instanceDollarProps 时走 attrs 原始值，不会进这里自引用
+    if (props.dollarProps) {
       resolved = interpolateDollarProps(resolved, props.dollarProps)
     }
     next[key] = resolved
@@ -197,8 +263,30 @@ const attrs = computed(() => {
 })
 const width = computed(() => parseSize(attrs.value.width, 'wrap_content'))
 const height = computed(() => parseSize(attrs.value.height, 'wrap_content'))
-const isSelected = computed(() => props.selectable && props.selectedId === props.nodeId)
-const isHovered = computed(() => props.selectable && props.hoveredId === props.nodeId)
+const isSelected = computed(() => {
+  if (!props.selectedId) return false
+  // 虚拟插槽出口（Component/#slot:name）
+  if (
+    props.node.tag === 'Slot' &&
+    slotOutletNodeId.value &&
+    props.selectedId === slotOutletNodeId.value
+  ) {
+    return true
+  }
+  // 按真实 nodeId 回显（含 Component 插槽注入的内容），不依赖 selectable
+  return props.selectedId === props.nodeId
+})
+const isHovered = computed(() => {
+  if (!props.hoveredId) return false
+  if (
+    props.node.tag === 'Slot' &&
+    slotOutletNodeId.value &&
+    props.hoveredId === slotOutletNodeId.value
+  ) {
+    return true
+  }
+  return props.hoveredId === props.nodeId
+})
 
 /** 纵向父布局中 height=match_parent：占满剩余高度（滚动列内除外） */
 const fillRemainingHeight = computed(
@@ -266,9 +354,9 @@ const shellExtraStyle = computed(() => props.extraStyle)
 
 const textContent = computed(() => {
   const raw = attrs.value.text || props.node.text || ''
-  if (props.selectable || !props.dollarProps) return raw
-  // attrs.text 已插值；裸 text 节点兜底
+  // attrs.text 已含数据池 + $props 插值；裸 text 再兜底一次
   if (attrs.value.text) return attrs.value.text
+  if (!props.dollarProps) return raw
   return interpolateDollarProps(raw, props.dollarProps)
 })
 
@@ -288,13 +376,28 @@ const textStyle = computed(() => ({
 const instanceDollarProps = computed(() => {
   const config = componentDetail.value?.config
   const source = props.node.attrs
-  // 编辑/预览都把 {titleBarColor} 等解析进 $props，画布才能看到绑定结果
-  const resolved: Record<string, string> = {}
+  const scope = {
+    ...(props.node.scope ?? {}),
+    $route: props.routeParams,
+  }
+  const resolved: Record<string, unknown> = {}
+  const propDefs = config?.props ?? []
+  const propNames = new Set(
+    propDefs.map((p) => p.name.trim()).filter(Boolean),
+  )
   for (const [key, value] of Object.entries(source)) {
-    resolved[key] = interpolateDataBindings(value, props.pageData, {
-      ...(props.node.scope ?? {}),
-      $route: props.routeParams,
-    })
+    if (!propNames.has(key)) {
+      // 非声明 prop：仍做字符串插值，供布局类同名属性使用
+      resolved[key] = interpolateDataBindings(value, props.pageData, scope)
+      continue
+    }
+    const def = propDefs.find((p) => p.name.trim() === key)
+    if (def && (def.type === 'array' || def.type === 'json')) {
+      const native = resolveAttrBindingValue(value, props.pageData, scope)
+      if (native !== undefined) resolved[key] = native
+      continue
+    }
+    resolved[key] = interpolateDataBindings(value, props.pageData, scope)
   }
   return buildDollarProps(config, resolved)
 })
@@ -337,7 +440,12 @@ const componentRoot = computed(() => {
   const detail = componentDetail.value
   if (!detail?.xml?.trim()) return null
   try {
-    return parsePageXml(detail.xml)
+    const root = parsePageXml(detail.xml)
+    // 页面内嵌组件时，定义树里的 repeat 也要按组件数据池展开
+    if (props.expandRepeat) {
+      return expandRepeatTree(root, componentPageData.value ?? detail.data)
+    }
+    return root
   } catch {
     return null
   }
@@ -397,6 +505,16 @@ const componentStyle = computed(() => {
   }
   const stackHeight =
     insideScrollColumn.value || stackInVerticalParent.value
+  const fillHostHeight =
+    !stackHeight && componentHostHeight.value === 'match_parent'
+  // 自身或子孙（含插槽注入内容）被选中时，避免 overflow 裁掉选中框
+  const keepSelectionVisible =
+    props.selectable ||
+    Boolean(
+      props.selectedId &&
+        (props.selectedId === props.nodeId ||
+          props.selectedId.startsWith(`${props.nodeId}/`)),
+    )
   return {
     ...layoutStyle.value,
     display: 'flex',
@@ -404,14 +522,14 @@ const componentStyle = computed(() => {
     alignItems: 'stretch',
     justifyContent: 'flex-start',
     width: '100%',
-    height: stackHeight ? 'auto' : '100%',
-    maxHeight: stackHeight ? 'none' : undefined,
+    height: fillHostHeight ? '100%' : 'auto',
+    maxHeight: stackHeight || !fillHostHeight ? 'none' : undefined,
     minHeight:
       componentHostHeight.value === 'wrap_content' && !componentRoot.value
         ? '48px'
         : undefined,
     boxSizing: 'border-box' as const,
-    overflow: stackHeight ? 'visible' : 'hidden',
+    overflow: keepSelectionVisible || stackHeight || !fillHostHeight ? 'visible' : 'hidden',
   }
 })
 
@@ -941,6 +1059,132 @@ function childId(index: number, tag: string) {
   return `${props.nodeId}/${index}:${tag}`
 }
 
+const slotFillEntries = computed(() => {
+  if (props.node.tag !== 'Slot') return [] as SlotContentEntry[]
+  const name = props.node.attrs.name?.trim() || 'default'
+  return effectiveSlotScope.value?.map[name] ?? []
+})
+
+const slotHasFill = computed(() => slotFillEntries.value.length > 0)
+
+/** 插槽注入内容：父侧在编辑 Component 实例时即可选中 */
+const slotFillSelectable = computed(() =>
+  Boolean(effectiveSlotScope.value?.selectable),
+)
+
+/** 插槽内容使用宿主数据池 / $props（定义在填写插槽的组件上） */
+const slotFillPageData = computed(
+  () => effectiveSlotScope.value?.hostPageData ?? props.pageData,
+)
+const slotFillDollarProps = computed(
+  () => effectiveSlotScope.value?.hostDollarProps ?? props.dollarProps,
+)
+
+/** Slot 声明的作用域参数名（如 item）→ 写入填充节点 scope，供 {item.xxx} 解析 */
+function parseSlotParamNames(raw: string | undefined): string[] {
+  if (!raw?.trim()) return []
+  try {
+    const parsed = JSON.parse(raw) as unknown
+    if (!Array.isArray(parsed)) return []
+    const names: string[] = []
+    for (const row of parsed) {
+      if (!row || typeof row !== 'object') continue
+      const name = typeof (row as { name?: unknown }).name === 'string'
+        ? (row as { name: string }).name.trim()
+        : ''
+      if (name && /^[A-Za-z_$][\w$]*$/.test(name)) names.push(name)
+    }
+    return names
+  } catch {
+    return []
+  }
+}
+
+/**
+ * 把 Slot 作用域参数挂到填充节点上。
+ * 值优先取宿主 $props / 数据池同名字段；已有 repeat 展开的 scope.item 不覆盖。
+ */
+const slotFillNodes = computed(() => {
+  const entries = slotFillEntries.value
+  if (!entries.length) return [] as SlotContentEntry[]
+  const paramNames = parseSlotParamNames(props.node.attrs.params)
+  if (!paramNames.length) return entries
+
+  const hostProps = slotFillDollarProps.value ?? {}
+  const hostData = slotFillPageData.value
+  const scopeExtra: Record<string, unknown> = {}
+  for (const name of paramNames) {
+    if (Object.prototype.hasOwnProperty.call(hostProps, name)) {
+      scopeExtra[name] = hostProps[name]
+      continue
+    }
+    const field = hostData?.fields.find((f) => f.name.trim() === name)
+    if (field) {
+      scopeExtra[name] = field.value
+      continue
+    }
+    scopeExtra[name] = {}
+  }
+
+  return entries.map((entry) => {
+    const prev = entry.node.scope
+    if (prev?.item !== undefined && prev.item !== null) {
+      return entry
+    }
+    return {
+      nodeId: entry.nodeId,
+      node: {
+        ...entry.node,
+        scope: {
+          item: scopeExtra.item ?? {},
+          index: prev?.index ?? 0,
+        },
+      },
+    }
+  })
+})
+
+/**
+ * Slot 作为布局宿主：给注入内容提供确定宽高的 flex 容器。
+ * 否则子节点 height=match_parent（flex:1 + height:0）会在非 flex 父级里塌成 0，
+ * 再叠加 overflow:hidden 就会整块「看不见」。
+ */
+const slotFillStyle = computed<CSSProperties>(() => {
+  const fillHeight = height.value === 'match_parent'
+  return {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'stretch',
+    boxSizing: 'border-box',
+    width: '100%',
+    minWidth: 0,
+    minHeight: 0,
+    flex: fillHeight ? '1 1 0%' : '0 0 auto',
+    height: fillHeight ? '100%' : 'auto',
+    alignSelf: 'stretch',
+    overflow: 'visible',
+    position: 'relative',
+    zIndex: 1,
+  }
+})
+
+const slotPlaceholderStyle = computed<CSSProperties>(() => ({
+  boxSizing: 'border-box',
+  width: '100%',
+  height: height.value === 'match_parent' ? '100%' : 'auto',
+  minHeight: '48px',
+  flex: height.value === 'match_parent' ? '1 1 0%' : undefined,
+  border: '1px dashed #94a3b8',
+  borderRadius: '6px',
+  background: 'rgba(148, 163, 184, 0.08)',
+  color: '#64748b',
+  fontSize: '12px',
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  padding: '8px',
+}))
+
 function emitInteract(
   eventKey: PreviewEventKey,
   eventArgs?: Record<string, unknown>,
@@ -970,6 +1214,11 @@ function handleScroll(detail: {
 }
 
 function handleSelect(event: MouseEvent) {
+  if (slotOutletSelectable.value && slotOutletNodeId.value) {
+    event.stopPropagation()
+    emit('select', slotOutletNodeId.value)
+    return
+  }
   if (props.selectable) {
     event.stopPropagation()
     emit('select', props.nodeId)
@@ -1011,6 +1260,10 @@ function handleModalPanelClick(event: MouseEvent) {
 }
 
 function handleMouseEnter() {
+  if (slotOutletSelectable.value && slotOutletNodeId.value) {
+    emit('hover', slotOutletNodeId.value)
+    return
+  }
   if (!props.selectable) return
   emit('hover', props.nodeId)
 }
@@ -1119,6 +1372,8 @@ onBeforeUnmount(() => {
       :component-map="componentMap"
       :dollar-props="dollarProps"
       :route-params="routeParams"
+      :expand-repeat="expandRepeat"
+      :voider-slot-scope="childVoiderSlotScope"
       @select="emit('select', $event)"
       @hover="emit('hover', $event)"
       @open-repeat="emit('open-repeat', $event)"
@@ -1336,6 +1591,60 @@ onBeforeUnmount(() => {
   </WidgetSelectShell>
 
   <WidgetSelectShell
+    v-else-if="node.tag === 'Slot'"
+    :selected="isSelected"
+    :hovered="isHovered"
+    :margin-attrs="attrs"
+    :width="width"
+    :height="height"
+    :parent-horizontal="parentHorizontal"
+    :parent-vertical="parentVertical"
+    :extra-style="shellExtraStyle"
+    :repeat-badge="showRepeatBadge"
+    :event-badge-count="eventBadgeCount"
+    :visually-hidden="visuallyHidden"
+    :interactive="previewInteractive || slotOutletSelectable"
+    :inside-scroll-port="insideScrollColumn"
+    :fill-remaining-height="fillRemainingHeight"
+    @click="handleSelect"
+    @mouseenter="handleMouseEnter"
+    @pointerdown="handlePointerDown"
+    @pointerup="handlePointerUp"
+    @pointerleave="handlePointerLeave"
+    @open-repeat="handleOpenRepeat"
+  >
+    <div v-if="slotHasFill" class="widget slot-fill" :style="slotFillStyle">
+      <XmlNodeView
+        v-for="entry in slotFillNodes"
+        :key="entry.nodeId"
+        :node="entry.node"
+        :node-id="entry.nodeId"
+        :selected-id="selectedId"
+        :hovered-id="hoveredId"
+        :selectable="slotFillSelectable"
+        :interact-enabled="interactEnabled && !slotFillSelectable"
+        :parent-horizontal="false"
+        :parent-vertical="true"
+        :parent-scrollable="inScrollColumn"
+        :icon-library="iconLibrary"
+        :page-data="slotFillPageData"
+        :hidden-node-ids="hiddenNodeIds"
+        :component-map="componentMap"
+        :dollar-props="slotFillDollarProps"
+        :route-params="routeParams"
+        :expand-repeat="expandRepeat"
+        @select="forwardSelect"
+        @hover="forwardHover"
+        @open-repeat="forwardOpenRepeat"
+        @interact="forwardInteract"
+      />
+    </div>
+    <div v-else class="widget slot-placeholder" :style="slotPlaceholderStyle">
+      插槽 · {{ attrs.name?.trim() || 'default' }}
+    </div>
+  </WidgetSelectShell>
+
+  <WidgetSelectShell
     v-else-if="node.tag === 'Component'"
     :selected="isSelected"
     :hovered="isHovered"
@@ -1363,14 +1672,23 @@ onBeforeUnmount(() => {
         v-if="componentRoot"
         :node="componentRoot"
         :node-id="`${nodeId}/c:0:${componentRoot.tag}`"
+        :selected-id="selectedId"
+        :hovered-id="hoveredId"
         :selectable="false"
         :interact-enabled="interactEnabled"
+        :parent-vertical="true"
         :parent-scrollable="inScrollColumn"
         :icon-library="iconLibrary"
         :page-data="componentPageData ?? pageData"
         :component-map="componentMap"
         :dollar-props="instanceDollarProps"
         :route-params="routeParams"
+        :expand-repeat="expandRepeat"
+        :voider-slot-scope="childVoiderSlotScope"
+        is-root
+        @select="forwardSelect"
+        @hover="forwardHover"
+        @open-repeat="forwardOpenRepeat"
         @interact="forwardComponentInteract"
       />
       <div v-else :style="componentPlaceholderStyle">
@@ -1436,6 +1754,8 @@ onBeforeUnmount(() => {
             :component-map="componentMap"
             :dollar-props="dollarProps"
             :route-params="routeParams"
+            :expand-repeat="expandRepeat"
+            :voider-slot-scope="childVoiderSlotScope"
             @select="forwardSelect"
             @hover="forwardHover"
             @open-repeat="forwardOpenRepeat"
@@ -1481,6 +1801,8 @@ onBeforeUnmount(() => {
             :component-map="componentMap"
             :dollar-props="dollarProps"
             :route-params="routeParams"
+            :expand-repeat="expandRepeat"
+            :voider-slot-scope="childVoiderSlotScope"
             @select="forwardSelect"
             @hover="forwardHover"
             @open-repeat="forwardOpenRepeat"
@@ -1546,6 +1868,8 @@ onBeforeUnmount(() => {
         :component-map="componentMap"
         :dollar-props="dollarProps"
         :route-params="routeParams"
+        :expand-repeat="expandRepeat"
+        :voider-slot-scope="childVoiderSlotScope"
         @select="forwardSelect"
         @hover="forwardHover"
         @open-repeat="forwardOpenRepeat"
@@ -1608,6 +1932,8 @@ onBeforeUnmount(() => {
           :component-map="componentMap"
           :dollar-props="dollarProps"
           :route-params="routeParams"
+          :expand-repeat="expandRepeat"
+          :voider-slot-scope="childVoiderSlotScope"
           @select="forwardSelect"
           @hover="forwardHover"
           @open-repeat="forwardOpenRepeat"
@@ -1646,7 +1972,20 @@ onBeforeUnmount(() => {
 }
 
 .fragment-host.is-root {
+  flex: 1 1 auto;
   min-height: 100%;
+  min-width: 0;
+}
+
+/* 仅当组件宿主被拉满时，定义树才跟着铺满；wrap_content 宿主勿强行 height:100% */
+.component-host {
+  min-width: 0;
+}
+.component-host > :deep(.fragment-host.is-root),
+.component-host > :deep(.select-shell) {
+  width: 100%;
+  min-width: 0;
+  align-self: stretch;
 }
 
 /* 仅含 Modal：不占文档流 */
@@ -1693,6 +2032,11 @@ onBeforeUnmount(() => {
   font-size: 11px;
   color: #64748b;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+/* 尺寸主要由 slotFillStyle 控制；此处仅兜底 */
+.slot-fill {
+  box-sizing: border-box;
 }
 
 .unsupported {

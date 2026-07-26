@@ -127,6 +127,38 @@ export function interpolateDataBindings(
   })
 }
 
+/**
+ * 解析属性绑定为原生值（用于 Component 的 array/json props）。
+ * - 整段为单个 `{expr}` → 返回 resolve 后的原值（数组/对象不 stringify）
+ * - 否则走字符串插值
+ * - 解析不到时返回 undefined（调用方保留默认值）
+ */
+export function resolveAttrBindingValue(
+  raw: string,
+  pageData: PageData | undefined,
+  scope?: DynamicStyleScope,
+): unknown {
+  const text = raw?.trim() ?? ''
+  if (!text) return undefined
+  const single = text.match(/^\{([^{}]+)\}$/)
+  if (single) {
+    const expr = single[1]!.trim()
+    if (
+      !expr ||
+      expr === '$props' ||
+      expr === 'props' ||
+      expr.startsWith('$props.') ||
+      expr.startsWith('props.')
+    ) {
+      return undefined
+    }
+    return resolveConditionValue(expr, pageData, scope)
+  }
+  const interpolated = interpolateDataBindings(text, pageData, scope)
+  if (interpolated === text && /\{[^{}]+\}/.test(text)) return undefined
+  return interpolated
+}
+
 function compareValues(op: StyleConditionOp, left: unknown, right: string): boolean {
   switch (op) {
     case 'empty':

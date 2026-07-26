@@ -5,7 +5,10 @@ import {
   buildDataTypeTsContext,
   dataTypeToTs,
 } from '../utils/data-type-ts'
-import type { ProcessorTypeExpr } from './backend-services'
+import {
+  createEmptyProcessorTypeExpr,
+  type ProcessorTypeExpr,
+} from './backend-services'
 
 export type MethodParamType =
   | 'string'
@@ -195,6 +198,52 @@ export function processorTypeExprToMethodParamType(
   return dataFieldToMethodParamType((expr.type || 'any') as DataFieldType)
 }
 
+/** 数据池字段 → ProcessorTypeExpr（供 TypedBinding 类型匹配） */
+export function dataFieldToProcessorTypeExpr(
+  field: Pick<
+    DataField,
+    | 'type'
+    | 'typeRef'
+    | 'genericArgs'
+    | 'itemType'
+    | 'itemTypeRef'
+    | 'itemItemType'
+    | 'itemItemTypeRef'
+  >,
+): ProcessorTypeExpr {
+  const genericArgs = { ...(field.genericArgs ?? {}) }
+  if (field.type === 'array') {
+    return {
+      ...createEmptyProcessorTypeExpr('array'),
+      itemType: field.itemType || 'any',
+      itemTypeRef: field.itemTypeRef || '',
+      itemItemType: field.itemItemType || '',
+      itemItemTypeRef: field.itemItemTypeRef || '',
+      genericArgs,
+    }
+  }
+  if (field.typeRef) {
+    return {
+      ...createEmptyProcessorTypeExpr('json'),
+      typeRef: field.typeRef,
+      genericArgs,
+    }
+  }
+  if (field.type === 'json') {
+    return createEmptyProcessorTypeExpr('json')
+  }
+  if (field.type === 'any') return createEmptyProcessorTypeExpr('any')
+  if (
+    field.type === 'number' ||
+    field.type === 'boolean' ||
+    field.type === 'string'
+  ) {
+    return createEmptyProcessorTypeExpr(field.type)
+  }
+  // icon / color / ref → string 语义
+  return createEmptyProcessorTypeExpr('string')
+}
+
 /** 数据池字段 → Monaco ambient 变量（合法标识符；ref 见 buildRefAmbientDeclarations） */
 export function dataFieldsToAmbientVars(
   fields: DataField[] | undefined,
@@ -211,6 +260,7 @@ export function dataFieldsToAmbientVars(
       name,
       type: dataFieldToMethodParamType(field.type),
       tsType: dataFieldToTsType(field, library),
+      typeExpr: dataFieldToProcessorTypeExpr(field),
     })
   }
   return result

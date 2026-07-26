@@ -441,6 +441,17 @@ onBeforeUnmount(() => {
   overflow: visible;
 }
 
+.content-box.selected {
+  outline: 2px solid #fadb14;
+  outline-offset: -2px;
+  background-color: rgba(250, 219, 20, 0.1);
+}
+
+.content-box.hovered {
+  outline: 2px solid #ff85c0;
+  outline-offset: -2px;
+}
+
 .frame-content,
 .frame-margin {
   position: absolute;

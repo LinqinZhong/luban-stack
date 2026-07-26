@@ -9,6 +9,7 @@ import type {
 } from '../types/backend-services'
 import type {
   ControllerBindingConfig,
+  ControllerInputParamConfig,
   DataField,
   DataFieldValue,
   PageData,
@@ -27,10 +28,18 @@ type ServiceBundle = {
 
 export type ControllerBindingRuntimeOptions = {
   projectPath: string
-  /** 触发字段上配置的加载事件（onLoading / onSuccess / onError 原始 JSON） */
-  runEvents?: (raw: string) => void | Promise<void>
+  /** 触发字段上配置的加载事件；eventArgs 含成功/失败的 res */
+  runEvents?: (
+    raw: string,
+    eventArgs?: Record<string, unknown>,
+  ) => void | Promise<void>
   /** 预览写操作是否 dryRun；默认 true */
   dryRun?: boolean
+  /**
+   * 用于解析 binding 入参的数据池 scope（通常为当前页 fields 的值）。
+   * 未传时从 loadControllerBoundPageData 的 fields 自动构建。
+   */
+  pageScope?: Record<string, unknown>
 }
 
 function cloneValue<T>(value: T): T {
@@ -53,6 +62,77 @@ function findApi(
 ): ServiceApi | null {
   const ctrl = controllers.find((c) => c.id === controllerId)
   return ctrl?.apis.find((a) => a.id === apiId) ?? null
+}
+
+/** 数据池字段 → 绑定求值用的 scope */
+export function seedPageScope(fields: DataField[]): Record<string, unknown> {
+  const scope: Record<string, unknown> = {}
+  for (const field of fields) {
+    const name = field.name.trim()
+    if (!name || !isValidIdent(name)) continue
+    scope[name] = cloneValue(field.value)
+  }
+  return scope
+}
+
+function evalInScope(expression: string, scope: Record<string, unknown>): unknown {
+  const expr = expression.trim()
+  if (!expr) return undefined
+  const keys = Object.keys(scope).filter(isValidIdent)
+  const values = keys.map((k) => scope[k])
+  // eslint-disable-next-line no-new-func
+  const fn = new Function(...keys, `"use strict"; return (${expr});`)
+  return fn(...values)
+}
+
+function resolveInputValue(
+  cfg: ControllerInputParamConfig | undefined,
+  varName: string,
+  api: ServiceApi,
+  pageScope: Record<string, unknown>,
+): unknown {
+  const debug = api.debugParams ?? {}
+  if (!cfg) {
+    return varName in debug ? cloneValue(debug[varName]) : undefined
+  }
+  if (cfg.source === 'binding') {
+    const path = (cfg.binding ?? '').trim()
+    if (!path) return undefined
+    try {
+      return evalInScope(path, pageScope)
+    } catch {
+      return undefined
+    }
+  }
+  if ('literal' in cfg) return cloneValue(cfg.literal)
+  return varName in debug ? cloneValue(debug[varName]) : undefined
+}
+
+/**
+ * 按 API inputs + 绑定配置组装 flow 初始 scope。
+ * 无配置回退 api.debugParams；必填缺失则抛错。
+ */
+export function assembleControllerApiScope(
+  api: ServiceApi,
+  inputs: Record<string, ControllerInputParamConfig> | undefined,
+  pageScope: Record<string, unknown>,
+): Record<string, unknown> {
+  const scope: Record<string, unknown> = {
+    ...cloneValue(api.debugParams ?? {}),
+  }
+  for (const inp of api.inputs ?? []) {
+    const name = inp.varName.trim()
+    if (!name) continue
+    const value = resolveInputValue(inputs?.[name], name, api, pageScope)
+    if (value === undefined) {
+      if (inp.required) {
+        throw new Error(`必填入参「${name}」未配置或绑定值为空`)
+      }
+      continue
+    }
+    scope[name] = value
+  }
+  return scope
 }
 
 /**
@@ -101,15 +181,12 @@ async function fetchApiData(
   api: ServiceApi,
   bundle: ServiceBundle,
   dryRun: boolean,
+  initialScope: Record<string, unknown>,
 ): Promise<unknown> {
   const flow = api.flow
   if (!flow?.nodes?.length) {
     throw new Error(`API「${api.name || api.id}」未配置流程`)
   }
-  const initialScope = cloneValue(api.debugParams ?? {}) as Record<
-    string,
-    unknown
-  >
   const snap = await runFlowToEnd(
     {
       projectPath,
@@ -129,6 +206,7 @@ async function loadOneField(
   cfg: ControllerBindingConfig,
   options: ControllerBindingRuntimeOptions,
   cache: Map<string, ServiceBundle>,
+  pageScope: Record<string, unknown>,
 ): Promise<DataFieldValue> {
   const { projectPath, runEvents, dryRun = true } = options
   const serviceId = cfg.serviceId.trim()
@@ -148,22 +226,28 @@ async function loadOneField(
     if (!api) {
       throw new Error('找不到绑定的 API（可能已被删除）')
     }
+    const initialScope = assembleControllerApiScope(
+      api,
+      cfg.inputs,
+      pageScope,
+    )
     const raw = await fetchApiData(
       projectPath,
       serviceId,
       api,
       bundle,
       dryRun,
+      initialScope,
     )
     const data = unwrapResultData(raw)
     const parsed = runParseBody(cfg.parseBody, data)
     if (cfg.onSuccess.trim() && runEvents) {
-      await runEvents(cfg.onSuccess)
+      await runEvents(cfg.onSuccess, { res: parsed })
     }
     return parsed as DataFieldValue
   } catch (err) {
     if (cfg.onError.trim() && runEvents) {
-      await runEvents(cfg.onError)
+      await runEvents(cfg.onError, { res: err })
     }
     throw err
   }
@@ -189,13 +273,20 @@ export async function loadControllerBoundPageData(
   if (!targets.length) return { fields }
 
   const cache = new Map<string, ServiceBundle>()
+  const pageScope = options.pageScope ?? seedPageScope(fields)
 
   await Promise.all(
     targets.map(async (field) => {
       const cfg = field.controllerBinding!
       const name = field.name.trim() || '?'
       try {
-        const value = await loadOneField(field, cfg, options, cache)
+        const value = await loadOneField(
+          field,
+          cfg,
+          options,
+          cache,
+          pageScope,
+        )
         field.value = value
       } catch (err) {
         console.warn(`[voider] 控制器字段「${name}」加载失败:`, err)

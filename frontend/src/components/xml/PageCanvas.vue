@@ -514,6 +514,7 @@ onBeforeUnmount(() => {
           :hovered-id="hoveredNodeId"
           :selectable="selectable"
           :interact-enabled="!selectable"
+          :expand-repeat="expandRepeat"
           :icon-library="iconLibrary"
           :page-data="pageData"
           :hidden-node-ids="hiddenNodeIds"

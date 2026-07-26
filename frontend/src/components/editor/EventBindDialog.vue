@@ -4,6 +4,7 @@ import { Delete, Plus } from '@element-plus/icons-vue'
 import {
   CUSTOM_EVENT_METHOD,
   buildEmitAmbientDeclarations,
+  buildTypeLibraryAmbientDeclarations,
   dataFieldsToAmbientVars,
   isCustomEventMethod,
   parseEventBindings,
@@ -52,6 +53,8 @@ const props = defineProps<{
   eventParams?: MethodParam[]
   /** 自定义方法体函数名展示 */
   eventKey?: string
+  /** 项目数据类型库：具名类型 ambient（事件形参 tsType） */
+  typeLibrary?: import('../../types/data-types').DataTypeLibrary | null
 }>()
 
 const emit = defineEmits<{
@@ -174,18 +177,22 @@ const customFnName = computed(() => {
 const customParams = computed<MethodParam[]>(() =>
   (props.eventParams ?? [])
     .filter((item) => item.name.trim())
-    .map((item) => ({ name: item.name.trim(), type: item.type })),
+    .map((item) => ({
+      name: item.name.trim(),
+      type: item.type,
+      ...(item.tsType?.trim() ? { tsType: item.tsType.trim() } : {}),
+    })),
 )
 
 const eventParamHints = computed(() =>
   customParams.value.map((item) => ({
     name: item.name,
-    type: item.type,
+    type: item.tsType?.trim() || item.type,
     sample: `{${item.name}}`,
   })),
 )
 
-const customAmbientVars = computed(() => dataFieldsToAmbientVars(props.dataFields))
+const customAmbientVars = computed(() => dataFieldsToAmbientVars(props.dataFields, props.typeLibrary))
 
 const customAmbientExtra = computed(() => {
   const lines = [
@@ -197,10 +204,11 @@ const customAmbientExtra = computed(() => {
     'interface DeviceInfo { statusBarHeight: number; userAgent: string; menuButton: MenuButtonBoundingClientRect | null; platform: \'h5\' | \'miniprogram\' }',
     'declare function getDeviceInfo(): DeviceInfo;',
   ]
+  const typeLib = buildTypeLibraryAmbientDeclarations(props.typeLibrary)
   const base = props.emitEvents?.length
     ? `${lines.join('\n')}\n${buildEmitAmbientDeclarations(props.emitEvents)}`
     : `${lines.join('\n')}\n`
-  return `${buildRefAmbientDeclarations(
+  return `${typeLib ? `${typeLib}\n` : ''}${buildRefAmbientDeclarations(
     props.dataFields,
     props.xml,
     props.componentMap,
