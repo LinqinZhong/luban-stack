@@ -21,6 +21,7 @@ const SUPPORTED_TAGS = new Set([
   'LinearLayout',
   'RelativeLayout',
   'Swiper',
+  'MultiWindow',
   'Modal',
   'Component',
   'Slot',

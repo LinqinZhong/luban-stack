@@ -68,6 +68,7 @@ const emit = defineEmits<{
   'add-component': []
   delete: []
   'open-repeat': [id: string]
+  'add-window': [parentId: string]
   interact: [payload: import('../../utils/event-runtime').PreviewInteractPayload]
 }>()
 
@@ -535,6 +536,7 @@ onBeforeUnmount(() => {
           @select="emit('select', $event)"
           @hover="handleHover"
           @open-repeat="emit('open-repeat', $event)"
+          @add-window="emit('add-window', $event)"
           @interact="emit('interact', $event)"
         />
         <div ref="modalHostRef" class="phone-modal-host" />

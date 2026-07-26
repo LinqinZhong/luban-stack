@@ -40,6 +40,7 @@ import { MODAL_HOST_KEY, MODAL_STACK_KEY } from '../../composables/useModalStack
 import WidgetSelectShell from './WidgetSelectShell.vue'
 import OverlayScrollPort from './OverlayScrollPort.vue'
 import SwiperPort from './SwiperPort.vue'
+import MultiWindowPort from './MultiWindowPort.vue'
 import { makeSlotOutletNodeId } from '../../utils/slot-outlet'
 
 /** 纵向滚动列标记：子孙节点 match_parent 高度勿再 flex 抢视口 */
@@ -119,6 +120,7 @@ const emit = defineEmits<{
   hover: [id: string]
   'open-repeat': [id: string]
   interact: [payload: PreviewInteractPayload]
+  'add-window': [parentId: string]
 }>()
 
 const modalStack = inject(MODAL_STACK_KEY, null)
@@ -896,6 +898,81 @@ const swiperIndicatorActiveColor = computed(
   () => attrs.value.indicatorActiveColor?.trim() || '#409eff',
 )
 
+const multiWindowOverflowStyle = computed(() => {
+  // 编辑态始终 visible，避免窗内绝对定位 / 选中框被裁切（同 RelativeLayout）
+  if (props.selectable) return { overflow: 'visible' as const }
+  const strategy = parseOverflow(attrs.value.overflow, 'visible')
+  return {
+    overflow: (strategy === 'hidden' ? 'hidden' : 'visible') as
+      | 'visible'
+      | 'hidden',
+  }
+})
+
+const multiWindowStyle = computed(() => {
+  const matchHeight = height.value === 'match_parent'
+  const matchWidth = width.value === 'match_parent'
+  const stackHeight = insideScrollColumn.value
+  return {
+    ...layoutStyle.value,
+    ...multiWindowOverflowStyle.value,
+    position: 'relative' as const,
+    background: attrs.value.background || 'transparent',
+    ...(matchWidth ? { width: '100%' } : {}),
+    ...(matchHeight
+      ? stackHeight
+        ? { height: 'auto', maxHeight: 'none', flex: '0 0 auto', alignSelf: 'stretch' }
+        : {
+            height: '100%',
+            minHeight: 0,
+            flex: '1 1 0%',
+            alignSelf: 'stretch',
+          }
+      : {}),
+    display: 'block',
+    boxSizing: 'border-box' as const,
+  }
+})
+
+const multiWindows = computed(() =>
+  props.node.children.map((child, index) => ({
+    index,
+    key: child.attrs.windowKey?.trim() || '',
+  })),
+)
+
+/** active 已在 attrs 中做数据池插值；整段 {field} 再取原生值以便数字匹配 */
+const multiWindowActiveValue = computed(() => {
+  const raw = props.node.attrs.active?.trim() || ''
+  if (!raw) return ''
+  const native = resolveAttrBindingValue(raw, props.pageData, runtimeScope.value)
+  if (native !== undefined && native !== null && typeof native !== 'object') {
+    return native as string | number
+  }
+  return attrs.value.active ?? ''
+})
+
+const multiWindowFocusIndex = computed(() => {
+  if (!props.selectable || !props.selectedId) return 0
+  const prefix = `${props.nodeId}/`
+  if (!props.selectedId.startsWith(prefix)) return 0
+  const rest = props.selectedId.slice(prefix.length)
+  const m = rest.match(/^(\d+):/)
+  if (!m) return 0
+  const idx = Number(m[1])
+  return Number.isFinite(idx) ? idx : 0
+})
+
+function handleMultiWindowAdd() {
+  emit('add-window', props.nodeId)
+}
+
+function handleMultiWindowSelect(index: number) {
+  const child = props.node.children[index]
+  if (!child) return
+  emit('select', childId(index, child.tag))
+}
+
 const relativeStyle = computed(() => {
   const matchHeight = height.value === 'match_parent'
   const matchWidth = width.value === 'match_parent'
@@ -1376,6 +1453,10 @@ function forwardOpenRepeat(id: string) {
   emit('open-repeat', id)
 }
 
+function forwardAddWindow(parentId: string) {
+  emit('add-window', parentId)
+}
+
 function forwardInteract(payload: PreviewInteractPayload) {
   emit('interact', payload)
 }
@@ -1548,6 +1629,7 @@ onBeforeUnmount(() => {
       @hover="emit('hover', $event)"
       @open-repeat="emit('open-repeat', $event)"
       @interact="emit('interact', $event)"
+      @add-window="emit('add-window', $event)"
     />
   </div>
 
@@ -1809,6 +1891,7 @@ onBeforeUnmount(() => {
         @hover="forwardHover"
         @open-repeat="forwardOpenRepeat"
         @interact="forwardInteract"
+        @add-window="forwardAddWindow"
       />
     </div>
     <div v-else class="widget slot-placeholder" :style="slotPlaceholderStyle">
@@ -1863,6 +1946,7 @@ onBeforeUnmount(() => {
         @hover="forwardHover"
         @open-repeat="forwardOpenRepeat"
         @interact="forwardComponentInteract"
+        @add-window="forwardAddWindow"
       />
       <div v-else :style="componentPlaceholderStyle">
         <div class="component-title">{{ attrs.name || attrs.componentId || 'Component' }}</div>
@@ -1934,9 +2018,76 @@ onBeforeUnmount(() => {
             @hover="forwardHover"
             @open-repeat="forwardOpenRepeat"
             @interact="forwardInteract"
+            @add-window="forwardAddWindow"
           />
         </template>
       </SwiperPort>
+    </div>
+  </WidgetSelectShell>
+
+  <WidgetSelectShell
+    v-else-if="node.tag === 'MultiWindow'"
+    :selected="isSelected"
+    :hovered="isHovered"
+    :margin-attrs="attrs"
+    :width="width"
+    :height="height"
+    :parent-horizontal="parentHorizontal"
+    :parent-vertical="parentVertical"
+    :fill-parent="isRoot"
+    :extra-style="shellExtraStyle"
+    :repeat-badge="showRepeatBadge"
+    :event-badge-count="eventBadgeCount"
+    :visually-hidden="visuallyHidden"
+    :interactive="previewInteractive"
+    :inside-scroll-port="insideScrollColumn"
+    :fill-remaining-height="fillRemainingHeight"
+    @click="handleSelect"
+    @mouseenter="handleMouseEnter"
+    @pointerdown="handlePointerDown"
+    @pointerup="handlePointerUp"
+    @pointerleave="handlePointerLeave"
+    @open-repeat="handleOpenRepeat"
+  >
+    <div class="widget multi-window" :style="multiWindowStyle">
+      <MultiWindowPort
+        :editable="selectable"
+        :overflow="parseOverflow(attrs.overflow, 'visible')"
+        :active-value="multiWindowActiveValue"
+        :focus-index="multiWindowFocusIndex"
+        :windows="multiWindows"
+        @add-window="handleMultiWindowAdd"
+        @select-window="handleMultiWindowSelect"
+      >
+        <template #default="{ index }">
+          <XmlNodeView
+            v-if="node.children[index]"
+            :node="node.children[index]"
+            :node-id="childId(index, node.children[index].tag)"
+            :selected-id="selectedId"
+            :hovered-id="hoveredId"
+            :selectable="selectable"
+            :interact-enabled="interactEnabled"
+            :preview-lifecycle-gate="previewLifecycleGate"
+            :parent-horizontal="false"
+            :parent-vertical="true"
+            :parent-scrollable="inScrollColumn"
+            :icon-library="iconLibrary"
+            :page-data="pageData"
+            :hidden-node-ids="hiddenNodeIds"
+            :component-map="componentMap"
+            :dollar-props="dollarProps"
+            :route-params="routeParams"
+            :expand-repeat="expandRepeat"
+            :voider-slot-scope="childVoiderSlotScope"
+            @select="forwardSelect"
+            @hover="forwardHover"
+            @open-repeat="forwardOpenRepeat"
+            @interact="forwardInteract"
+            @add-window="forwardAddWindow"
+          />
+        </template>
+      </MultiWindowPort>
     </div>
   </WidgetSelectShell>
 
@@ -1982,6 +2133,7 @@ onBeforeUnmount(() => {
             @hover="forwardHover"
             @open-repeat="forwardOpenRepeat"
             @interact="forwardInteract"
+            @add-window="forwardAddWindow"
           />
           <div v-if="selectable && !node.children.length" class="modal-empty">
             向弹层添加内容 · name「{{ modalKey }}」
@@ -2054,6 +2206,7 @@ onBeforeUnmount(() => {
         @hover="forwardHover"
         @open-repeat="forwardOpenRepeat"
         @interact="forwardInteract"
+        @add-window="forwardAddWindow"
       />
     </OverlayScrollPort>
   </WidgetSelectShell>
@@ -2123,6 +2276,7 @@ onBeforeUnmount(() => {
           @hover="forwardHover"
           @open-repeat="forwardOpenRepeat"
           @interact="forwardInteract"
+          @add-window="forwardAddWindow"
         />
       </div>
     </OverlayScrollPort>
@@ -2131,7 +2285,8 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.widget.swiper {
+.widget.swiper,
+.widget.multi-window {
   width: 100%;
   height: 100%;
   min-height: 0;

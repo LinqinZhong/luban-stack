@@ -76,6 +76,15 @@ function nodeLabel(node: XmlNode): string {
     const n = node.children.length
     return n ? `${node.tag} · ${n}页` : node.tag
   }
+  if (node.tag === 'MultiWindow') {
+    const n = node.children.length
+    return n ? `多窗口 · ${n}窗` : '多窗口'
+  }
+  const windowKey = node.attrs.windowKey?.trim()
+  if (windowKey) {
+    const short = windowKey.length > 16 ? `${windowKey.slice(0, 16)}…` : windowKey
+    return `${node.tag} · ${short}`
+  }
   if (node.tag === 'Modal') {
     return '弹层 Modal'
   }

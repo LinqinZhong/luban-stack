@@ -359,6 +359,8 @@ const layoutForm = reactive({
   current: '0',
   indicatorColor: '',
   indicatorActiveColor: '',
+  active: '',
+  windowKey: '',
   closeOnClick: true,
   layout_alignParentLeft: false,
   layout_alignParentRight: false,
@@ -458,6 +460,8 @@ function syncLayoutForm() {
   layoutForm.current = node.attrs.current ?? '0'
   layoutForm.indicatorColor = node.attrs.indicatorColor ?? ''
   layoutForm.indicatorActiveColor = node.attrs.indicatorActiveColor ?? ''
+  layoutForm.active = node.attrs.active ?? ''
+  layoutForm.windowKey = node.attrs.windowKey ?? ''
   layoutForm.closeOnClick =
     node.attrs.closeOnClick == null ||
     node.attrs.closeOnClick === '' ||
@@ -582,7 +586,9 @@ const showImageProps = computed(() => selectedNode.value?.tag === 'Image')
 const showIconProps = computed(() => selectedNode.value?.tag === 'Icon')
 
 const showSwiperProps = computed(() => selectedNode.value?.tag === 'Swiper')
+const showMultiWindowProps = computed(() => selectedNode.value?.tag === 'MultiWindow')
 const showModalProps = computed(() => selectedNode.value?.tag === 'Modal')
+const isMultiWindowChild = computed(() => parentTag.value === 'MultiWindow')
 
 /** Modal 始终全屏，不展示也不写入宽高 / margin */
 const showSizeProps = computed(() => selectedNode.value?.tag !== 'Modal')
@@ -706,21 +712,26 @@ const showLayoutContainerProps = computed(
     selectedNode.value?.tag === 'LinearLayout' ||
     selectedNode.value?.tag === 'RelativeLayout' ||
     selectedNode.value?.tag === 'Swiper' ||
+    selectedNode.value?.tag === 'MultiWindow' ||
     selectedNode.value?.tag === 'Modal' ||
     selectedNode.value?.tag === 'Image' ||
     selectedNode.value?.tag === 'Input',
 )
 
-/** 溢出策略：布局容器 + Swiper（Swiper 无 scroll） */
+/** 溢出策略：布局容器 + Swiper / MultiWindow（无 scroll） */
 const showOverflowProps = computed(
   () =>
     selectedNode.value?.tag === 'LinearLayout' ||
     selectedNode.value?.tag === 'RelativeLayout' ||
-    selectedNode.value?.tag === 'Swiper',
+    selectedNode.value?.tag === 'Swiper' ||
+    selectedNode.value?.tag === 'MultiWindow',
 )
 
 const overflowOptionsForNode = computed(() => {
-  if (selectedNode.value?.tag === 'Swiper') {
+  if (
+    selectedNode.value?.tag === 'Swiper' ||
+    selectedNode.value?.tag === 'MultiWindow'
+  ) {
     return OVERFLOW_OPTIONS.filter((item) => item.value !== 'scroll')
   }
   return OVERFLOW_OPTIONS
@@ -746,6 +757,24 @@ const stringFieldOptions = computed(() =>
     }),
 )
 
+/** MultiWindow 激活项：string / number 顶层字段 */
+const activeFieldOptions = computed(() =>
+  (props.dataFields ?? [])
+    .filter(
+      (field) =>
+        (field.type === 'string' || field.type === 'number') && field.name.trim(),
+    )
+    .map((field) => {
+      const name = field.name.trim()
+      const remark = field.remark?.trim()
+      const typeLabel = field.type === 'number' ? '数字' : '字符串'
+      return {
+        value: name,
+        label: remark ? `${name} · ${remark}（${typeLabel}）` : `${name}（${typeLabel}）`,
+      }
+    }),
+)
+
 function parseInputValueBinding(raw: string | undefined): string {
   const m = (raw ?? '').trim().match(/^\{([A-Za-z_][\w]*)\}$/)
   return m?.[1] ?? ''
@@ -756,8 +785,20 @@ const modelSummary = computed(() => {
   return field || '未配置'
 })
 
+const activeSummary = computed(() => {
+  const field = parseInputValueBinding(selectedNode.value?.attrs.active)
+  if (field) return field
+  const literal = selectedNode.value?.attrs.active?.trim()
+  return literal || '未配置'
+})
+
 const modelDialogVisible = ref(false)
 const modelForm = reactive({
+  field: '',
+})
+
+const activeDialogVisible = ref(false)
+const activeForm = reactive({
   field: '',
 })
 
@@ -765,6 +806,12 @@ function openModelDialog() {
   if (!selectedNode.value || selectedNode.value.tag !== 'Input') return
   modelForm.field = parseInputValueBinding(selectedNode.value.attrs.value)
   modelDialogVisible.value = true
+}
+
+function openActiveDialog() {
+  if (!selectedNode.value || selectedNode.value.tag !== 'MultiWindow') return
+  activeForm.field = parseInputValueBinding(selectedNode.value.attrs.active)
+  activeDialogVisible.value = true
 }
 
 function saveModelConfig() {
@@ -786,6 +833,30 @@ function saveModelConfig() {
   }
 }
 
+function saveActiveConfig() {
+  if (
+    !props.selectedId ||
+    !selectedNode.value ||
+    selectedNode.value.tag !== 'MultiWindow'
+  ) {
+    return
+  }
+  const name = activeForm.field.trim()
+  try {
+    const next = setNodeAttribute(
+      props.xml,
+      props.selectedId,
+      'active',
+      name ? `{${name}}` : '',
+    )
+    emit('update:xml', next)
+    layoutForm.active = name ? `{${name}}` : ''
+    activeDialogVisible.value = false
+  } catch (err) {
+    console.error(err)
+  }
+}
+
 function clearModelConfig() {
   if (!props.selectedId || !selectedNode.value || selectedNode.value.tag !== 'Input') {
     return
@@ -794,6 +865,24 @@ function clearModelConfig() {
     const next = setNodeAttribute(props.xml, props.selectedId, 'value', '')
     emit('update:xml', next)
     modelDialogVisible.value = false
+  } catch (err) {
+    console.error(err)
+  }
+}
+
+function clearActiveConfig() {
+  if (
+    !props.selectedId ||
+    !selectedNode.value ||
+    selectedNode.value.tag !== 'MultiWindow'
+  ) {
+    return
+  }
+  try {
+    const next = setNodeAttribute(props.xml, props.selectedId, 'active', '')
+    emit('update:xml', next)
+    layoutForm.active = ''
+    activeDialogVisible.value = false
   } catch (err) {
     console.error(err)
   }
@@ -1665,6 +1754,33 @@ function saveVisibilityConfig(config: VisibilityConditionConfig) {
             </el-form>
           </template>
 
+          <template v-if="showMultiWindowProps">
+            <div class="section-title">多窗口</div>
+            <el-form label-position="top" size="small">
+              <p class="hint">
+                按数据池激活项切换显示窗口。在「动态」中绑定激活项；点击画布右侧「新建窗口」添加子窗口，并为每个窗口设置项名
+                <code>windowKey</code>。
+              </p>
+            </el-form>
+          </template>
+
+          <template v-if="isMultiWindowChild">
+            <div class="section-title">窗口项名</div>
+            <el-form label-position="top" size="small">
+              <el-form-item label="windowKey">
+                <el-input
+                  v-model="layoutForm.windowKey"
+                  clearable
+                  placeholder="与激活项匹配，如 home"
+                  @change="commitAttr('windowKey', layoutForm.windowKey.trim())"
+                />
+              </el-form-item>
+              <p class="hint">
+                当激活项等于该值时显示本窗口。支持字符串或数字（按字符串比较）。
+              </p>
+            </el-form>
+          </template>
+
           <template v-if="showModalProps">
             <div class="section-title">弹层 Modal</div>
             <el-form label-position="top" size="small">
@@ -1966,6 +2082,23 @@ function saveVisibilityConfig(config: VisibilityConditionConfig) {
             </p>
           </template>
 
+          <template v-if="showMultiWindowProps">
+            <div class="section-title">激活项</div>
+            <div class="visibility-row">
+              <span class="visibility-summary">{{ activeSummary }}</span>
+              <el-button type="primary" link @click="openActiveDialog">
+                配置
+              </el-button>
+            </div>
+            <p class="hint">
+              从数据池选择字符串或数字字段，写入
+              <code>{'{字段名}'}</code>
+              。预览时显示
+              <code>windowKey</code>
+              与激活值匹配的窗口。
+            </p>
+          </template>
+
           <div class="section-title">显示条件 · v-show</div>
           <div class="visibility-row">
             <span class="visibility-summary">{{ showIfSummary }}</span>
@@ -2086,6 +2219,45 @@ function saveVisibilityConfig(config: VisibilityConditionConfig) {
         <el-button @click="clearModelConfig">清除</el-button>
         <el-button @click="modelDialogVisible = false">取消</el-button>
         <el-button type="primary" @click="saveModelConfig">确定</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog
+      v-model="activeDialogVisible"
+      title="绑定激活项"
+      width="420px"
+      destroy-on-close
+      append-to-body
+    >
+      <el-form label-position="top" size="default">
+        <el-form-item label="数据池字段">
+          <el-select
+            v-model="activeForm.field"
+            clearable
+            filterable
+            placeholder="选择字符串或数字类型字段"
+            style="width: 100%"
+          >
+            <el-option
+              v-for="opt in activeFieldOptions"
+              :key="opt.value"
+              :label="opt.label"
+              :value="opt.value"
+            />
+          </el-select>
+        </el-form-item>
+      </el-form>
+      <p class="hint" style="margin-top: 0">
+        将写入属性
+        <code>active="{'{字段名}'}"</code>
+        。窗口的
+        <code>windowKey</code>
+        与该字段值相等时显示。
+      </p>
+      <template #footer>
+        <el-button @click="clearActiveConfig">清除</el-button>
+        <el-button @click="activeDialogVisible = false">取消</el-button>
+        <el-button type="primary" @click="saveActiveConfig">确定</el-button>
       </template>
     </el-dialog>
 

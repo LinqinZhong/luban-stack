@@ -407,11 +407,12 @@ function buildTwClasses(
 
   if (!skipHeight) {
     const h = sizeClass(attrs.height, 'h', {
-      // Swiper 滑页内仍按父级定高，勿因外层滚动列改成 h-fit
+      // Swiper / MultiWindow 窗内仍按父级定高，勿因外层滚动列改成 h-fit
       stackHeight:
         Boolean(options?.inScrollColumn) &&
         !isScrollContainer &&
-        options?.parentTag !== 'Swiper',
+        options?.parentTag !== 'Swiper' &&
+        options?.parentTag !== 'MultiWindow',
       isScrollContainer,
       flexFillHeight,
     })
@@ -1901,6 +1902,63 @@ ${pad}</template>`
       tag: 'div',
       attrs: [classAttr(shellTw), ...visibilityAttrs(attrs, ctx, inRepeat)],
       inner: swiper,
+    })
+  }
+
+  if (tag === 'MultiWindow') {
+    const activeRaw = (attrs.active || '').trim()
+    const activeExpr = activeRaw
+      ? `String(${bindingToExpr(activeRaw, ctx, inRepeat)} ?? '')`
+      : `''`
+    const overflowHidden = parseOverflowStrategy(attrs.overflow) === 'hidden'
+    const shellTw = twWithRelative(
+      attrs,
+      parentTag,
+      [
+        overflowHidden ? 'overflow-hidden' : 'overflow-visible',
+        'relative',
+        'min-h-0',
+      ],
+      twOpts,
+    )
+    const panes = node.children
+      .filter((c) => c.tag !== '#text')
+      .map((child) => {
+        const childIndex = node.children.indexOf(child)
+        const childPath = `${nodePath}/${childIndex}:${child.tag}`
+        const windowKey = (child.attrs.windowKey || '').trim()
+        const showAttr = windowKey
+          ? `v-show="${activeExpr} === '${escapeTsString(windowKey)}'"`
+          : 'v-show="false"'
+        const pane = renderNode(
+          child,
+          ctx,
+          'MultiWindow',
+          inRepeat,
+          scopeVar,
+          depth + 2,
+          childPath,
+          inScrollColumn,
+        )
+        return formatVueElement({
+          pad: `${pad}  `,
+          tag: 'div',
+          attrs: [
+            // 与 RelativeLayout 一致：窗内容可溢出，不强制裁切
+            'class="absolute inset-0 flex flex-col min-w-0 min-h-0 overflow-visible"',
+            showAttr,
+            `:key="'${childIndex}:${escapeTsString(windowKey)}'"`,
+          ],
+          inner: pane,
+        })
+      })
+      .filter(Boolean)
+      .join('\n')
+    return formatVueElement({
+      pad,
+      tag: 'div',
+      attrs: [classAttr(shellTw), ...visibilityAttrs(attrs, ctx, inRepeat)],
+      inner: panes,
     })
   }
 

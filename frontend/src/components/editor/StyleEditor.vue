@@ -68,6 +68,7 @@ const showBorder = computed(
     (props.tag === 'LinearLayout' ||
       props.tag === 'RelativeLayout' ||
       props.tag === 'Swiper' ||
+      props.tag === 'MultiWindow' ||
       props.tag === 'Modal' ||
       props.tag === 'Image' ||
       props.tag === 'Input'),
@@ -76,11 +77,12 @@ const showOverflow = computed(
   () =>
     props.tag === 'LinearLayout' ||
     props.tag === 'RelativeLayout' ||
-    props.tag === 'Swiper',
+    props.tag === 'Swiper' ||
+    props.tag === 'MultiWindow',
 )
 
 const overflowOptionsForTag = computed(() => {
-  if (props.tag === 'Swiper') {
+  if (props.tag === 'Swiper' || props.tag === 'MultiWindow') {
     return OVERFLOW_OPTIONS.filter((item) => item.value !== 'scroll')
   }
   return OVERFLOW_OPTIONS

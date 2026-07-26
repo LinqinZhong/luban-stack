@@ -2857,6 +2857,23 @@ async function handleAddWidget(tag: WidgetTag) {
   }
 }
 
+/** 多窗口：右侧「新建窗口」追加子布局并自动分配 windowKey */
+async function handleAddMultiWindow(parentId: string) {
+  if (!activeDoc.value || !parentId) return
+  try {
+    const { xml, newNodeId } = appendWidget(
+      activeDoc.value.xml,
+      parentId,
+      'LinearLayout',
+    )
+    selectedNodeId.value = newNodeId
+    await handleXmlUpdate(xml)
+    propsTab.value = 'style'
+  } catch (err) {
+    ElMessage.error(err instanceof Error ? err.message : '新建窗口失败')
+  }
+}
+
 async function handleDeleteWidget() {
   if (
     !activeDoc.value ||
@@ -3353,6 +3370,7 @@ watch(
           :status-bar-cover="resolvedPageStatusBar.cover"
           @select="selectedNodeId = $event"
           @open-repeat="handleOpenRepeatConfig"
+          @add-window="handleAddMultiWindow"
           @interact="handlePreviewInteract"
           @add="openAddWidgetDialog"
           @add-component="openAddComponentDialog"
@@ -3597,21 +3615,24 @@ watch(
     <el-dialog
       v-model="addWidgetVisible"
       title="添加控件"
-      width="480px"
+      width="560px"
       destroy-on-close
+      class="add-widget-dialog"
     >
       <p class="add-hint">
         将添加到当前选中的布局容器；若选中的是 Text/Button/Input，则添加到其父布局。选中 Component 时可添加插槽内容子节点。
       </p>
-      <div class="widget-options">
+      <div class="widget-options widget-options--tiles">
         <button
           v-for="item in addWidgetOptions"
           :key="item.tag"
           type="button"
-          class="widget-option"
+          class="widget-option widget-option--tile"
+          :title="item.description"
           @click="handleAddWidget(item.tag)"
         >
-          <div class="widget-option-title">{{ item.label }}</div>
+          <div class="widget-option-title">{{ item.label.split(/\s+/)[0] }}</div>
+          <div class="widget-option-tag">{{ item.tag }}</div>
           <div class="widget-option-desc">{{ item.description }}</div>
         </button>
       </div>
@@ -3959,6 +3980,15 @@ watch(
   gap: 8px;
 }
 
+.widget-options--tiles {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  max-height: min(58vh, 460px);
+  overflow-y: auto;
+  padding: 2px;
+}
+
 .widget-option {
   width: 100%;
   padding: 12px 14px;
@@ -3969,9 +3999,25 @@ watch(
   cursor: pointer;
 }
 
+.widget-option--tile {
+  aspect-ratio: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 12px 10px;
+  text-align: center;
+  transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
+}
+
 .widget-option:hover {
   border-color: #409eff;
   background: #ecf5ff;
+}
+
+.widget-option--tile:hover {
+  box-shadow: 0 0 0 1px #409eff inset;
 }
 
 .widget-option-title {
@@ -3980,9 +4026,32 @@ watch(
   color: #303133;
 }
 
+.widget-option--tile .widget-option-title {
+  font-size: 15px;
+  line-height: 1.3;
+}
+
+.widget-option-tag {
+  font-size: 11px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color: #64748b;
+  line-height: 1.2;
+}
+
 .widget-option-desc {
   margin-top: 4px;
   font-size: 12px;
   color: #94a3b8;
+}
+
+.widget-option--tile .widget-option-desc {
+  margin-top: 2px;
+  font-size: 11px;
+  line-height: 1.35;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  word-break: break-all;
 }
 </style>

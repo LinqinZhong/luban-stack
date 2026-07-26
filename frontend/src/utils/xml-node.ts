@@ -10,6 +10,7 @@ export type WidgetTag =
   | 'LinearLayout'
   | 'RelativeLayout'
   | 'Swiper'
+  | 'MultiWindow'
   | 'Modal'
   | 'Component'
   | 'Slot'
@@ -20,6 +21,7 @@ const CONTAINER_TAGS = new Set<string>([
   'LinearLayout',
   'RelativeLayout',
   'Swiper',
+  'MultiWindow',
   'Modal',
 ])
 
@@ -151,6 +153,11 @@ export const WIDGET_OPTIONS: Array<{
   { tag: 'LinearLayout', label: '线性布局 LinearLayout', description: '水平或垂直排列子控件' },
   { tag: 'RelativeLayout', label: '相对布局 RelativeLayout', description: '相对父容器定位子控件' },
   { tag: 'Swiper', label: '滑动窗口 Swiper', description: '多页横滑轮播，子控件各为一页' },
+  {
+    tag: 'MultiWindow',
+    label: '多窗口 MultiWindow',
+    description: '按数据池激活项切换显示窗口，每个子控件对应一个窗口',
+  },
   {
     tag: 'Modal',
     label: '弹层 Modal',
@@ -349,6 +356,10 @@ function createWidgetElement(doc: Document, tag: WidgetTag): Element {
     el.setAttribute('interval', '3000')
     el.setAttribute('duration', '280')
     el.setAttribute('current', '0')
+  } else if (tag === 'MultiWindow') {
+    el.setAttribute('width', 'match_parent')
+    el.setAttribute('height', 'match_parent')
+    el.setAttribute('active', '')
   } else if (tag === 'Modal') {
     const used = new Set(
       Array.from(doc.getElementsByTagName('Modal')).map(
@@ -445,7 +456,7 @@ export function appendWidget(
 
   if (!isAppendParentAllowed(parentEl.tagName)) {
     throw new Error(
-      '只能向 LinearLayout / RelativeLayout / Swiper / Modal / Component 添加子控件',
+      '只能向 LinearLayout / RelativeLayout / Swiper / MultiWindow / Modal / Component 添加子控件',
     )
   }
 
@@ -458,6 +469,27 @@ export function appendWidget(
   if (parentEl.tagName === 'Component') {
     const slotName = options?.slot?.trim() || 'default'
     widget.setAttribute('slot', slotName)
+  }
+  // MultiWindow 子节点需绑定窗口项名
+  if (parentEl.tagName === 'MultiWindow') {
+    const used = new Set(
+      Array.from(parentEl.children).map(
+        (item) => item.getAttribute('windowKey')?.trim() || '',
+      ),
+    )
+    let key = 'window1'
+    let n = 1
+    while (used.has(key)) {
+      n += 1
+      key = `window${n}`
+    }
+    widget.setAttribute('windowKey', key)
+    if (!widget.getAttribute('width')) {
+      widget.setAttribute('width', 'match_parent')
+    }
+    if (!widget.getAttribute('height')) {
+      widget.setAttribute('height', 'match_parent')
+    }
   }
   parentEl.appendChild(widget)
   const index = parentEl.children.length - 1
