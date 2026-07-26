@@ -146,6 +146,44 @@ function resolveArrayValue(
   return Array.isArray(field.value) ? field.value : []
 }
 
+/** 数组引用身份：同引用同 length 时视为未变，避免滚动 setData 触发整表 re-expand */
+const arrayEpochMap = new WeakMap<object, number>()
+let arrayEpochSeq = 0
+
+function arrayEpoch(value: unknown): string {
+  if (!Array.isArray(value)) return '0'
+  let id = arrayEpochMap.get(value)
+  if (id == null) {
+    id = ++arrayEpochSeq
+    arrayEpochMap.set(value, id)
+  }
+  return `${id}:${value.length}`
+}
+
+/**
+ * repeat 展开缓存键：仅数组型数据池字段与 $props 数组。
+ * 标量（如 pullHeight / isReachTop）变化不应触发商品列表重建。
+ */
+export function buildRepeatExpandKey(
+  pageData: PageData | undefined,
+  dollarProps?: Record<string, unknown> | null,
+): string {
+  const parts: string[] = []
+  for (const field of pageData?.fields ?? []) {
+    const name = field.name.trim()
+    if (!name || !Array.isArray(field.value)) continue
+    parts.push(`d:${name}:${arrayEpoch(field.value)}`)
+  }
+  if (dollarProps) {
+    for (const key of Object.keys(dollarProps).sort()) {
+      const value = dollarProps[key]
+      if (!Array.isArray(value)) continue
+      parts.push(`p:${key}:${arrayEpoch(value)}`)
+    }
+  }
+  return parts.join('|')
+}
+
 /**
  * 按 repeat / repeatIndex 展开子树（预览用）。
  * 展开后写入 scope，并应用 dynamicStyles。

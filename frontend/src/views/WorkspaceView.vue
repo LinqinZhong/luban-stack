@@ -99,7 +99,7 @@ import {
 import { runEventBindings } from '../utils/event-runtime'
 import { createComponentEmit } from '../utils/component-emit'
 import type { PreviewInteractPayload } from '../utils/event-runtime'
-import { resolveComputedPageData } from '../utils/compute-runtime'
+import { resolveComputedPageData, sameJson } from '../utils/compute-runtime'
 import {
   hasControllerBoundFields,
   loadControllerBoundPageData,
@@ -1785,6 +1785,7 @@ function applyComponentPreviewSetData(
     return
   }
   const prev = fields[index]!
+  if (sameJson(prev.value, value)) return
   let objectFields = prev.objectFields
   if (
     prev.type === 'json' &&
@@ -2300,6 +2301,16 @@ async function runLifecycleUpdateSequence() {
   }
 }
 
+/** setData 高频时合并 onUpdate，避免滚动帧内反复跑生命周期 */
+let lifecycleUpdateTimer: ReturnType<typeof setTimeout> | null = null
+function scheduleLifecycleUpdate() {
+  if (lifecycleUpdateTimer != null) return
+  lifecycleUpdateTimer = setTimeout(() => {
+    lifecycleUpdateTimer = null
+    void runLifecycleUpdateSequence()
+  }, 32)
+}
+
 watch(workspaceMode, async (mode, prev) => {
   if (prev === 'preview' && mode !== 'preview') {
     previewLifecycleGate.value = 0
@@ -2455,6 +2466,7 @@ function applyPreviewSetData(prop: string, value: import('../types/page-data').D
     return
   }
   const prev = fields[index]!
+  if (sameJson(prev.value, value)) return
   // json 对象同步 objectFields，避免面板/后续逻辑读到旧嵌套值
   let objectFields = prev.objectFields
   if (
@@ -2474,7 +2486,7 @@ function applyPreviewSetData(prop: string, value: import('../types/page-data').D
   }
   fields[index] = { ...prev, value, objectFields }
   previewRuntimeData.value = { fields }
-  void runLifecycleUpdateSequence()
+  scheduleLifecycleUpdate()
 }
 
 async function handleDataUpdate(data: import('../types/page-data').PageData) {

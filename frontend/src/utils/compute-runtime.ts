@@ -50,12 +50,37 @@ function seedScope(fields: DataField[]): Record<string, unknown> {
   return scope
 }
 
-function sameJson(a: unknown, b: unknown): boolean {
+export function sameJson(a: unknown, b: unknown): boolean {
   try {
     return JSON.stringify(a) === JSON.stringify(b)
   } catch {
     return Object.is(a, b)
   }
+}
+
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+/** 计算体里实际读到的同级普通字段名（不含自身） */
+function collectPlainDepsFromComputeBodies(fields: DataField[]): Set<string> {
+  const names = fields
+    .map((item) => item.name.trim())
+    .filter((name) => Boolean(name) && isValidIdent(name))
+  const deps = new Set<string>()
+  for (const field of fields) {
+    if (field.binding !== 'computed') continue
+    const body = field.computeBody ?? ''
+    if (!body.trim()) continue
+    const self = field.name.trim()
+    for (const name of names) {
+      if (name === self) continue
+      if (new RegExp(`(^|[^\\w$])${escapeRegExp(name)}(?![\\w$])`).test(body)) {
+        deps.add(name)
+      }
+    }
+  }
+  return deps
 }
 
 function buildBuiltinScope(options?: ResolveComputedOptions): Record<string, unknown> {
@@ -193,8 +218,15 @@ export function buildComputeDepsKey(
   const bodies = fields
     .filter((item) => item.binding === 'computed')
     .map((item) => [item.name.trim(), item.computeBody ?? ''])
+  // 只跟踪计算体真正读到的普通字段，避免滚动改 isReachTop 等无关标量时整池重算
+  const plainDeps = collectPlainDepsFromComputeBodies(fields)
   const plain = fields
-    .filter((item) => item.binding !== 'computed' && item.type !== 'ref')
+    .filter(
+      (item) =>
+        item.binding !== 'computed' &&
+        item.type !== 'ref' &&
+        plainDeps.has(item.name.trim()),
+    )
     .map((item) => [item.name.trim(), item.value])
   try {
     return JSON.stringify({ props: propsSlice, device: deviceSlice, bodies, plain })

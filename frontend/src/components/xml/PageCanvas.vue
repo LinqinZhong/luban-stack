@@ -14,7 +14,7 @@ import { getDeviceInfo } from '../../utils/device-info'
 import type { IconLibrary } from '../../types/icon-library'
 import type { PageData } from '../../types/page-data'
 import type { ComponentRenderMap } from '../../types/component-render'
-import { expandRepeatTree } from '../../utils/repeat'
+import { buildRepeatExpandKey, expandRepeatTree } from '../../utils/repeat'
 import { parsePageXml, type XmlNode } from '../../utils/xml'
 import IconSprite from './IconSprite.vue'
 import XmlNodeView from './XmlNodeView.vue'
@@ -100,24 +100,32 @@ watch(
     if (selectable) (props.modalStack ?? fallbackModalStack).closeAll()
   },
 )
+/** 页面级 repeat：仅数组变化时重建，避免标量 setData 每帧拆树 */
+let cachedPageExpandKey = ''
+let cachedPageRoot: XmlNode | null = null
+
 const parsed = computed<{ root: XmlNode | null; error: string }>(() => {
-  // 深度依赖 $props（含数组内容），避免仅改 data 项时不触发重新展开
-  try {
-    void JSON.stringify(props.dollarProps ?? null)
-  } catch {
-    void props.dollarProps
-  }
   if (!props.xml.trim()) {
+    cachedPageExpandKey = ''
+    cachedPageRoot = null
     return { root: null, error: '?? XML ??' }
   }
   try {
     const root = parsePageXml(props.xml)
-    const viewRoot =
-      props.expandRepeat && root
-        ? expandRepeatTree(root, props.pageData, props.dollarProps)
-        : root
+    if (!props.expandRepeat || !root) {
+      return { root, error: '' }
+    }
+    const expandKey = `${props.xml}\0${buildRepeatExpandKey(props.pageData, props.dollarProps)}`
+    if (expandKey === cachedPageExpandKey && cachedPageRoot) {
+      return { root: cachedPageRoot, error: '' }
+    }
+    const viewRoot = expandRepeatTree(root, props.pageData, props.dollarProps)
+    cachedPageExpandKey = expandKey
+    cachedPageRoot = viewRoot
     return { root: viewRoot, error: '' }
   } catch (err) {
+    cachedPageExpandKey = ''
+    cachedPageRoot = null
     return {
       root: null,
       error: err instanceof Error ? err.message : 'XML ????',

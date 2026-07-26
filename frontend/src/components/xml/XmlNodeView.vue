@@ -27,7 +27,7 @@ import {
 } from '../../utils/component-props'
 import { hydrateApiDollarProps } from '../../utils/api-prop'
 import { resolveComputedPageData, buildComputeDepsKey } from '../../utils/compute-runtime'
-import { expandRepeatTree } from '../../utils/repeat'
+import { buildRepeatExpandKey, expandRepeatTree } from '../../utils/repeat'
 import { CANVAS_RUNTIME_KEY } from '../../composables/useCanvasRuntime'
 import {
   DYNAMIC_STYLES_ATTR,
@@ -444,14 +444,18 @@ const componentComputeDepsKey = computed(() => {
 const componentPageData = shallowRef<PageData | undefined>(undefined)
 
 watch(
-  componentComputeDepsKey,
+  [
+    () => componentDetail.value?.data,
+    componentComputeDepsKey,
+    () => instanceDollarProps.value,
+  ],
   () => {
     const detail = componentDetail.value
     if (!detail) {
       componentPageData.value = props.pageData
       return
     }
-    // 仅在 depsKey 变化时求值；此处读 instanceDollarProps 不会额外建依赖
+    // data 引用变化（setData）或计算依赖变化时同步；attrs 绑定靠 pageData 热更新
     componentPageData.value = resolveComputedPageData(detail.data, {
       getDeviceInfo: canvasRuntime?.getDeviceInfo,
       dollarProps: instanceDollarProps.value,
@@ -460,27 +464,35 @@ watch(
   { immediate: true },
 )
 
+/** repeat 展开结果：仅数组 / $props 数组变化时重建，避免下拉高度每帧拆掉商品列表 */
+let cachedComponentExpandKey = ''
+let cachedComponentRoot: XmlNode | null = null
+
 const componentRoot = computed(() => {
   const detail = componentDetail.value
-  if (!detail?.xml?.trim()) return null
+  if (!detail?.xml?.trim()) {
+    cachedComponentExpandKey = ''
+    cachedComponentRoot = null
+    return null
+  }
   try {
-    // 深度依赖实例 $props，保证 repeat="$props.xxx" 随调试数据刷新
-    try {
-      void JSON.stringify(instanceDollarProps.value ?? null)
-    } catch {
-      void instanceDollarProps.value
+    const data = componentPageData.value ?? detail.data
+    const dollarProps = instanceDollarProps.value
+    if (!props.expandRepeat) {
+      return parsePageXml(detail.xml)
+    }
+    const expandKey = `${detail.xml}\0${buildRepeatExpandKey(data, dollarProps)}`
+    if (expandKey === cachedComponentExpandKey && cachedComponentRoot) {
+      return cachedComponentRoot
     }
     const root = parsePageXml(detail.xml)
-    // 页面内嵌组件时，定义树里的 repeat 也要按组件数据池 / $props 展开
-    if (props.expandRepeat) {
-      return expandRepeatTree(
-        root,
-        componentPageData.value ?? detail.data,
-        instanceDollarProps.value,
-      )
-    }
-    return root
+    const expanded = expandRepeatTree(root, data, dollarProps)
+    cachedComponentExpandKey = expandKey
+    cachedComponentRoot = expanded
+    return expanded
   } catch {
+    cachedComponentExpandKey = ''
+    cachedComponentRoot = null
     return null
   }
 })

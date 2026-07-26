@@ -213,9 +213,14 @@ function scrollDetail(el: HTMLElement): ScrollDetail {
   }
 }
 
-function onScroll() {
+/** 每帧最多派发一次 scroll / touchMove，减轻预览 setData 压力 */
+let scrollEmitRaf: number | null = null
+let touchMoveEmitRaf: number | null = null
+let pendingTouchMove: TouchDetail | null = null
+
+function flushScrollEmit() {
+  scrollEmitRaf = null
   if (!props.enabled) return
-  revealThumb()
   const el = bodyRef.value
   if (!el) return
   const detail = scrollDetail(el)
@@ -228,6 +233,39 @@ function onScroll() {
   if (nowUpper && !atUpperEdge) emit('scrollToUpper', detail)
   atLowerEdge = nowLower
   atUpperEdge = nowUpper
+}
+
+function onScroll() {
+  if (!props.enabled) return
+  revealThumb()
+  if (scrollEmitRaf != null) return
+  scrollEmitRaf = requestAnimationFrame(flushScrollEmit)
+}
+
+function flushTouchMoveEmit() {
+  touchMoveEmitRaf = null
+  if (!props.enabled || !pendingTouchMove) return
+  const detail = pendingTouchMove
+  pendingTouchMove = null
+  emit('touchMove', detail)
+}
+
+function scheduleTouchMoveEmit(detail: TouchDetail) {
+  pendingTouchMove = detail
+  if (touchMoveEmitRaf != null) return
+  touchMoveEmitRaf = requestAnimationFrame(flushTouchMoveEmit)
+}
+
+function cancelEmitRafs() {
+  if (scrollEmitRaf != null) {
+    cancelAnimationFrame(scrollEmitRaf)
+    scrollEmitRaf = null
+  }
+  if (touchMoveEmitRaf != null) {
+    cancelAnimationFrame(touchMoveEmitRaf)
+    touchMoveEmitRaf = null
+  }
+  pendingTouchMove = null
 }
 
 function touchDetail(event: TouchEvent, preferChanged: boolean): TouchDetail | null {
@@ -266,11 +304,16 @@ function onTouchMove(event: TouchEvent) {
   if (!props.enabled) return
   const detail = touchDetail(event, false)
   if (!detail) return
-  emit('touchMove', detail)
+  scheduleTouchMoveEmit(detail)
 }
 
 function onTouchEnd(event: TouchEvent) {
   if (!props.enabled) return
+  // 先冲刷最后一帧 move，避免 touchEnd 读到过期坐标
+  if (touchMoveEmitRaf != null) {
+    cancelAnimationFrame(touchMoveEmitRaf)
+    flushTouchMoveEmit()
+  }
   const detail = touchDetail(event, true)
   if (!detail) return
   emit('touchEnd', detail)
@@ -278,6 +321,10 @@ function onTouchEnd(event: TouchEvent) {
 
 function endSimTouch(event: PointerEvent) {
   if (simTouchPointerId == null || event.pointerId !== simTouchPointerId) return
+  if (touchMoveEmitRaf != null) {
+    cancelAnimationFrame(touchMoveEmitRaf)
+    flushTouchMoveEmit()
+  }
   emit('touchEnd', detailFromPointer(event))
   simTouchPointerId = null
 }
@@ -350,7 +397,7 @@ function onPointerDown(event: PointerEvent) {
 
 function onPointerMove(event: PointerEvent) {
   if (simTouchPointerId != null && event.pointerId === simTouchPointerId) {
-    emit('touchMove', detailFromPointer(event))
+    scheduleTouchMoveEmit(detailFromPointer(event))
   }
 
   if (dragPointerId == null || event.pointerId !== dragPointerId) return
@@ -434,6 +481,7 @@ onBeforeUnmount(() => {
   stopMomentum()
   endDrag()
   simTouchPointerId = null
+  cancelEmitRafs()
   unbindObservers()
 })
 
