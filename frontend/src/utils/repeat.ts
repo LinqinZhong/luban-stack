@@ -5,7 +5,6 @@ import {
   V_SHOW_ATTR,
 } from '../types/dynamic-styles'
 import { INTERACTION_EVENT_KEYS } from '../types/page-method'
-import { applyDynamicStyleOverrides } from './dynamic-style-runtime'
 import type { XmlNode } from './xml'
 
 const SKIP_INTERPOLATE_ATTRS = new Set<string>([
@@ -85,12 +84,7 @@ function interpolateAttrTemplate(
   return interpolateTemplate(template, item, index)
 }
 
-function applyItemScope(
-  node: XmlNode,
-  item: unknown,
-  index: number,
-  pageData: PageData | undefined,
-): XmlNode {
+function applyItemScope(node: XmlNode, item: unknown, index: number): XmlNode {
   const attrs: Record<string, string> = {}
   for (const [key, value] of Object.entries(node.attrs)) {
     if (key === 'repeat' || key === 'repeatIndex') {
@@ -105,17 +99,15 @@ function applyItemScope(
     attrs[key] = interpolateAttrTemplate(value, item, index)
   }
 
-  const scoped: XmlNode = {
+  // 不在此处套 dynamicStyles：展开结果会被缓存，烤死的 height 等无法随 refreshing 回退。
+  // XmlNodeView 渲染时按 pageData + scope 实时套用。
+  return {
     tag: node.tag,
     attrs,
     text: interpolateTemplate(node.text, item, index),
     scope: { item, index },
-    children: node.children.map((child) =>
-      applyItemScope(child, item, index, pageData),
-    ),
+    children: node.children.map((child) => applyItemScope(child, item, index)),
   }
-
-  return applyDynamicStyleOverrides(scoped, pageData, { item, index })
 }
 
 function resolveArrayValue(
@@ -186,7 +178,8 @@ export function buildRepeatExpandKey(
 
 /**
  * 按 repeat / repeatIndex 展开子树（预览用）。
- * 展开后写入 scope，并应用 dynamicStyles。
+ * 仅克隆结构并写入 item scope；dynamicStyles 留给 XmlNodeView 按实时数据池套用，
+ * 避免与 expand 缓存叠加后把 height 等绑死成字面量。
  * repeat 可为数据池字段名，或 `$props.xxx`（组件入参数组）。
  */
 export function expandRepeatTree(
@@ -204,7 +197,7 @@ function expandNode(
 ): XmlNode {
   const next = cloneNode(node)
   next.children = expandChildren(next.children, pageData, dollarProps)
-  return applyDynamicStyleOverrides(next, pageData, next.scope)
+  return next
 }
 
 function expandChildren(
@@ -233,13 +226,13 @@ function expandChildren(
     if (indexAttr !== '') {
       const fixed = Number(indexAttr)
       if (Number.isInteger(fixed) && fixed >= 0 && fixed < items.length) {
-        result.push(applyItemScope(prepared, items[fixed], fixed, pageData))
+        result.push(applyItemScope(prepared, items[fixed], fixed))
       }
       continue
     }
 
     items.forEach((item, index) => {
-      result.push(applyItemScope(clonePrepared(prepared), item, index, pageData))
+      result.push(applyItemScope(clonePrepared(prepared), item, index))
     })
   }
 
