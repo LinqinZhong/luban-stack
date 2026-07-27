@@ -213,6 +213,7 @@ Component({
     var scrollLeft = e && e.detail && e.detail.scrollLeft != null ? e.detail.scrollLeft : 0
     var scrollHeight = e && e.detail && e.detail.scrollHeight != null ? e.detail.scrollHeight : 0
     setData('isReachTop', scrollTop <= 30)
+    if (typeof that.__recomputeComputed === 'function') that.__recomputeComputed()
   },
   __onScrollToLower_1(e) {
     var that = this
@@ -238,6 +239,7 @@ Component({
     var arrowRotate = that.data.arrowRotate
     if (that.data.loading || that.data.refreshing) return
     loadData()
+    if (typeof that.__recomputeComputed === 'function') that.__recomputeComputed()
   },
   __recomputeComputed: function () {
     var that = this

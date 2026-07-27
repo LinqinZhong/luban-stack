@@ -447,15 +447,16 @@ onBeforeUnmount(() => {
   overflow: visible;
 }
 
+/* 边框按 1/zoom 反缩放，屏幕上始终约 1px */
 .content-box.selected {
-  outline: 2px solid #fadb14;
-  outline-offset: -2px;
-  background-color: rgba(250, 219, 20, 0.1);
+  outline: calc(1px / var(--canvas-zoom, 1)) solid #d48806;
+  outline-offset: calc(-1px / var(--canvas-zoom, 1));
+  background-color: rgba(212, 136, 6, 0.08);
 }
 
 .content-box.hovered {
-  outline: 2px solid #ff85c0;
-  outline-offset: -2px;
+  outline: calc(1px / var(--canvas-zoom, 1)) solid #c41d7f;
+  outline-offset: calc(-1px / var(--canvas-zoom, 1));
 }
 
 .frame-content,
@@ -471,11 +472,11 @@ onBeforeUnmount(() => {
 }
 
 .frame-content.selected {
-  border: 2px solid #fadb14;
+  border: calc(1px / var(--canvas-zoom, 1)) solid #d48806;
 }
 
 .frame-content.hovered {
-  border: 2px solid #ff85c0;
+  border: calc(1px / var(--canvas-zoom, 1)) solid #c41d7f;
 }
 
 .frame-margin {
@@ -483,18 +484,18 @@ onBeforeUnmount(() => {
 }
 
 .frame-margin.selected {
-  border: 2px dashed #fadb14;
+  border: calc(1px / var(--canvas-zoom, 1)) dashed #d48806;
 }
 
 .frame-margin.hovered {
-  border: 2px dashed #ff85c0;
+  border: calc(1px / var(--canvas-zoom, 1)) dashed #c41d7f;
 }
 
 .badge-stack {
   position: absolute;
   top: 0;
   right: 0;
-  z-index: 40;
+  z-index: 100040;
   transform: translate(50%, -50%);
   display: flex;
   align-items: center;

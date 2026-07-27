@@ -15,6 +15,10 @@ export const MODAL_STACK_KEY: InjectionKey<ModalStackApi> = Symbol('voiderModalS
 export const MODAL_HOST_KEY: InjectionKey<Ref<HTMLElement | null>> = Symbol('voiderModalHost')
 /** 编辑态角标挂载层（需高于屏幕虚线框） */
 export const BADGE_HOST_KEY: InjectionKey<Ref<HTMLElement | null>> = Symbol('voiderBadgeHost')
+/** 编辑态测量模式：select 普通选中；measure 显示间距与尺寸 */
+export type CanvasToolMode = 'select' | 'measure'
+export const CANVAS_TOOL_MODE_KEY: InjectionKey<Ref<CanvasToolMode>> =
+  Symbol('voiderCanvasToolMode')
 
 /**
  * 页面级 Modal 堆栈：同一时刻仅栈顶可见；

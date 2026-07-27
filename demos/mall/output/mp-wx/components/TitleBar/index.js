@@ -40,8 +40,9 @@ Component({
   },
   },
   methods: {
-  __onTap_0(e) {
+  __onEvt_0(e) {
     wx.navigateBack()
+    if (typeof this.__recomputeComputed === 'function') this.__recomputeComputed()
   },
   __recomputeComputed: function () {
     var that = this

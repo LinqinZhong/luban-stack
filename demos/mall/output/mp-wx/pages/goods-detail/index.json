@@ -4,6 +4,7 @@
     "title-bar": "/components/TitleBar/index",
     "spec-selector": "/components/SpecSelector/index"
   },
+  "navigationBarTextStyle": "white",
   "navigationStyle": "custom",
   "disableScroll": true
 }

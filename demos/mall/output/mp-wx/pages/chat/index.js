@@ -10,7 +10,8 @@ Page({
       }
     ]
   },
-  onLoad() {},
+  onLoad() {
+  },
   onShow() {},
   onReady() {},
 })

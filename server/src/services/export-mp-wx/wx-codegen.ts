@@ -355,7 +355,7 @@ function registerCustomEventHandler(
       .join('\n')
     ctx.pageHandlers.push({
       name: finalName,
-      body: `${prelude.join('\n')}\n${bodyIndented}`,
+      body: `${prelude.join('\n')}\n${bodyIndented}\n    if (typeof that.__recomputeComputed === 'function') that.__recomputeComputed()`,
     })
     return `${meta.bind}="${finalName}"`
   }
@@ -376,8 +376,8 @@ function registerCustomEventHandler(
 }
 
 /**
- * onClick ??bindtap + Page methods??
- * setData ??`{item.key}` ??? data-* ????????MultiWindow ????active ????
+ * onClick → bindtap + methods
+ * setData 的 `{item.key}` 走 data-*；组件 emit 用 triggerEvent
  */
 function collectClickEventAttrs(
   attrs: Record<string, string>,
@@ -385,18 +385,71 @@ function collectClickEventAttrs(
 ): string[] {
   const raw = attrs.onClick?.trim()
   if (!raw || !isEventBindingValue(raw)) return []
+  return buildPresetEventBindAttrs(raw, ctx, { bindName: 'bindtap' })
+}
+
+/**
+ * 组件用法上的自定义事件（如 GoodsCard 的 select="[{emit...}]"）
+ * → bind:select="handler"
+ */
+function collectComponentCustomEventAttrs(
+  eventName: string,
+  raw: string | undefined,
+  ctx: RenderCtx,
+): string[] {
+  const trimmed = raw?.trim()
+  if (!trimmed || !isEventBindingValue(trimmed)) return []
+  if (!/^[A-Za-z_][\w.-]*$/.test(eventName)) return []
+  return buildPresetEventBindAttrs(trimmed, ctx, {
+    bindName: `bind:${eventName}`,
+    /** 子组件 triggerEvent 的 detail 作为 payload */
+    payloadFromDetail: true,
+  })
+}
+
+/**
+ * 将编辑器预设事件绑定编译为 WXML bind* + Page/Component methods
+ */
+function buildPresetEventBindAttrs(
+  raw: string,
+  ctx: RenderCtx,
+  options: {
+    bindName: string
+    payloadFromDetail?: boolean
+    /** onScroll 等：{scrollTop} → e.detail.scrollTop */
+    isScroll?: boolean
+  },
+): string[] {
   const bindings = parseEvtBindings(raw)
   if (!bindings.length) return []
 
-  // ???????????
   if (bindings.every((b) => (b.method || '').trim() === '__custom__')) {
+    // 自定义脚本：走 registerCustomEventHandler（仅 onClick 键名用于命名）
     const a = registerCustomEventHandler('onClick', raw, ctx)
-    return a ? [a] : []
+    if (!a) return []
+    // registerCustomEventHandler 返回 bindtap="..."，替换 bind 名
+    const m = a.match(/^(\w+(?::[\w.-]+)?)=(".*")$/)
+    if (m) return [`${options.bindName}=${m[2]}`]
+    return [a.replace(/^bindtap=/, `${options.bindName}=`)]
   }
 
   const dataAttrs: string[] = []
   const stmts: string[] = []
   let dataIdx = 0
+  const fromDetail = Boolean(options.payloadFromDetail)
+  const isScroll = Boolean(options.isScroll)
+  const scrollDetailKeys = new Set([
+    'scrollTop',
+    'scrollLeft',
+    'scrollHeight',
+    'scrollWidth',
+    'deltaX',
+    'deltaY',
+  ])
+
+  if (fromDetail) {
+    stmts.push(`var __payload = (e && e.detail) || {}`)
+  }
 
   for (const bind of bindings) {
     const method = (bind.method || '').trim()
@@ -408,12 +461,23 @@ function collectClickEventAttrs(
       const valueRaw = String(args.value ?? '').trim()
       const bindMatch = valueRaw.match(/^\{([A-Za-z_$][\w.$]*)\}$/)
       if (bindMatch) {
-        const i = dataIdx++
-        const expr = normalizeExpr(bindMatch[1]!)
-        dataAttrs.push(`data-voider-v${i}="{{${expr}}}"`)
-        stmts.push(
-          `this.setData({ ${prop}: e.currentTarget.dataset.voiderV${i} })`,
-        )
+        const path = bindMatch[1]!
+        if (isScroll && scrollDetailKeys.has(path) && !path.includes('.')) {
+          stmts.push(
+            `this.setData({ ${prop}: (e && e.detail && e.detail.${path} != null) ? e.detail.${path} : 0 })`,
+          )
+        } else if (fromDetail) {
+          stmts.push(
+            `this.setData({ ${prop}: ${detailPathExpr(path)} })`,
+          )
+        } else {
+          const i = dataIdx++
+          const expr = normalizeExpr(path)
+          dataAttrs.push(`data-voider-v${i}="{{${expr}}}"`)
+          stmts.push(
+            `this.setData({ ${prop}: e.currentTarget.dataset.voiderV${i} })`,
+          )
+        }
       } else {
         let valueExpr: string
         try {
@@ -431,11 +495,17 @@ function collectClickEventAttrs(
       if (!to) continue
       const toBind = to.match(/^\{([A-Za-z_$][\w.$]*)\}$/)
       if (toBind) {
-        const i = dataIdx++
-        dataAttrs.push(`data-voider-v${i}="{{${normalizeExpr(toBind[1]!)}}}"`)
-        stmts.push(
-          `wx.navigateTo({ url: '/pages/' + e.currentTarget.dataset.voiderV${i} + '/index' })`,
-        )
+        if (fromDetail) {
+          stmts.push(
+            `wx.navigateTo({ url: '/pages/' + ${detailPathExpr(toBind[1]!)} + '/index' })`,
+          )
+        } else {
+          const i = dataIdx++
+          dataAttrs.push(`data-voider-v${i}="{{${normalizeExpr(toBind[1]!)}}}"`)
+          stmts.push(
+            `wx.navigateTo({ url: '/pages/' + e.currentTarget.dataset.voiderV${i} + '/index' })`,
+          )
+        }
       } else {
         stmts.push(
           `wx.navigateTo({ url: ${JSON.stringify(`/pages/${to}/index`)} })`,
@@ -453,11 +523,17 @@ function collectClickEventAttrs(
       const message = String(args.message ?? '').trim()
       const msgBind = message.match(/^\{([A-Za-z_$][\w.$]*)\}$/)
       if (msgBind) {
-        const i = dataIdx++
-        dataAttrs.push(`data-voider-v${i}="{{${normalizeExpr(msgBind[1]!)}}}"`)
-        stmts.push(
-          `wx.showToast({ title: String(e.currentTarget.dataset.voiderV${i} || ''), icon: 'none' })`,
-        )
+        if (fromDetail) {
+          stmts.push(
+            `wx.showToast({ title: String(${detailPathExpr(msgBind[1]!)} || ''), icon: 'none' })`,
+          )
+        } else {
+          const i = dataIdx++
+          dataAttrs.push(`data-voider-v${i}="{{${normalizeExpr(msgBind[1]!)}}}"`)
+          stmts.push(
+            `wx.showToast({ title: String(e.currentTarget.dataset.voiderV${i} || ''), icon: 'none' })`,
+          )
+        }
       } else {
         stmts.push(
           `wx.showToast({ title: ${JSON.stringify(message)}, icon: 'none' })`,
@@ -465,16 +541,90 @@ function collectClickEventAttrs(
       }
       continue
     }
+
+    if (method === 'emit') {
+      const eventName = String(args.event ?? '').trim()
+      if (!eventName || !/^[A-Za-z_][\w.-]*$/.test(eventName)) continue
+      const detailParts: string[] = []
+      for (const [key, value] of Object.entries(args)) {
+        if (key === 'event') continue
+        const safeKey = /^[A-Za-z_][\w]*$/.test(key) ? key : JSON.stringify(key)
+        const valueRaw = String(value ?? '').trim()
+        const bindMatch = valueRaw.match(/^\{([A-Za-z_$][\w.$]*)\}$/)
+        if (bindMatch) {
+          const path = bindMatch[1]!
+          if (fromDetail) {
+            detailParts.push(`${safeKey}: ${detailPathExpr(path)}`)
+          } else {
+            const expr = normalizeExpr(path)
+            // 列表 item 仍走 data-*；props/data 在 handler 里读，避免对象被 dataset 串化
+            if (expr === 'item' || expr === 'index' || expr.startsWith('item.')) {
+              const i = dataIdx++
+              dataAttrs.push(`data-voider-v${i}="{{${expr}}}"`)
+              detailParts.push(`${safeKey}: e.currentTarget.dataset.voiderV${i}`)
+            } else {
+              detailParts.push(`${safeKey}: ${runtimePropExpr(expr)}`)
+            }
+          }
+        } else {
+          let valueExpr: string
+          try {
+            valueExpr = JSON.stringify(JSON.parse(valueRaw))
+          } catch {
+            valueExpr = JSON.stringify(valueRaw)
+          }
+          detailParts.push(`${safeKey}: ${valueExpr}`)
+        }
+      }
+      stmts.push(
+        `this.triggerEvent(${JSON.stringify(eventName)}, { ${detailParts.join(', ')} })`,
+      )
+      continue
+    }
+
+    // 同级自定义方法
+    if (method && ctx.siblingMethodNames.includes(method)) {
+      stmts.push(`if (typeof this.${method} === 'function') this.${method}(e)`)
+      continue
+    }
   }
 
   if (!stmts.length) return []
 
-  const name = `__onTap_${ctx.handlerSeq.n++}`
+  // Page 无 observers：setData 后主动重算计算字段（标题栏透明度等）
+  stmts.push(
+    `if (typeof this.__recomputeComputed === 'function') this.__recomputeComputed()`,
+  )
+
+  const name = `__onEvt_${ctx.handlerSeq.n++}`
   ctx.pageHandlers.push({
     name,
     body: stmts.map((s) => `    ${s}`).join('\n'),
   })
-  return [`bindtap="${name}"`, ...dataAttrs]
+  return [`${options.bindName}="${name}"`, ...dataAttrs]
+}
+
+/** 事件 detail / payload 字段访问：goods → __payload.goods；item.x 仍按路径 */
+function detailPathExpr(path: string): string {
+  const p = path.trim()
+  if (!p) return 'undefined'
+  if (p === 'item' || p === 'index') return p
+  if (p.startsWith('item.') || p.startsWith('index.')) return p
+  const norm = normalizeExpr(p)
+  if (norm === '$props') return '__payload'
+  return `__payload.${norm}`
+}
+
+/** 组件 props / 页面 data 运行时读取（保留对象引用） */
+function runtimePropExpr(expr: string): string {
+  const parts = expr.split('.').filter(Boolean)
+  if (!parts.length || !parts.every((p) => /^[A-Za-z_$][\w$]*$/.test(p))) {
+    return 'undefined'
+  }
+  const root = parts[0]!
+  const rootExpr = `(this.properties.${root} !== undefined ? this.properties.${root} : this.data.${root})`
+  if (parts.length === 1) return rootExpr
+  return `((${rootExpr}) || {}).${parts.slice(1).join('.')}`
 }
 
 /** ?? / ?? / ???? ??bind* + methods */
@@ -505,6 +655,27 @@ function collectScrollTouchEventAttrs(
     }
     const raw = attrs[key]
     if (!raw?.trim()) continue
+    const meta = WX_EVENT_BIND[key]
+    if (!meta) continue
+
+    // setData / navigate / emit 等预设绑定（含 onScroll → titleBarOpacity）
+    if (isEventBindingValue(raw)) {
+      const bindings = parseEvtBindings(raw)
+      const isAllCustom = bindings.every(
+        (b) => (b.method || '').trim() === '__custom__',
+      )
+      if (!isAllCustom) {
+        const preset = buildPresetEventBindAttrs(raw, ctx, {
+          bindName: meta.bind,
+          isScroll: meta.kind === 'scroll',
+        })
+        if (preset.length) {
+          out.push(...preset)
+          continue
+        }
+      }
+    }
+
     const bind = registerCustomEventHandler(key, raw, ctx)
     if (bind) out.push(bind)
   }
@@ -597,15 +768,67 @@ function normalizeExpr(expr: string): string {
   return expr
 }
 
+/** 与编辑器 / vue3 一致：Modal 或全 Modal Fragment 不占文档流 */
+function isOutOfFlowTree(node: XmlNode): boolean {
+  if (node.tag === 'Modal') return true
+  if (node.tag === 'Fragment') {
+    return (
+      node.children.length > 0 &&
+      node.children.every((child) => isOutOfFlowTree(child))
+    )
+  }
+  return false
+}
+
+const OUT_OF_FLOW_HOST_STYLE =
+  'position:absolute;top:0;left:0;width:0;height:0;margin:0;overflow:visible;pointer-events:none'
+
+function isTrueAttr(raw: string | undefined): boolean {
+  return raw === 'true' || raw === '1'
+}
+
 function attrStyle(
   attrs: Record<string, string>,
-  options?: { flexParent?: 'row' | 'column'; isComponent?: boolean },
+  options?: {
+    flexParent?: 'row' | 'column'
+    isComponent?: boolean
+    /** RelativeLayout 子节点：与编辑器一致，一律 absolute */
+    isRelativeChild?: boolean
+  },
 ): string {
   const parts: string[] = []
   const wRaw = attrs.width?.trim()
   const hRaw = attrs.height?.trim()
+  const isRelativeChild = Boolean(options?.isRelativeChild)
+  const isScrollContainer = (attrs.overflow || '').trim().toLowerCase() === 'scroll'
+  const hasRelativeEdge =
+    isTrueAttr(attrs.layout_alignParentLeft) ||
+    isTrueAttr(attrs.layout_alignParentStart) ||
+    isTrueAttr(attrs.layout_alignParentRight) ||
+    isTrueAttr(attrs.layout_alignParentEnd) ||
+    isTrueAttr(attrs.layout_alignParentTop) ||
+    isTrueAttr(attrs.layout_alignParentBottom) ||
+    isTrueAttr(attrs.layout_centerInParent) ||
+    isTrueAttr(attrs.layout_centerHorizontal) ||
+    isTrueAttr(attrs.layout_centerVertical) ||
+    (['layout_marginLeft', 'layout_marginRight', 'layout_marginTop', 'layout_marginBottom'] as const).some(
+      (k) => {
+        const raw = attrs[k]?.trim()
+        return Boolean(raw) && raw !== 'null'
+      },
+    )
+  // 相对布局中铺满且可滚：用 inset 固定视口（与 vue3 inset-0 一致）
+  const useRelativeInset =
+    isRelativeChild &&
+    isScrollContainer &&
+    wRaw === 'match_parent' &&
+    hRaw === 'match_parent' &&
+    !hasRelativeEdge
+
   const wBind = styleBindingExpr(wRaw)
-  if (wBind) {
+  if (useRelativeInset) {
+    /* width 由 inset 承担 */
+  } else if (wBind) {
     parts.push(`width:{{${wBind}}}px`)
   } else if (wRaw === 'match_parent' && options?.flexParent === 'row') {
     parts.push('flex:1', 'min-width:0', 'width:0')
@@ -614,7 +837,9 @@ function attrStyle(
     if (w) parts.push(`width:${w}`)
   }
   const hBind = styleBindingExpr(hRaw)
-  if (hBind) {
+  if (useRelativeInset) {
+    /* height 由 inset 承担 */
+  } else if (hBind) {
     parts.push(`height:{{${hBind}}}px`)
   } else if (hRaw === 'match_parent' && options?.flexParent === 'column') {
     parts.push('flex:1', 'min-height:0', 'height:0')
@@ -693,40 +918,38 @@ function attrStyle(
 
   // transform：小程序需 -webkit-；仅 Z 轴时用 rotate()（rotateZ 真机常不生效）
   const transformFns = buildTransformFunctions(attrs)
-  // RelativeLayout 定位
+  // RelativeLayout 定位（子节点一律 absolute，与编辑器 / vue3 一致）
   const relative: string[] = []
-  const hasLayoutMargin = (
-    ['layout_marginLeft', 'layout_marginRight', 'layout_marginTop', 'layout_marginBottom'] as const
-  ).some((k) => {
-    const raw = attrs[k]?.trim()
-    return Boolean(raw) && raw !== 'null'
-  })
-  if (attrs.layout_centerInParent === 'true') {
+  if (isTrueAttr(attrs.layout_centerInParent)) {
     relative.push('position:absolute', 'left:50%', 'top:50%')
     transformFns.push('translate(-50%,-50%)')
-  } else {
-    if (
-      attrs.layout_alignParentLeft === 'true' ||
-      attrs.layout_alignParentRight === 'true' ||
-      attrs.layout_alignParentTop === 'true' ||
-      attrs.layout_alignParentBottom === 'true' ||
-      attrs.layout_centerHorizontal === 'true' ||
-      attrs.layout_centerVertical === 'true' ||
-      hasLayoutMargin
-    ) {
-      relative.push('position:absolute')
-    }
-    if (attrs.layout_alignParentLeft === 'true') relative.push('left:0')
-    if (attrs.layout_alignParentRight === 'true') relative.push('right:0')
-    if (attrs.layout_alignParentTop === 'true') relative.push('top:0')
-    if (attrs.layout_alignParentBottom === 'true') relative.push('bottom:0')
-    if (attrs.layout_centerHorizontal === 'true') {
-      relative.push('left:50%')
-      transformFns.push('translateX(-50%)')
-    }
-    if (attrs.layout_centerVertical === 'true') {
-      relative.push('top:50%')
-      transformFns.push('translateY(-50%)')
+  } else if (isRelativeChild || hasRelativeEdge) {
+    relative.push('position:absolute')
+    if (useRelativeInset) {
+      relative.push('left:0', 'top:0', 'right:0', 'bottom:0')
+    } else {
+      if (
+        isTrueAttr(attrs.layout_alignParentLeft) ||
+        isTrueAttr(attrs.layout_alignParentStart)
+      ) {
+        relative.push('left:0')
+      }
+      if (
+        isTrueAttr(attrs.layout_alignParentRight) ||
+        isTrueAttr(attrs.layout_alignParentEnd)
+      ) {
+        relative.push('right:0')
+      }
+      if (isTrueAttr(attrs.layout_alignParentTop)) relative.push('top:0')
+      if (isTrueAttr(attrs.layout_alignParentBottom)) relative.push('bottom:0')
+      if (isTrueAttr(attrs.layout_centerHorizontal)) {
+        relative.push('left:50%')
+        transformFns.push('translateX(-50%)')
+      }
+      if (isTrueAttr(attrs.layout_centerVertical)) {
+        relative.push('top:50%')
+        transformFns.push('translateY(-50%)')
+      }
     }
   }
   // layout_margin*：相对父边缘的偏移（覆盖 left:0 / bottom:0 等）；忽略字面量 "null"
@@ -893,6 +1116,8 @@ type RenderCtx = {
   kind: 'page' | 'component'
   /** componentId ??????????type=api / twoWay??*/
   componentConfigs: Map<string, ComponentConfig>
+  /** componentId → 定义树根；用于 Modal-only 组件脱离文档流 */
+  componentRoots: Map<string, XmlNode>
   /** ?? API ?? ????method/path ??????*/
   resolveApi: (raw: string) => MpApiBinding | null
   /** ?? Page.data ??API ???? */
@@ -909,10 +1134,35 @@ type RenderCtx = {
   dataFieldNames: string[]
   /** LinearLayout ????match_parent ? flex:1 */
   parentFlex?: 'row' | 'column'
+  /** 父节点为 RelativeLayout：子节点一律 absolute，且不吃 flexParent */
+  parentIsRelative?: boolean
+  /**
+   * 处在 overflow=scroll 的纵向内容列内：子项需 flex-shrink:0，
+   * 否则 scroll-view enable-flex 会把固定高度压扁
+   */
+  inScrollColumn?: boolean
   /** ?? gap?px?????? margin ????? flex gap ????? */
   flexGapPx?: number
   /** ???? flex ??????????????? gap margin? */
   isLastFlexChild?: boolean
+}
+
+/** 统一布局样式：RelativeLayout 子节点带 isRelativeChild */
+function layoutAttrStyle(
+  attrs: Record<string, string>,
+  ctx: RenderCtx,
+  options?: { isComponent?: boolean },
+): string {
+  const base = attrStyle(attrs, {
+    flexParent: ctx.parentIsRelative ? undefined : ctx.parentFlex,
+    isRelativeChild: Boolean(ctx.parentIsRelative),
+    isComponent: options?.isComponent,
+  })
+  // 纵向滚动列内禁止被 flex 压缩（与 vue3 shrink-0 / 编辑器一致）
+  if (ctx.inScrollColumn && ctx.parentFlex !== 'row') {
+    return mergeStyle(base, 'flex-shrink:0')
+  }
+  return base
 }
 
 function pad(n: number): string {
@@ -989,10 +1239,14 @@ export function renderNode(node: XmlNode, ctx: RenderCtx): string {
     const tagName = toComponentTag(id)
     ctx.usedComponents.set(id, `/components/${id}/index`)
     const config = ctx.componentConfigs.get(id)
+    const componentRoot = ctx.componentRoots.get(id)
+    const outOfFlow = Boolean(componentRoot && isOutOfFlowTree(componentRoot))
     const gapMargin = siblingGapMarginStyle(ctx, { everyItem: Boolean(repeat) })
     const spacing = spacingStyleFromAttrs(attrs)
     // virtualHost：padding/margin（含 gap 换算的兄弟边距）写在组件 style 上常不生效 → 外包一层 view
-    const useSpacingWrap = Boolean(spacing) || Boolean(gapMargin)
+    // Modal-only 组件脱离文档流：不外包、不吃 flex
+    const useSpacingWrap =
+      !outOfFlow && (Boolean(spacing) || Boolean(gapMargin))
     // 外包时 wx:for 必须在 wrapper 上，否则边距只包一层、列表项之间仍无 gap
     const propAttrs: string[] = useSpacingWrap ? [] : [...forAttrs]
     for (const [key, value] of Object.entries(attrs)) {
@@ -1049,25 +1303,38 @@ export function renderNode(node: XmlNode, ctx: RenderCtx): string {
         propAttrs.push(`${key}="${escapeXml(value)}"`)
       }
     }
-    const layoutStyle = withSiblingGap(
-      mergeStyle(
-        attrStyle(attrs, { flexParent: ctx.parentFlex, isComponent: true }),
-      ),
-      ctx,
-      { everyItem: Boolean(repeat) },
-    )
-    const hostStyle = useSpacingWrap
-      ? layoutStyle.includes('flex:1') || /(?:^|;)height:0(?:;|$)/.test(layoutStyle)
-        ? 'width:100%;height:100%;min-height:0;box-sizing:border-box'
-        : 'width:100%;height:auto;box-sizing:border-box'
-      : layoutStyle
+    const layoutStyle = outOfFlow
+      ? OUT_OF_FLOW_HOST_STYLE
+      : withSiblingGap(
+          mergeStyle(
+            layoutAttrStyle(attrs, ctx, { isComponent: true }),
+          ),
+          ctx,
+          { everyItem: Boolean(repeat) },
+        )
+    const hostStyle = outOfFlow
+      ? OUT_OF_FLOW_HOST_STYLE
+      : useSpacingWrap
+        ? layoutStyle.includes('flex:1') || /(?:^|;)height:0(?:;|$)/.test(layoutStyle)
+          ? 'width:100%;height:100%;min-height:0;box-sizing:border-box'
+          : 'width:100%;height:auto;box-sizing:border-box'
+        : layoutStyle
     if (hostStyle) propAttrs.push(`style="${escapeXml(hostStyle)}"`)
     propAttrs.push(...visibilityWxmlAttrs(attrs))
+    // 组件声明的自定义事件：select="[{emit...}]" → bind:select
+    for (const evt of config?.events ?? []) {
+      const evtName = evt.name?.trim()
+      if (!evtName) continue
+      propAttrs.push(
+        ...collectComponentCustomEventAttrs(evtName, attrs[evtName], ctx),
+      )
+    }
     const tagIndent = ctx.indent + (useSpacingWrap ? 1 : 0)
     const inner = renderChildren(node.children, {
       ...ctx,
       indent: tagIndent + 1,
       parentFlex: undefined,
+      parentIsRelative: false,
       flexGapPx: undefined,
     })
     const open = openTag(tagName, propAttrs, tagIndent)
@@ -1102,7 +1369,7 @@ function renderWidget(
   const vis = visibilityWxmlAttrs(attrs)
 
   if (node.tag === 'Swiper') {
-    const base = attrStyle(attrs, { flexParent: ctx.parentFlex })
+    const base = layoutAttrStyle(attrs, ctx)
     const style = mergeStyle(
       base,
       base.includes('width:') ? null : 'width:100%',
@@ -1122,7 +1389,13 @@ function renderWidget(
     const slides = node.children
       .filter((c) => c.tag !== '#text')
       .map((child) => {
-        const inner = renderNode(child, { ...ctx, indent: ctx.indent + 2 })
+        const inner = renderNode(child, {
+          ...ctx,
+          indent: ctx.indent + 2,
+          // swiper-item 不是 flex 容器；勿继承外层 LinearLayout 的 parentFlex
+          parentFlex: undefined,
+          parentIsRelative: false,
+        })
         return `${pad(ctx.indent + 1)}<swiper-item>\n${inner}\n${pad(ctx.indent + 1)}</swiper-item>`
       })
       .filter(Boolean)
@@ -1154,7 +1427,7 @@ function renderWidget(
     const activeExpr = bindingToActiveExpr(attrs.active || '')
     const overflow = (attrs.overflow || '').toLowerCase()
     const style = mergeStyle(
-      attrStyle(attrs, { flexParent: ctx.parentFlex }),
+      layoutAttrStyle(attrs, ctx),
       'position:relative',
       'min-height:0',
       'overflow:hidden',
@@ -1191,7 +1464,7 @@ function renderWidget(
   if (node.tag === 'Text') {
     const raw = attrs.text || node.text || ''
     const content = bindingAwareEscape(toWxmlText(raw))
-    const style = mergeStyle(attrStyle(attrs, { flexParent: ctx.parentFlex }))
+    const style = mergeStyle(layoutAttrStyle(attrs, ctx))
     const clickAttrs = collectClickEventAttrs(attrs, ctx)
     const open = openTag(
       'text',
@@ -1205,7 +1478,7 @@ function renderWidget(
     const raw = attrs.text || 'Button'
     const content = bindingAwareEscape(toWxmlText(raw))
     const style = mergeStyle(
-      attrStyle(attrs, { flexParent: ctx.parentFlex }),
+      layoutAttrStyle(attrs, ctx),
       'display:flex',
       'align-items:center',
       'justify-content:center',
@@ -1228,7 +1501,7 @@ function renderWidget(
   if (node.tag === 'Input') {
     const value = attrs.value?.trim() || ''
     const placeholder = attrs.placeholder || ''
-    const style = mergeStyle(attrStyle(attrs, { flexParent: ctx.parentFlex }))
+    const style = mergeStyle(layoutAttrStyle(attrs, ctx))
     const valueAttr = isBinding(value)
       ? `value="{{${normalizeExpr(value.replace(/^\{|\}$/g, ''))}}}"`
       : `value="${escapeXml(value)}"`
@@ -1248,7 +1521,7 @@ function renderWidget(
 
   if (node.tag === 'Image') {
     const src = attrs.src?.trim() || ''
-    const style = mergeStyle(attrStyle(attrs, { flexParent: ctx.parentFlex }))
+    const style = mergeStyle(layoutAttrStyle(attrs, ctx))
     const mode =
       attrs.objectFit === 'contain'
         ? 'aspectFit'
@@ -1299,7 +1572,7 @@ function renderWidget(
       a.startsWith('bindtap=') ? a.replace(/^bindtap=/, 'catchtap=') : a,
     )
     const imageStyle = mergeStyle(
-      attrStyle(attrsNoRotate, { flexParent: ctx.parentFlex }),
+      layoutAttrStyle(attrsNoRotate, ctx),
       rotateFns.length ? 'width:100%;height:100%' : dimStyle,
     )
     const srcAttr = isBinding(iconId)
@@ -1331,7 +1604,7 @@ function renderWidget(
     delete layoutOnly.width
     delete layoutOnly.height
     const wrapStyle = mergeStyle(
-      attrStyle(layoutOnly, { flexParent: ctx.parentFlex }),
+      layoutAttrStyle(layoutOnly, ctx),
       dimStyle,
       'display:inline-flex',
       'flex-shrink:0',
@@ -1354,7 +1627,7 @@ function renderWidget(
     isScroll && shouldUseNativeCustomRefresher(attrs, ctx)
   const baseStyle = withSiblingGap(
     mergeStyle(
-      attrStyle(attrs, { flexParent: ctx.parentFlex }),
+      layoutAttrStyle(attrs, ctx),
       isLinear && !useNativeRefresher ? flexStyle(attrs) : null,
       isRelative ? 'position:relative;box-sizing:border-box' : null,
       isScroll && !isLinear ? 'height:100%' : null,
@@ -1426,6 +1699,10 @@ function renderWidget(
     ...ctx,
     indent: ctx.indent + (isRelative ? 2 : 1),
     parentFlex: childFlex,
+    parentIsRelative: isRelative,
+    inScrollColumn:
+      Boolean(ctx.inScrollColumn) ||
+      (isScroll && attrs.orientation !== 'horizontal'),
     flexGapPx: isLinear ? parseGapPx(attrs) : undefined,
   }
   const contentInner = renderChildren(scrollChildren, childCtx)
@@ -1510,12 +1787,21 @@ function pageDataObject(data: PageData | undefined): Record<string, unknown> {
   return out
 }
 
+/** statusBar.textStyle="{statusBarColor}" → 字段名；静态 white/black 返回 null */
+function parseStatusBarTextStyleField(raw: string | undefined): string | null {
+  if (!raw?.trim()) return null
+  const t = raw.trim()
+  const m = t.match(/^\{([A-Za-z_$][\w$]*)\}$/)
+  return m ? m[1]! : null
+}
+
 export function generatePageFiles(options: {
   pageId: string
   title: string
   root: XmlNode | null
   data: PageData
   componentConfigs: Map<string, ComponentConfig>
+  componentRoots?: Map<string, XmlNode>
   resolveApi: (raw: string) => MpApiBinding | null
   /** ?? statusBar ???????????? */
   statusBar?: {
@@ -1534,6 +1820,7 @@ export function generatePageFiles(options: {
     usedComponents,
     kind: 'page',
     componentConfigs: options.componentConfigs,
+    componentRoots: options.componentRoots ?? new Map(),
     resolveApi: options.resolveApi,
     apiData,
     apiDataSeq: { n: 0 },
@@ -1562,10 +1849,38 @@ export function generatePageFiles(options: {
   const eventCode = pageHandlers
     .map((h) => `  ${h.name}(e) {\n${h.body}\n  }`)
     .join(',\n')
-  const extraHandlers = [syncCode, eventCode].filter(Boolean).join(',\n')
+
+  // 页面计算字段（标题栏颜色随滚动等）；Page 无 observers，靠 onLoad + setData 后手动重算
+  const { recomputeMethod, hasComputed } = generateComputedObservers({
+    fields: options.data?.fields ?? [],
+    propNames: [],
+  })
+  const statusBarTextField = parseStatusBarTextStyleField(options.statusBar?.textStyle)
+  let recomputeForPage = recomputeMethod
+  if (hasComputed && statusBarTextField) {
+    // 在 setData(patch) 之后同步系统状态栏前景色（自定义导航仍生效）
+    recomputeForPage = recomputeMethod.replace(
+      /    this\.setData\(patch\)\n  \}/,
+      [
+        `    this.setData(patch)`,
+        `    try {`,
+        `      var __sb = patch[${JSON.stringify(statusBarTextField)}]`,
+        `      if (__sb === undefined) __sb = that.data[${JSON.stringify(statusBarTextField)}]`,
+        `      var __front = (__sb === 'black' || __sb === '#000000') ? '#000000' : '#ffffff'`,
+        `      wx.setNavigationBarColor({ frontColor: __front, backgroundColor: '#ffffff' })`,
+        `    } catch (err) {}`,
+        `  }`,
+      ].join('\n'),
+    )
+  }
+
+  const extraHandlers = [syncCode, eventCode, hasComputed ? recomputeForPage : '']
+    .filter(Boolean)
+    .join(',\n')
   const js = `Page({
   data: ${JSON.stringify(dataObj, null, 2).replace(/\n/g, '\n  ')},
-  onLoad() {},
+  onLoad() {${hasComputed ? '\n    this.__recomputeComputed()' : ''}
+  },
   onShow() {},
   onReady() {},${extraHandlers ? `\n${extraHandlers},` : ''}
 })
@@ -1589,6 +1904,9 @@ export function generatePageFiles(options: {
     typeof sb?.textStyle === 'string' ? sb.textStyle.trim().toLowerCase() : ''
   if (textStyleRaw === 'white' || textStyleRaw === 'black') {
     json.navigationBarTextStyle = textStyleRaw
+  } else if (statusBarTextField) {
+    // 动态绑定：初始用 white（沉浸式常见），滚动后由 __recomputeComputed 更新
+    json.navigationBarTextStyle = 'white'
   }
 
   // navigationBar === false ??????????
@@ -1622,6 +1940,8 @@ export function generateComponentFiles(options: {
   config: ComponentConfig
   methods: PageMethod[]
   lifecycle?: LifecycleConfig
+  componentConfigs?: Map<string, ComponentConfig>
+  componentRoots?: Map<string, XmlNode>
 }): { wxml: string; wxss: string; js: string; json: string } {
   const usedComponents = new Map<string, string>()
   const customMethods = (options.methods ?? []).filter((m) => !m.builtin)
@@ -1635,7 +1955,8 @@ export function generateComponentFiles(options: {
     indent: 0,
     usedComponents,
     kind: 'component',
-    componentConfigs: new Map(),
+    componentConfigs: options.componentConfigs ?? new Map(),
+    componentRoots: options.componentRoots ?? new Map(),
     resolveApi: () => null,
     apiData: {},
     apiDataSeq: { n: 0 },

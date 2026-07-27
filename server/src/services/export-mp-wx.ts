@@ -170,8 +170,12 @@ export async function exportMpWxProject(
   const resolveApi = await preloadApiResolver(projectPath)
 
   const componentConfigs = new Map<string, ComponentConfig>()
+  const componentRoots = new Map<string, XmlNode>()
   for (const c of componentDetails) {
     componentConfigs.set(c.id, c.config)
+    const rootNodes = migrateLegacyMaskNodes(parseXml(c.xml))
+    const root = findRootNode(rootNodes)
+    if (root) componentRoots.set(c.id, root)
   }
 
   const scaffold = scaffoldMpWxFiles({
@@ -190,6 +194,7 @@ export async function exportMpWxProject(
       root,
       data: page.data,
       componentConfigs,
+      componentRoots,
       resolveApi,
       statusBar: page.config.statusBar,
     })
@@ -214,6 +219,8 @@ export async function exportMpWxProject(
       config: component.config,
       methods,
       lifecycle,
+      componentConfigs,
+      componentRoots,
     })
     const base = `components/${component.id}/index`
     await writeProjectFile(outputPath, `${base}.wxml`, files.wxml)

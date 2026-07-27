@@ -8,15 +8,15 @@
   </view>
   <slot name="header" />
   <slot>
-    <view style="width:100%;height:auto;padding:16rpx;display:flex;flex-direction:column">
-      <view wx:for="{{data}}" wx:for-item="item" wx:for-index="index" wx:key="index" style="width:100%;height:auto;padding:20rpx;background:#ffffff;display:flex;flex-direction:column">
-        <text style="width:100%;height:auto;background:#ffffff;color:#303133;font-size:28rpx">{{item}}</text>
+    <view style="width:100%;height:auto;padding:16rpx;flex-shrink:0;display:flex;flex-direction:column">
+      <view wx:for="{{data}}" wx:for-item="item" wx:for-index="index" wx:key="index" style="width:100%;height:auto;padding:20rpx;background:#ffffff;flex-shrink:0;display:flex;flex-direction:column">
+        <text style="width:100%;height:auto;background:#ffffff;color:#303133;font-size:28rpx;flex-shrink:0">{{item}}</text>
       </view>
     </view>
   </slot>
-  <view style="width:100%;height:auto;display:flex;flex-direction:column;align-items:center;justify-content:center">
-    <text wx:if="{{(!hasNext && !loading)}}" style="width:auto;height:auto;margin-top:20rpx;margin-bottom:20rpx;color:#303133;font-size:28rpx">{{bottomText}}</text>
-    <view wx:if="{{(loading && !refreshing && hasNext)}}" style="width:100%;height:auto;padding:16rpx;display:flex;flex-direction:row;align-items:center;justify-content:center">
+  <view style="width:100%;height:auto;flex-shrink:0;display:flex;flex-direction:column;align-items:center;justify-content:center">
+    <text wx:if="{{(!hasNext && !loading)}}" style="width:auto;height:auto;margin-top:20rpx;margin-bottom:20rpx;color:#303133;font-size:28rpx;flex-shrink:0">{{bottomText}}</text>
+    <view wx:if="{{(loading && !refreshing && hasNext)}}" style="width:100%;height:auto;padding:16rpx;flex-shrink:0;display:flex;flex-direction:row;align-items:center;justify-content:center">
       <image src="/assets/icons/loading.svg" mode="aspectFit" style="width:auto;height:auto;color:#303133;font-size:40rpx;width:40rpx;height:40rpx" />
       <text style="width:auto;height:auto;color:#303133;font-size:28rpx">加载中...</text>
     </view>

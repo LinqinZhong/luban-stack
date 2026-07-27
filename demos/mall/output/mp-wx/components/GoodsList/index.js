@@ -24,6 +24,16 @@ Component({
   },
   },
   methods: {
+  __onEvt_0(e) {
+    var __payload = (e && e.detail) || {}
+    this.triggerEvent("select", { goods: __payload.goods })
+    if (typeof this.__recomputeComputed === 'function') this.__recomputeComputed()
+  },
+  __onEvt_1(e) {
+    var __payload = (e && e.detail) || {}
+    this.triggerEvent("select", { goods: __payload.goods })
+    if (typeof this.__recomputeComputed === 'function') this.__recomputeComputed()
+  },
   __recomputeComputed: function () {
     var that = this
     var $props = {}

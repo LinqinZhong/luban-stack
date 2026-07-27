@@ -1,12 +1,14 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, provide, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, provide, ref, watch } from 'vue'
 import { Delete, Plus, RefreshRight } from '@element-plus/icons-vue'
 import { colorPickState } from '../../composables/useColorPick'
 import {
   BADGE_HOST_KEY,
+  CANVAS_TOOL_MODE_KEY,
   createModalStack,
   MODAL_HOST_KEY,
   MODAL_STACK_KEY,
+  type CanvasToolMode,
   type ModalStackApi,
 } from '../../composables/useModalStack'
 import { CANVAS_RUNTIME_KEY } from '../../composables/useCanvasRuntime'
@@ -80,6 +82,8 @@ const emit = defineEmits<{
 const fallbackModalStack = createModalStack()
 const modalHostRef = ref<HTMLElement | null>(null)
 const badgeHostRef = ref<HTMLElement | null>(null)
+/** 选中工具 / 测量工具 */
+const toolMode = ref<CanvasToolMode>('select')
 
 /** 画布场景：H5 / 小程序 */
 const scene = defineModel<'h5' | 'miniprogram'>('scene', { default: 'h5' })
@@ -87,6 +91,7 @@ const scene = defineModel<'h5' | 'miniprogram'>('scene', { default: 'h5' })
 provide(MODAL_STACK_KEY, props.modalStack ?? fallbackModalStack)
 provide(MODAL_HOST_KEY, modalHostRef)
 provide(BADGE_HOST_KEY, badgeHostRef)
+provide(CANVAS_TOOL_MODE_KEY, toolMode)
 provide(CANVAS_RUNTIME_KEY, {
   getDeviceInfo: () =>
     getDeviceInfo({
@@ -146,6 +151,8 @@ const hoveredNodeId = ref('')
 const phoneFrameStyle = computed(() => {
   const style: Record<string, string> = {
     width: `${props.canvasWidth}px`,
+    // 辅助边框/标注反缩放用（与 transform scale 配套）
+    '--canvas-zoom': String(zoom.value || 1),
   }
   if (typeof props.canvasHeight === 'number' && Number.isFinite(props.canvasHeight)) {
     style.height = `${props.canvasHeight}px`
@@ -156,6 +163,300 @@ const phoneFrameStyle = computed(() => {
   }
   return style
 })
+
+type MeasureRect = { left: number; top: number; right: number; bottom: number }
+type MeasureGuide = {
+  side: 'left' | 'right' | 'top' | 'bottom' | 'h' | 'v'
+  value: number
+  left: number
+  top: number
+  width: number
+  height: number
+}
+/** 占满画布的对齐虚线（相对 stage 坐标） */
+type AlignGuide = {
+  axis: 'h' | 'v'
+  /** h → top；v → left（相对 stage） */
+  pos: number
+  /** selected=黄，hovered=粉 */
+  tone: 'selected' | 'hovered'
+}
+
+const measureGuides = ref<MeasureGuide[]>([])
+const alignGuides = ref<AlignGuide[]>([])
+const measureSizeLabel = ref<{ text: string; left: number; top: number } | null>(null)
+let measureSyncRaf = 0
+let measureLiveRaf = 0
+
+const showMeasureOverlay = computed(
+  () =>
+    Boolean(props.selectable) &&
+    toolMode.value === 'measure' &&
+    Boolean(props.selectedId),
+)
+
+function toLocalRect(
+  host: HTMLElement,
+  hr: DOMRect,
+  rect: DOMRect,
+): MeasureRect {
+  const scaleX = host.offsetWidth / hr.width
+  const scaleY = host.offsetHeight / hr.height
+  return {
+    left: (rect.left - hr.left) * scaleX,
+    top: (rect.top - hr.top) * scaleY,
+    right: (rect.right - hr.left) * scaleX,
+    bottom: (rect.bottom - hr.top) * scaleY,
+  }
+}
+
+function rectContains(outer: MeasureRect, inner: MeasureRect) {
+  return (
+    outer.left <= inner.left + 0.5 &&
+    outer.right >= inner.right - 0.5 &&
+    outer.top <= inner.top + 0.5 &&
+    outer.bottom >= inner.bottom - 0.5
+  )
+}
+
+function midY(r: MeasureRect) {
+  return (r.top + r.bottom) / 2
+}
+
+function midX(r: MeasureRect) {
+  return (r.left + r.right) / 2
+}
+
+function smallerByHeight(a: MeasureRect, b: MeasureRect) {
+  return a.bottom - a.top <= b.bottom - b.top ? a : b
+}
+
+function smallerByWidth(a: MeasureRect, b: MeasureRect) {
+  return a.right - a.left <= b.right - b.left ? a : b
+}
+
+function yOverlap(a: MeasureRect, b: MeasureRect) {
+  return a.top < b.bottom - 0.5 && a.bottom > b.top + 0.5
+}
+
+function xOverlap(a: MeasureRect, b: MeasureRect) {
+  return a.left < b.right - 0.5 && a.right > b.left + 0.5
+}
+
+/** 视口坐标 → stage 本地坐标（对齐虚线挂在 stage 上，占满画布） */
+function viewportToStage(stage: HTMLElement, clientX: number, clientY: number) {
+  const sr = stage.getBoundingClientRect()
+  if (sr.width < 1 || sr.height < 1) return { x: 0, y: 0 }
+  const scaleX = stage.clientWidth / sr.width
+  const scaleY = stage.clientHeight / sr.height
+  return {
+    x: (clientX - sr.left) * scaleX,
+    y: (clientY - sr.top) * scaleY,
+  }
+}
+
+/** 内嵌：小节点相对大节点四边间距 */
+function containmentGuides(small: MeasureRect, large: MeasureRect): MeasureGuide[] {
+  const next: MeasureGuide[] = []
+  const leftGap = small.left - large.left
+  if (leftGap >= 1) {
+    next.push({
+      side: 'left',
+      value: Math.round(leftGap),
+      left: large.left,
+      top: midY(small),
+      width: leftGap,
+      height: 0,
+    })
+  }
+  const rightGap = large.right - small.right
+  if (rightGap >= 1) {
+    next.push({
+      side: 'right',
+      value: Math.round(rightGap),
+      left: small.right,
+      top: midY(small),
+      width: rightGap,
+      height: 0,
+    })
+  }
+  const topGap = small.top - large.top
+  if (topGap >= 1) {
+    next.push({
+      side: 'top',
+      value: Math.round(topGap),
+      left: midX(small),
+      top: large.top,
+      width: 0,
+      height: topGap,
+    })
+  }
+  const bottomGap = large.bottom - small.bottom
+  if (bottomGap >= 1) {
+    next.push({
+      side: 'bottom',
+      value: Math.round(bottomGap),
+      left: midX(small),
+      top: small.bottom,
+      width: 0,
+      height: bottomGap,
+    })
+  }
+  return next
+}
+
+type GuidesResult = { distances: MeasureGuide[]; aligns: AlignGuide[] }
+
+/**
+ * 选中(a) ↔ 悬停(b) 间距；
+ * 距离线在垂直/水平方向对不齐时，补占满画布的对齐虚线。
+ * selectedEl/hoveredEl 用于把边换算到 stage 坐标。
+ */
+function guidesBetween(
+  a: MeasureRect,
+  b: MeasureRect,
+  stage: HTMLElement,
+  selectedEl: HTMLElement,
+  hoveredEl: HTMLElement,
+): GuidesResult {
+  if (rectContains(a, b) || rectContains(b, a)) {
+    const small = rectContains(a, b) ? b : a
+    const large = rectContains(a, b) ? a : b
+    return { distances: containmentGuides(small, large), aligns: [] }
+  }
+
+  const distances: MeasureGuide[] = []
+  const aligns: AlignGuide[] = []
+  const y = midY(smallerByHeight(a, b))
+  const x = midX(smallerByWidth(a, b))
+
+  const aBox = selectedEl.getBoundingClientRect()
+  const bBox = hoveredEl.getBoundingClientRect()
+
+  const pushAlignV = (clientX: number, tone: 'selected' | 'hovered') => {
+    const { x: sx } = viewportToStage(stage, clientX, 0)
+    aligns.push({ axis: 'v', pos: sx, tone })
+  }
+  const pushAlignH = (clientY: number, tone: 'selected' | 'hovered') => {
+    const { y: sy } = viewportToStage(stage, 0, clientY)
+    aligns.push({ axis: 'h', pos: sy, tone })
+  }
+
+  if (a.right < b.left - 0.5) {
+    const gap = b.left - a.right
+    distances.push({ side: 'h', value: Math.round(gap), left: a.right, top: y, width: gap, height: 0 })
+    // 垂直方向错开：距离线够不到另一元素边，拉满画布虚线
+    if (!yOverlap(a, b)) {
+      pushAlignV(aBox.right, 'selected')
+      pushAlignV(bBox.left, 'hovered')
+    }
+  } else if (b.right < a.left - 0.5) {
+    const gap = a.left - b.right
+    distances.push({ side: 'h', value: Math.round(gap), left: b.right, top: y, width: gap, height: 0 })
+    if (!yOverlap(a, b)) {
+      pushAlignV(bBox.right, 'hovered')
+      pushAlignV(aBox.left, 'selected')
+    }
+  }
+
+  if (a.bottom < b.top - 0.5) {
+    const gap = b.top - a.bottom
+    distances.push({ side: 'v', value: Math.round(gap), left: x, top: a.bottom, width: 0, height: gap })
+    if (!xOverlap(a, b)) {
+      pushAlignH(aBox.bottom, 'selected')
+      pushAlignH(bBox.top, 'hovered')
+    }
+  } else if (b.bottom < a.top - 0.5) {
+    const gap = a.top - b.bottom
+    distances.push({ side: 'v', value: Math.round(gap), left: x, top: b.bottom, width: 0, height: gap })
+    if (!xOverlap(a, b)) {
+      pushAlignH(bBox.bottom, 'hovered')
+      pushAlignH(aBox.top, 'selected')
+    }
+  }
+
+  return { distances, aligns }
+}
+
+function syncMeasureOverlay() {
+  const host = badgeHostRef.value
+  const phone = phoneRef.value
+  const stage = stageRef.value
+  if (!host || !phone || !showMeasureOverlay.value) {
+    measureGuides.value = []
+    alignGuides.value = []
+    measureSizeLabel.value = null
+    return
+  }
+
+  const selectedEl = phone.querySelector('.content-box.selected') as HTMLElement | null
+  if (!selectedEl) {
+    measureGuides.value = []
+    alignGuides.value = []
+    measureSizeLabel.value = null
+    return
+  }
+
+  const hr = host.getBoundingClientRect()
+  if (hr.width < 1 || hr.height < 1) {
+    measureGuides.value = []
+    alignGuides.value = []
+    measureSizeLabel.value = null
+    return
+  }
+
+  const selected = toLocalRect(host, hr, selectedEl.getBoundingClientRect())
+  const width = Math.max(0, Math.round(selected.right - selected.left))
+  const height = Math.max(0, Math.round(selected.bottom - selected.top))
+  const inv = 1 / (zoom.value || 1)
+  measureSizeLabel.value = {
+    text: `${width} × ${height}`,
+    left: (selected.left + selected.right) / 2,
+    top: selected.bottom + 4 * inv,
+  }
+
+  const canDistance =
+    Boolean(hoveredNodeId.value) &&
+    hoveredNodeId.value !== props.selectedId
+  if (!canDistance || !stage) {
+    measureGuides.value = []
+    alignGuides.value = []
+    return
+  }
+
+  const hoveredEl = phone.querySelector('.content-box.hovered') as HTMLElement | null
+  if (!hoveredEl) {
+    measureGuides.value = []
+    alignGuides.value = []
+    return
+  }
+
+  const hovered = toLocalRect(host, hr, hoveredEl.getBoundingClientRect())
+  const result = guidesBetween(selected, hovered, stage, selectedEl, hoveredEl)
+  measureGuides.value = result.distances
+  alignGuides.value = result.aligns
+}
+
+function scheduleMeasureSync() {
+  if (measureSyncRaf) cancelAnimationFrame(measureSyncRaf)
+  measureSyncRaf = requestAnimationFrame(() => {
+    measureSyncRaf = 0
+    syncMeasureOverlay()
+  })
+}
+
+function startMeasureLiveSync() {
+  if (measureLiveRaf) return
+  const tick = () => {
+    if (!showMeasureOverlay.value) {
+      measureLiveRaf = 0
+      return
+    }
+    syncMeasureOverlay()
+    measureLiveRaf = requestAnimationFrame(tick)
+  }
+  measureLiveRaf = requestAnimationFrame(tick)
+}
 
 const phoneFitContent = computed(
   () => props.canvasHeight === 'auto' || typeof props.canvasHeight === 'number',
@@ -244,7 +545,7 @@ function handleStatusBarSelect(event: MouseEvent) {
 }
 
 const worldStyle = computed(() => ({
-  transform: `translate(${panX.value}px, ${panY.value}px) scale(${zoom.value})`,
+  transform: `translate(${panX.value}px, ${panY.value}px) scale(${zoom.value || 1})`,
   transformOrigin: 'center top',
 }))
 
@@ -269,10 +570,29 @@ function clearHover() {
 }
 
 function handlePhoneClick(event: MouseEvent) {
-  if (!colorPickState.picking.value) return
-  event.preventDefault()
-  event.stopPropagation()
-  colorPickState.pickFromPoint(event.clientX, event.clientY)
+  if (colorPickState.picking.value) {
+    event.preventDefault()
+    event.stopPropagation()
+    colorPickState.pickFromPoint(event.clientX, event.clientY)
+    return
+  }
+  // 点到手机框内未被控件拦截的区域 → 取消选中
+  if (props.selectable) {
+    emit('select', '')
+  }
+}
+
+/** 点击画布空白（网格区域等）取消选中 */
+function handleStageClick(event: MouseEvent) {
+  if (!props.selectable) return
+  if (colorPickState.picking.value) return
+  const el = event.target as HTMLElement | null
+  if (!el) return
+  // 工具栏 / 状态条 / 取色层等
+  if (el.closest('.color-pick-ignore')) return
+  // 控件自身会 stopPropagation；此处再兜底
+  if (el.closest('.select-shell')) return
+  emit('select', '')
 }
 
 /** ??????????????????????????? */
@@ -345,9 +665,9 @@ function clampZoom(value: number) {
 }
 
 function onStageWheel(event: WheelEvent) {
-  if (!event.ctrlKey && !event.metaKey) return
+  // 编辑态：滚轮直接缩放；预览态仍需 Ctrl/⌘，避免挡住页面滚动
+  if (!props.selectable && !event.ctrlKey && !event.metaKey) return
   event.preventDefault()
-  // ?????????????????
   const stage = stageRef.value
   if (!stage) {
     const factor = event.deltaY > 0 ? 0.9 : 1 / 0.9
@@ -362,10 +682,9 @@ function onStageWheel(event: WheelEvent) {
   const nextZoom = clampZoom(oldZoom * factor)
   if (nextZoom === oldZoom) return
 
-  // world ? center top ???????? x = stageWidth/2??? y = 0??? padding ?????
+  // world 以 center top 为原点：x = stageWidth/2，y = 0
   const ox = rect.width / 2
   const oy = 0
-  // ????????????????????????
   const dx = cx - ox - panX.value
   const dy = cy - oy - panY.value
   const ratio = nextZoom / oldZoom
@@ -427,12 +746,35 @@ function onStageAuxClick(event: MouseEvent) {
 
 onMounted(() => {
   stageRef.value?.addEventListener('wheel', onStageWheel, { passive: false })
+  window.addEventListener('resize', scheduleMeasureSync)
+  window.addEventListener('scroll', scheduleMeasureSync, true)
 })
 
 onBeforeUnmount(() => {
   endPan()
   stageRef.value?.removeEventListener('wheel', onStageWheel)
+  window.removeEventListener('resize', scheduleMeasureSync)
+  window.removeEventListener('scroll', scheduleMeasureSync, true)
+  if (measureSyncRaf) cancelAnimationFrame(measureSyncRaf)
+  if (measureLiveRaf) cancelAnimationFrame(measureLiveRaf)
+  measureLiveRaf = 0
 })
+
+watch(
+  [
+    showMeasureOverlay,
+    () => props.selectedId,
+    hoveredNodeId,
+    zoom,
+    toolMode,
+  ],
+  async () => {
+    await nextTick()
+    scheduleMeasureSync()
+    if (showMeasureOverlay.value) startMeasureLiveSync()
+  },
+  { flush: 'post', immediate: true },
+)
 </script>
 
 <template>
@@ -446,6 +788,7 @@ onBeforeUnmount(() => {
     @pointercancel="onStagePointerUp"
     @mousedown="onStageMouseDown"
     @auxclick="onStageAuxClick"
+    @click="handleStageClick"
   >
     <IconSprite
       v-if="iconLibrary"
@@ -589,42 +932,74 @@ onBeforeUnmount(() => {
           show-icon
           :closable="false"
         />
-        <XmlNodeView
-          v-else-if="parsed.root"
-          :node="parsed.root"
-          :node-id="rootId"
-          :selected-id="selectable ? selectedId : ''"
-          :hovered-id="hoveredNodeId"
-          :selectable="selectable"
-          :interact-enabled="!selectable"
-          :expand-repeat="expandRepeat"
-          :icon-library="iconLibrary"
-          :page-data="pageData"
-          :hidden-node-ids="hiddenNodeIds"
-          :component-map="componentMap"
-          :dollar-props="dollarProps"
-          :route-params="routeParams"
-          :preview-lifecycle-gate="previewLifecycleGate"
-          is-root
-          @select="emit('select', $event)"
-          @hover="handleHover"
-          @open-repeat="emit('open-repeat', $event)"
-          @add-window="emit('add-window', $event)"
-          @interact="emit('interact', $event)"
-        />
+        <!-- 隔离页面内容的 z-index，避免绝对定位控件压过角标/光标 -->
+        <div v-else-if="parsed.root" class="phone-page-layer">
+          <XmlNodeView
+            :node="parsed.root"
+            :node-id="rootId"
+            :selected-id="selectable ? selectedId : ''"
+            :hovered-id="hoveredNodeId"
+            :selectable="selectable"
+            :interact-enabled="!selectable"
+            :expand-repeat="expandRepeat"
+            :icon-library="iconLibrary"
+            :page-data="pageData"
+            :hidden-node-ids="hiddenNodeIds"
+            :component-map="componentMap"
+            :dollar-props="dollarProps"
+            :route-params="routeParams"
+            :preview-lifecycle-gate="previewLifecycleGate"
+            is-root
+            @select="emit('select', $event)"
+            @hover="handleHover"
+            @open-repeat="emit('open-repeat', $event)"
+            @add-window="emit('add-window', $event)"
+            @interact="emit('interact', $event)"
+          />
+        </div>
         <div ref="modalHostRef" class="phone-modal-host" />
-        <!-- ?????????????????/?????????? -->
         <div
           v-if="selectable"
           class="phone-screen-frame"
           aria-hidden="true"
         />
-        <!-- ????????????????? -->
         <div
           v-if="selectable"
           ref="badgeHostRef"
           class="phone-badge-host"
-        />
+        >
+          <div
+            v-if="showMeasureOverlay"
+            class="distance-guides"
+            aria-hidden="true"
+          >
+            <div
+              v-for="(g, i) in measureGuides"
+              :key="`${g.side}-${i}`"
+              class="distance-guide"
+              :class="g.side"
+              :style="{
+                left: `${g.left}px`,
+                top: `${g.top}px`,
+                width: g.width ? `${g.width}px` : undefined,
+                height: g.height ? `${g.height}px` : undefined,
+              }"
+            >
+              <span class="distance-line" />
+              <span class="distance-label">{{ g.value }}</span>
+            </div>
+            <div
+              v-if="measureSizeLabel"
+              class="size-label"
+              :style="{
+                left: `${measureSizeLabel.left}px`,
+                top: `${measureSizeLabel.top}px`,
+              }"
+            >
+              {{ measureSizeLabel.text }}
+            </div>
+          </div>
+        </div>
         <Transition name="phone-toast">
           <div
             v-if="toast?.message"
@@ -645,7 +1020,64 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
+    <div
+      v-if="alignGuides.length"
+      class="align-guides color-pick-ignore"
+      aria-hidden="true"
+    >
+      <div
+        v-for="(g, i) in alignGuides"
+        :key="`${g.axis}-${g.tone}-${i}`"
+        class="align-guide"
+        :class="[g.axis, g.tone]"
+        :style="
+          g.axis === 'h'
+            ? { top: `${g.pos}px` }
+            : { left: `${g.pos}px` }
+        "
+      />
+    </div>
+
     <div class="stage-status color-pick-ignore">
+      <div
+        v-if="selectable"
+        class="scene-tabs tool-tabs"
+        role="tablist"
+        aria-label="画布工具"
+      >
+        <button
+          type="button"
+          role="tab"
+          class="scene-tab tool-tab"
+          :class="{ active: toolMode === 'select' }"
+          :aria-selected="toolMode === 'select'"
+          title="选择"
+          @click="toolMode = 'select'"
+        >
+          <svg class="tool-icon" viewBox="0 0 16 16" aria-hidden="true">
+            <path
+              fill="currentColor"
+              d="M3.2 1.4a.7.7 0 0 1 .76-.1l9.2 4.5a.7.7 0 0 1-.08 1.3L9.1 8.5l3.4 5.1a.7.7 0 0 1-.2.96l-1.35.9a.7.7 0 0 1-.96-.2L6.7 10.3l-2.5 2.4a.7.7 0 0 1-1.2-.46V2a.7.7 0 0 1 .2-.6Z"
+            />
+          </svg>
+        </button>
+        <button
+          type="button"
+          role="tab"
+          class="scene-tab tool-tab"
+          :class="{ active: toolMode === 'measure' }"
+          :aria-selected="toolMode === 'measure'"
+          title="测量"
+          @click="toolMode = 'measure'"
+        >
+          <svg class="tool-icon" viewBox="0 0 16 16" aria-hidden="true">
+            <path
+              fill="currentColor"
+              d="M1.6 11.8 11.8 1.6a1.4 1.4 0 0 1 2 2L3.6 13.8a1.4 1.4 0 0 1-2-2Zm9.3-8.6.7.7-1.1 1.1-.7-.7 1.1-1.1Zm-1.8 1.8.7.7-1.1 1.1-.7-.7 1.1-1.1Zm-1.8 1.8.7.7-1.1 1.1-.7-.7 1.1-1.1Zm-1.8 1.8.7.7-1.2 1.2-.7-.7 1.2-1.2Z"
+            />
+          </svg>
+        </button>
+      </div>
       <div class="scene-tabs" role="tablist" aria-label="画布场景">
         <button
           v-for="tab in sceneTabs"
@@ -660,7 +1092,10 @@ onBeforeUnmount(() => {
           {{ tab.label }}
         </button>
       </div>
-      <span class="zoom-label" title="Ctrl + 滚轮缩放">{{ zoomPercent }}%</span>
+      <span
+        class="zoom-label"
+        :title="selectable ? '滚轮缩放' : 'Ctrl + 滚轮缩放'"
+      >{{ zoomPercent }}%</span>
       <el-tooltip content="重置视图 · Ctrl+0" placement="left">
         <el-button
           class="pan-reset"
@@ -715,7 +1150,6 @@ onBeforeUnmount(() => {
   min-width: 100%;
   min-height: 100%;
   box-sizing: border-box;
-  will-change: transform;
 }
 
 .stage-toolbar {
@@ -795,6 +1229,17 @@ onBeforeUnmount(() => {
   font-weight: 600;
 }
 
+.tool-tab {
+  width: 28px;
+  padding: 0;
+}
+
+.tool-icon {
+  display: block;
+  width: 14px;
+  height: 14px;
+}
+
 .zoom-label {
   box-sizing: border-box;
   display: inline-flex;
@@ -841,8 +1286,8 @@ onBeforeUnmount(() => {
   pointer-events: none;
   z-index: 6;
   box-sizing: border-box;
-  outline: 2px solid transparent;
-  outline-offset: -2px;
+  outline: calc(1px / var(--canvas-zoom, 1)) solid transparent;
+  outline-offset: calc(-1px / var(--canvas-zoom, 1));
   transition: outline-color 0.12s ease;
 }
 
@@ -867,12 +1312,6 @@ onBeforeUnmount(() => {
   flex-shrink: 0;
 }
 
-.phone.status-bar-cover > :deep(.select-shell) {
-  /* 重叠时页面仍铺满手机框，状态栏浮层不占流 */
-  flex: 1 1 auto;
-  min-height: 0;
-}
-
 /* 微信原生标题栏（navigationBar） */
 .device-navigation-bar {
   flex-shrink: 0;
@@ -884,8 +1323,8 @@ onBeforeUnmount(() => {
   box-sizing: border-box;
   pointer-events: none;
   z-index: 6;
-  outline: 2px solid transparent;
-  outline-offset: -2px;
+  outline: calc(1px / var(--canvas-zoom, 1)) solid transparent;
+  outline-offset: calc(-1px / var(--canvas-zoom, 1));
   transition: outline-color 0.12s ease;
 }
 
@@ -1072,9 +1511,27 @@ onBeforeUnmount(() => {
   background: #111;
 }
 
-.phone.has-status-bar > :deep(.select-shell) {
+.phone.has-status-bar > .phone-page-layer > :deep(.select-shell) {
   flex: 1 1 auto;
   min-height: 0;
+}
+
+.phone.status-bar-cover > .phone-page-layer > :deep(.select-shell) {
+  /* 重叠时页面仍铺满手机框，状态栏浮层不占流 */
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.phone-page-layer {
+  position: relative;
+  z-index: 0;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  /* 困住页面内任意 z-index，避免压过角标/手指光标 */
+  isolation: isolate;
 }
 
 .phone.is-miniprogram {
@@ -1113,7 +1570,7 @@ onBeforeUnmount(() => {
 
 .phone-touch-cursor {
   position: absolute;
-  z-index: 300;
+  z-index: 100050;
   width: 28px;
   height: 28px;
   margin: -14px 0 0 -14px;
@@ -1150,19 +1607,139 @@ onBeforeUnmount(() => {
   z-index: 200;
   pointer-events: none;
   box-sizing: border-box;
-  border: 2px dashed #79bbff;
+  border: calc(1px / var(--canvas-zoom, 1)) dashed #1677ff;
 }
 
 .phone-badge-host {
   position: absolute;
   inset: 0;
-  z-index: 210;
+  z-index: 100040;
   pointer-events: none;
   overflow: visible;
 }
 
 .phone-badge-host :deep(.badge-stack) {
   pointer-events: auto;
+}
+
+.distance-guides {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 30;
+  overflow: visible;
+}
+
+.align-guides {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.align-guide {
+  position: absolute;
+  pointer-events: none;
+  box-sizing: border-box;
+}
+
+.align-guide.h {
+  left: 0;
+  right: 0;
+  height: 0;
+  border-top: 1px dashed transparent;
+}
+
+.align-guide.v {
+  top: 0;
+  bottom: 0;
+  width: 0;
+  border-left: 1px dashed transparent;
+}
+
+.align-guide.selected {
+  border-color: #d48806;
+}
+
+.align-guide.hovered {
+  border-color: #c41d7f;
+}
+
+.distance-guide {
+  position: absolute;
+  pointer-events: none;
+  color: #f5222d;
+}
+
+.distance-guide .distance-line {
+  position: absolute;
+  background: #f5222d;
+}
+
+.distance-guide.left .distance-line,
+.distance-guide.right .distance-line,
+.distance-guide.h .distance-line {
+  left: 0;
+  right: 0;
+  top: 0;
+  height: calc(1px / var(--canvas-zoom, 1));
+  transform: translateY(-50%);
+}
+
+.distance-guide.top .distance-line,
+.distance-guide.bottom .distance-line,
+.distance-guide.v .distance-line {
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: calc(1px / var(--canvas-zoom, 1));
+  transform: translateX(-50%);
+}
+
+.distance-guide .distance-label {
+  position: absolute;
+  z-index: 1;
+  padding: 0 calc(3px / var(--canvas-zoom, 1));
+  font-size: calc(11px / var(--canvas-zoom, 1));
+  font-weight: 600;
+  line-height: calc(14px / var(--canvas-zoom, 1));
+  color: #f5222d;
+  background: rgba(255, 255, 255, 0.92);
+  white-space: nowrap;
+  user-select: none;
+}
+
+.distance-guide.left .distance-label,
+.distance-guide.right .distance-label,
+.distance-guide.h .distance-label {
+  left: 50%;
+  top: 0;
+  transform: translate(-50%, calc(-100% - 2px / var(--canvas-zoom, 1)));
+}
+
+.distance-guide.top .distance-label,
+.distance-guide.bottom .distance-label,
+.distance-guide.v .distance-label {
+  left: 0;
+  top: 50%;
+  transform: translate(calc(100% + 2px / var(--canvas-zoom, 1)), -50%);
+}
+
+.size-label {
+  position: absolute;
+  z-index: 2;
+  transform: translateX(-50%);
+  padding: calc(1px / var(--canvas-zoom, 1)) calc(6px / var(--canvas-zoom, 1));
+  border-radius: calc(3px / var(--canvas-zoom, 1));
+  font-size: calc(11px / var(--canvas-zoom, 1));
+  font-weight: 600;
+  line-height: calc(16px / var(--canvas-zoom, 1));
+  color: #fff;
+  background: #f5222d;
+  white-space: nowrap;
+  user-select: none;
+  pointer-events: none;
 }
 
 /* ?????????? Swiper ?????????? */
