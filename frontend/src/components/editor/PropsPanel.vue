@@ -7,6 +7,7 @@ import DynamicStyleStateDialog from './DynamicStyleStateDialog.vue'
 import EventBindDialog from './EventBindDialog.vue'
 import NumericInput from './NumericInput.vue'
 import VisibilityConditionDialog from './VisibilityConditionDialog.vue'
+import OssResourcePickerDialog from './OssResourcePickerDialog.vue'
 import { countEventBindings, type MethodParam, type PageMethod } from '../../types/page-method'
 import {
   findNodeFromXml,
@@ -26,6 +27,7 @@ import {
 import { ElMessage } from 'element-plus'
 import { OVERFLOW_OPTIONS } from '../../utils/xml'
 import type { DataField } from '../../types/page-data'
+import type { OssBindingConfig } from '../../types/page-data'
 import {
   DYNAMIC_STYLES_ATTR,
   V_IF_ATTR,
@@ -46,9 +48,12 @@ import {
 } from '../../utils/data-field-paths'
 import IconValueSelect from './IconValueSelect.vue'
 import ApiPropBindField from './ApiPropBindField.vue'
+import DataFieldTypeTreeSelect, {
+  type TypeSelectPayload,
+} from './DataFieldTypeTreeSelect.vue'
 import type { ComponentRenderMap } from '../../types/component-render'
 import type { ComponentPropDef } from '../../types/component'
-import { DATA_FIELD_TYPE_OPTIONS, COMPOSABLE_FIELD_TYPE_OPTIONS, type DataFieldType } from '../../types/page-data'
+import { DATA_FIELD_TYPE_OPTIONS, type DataFieldType } from '../../types/page-data'
 import {
   isStatusBarNodeId,
   normalizeStatusBarConfig,
@@ -212,6 +217,10 @@ interface SlotParamRow {
   name: string
   type: DataFieldType
   typeRef?: string
+  itemType?: DataFieldType
+  itemTypeRef?: string
+  itemItemType?: DataFieldType
+  itemItemTypeRef?: string
 }
 
 function parseSlotParams(raw: string | undefined): SlotParamRow[] {
@@ -232,7 +241,31 @@ function parseSlotParams(raw: string | undefined): SlotParamRow[] {
           typeof row.typeRef === 'string' && row.typeRef.trim()
             ? row.typeRef.trim()
             : undefined
-        return { name, type, typeRef } satisfies SlotParamRow
+        const itemType =
+          typeof row.itemType === 'string'
+            ? (row.itemType as DataFieldType)
+            : undefined
+        const itemTypeRef =
+          typeof row.itemTypeRef === 'string' && row.itemTypeRef.trim()
+            ? row.itemTypeRef.trim()
+            : undefined
+        const itemItemType =
+          typeof row.itemItemType === 'string'
+            ? (row.itemItemType as DataFieldType)
+            : undefined
+        const itemItemTypeRef =
+          typeof row.itemItemTypeRef === 'string' && row.itemItemTypeRef.trim()
+            ? row.itemItemTypeRef.trim()
+            : undefined
+        return {
+          name,
+          type,
+          typeRef,
+          itemType,
+          itemTypeRef,
+          itemItemType,
+          itemItemTypeRef,
+        } satisfies SlotParamRow
       })
       .filter((item): item is SlotParamRow => Boolean(item))
   } catch {
@@ -247,6 +280,14 @@ function serializeSlotParams(rows: SlotParamRow[]): string {
         name: row.name.trim(),
         type: row.type,
         ...(row.typeRef?.trim() ? { typeRef: row.typeRef.trim() } : {}),
+        ...(row.itemType ? { itemType: row.itemType } : {}),
+        ...(row.itemTypeRef?.trim()
+          ? { itemTypeRef: row.itemTypeRef.trim() }
+          : {}),
+        ...(row.itemItemType ? { itemItemType: row.itemItemType } : {}),
+        ...(row.itemItemTypeRef?.trim()
+          ? { itemItemTypeRef: row.itemItemTypeRef.trim() }
+          : {}),
       }))
       .filter((row) => row.name),
   )
@@ -273,6 +314,21 @@ function addSlotParam() {
 
 function removeSlotParam(index: number) {
   slotParamRows.value.splice(index, 1)
+  commitSlotParams()
+}
+
+function handleSlotParamTypeChange(index: number, payload: TypeSelectPayload) {
+  const row = slotParamRows.value[index]
+  if (!row || payload.cleared || payload.type === 'void' || payload.type === 'generic') {
+    return
+  }
+  row.type = payload.type
+  row.typeRef = payload.typeRef
+  row.itemType = payload.itemType === 'generic' ? undefined : payload.itemType
+  row.itemTypeRef = payload.itemTypeRef
+  row.itemItemType =
+    payload.itemItemType === 'generic' ? undefined : payload.itemItemType
+  row.itemItemTypeRef = payload.itemItemTypeRef
   commitSlotParams()
 }
 
@@ -551,6 +607,7 @@ function eventBindingSummary(key: string): string {
 }
 
 const eventBindVisible = ref(false)
+const imageOssPickerVisible = ref(false)
 const eventBindKey = ref('onClick')
 const eventBindLabel = ref('')
 const eventBindParams = ref<MethodParam[]>([])
@@ -597,6 +654,20 @@ const showTextProps = computed(
 const showInputProps = computed(() => selectedNode.value?.tag === 'Input')
 
 const showImageProps = computed(() => selectedNode.value?.tag === 'Image')
+
+function openImageOssPicker() {
+  if (!props.projectPath?.trim()) {
+    ElMessage.warning('未打开项目，无法选择对象存储资源')
+    return
+  }
+  imageOssPickerVisible.value = true
+}
+
+function onImageOssPicked(config: OssBindingConfig) {
+  const url = (config.url || '').trim()
+  layoutForm.src = url
+  commitAttr('src', url)
+}
 
 const showIconProps = computed(() => selectedNode.value?.tag === 'Icon')
 
@@ -1304,18 +1375,19 @@ function saveVisibilityConfig(config: VisibilityConditionConfig) {
                     placeholder="参数名"
                     @change="commitSlotParams"
                   />
-                  <el-select
-                    v-model="row.type"
-                    style="width: 120px"
-                    @change="commitSlotParams"
-                  >
-                    <el-option
-                      v-for="opt in COMPOSABLE_FIELD_TYPE_OPTIONS"
-                      :key="opt.value"
-                      :label="opt.label"
-                      :value="opt.value"
-                    />
-                  </el-select>
+                  <DataFieldTypeTreeSelect
+                    class="slot-param-type"
+                    :type="row.type"
+                    :type-ref="row.typeRef"
+                    :item-type="row.itemType"
+                    :item-type-ref="row.itemTypeRef"
+                    :item-item-type="row.itemItemType"
+                    :item-item-type-ref="row.itemItemTypeRef"
+                    :library="typeLibrary"
+                    composable
+                    size="small"
+                    @change="handleSlotParamTypeChange(index, $event)"
+                  />
                   <el-button
                     type="danger"
                     link
@@ -1636,12 +1708,17 @@ function saveVisibilityConfig(config: VisibilityConditionConfig) {
             <div class="section-title">图片</div>
             <el-form label-position="top" size="small">
               <el-form-item label="src">
-                <el-input
-                  v-model="layoutForm.src"
-                  clearable
-                  placeholder="图片 URL"
-                  @change="commitAttr('src', layoutForm.src)"
-                />
+                <div class="image-src-row">
+                  <el-input
+                    v-model="layoutForm.src"
+                    clearable
+                    placeholder="图片 URL"
+                    @change="commitAttr('src', layoutForm.src)"
+                  />
+                  <el-button type="primary" link @click="openImageOssPicker">
+                    对象存储
+                  </el-button>
+                </div>
               </el-form-item>
               <el-form-item label="alt">
                 <el-input
@@ -2015,6 +2092,7 @@ function saveVisibilityConfig(config: VisibilityConditionConfig) {
             :icon-options="iconOptions"
             :component-props="componentProps"
             :type-library="typeLibrary"
+            :project-path="projectPath"
             @save="handleEventBindSave"
           />
         </div>
@@ -2390,6 +2468,11 @@ function saveVisibilityConfig(config: VisibilityConditionConfig) {
       :xml="xml"
       @save="saveVisibilityConfig"
     />
+    <OssResourcePickerDialog
+      v-model="imageOssPickerVisible"
+      :project-path="projectPath"
+      @confirm="onImageOssPicked"
+    />
   </aside>
 </template>
 
@@ -2626,6 +2709,23 @@ function saveVisibilityConfig(config: VisibilityConditionConfig) {
 }
 
 .slot-param-row .el-input {
+  flex: 0 0 100px;
+  min-width: 0;
+}
+
+.slot-param-type {
+  flex: 1;
+  min-width: 0;
+}
+
+.image-src-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+}
+
+.image-src-row .el-input {
   flex: 1;
   min-width: 0;
 }

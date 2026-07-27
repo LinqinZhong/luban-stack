@@ -1,4 +1,4 @@
-import type { VoiderProjectConfig } from '../../types/voider-project.js'
+﻿import type { VoiderProjectConfig } from '../../types/voider-project.js'
 import { pageIdToViewName } from './naming.js'
 
 export interface ScaffoldContext {
@@ -219,9 +219,9 @@ const designScreenH = computed(() => vh.value / scale.value)
 </script>
 
 <template>
-  <div class="voider-stage" :style="{ height: vh + 'px' }">
+  <div class="app-stage" :style="{ height: vh + 'px' }">
     <div
-      class="voider-page"
+      class="app-page"
       :style="{
         width: DESIGN_WIDTH + 'px',
         height: designScreenH + 'px',
@@ -235,13 +235,13 @@ const designScreenH = computed(() => vh.value / scale.value)
 </template>
 
 <style scoped>
-.voider-stage {
+.app-stage {
   width: 100%;
   overflow: hidden;
   position: relative;
   background: #ededed;
 }
-.voider-page {
+.app-page {
   position: relative;
   overflow: hidden;
 }
@@ -260,7 +260,7 @@ html, body, #app {
   font-size: 14px;
 }
 
-.voider-toast {
+.app-toast {
   position: absolute;
   left: 50%;
   bottom: 72px;
@@ -281,7 +281,7 @@ html, body, #app {
   transition: opacity 0.2s ease, transform 0.2s ease;
 }
 
-.voider-toast.is-visible {
+.app-toast.is-visible {
   opacity: 1;
   transform: translateX(-50%) translateY(0);
 }
@@ -301,8 +301,16 @@ declare module '*.svg?raw' {
 }
 `
 
-  files['src/components/VoiderIcon.vue'] = `<script setup lang="ts">
-import { computed } from 'vue'
+  files['src/components/AppIcon.vue'] = `<script setup lang="ts">
+import { computed, ref, watch } from 'vue'
+import {
+  ICON_PRIVATE_BINDINGS,
+  ICON_REMOTE_URLS,
+  type IconRemoteBinding,
+} from '../assets/icon-remotes'
+
+const SIGN_EXPIRES_IN = 7 * 24 * 3600
+const CACHE_SKEW_MS = 60 * 60 * 1000
 
 const props = withDefaults(
   defineProps<{
@@ -322,11 +330,199 @@ const modules = import.meta.glob('../assets/icons/*.svg', {
   eager: true,
 }) as Record<string, string>
 
-const svg = computed(() => {
+const remoteSvg = ref('')
+let fetchToken = 0
+
+const localSvg = computed(() => {
   const id = String(props.name || '').trim()
   if (!id) return ''
   return modules[\`../assets/icons/\${id}.svg\`] ?? ''
 })
+
+const publicUrl = computed(() => {
+  const id = String(props.name || '').trim()
+  if (!id) return ''
+  return ICON_REMOTE_URLS[id] ?? ''
+})
+
+const privateBinding = computed((): IconRemoteBinding | null => {
+  const id = String(props.name || '').trim()
+  if (!id) return null
+  return ICON_PRIVATE_BINDINGS[id] ?? null
+})
+
+const svg = computed(() =>
+  publicUrl.value || privateBinding.value ? remoteSvg.value : localSvg.value,
+)
+
+function storageKey(iconId: string, objectKey: string) {
+  return \`icon_url_\${iconId}_\${objectKey || ''}\`
+}
+
+function readCachedUrl(iconId: string, objectKey: string): string {
+  try {
+    const raw = localStorage.getItem(storageKey(iconId, objectKey))
+    if (!raw) return ''
+    const data = JSON.parse(raw) as { url?: string; expiresAt?: number }
+    if (!data?.url) return ''
+    const expiresAt = Number(data.expiresAt) || 0
+    if (expiresAt && expiresAt <= Date.now() + CACHE_SKEW_MS) return ''
+    return data.url
+  } catch {
+    return ''
+  }
+}
+
+function writeCachedUrl(
+  iconId: string,
+  objectKey: string,
+  url: string,
+  expiresInSec = SIGN_EXPIRES_IN,
+) {
+  try {
+    const ttl =
+      Number.isFinite(expiresInSec) && expiresInSec > 0
+        ? expiresInSec
+        : SIGN_EXPIRES_IN
+    localStorage.setItem(
+      storageKey(iconId, objectKey),
+      JSON.stringify({
+        url,
+        expiresAt: Date.now() + ttl * 1000,
+        objectKey,
+      }),
+    )
+  } catch {
+    // quota / private mode
+  }
+}
+
+function clearCachedUrl(iconId: string, objectKey: string) {
+  try {
+    localStorage.removeItem(storageKey(iconId, objectKey))
+  } catch {
+    // ignore
+  }
+}
+
+function parseApiBaseUrls(): Record<string, string> {
+  const raw = String(import.meta.env.VITE_API_BASE_URLS || '').trim()
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw) as unknown
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        const out: Record<string, string> = {}
+        for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
+          if (typeof v === 'string' && v.trim()) out[k] = v.trim().replace(/\\/+$/, '')
+        }
+        return out
+      }
+    } catch {
+      // ignore
+    }
+  }
+  const legacy = String(import.meta.env.VITE_API_BASE || '').trim()
+  return legacy ? { default: legacy.replace(/\\/+$/, '') } : {}
+}
+
+async function signPrivate(
+  binding: IconRemoteBinding,
+): Promise<{ url: string; expiresIn: number }> {
+  const map = parseApiBaseUrls()
+  const base = (
+    map.oss ||
+    map.default ||
+    Object.values(map).find((v) => typeof v === 'string' && v.trim()) ||
+    String(import.meta.env.VITE_API_BASE || '')
+  ).replace(/\\/+$/, '')
+  if (!base) {
+    throw new Error('VITE_API_BASE_URLS / VITE_API_BASE missing')
+  }
+  const res = await fetch(\`\${base}/oss/sign\`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      connectionId: binding.connectionId,
+      bucketName: binding.bucketName,
+      key: binding.objectKey,
+      expiresIn: SIGN_EXPIRES_IN,
+    }),
+  })
+  const body = (await res.json().catch(() => null)) as {
+    code?: number
+    data?: { signedUrl?: string; url?: string; expiresIn?: number }
+    signedUrl?: string
+    url?: string
+    expiresIn?: number
+    message?: string
+  } | null
+  const signed =
+    body?.data?.signedUrl ||
+    body?.data?.url ||
+    body?.signedUrl ||
+    body?.url ||
+    ''
+  const expiresIn = Number(body?.data?.expiresIn ?? body?.expiresIn) || SIGN_EXPIRES_IN
+  if (!res.ok || !signed) {
+    throw new Error(
+      (body?.code !== 0 && body?.message) ||
+        (!signed ? '签名响应缺少 url' : '') ||
+        \`sign HTTP \${res.status}\`,
+    )
+  }
+  return { url: signed, expiresIn }
+}
+
+async function resolveRemoteUrl(
+  iconId: string,
+  url: string,
+  binding: IconRemoteBinding | null,
+): Promise<string> {
+  if (url) {
+    const cached = readCachedUrl(iconId, 'public')
+    if (cached) return cached
+    writeCachedUrl(iconId, 'public', url, SIGN_EXPIRES_IN)
+    return url
+  }
+  if (!binding) return ''
+  const objectKey = binding.objectKey || ''
+  const cached = readCachedUrl(iconId, objectKey)
+  if (cached) return cached
+  const signed = await signPrivate(binding)
+  writeCachedUrl(iconId, objectKey, signed.url, signed.expiresIn)
+  return signed.url
+}
+
+watch(
+  [publicUrl, privateBinding, () => props.name],
+  async ([url, binding]) => {
+    const token = ++fetchToken
+    const iconId = String(props.name || '').trim()
+    remoteSvg.value = ''
+    if (!iconId || (!url && !binding)) return
+    try {
+      let fetchUrl = await resolveRemoteUrl(iconId, url, binding)
+      let res = await fetch(fetchUrl)
+      if (!res.ok && binding) {
+        clearCachedUrl(iconId, binding.objectKey || '')
+        const signed = await signPrivate(binding)
+        writeCachedUrl(iconId, binding.objectKey || '', signed.url, signed.expiresIn)
+        fetchUrl = signed.url
+        res = await fetch(fetchUrl)
+      }
+      if (!res.ok) return
+      const text = await res.text()
+      if (token !== fetchToken) return
+      remoteSvg.value = text
+    } catch {
+      if (token !== fetchToken) return
+      remoteSvg.value = ''
+    }
+  },
+  { immediate: true },
+)
 
 const box = computed(() => {
   const n = Number(props.size)
@@ -336,7 +532,7 @@ const box = computed(() => {
 
 <template>
   <span
-    class="voider-icon inline-flex items-center justify-center shrink-0"
+    class="app-icon inline-flex items-center justify-center shrink-0"
     :style="{ width: box + 'px', height: box + 'px', color: color || 'currentColor' }"
     v-html="svg"
     aria-hidden="true"
@@ -344,7 +540,7 @@ const box = computed(() => {
 </template>
 
 <style scoped>
-.voider-icon :deep(svg) {
+.app-icon :deep(svg) {
   width: 100%;
   height: 100%;
   display: block;
@@ -352,7 +548,7 @@ const box = computed(() => {
 </style>
 `
 
-  files['src/components/VoiderSwiper.vue'] = `<script setup lang="ts">
+  files['src/components/AppSwiper.vue'] = `<script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
 const props = withDefaults(
@@ -536,19 +732,19 @@ onBeforeUnmount(() => clearTimer())
 <template>
   <div
     ref="viewportRef"
-    class="voider-swiper"
+    class="app-swiper"
     :class="{ dragging }"
     @pointerdown="onPointerDown"
     @pointermove="onPointerMove"
     @pointerup="onPointerUp"
     @pointercancel="onPointerUp"
   >
-    <div class="voider-swiper-track" :style="trackStyle">
+    <div class="app-swiper-track" :style="trackStyle">
       <slot />
     </div>
     <div
       v-if="indicator && count > 1"
-      class="voider-swiper-dots"
+      class="app-swiper-dots"
       aria-hidden="true"
     >
       <button
@@ -567,7 +763,7 @@ onBeforeUnmount(() => clearTimer())
 </template>
 
 <style scoped>
-.voider-swiper {
+.app-swiper {
   /* 尺寸由外层 shell / class 决定，这里只做填满，避免盖掉 absolute / 固定宽高 */
   position: relative;
   width: 100%;
@@ -579,10 +775,10 @@ onBeforeUnmount(() => clearTimer())
   user-select: none;
   box-sizing: border-box;
 }
-.voider-swiper.dragging {
+.app-swiper.dragging {
   cursor: grabbing;
 }
-.voider-swiper-track {
+.app-swiper-track {
   display: flex;
   flex-direction: row;
   height: 100%;
@@ -590,7 +786,7 @@ onBeforeUnmount(() => clearTimer())
   will-change: transform;
   box-sizing: border-box;
 }
-.voider-swiper-track > :deep(*) {
+.app-swiper-track > :deep(*) {
   position: relative;
   flex: 0 0 100%;
   width: 100%;
@@ -600,7 +796,7 @@ onBeforeUnmount(() => clearTimer())
   overflow: hidden;
   box-sizing: border-box;
 }
-.voider-swiper-dots {
+.app-swiper-dots {
   position: absolute;
   left: 0;
   right: 0;
@@ -649,7 +845,7 @@ const router = createRouter({
 export default router
 `
 
-  files['src/runtime/voider.ts'] = RUNTIME_VOIDER_TS
+  files['src/runtime/app.ts'] = RUNTIME_APP_TS
 
   files['src/runtime/helpers.ts'] = `import { useRouter } from 'vue-router'
 
@@ -660,11 +856,11 @@ function ensureToastHost(): HTMLElement {
   if (typeof document === 'undefined') {
     throw new Error('showToast requires DOM')
   }
-  const page = document.querySelector('.voider-page') as HTMLElement | null
+  const page = document.querySelector('.app-page') as HTMLElement | null
   return page ?? document.body
 }
 
-/** 页面内 Toast（对齐编辑器预览；挂在 .voider-page 上随设计稿缩放） */
+/** 页面内 Toast（对齐编辑器预览；挂在 .app-page 上随设计稿缩放） */
 export function showToast(message?: string, duration: 'short' | 'long' = 'short') {
   if (typeof document === 'undefined') return
   const text = String(message ?? '').trim() || ' '
@@ -674,7 +870,7 @@ export function showToast(message?: string, duration: 'short' | 'long' = 'short'
   }
   if (!toastEl) {
     toastEl = document.createElement('div')
-    toastEl.className = 'voider-toast'
+    toastEl.className = 'app-toast'
     toastEl.setAttribute('role', 'status')
   }
   toastEl.textContent = text
@@ -805,6 +1001,110 @@ export function getDeviceInfo(): DeviceInfo {
   }
 }
 
+export type ApiBinding = {
+  serviceId?: string
+  serviceName?: string
+  controllerId?: string
+  apiId?: string
+  method?: string
+  path?: string
+}
+
+function parseApiBaseUrls(): Record<string, string> {
+  const raw = String(import.meta.env.VITE_API_BASE_URLS || '').trim()
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw) as unknown
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        const out: Record<string, string> = {}
+        for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
+          if (typeof v === 'string' && v.trim()) out[k] = v.trim().replace(/\\/+$/, '')
+        }
+        return out
+      }
+    } catch {
+      // ignore
+    }
+  }
+  const legacy = String(import.meta.env.VITE_API_BASE || '').trim()
+  return legacy ? { default: legacy.replace(/\\/+$/, '') } : {}
+}
+
+export function resolveApiBase(serviceId?: string, serviceName?: string): string {
+  const map = parseApiBaseUrls()
+  const keys = [serviceName, serviceId, 'default', 'oss']
+  for (const key of keys) {
+    const k = key?.trim()
+    if (!k) continue
+    const v = map[k]
+    if (typeof v === 'string' && v.trim()) return v.replace(/\\/+$/, '')
+  }
+  const first = Object.values(map).find((v) => typeof v === 'string' && v.trim())
+  return first ? first.replace(/\\/+$/, '') : ''
+}
+
+function unwrapResult(data: unknown): unknown {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return data
+  const row = data as Record<string, unknown>
+  if (!('data' in row)) return data
+  const keys = Object.keys(row)
+  const looksLikeResult =
+    'code' in row || 'message' in row || 'msg' in row || keys.length <= 4
+  return looksLikeResult ? row.data : data
+}
+
+/** 按 binding.serviceName 从 apiBaseUrls 字典取根地址并发请求 */
+export async function invoke(
+  binding: ApiBinding | null | undefined,
+  args?: Record<string, unknown>,
+): Promise<any> {
+  if (!binding || typeof binding !== 'object') {
+    throw new Error('API binding missing')
+  }
+  const path = typeof binding.path === 'string' ? binding.path.trim() : ''
+  if (!path) {
+    throw new Error(
+      \`API missing path (serviceId=\${binding.serviceId || ''}, apiId=\${binding.apiId || ''})\`,
+    )
+  }
+  const base = resolveApiBase(binding.serviceId, binding.serviceName)
+  if (!base) {
+    throw new Error(
+      \`API baseUrl missing for serviceId=\${binding.serviceId || ''}（请在 .env.local 配置 VITE_API_BASE_URLS）\`,
+    )
+  }
+  const url = /^https?:\\/\\//i.test(path)
+    ? path
+    : base + (path.startsWith('/') ? path : '/' + path)
+  const method = String(binding.method || 'GET').toUpperCase()
+  const payload = args && typeof args === 'object' ? args : {}
+  const init: RequestInit = {
+    method,
+    headers: { 'Content-Type': 'application/json' },
+  }
+  let finalUrl = url
+  if (method === 'GET' || method === 'DELETE') {
+    const q = new URLSearchParams()
+    for (const [k, v] of Object.entries(payload)) {
+      if (v == null) continue
+      q.set(k, typeof v === 'object' ? JSON.stringify(v) : String(v))
+    }
+    const qs = q.toString()
+    if (qs) finalUrl += (finalUrl.includes('?') ? '&' : '?') + qs
+  } else {
+    init.body = JSON.stringify(payload)
+  }
+  const res = await fetch(finalUrl, init)
+  const body = await res.json().catch(() => null)
+  if (!res.ok) {
+    const msg =
+      (body && typeof body === 'object' && ((body as any).message || (body as any).msg)) ||
+      \`request failed \${res.status}\`
+    throw new Error(String(msg))
+  }
+  return unwrapResult(body)
+}
+
 /** 页面/组件内导航（须在 setup 中调用） */
 export function useNavigation() {
   const router = useRouter()
@@ -826,7 +1126,7 @@ export function useNavigation() {
 
   files['README.md'] = `# ${ctx.projectName}
 
-Exported from Voider as a Vue 3 + Vite + TypeScript + Tailwind CSS + Pinia + Vue Router project.
+Vue 3 + Vite + TypeScript + Tailwind CSS + Pinia + Vue Router（由设计器导出）。
 
 ## Setup
 
@@ -837,13 +1137,15 @@ npm run dev
 
 Open the URL shown in the terminal (default http://localhost:5173).
 
+API / OSS 签名根地址见 \`.env.local\` 中 \`VITE_API_BASE_URLS\`（字典，按 serviceName / default；默认直连 Nest \`http://127.0.0.1:3030\`）。
+
 ## Project structure
 
-- \`src/views/\` — page views (data pool as ref/computed in the page)
-- \`src/components/\` — reusable components
-- \`src/stores/\` — Pinia stores for component data pools
-- \`src/runtime/helpers.ts\` — navigateTo / navigateBack / showToast / getDeviceInfo
-- \`src/runtime/voider.ts\` — visibility & interpolate helpers
+- \`src/views/\` — page views
+- \`src/components/\` — reusable components（含 AppIcon / AppSwiper）
+- \`src/stores/\` — Pinia stores
+- \`src/runtime/helpers.ts\` — navigateTo / navigateBack / showToast / getDeviceInfo / invoke
+- \`src/runtime/app.ts\` — visibility & interpolate helpers
 `
 
   return files
@@ -854,7 +1156,7 @@ function slugify(name: string): string {
     name
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-+|-+$/g, '') || 'voider-export'
+      .replace(/^-+|-+$/g, '') || "app-export"
   )
 }
 
@@ -866,7 +1168,7 @@ function escapeHtml(value: string): string {
     .replace(/"/g, '&quot;')
 }
 
-const RUNTIME_VOIDER_TS = `import type { Router } from 'vue-router'
+const RUNTIME_APP_TS = `import type { Router } from 'vue-router'
 import { getDeviceInfo, showToast as defaultShowToast } from './helpers'
 
 export interface EventScope {
@@ -874,13 +1176,13 @@ export interface EventScope {
   index?: number
 }
 
-export interface VoiderStoreLike {
+export interface AppStoreLike {
   $state: Record<string, any>
   setData: (prop: string, value: any) => void
 }
 
 export interface EventContext {
-  store: VoiderStoreLike
+  store: AppStoreLike
   router: Router
   route: Record<string, any>
   modalVisible: Record<string, boolean>
@@ -925,7 +1227,7 @@ function formatValue(value: any): string {
 export function interpolate(
   template: string,
   ctx: {
-    store?: VoiderStoreLike
+    store?: AppStoreLike
     scope?: EventScope
     props?: Record<string, any>
     route?: Record<string, any>
@@ -965,7 +1267,7 @@ export function interpolate(
 function resolveConditionValue(
   path: string,
   ctx: {
-    store?: VoiderStoreLike
+    store?: AppStoreLike
     scope?: EventScope
     props?: Record<string, any>
     route?: Record<string, any>
@@ -1139,7 +1441,7 @@ export async function runEventBindings(
         const fn = new Function(...Object.keys(scope), body)
         fn(...Object.values(scope))
       } catch (err) {
-        console.warn('[voider] custom event failed', err)
+        console.warn('[app] custom event failed', err)
       }
       continue
     }
@@ -1200,7 +1502,7 @@ export async function runEventBindings(
       ctx.emit?.(\`update:\${prop}\`, value)
       continue
     }
-    console.warn('[voider] unknown event method:', binding.method)
+    console.warn('[app] unknown event method:', binding.method)
   }
 }
 `

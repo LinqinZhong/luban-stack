@@ -1001,6 +1001,7 @@ function handleSave() {
     :emit-events="emitEvents"
     :type-library="typeLibrary"
     :component-props="componentProps"
+    :project-path="projectPath"
     @save="saveEventBind"
   />
 </template>

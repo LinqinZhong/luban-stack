@@ -191,6 +191,7 @@ export const COMMON_PRESET_TYPE_IDS = [
   'type_common_Result',
   'type_common_QueryPageDto',
   'type_common_QueryPageVo',
+  'type_common_URI',
 ] as const
 
 /** 系统预设类型名 */
@@ -199,6 +200,7 @@ export const COMMON_PRESET_TYPE_NAMES = [
   'Result',
   'QueryPageDto',
   'QueryPageVo',
+  'URI',
 ] as const
 
 const COMMON_PRESET_ID_SET = new Set<string>(COMMON_PRESET_TYPE_IDS)
@@ -400,10 +402,23 @@ export function createCommonDataTypeGroup(): DataTypeGroup {
     combination: createEmptyTypeExpr(),
   }
 
+  const uri: DataTypeDef = {
+    id: 'type_common_URI',
+    name: 'URI',
+    kind: 'string',
+    remark: '资源外链（type URI = string）',
+    tableName: '',
+    category: 'other',
+    generics: [],
+    fields: [],
+    enumMembers: [],
+    combination: createEmptyTypeExpr(),
+  }
+
   return {
     id: 'group_common',
     name: COMMON_GROUP_NAME,
-    types: [resultCode, result, queryPageDto, queryPageVo],
+    types: [resultCode, result, queryPageDto, queryPageVo, uri],
   }
 }
 

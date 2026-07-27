@@ -1,0 +1,437 @@
+import { queryRows } from './db'
+
+export type DataMethodCondition = {
+  id?: string
+  field: string
+  customField: string
+  op: string
+  valueKind: string
+  value: string
+  valueTo: string
+}
+
+export type DataMethodConfig = {
+  source: string
+  operation: string
+  queryFields: string[]
+  sql: string
+  fieldMappings: Array<{ field: string; column: string }>
+  batchSourceParam: string
+  conditionGroups: Array<{ id?: string; conditions: DataMethodCondition[] }>
+}
+
+export type DataMethodOutputMeta = {
+  type: string
+  typeRef: string
+  itemType: string
+  itemTypeRef: string
+}
+
+function quoteIdent(name: string): string {
+  return '`' + name.replace(/`/g, '') + '`'
+}
+
+function sqlLiteral(value: unknown): string {
+  if (value == null) return 'NULL'
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value)
+  if (typeof value === 'boolean') return value ? '1' : '0'
+  if (typeof value === 'object') {
+    return (
+      "'" +
+      JSON.stringify(value).replace(/\\/g, '\\\\').replace(/'/g, "''") +
+      "'"
+    )
+  }
+  return "'" + String(value).replace(/\\/g, '\\\\').replace(/'/g, "''") + "'"
+}
+
+function resolvePath(
+  params: Record<string, unknown>,
+  pathExpr: string,
+): unknown {
+  const parts = pathExpr
+    .split('.')
+    .map((p) => p.trim())
+    .filter(Boolean)
+  let cur: unknown = params
+  for (const part of parts) {
+    if (cur == null || typeof cur !== 'object' || Array.isArray(cur)) {
+      return undefined
+    }
+    cur = (cur as Record<string, unknown>)[part]
+  }
+  return cur
+}
+
+function pickPageMeta(params: Record<string, unknown>) {
+  const nested =
+    (params.pageDto as Record<string, unknown> | undefined) ||
+    (params.dto as Record<string, unknown> | undefined) ||
+    (params.query as Record<string, unknown> | undefined) ||
+    (params.page as Record<string, unknown> | undefined)
+  const src = nested && typeof nested === 'object' ? nested : params
+  const current = Math.max(1, Number(src.current ?? src.page ?? 1) || 1)
+  const pageSize = Math.max(
+    1,
+    Math.min(200, Number(src.pageSize ?? src.size ?? 10) || 10),
+  )
+  return { current, pageSize }
+}
+
+function buildWhereClause(
+  groups: DataMethodConfig['conditionGroups'],
+  params: Record<string, unknown>,
+): string {
+  if (!groups?.length) return ''
+  const groupSqls: string[] = []
+  for (const group of groups) {
+    const parts: string[] = []
+    for (const cond of group.conditions ?? []) {
+      const colName =
+        !cond.field || cond.field === '__custom__'
+          ? (cond.customField || '').trim()
+          : cond.field.trim()
+      if (!colName || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(colName)) continue
+      const col = quoteIdent(colName)
+      const op = cond.op
+      if (op === 'isNull') {
+        parts.push(`${col} IS NULL`)
+        continue
+      }
+      if (op === 'isNotNull') {
+        parts.push(`${col} IS NOT NULL`)
+        continue
+      }
+      const resolveVal = (raw: string): unknown => {
+        const text = (raw || '').trim()
+        if (cond.valueKind === 'param') return resolvePath(params, text)
+        if (!text) return undefined
+        try {
+          return JSON.parse(text)
+        } catch {
+          return text
+        }
+      }
+      const v = resolveVal(cond.value ?? '')
+      if (op === 'between') {
+        const v2 = resolveVal(cond.valueTo ?? '')
+        if (v === undefined || v2 === undefined) continue
+        parts.push(`${col} BETWEEN ${sqlLiteral(v)} AND ${sqlLiteral(v2)}`)
+        continue
+      }
+      if (v === undefined || v === null || v === '') continue
+      if (op === 'eq') parts.push(`${col} = ${sqlLiteral(v)}`)
+      else if (op === 'ne') parts.push(`${col} <> ${sqlLiteral(v)}`)
+      else if (op === 'gt') parts.push(`${col} > ${sqlLiteral(v)}`)
+      else if (op === 'gte') parts.push(`${col} >= ${sqlLiteral(v)}`)
+      else if (op === 'lt') parts.push(`${col} < ${sqlLiteral(v)}`)
+      else if (op === 'lte') parts.push(`${col} <= ${sqlLiteral(v)}`)
+      else if (op === 'like') {
+        parts.push(`${col} LIKE ${sqlLiteral(`%${String(v)}%`)}`)
+      } else if (op === 'notLike') {
+        parts.push(`${col} NOT LIKE ${sqlLiteral(`%${String(v)}%`)}`)
+      } else if (op === 'in' || op === 'notIn') {
+        const list = Array.isArray(v)
+          ? v
+          : String(v)
+              .split(',')
+              .map((x) => x.trim())
+              .filter(Boolean)
+        if (!list.length) continue
+        const inner = list.map((x) => sqlLiteral(x)).join(', ')
+        parts.push(
+          op === 'in' ? `${col} IN (${inner})` : `${col} NOT IN (${inner})`,
+        )
+      }
+    }
+    if (parts.length) {
+      groupSqls.push(
+        parts.length === 1 ? parts[0]! : `(${parts.join(' AND ')})`,
+      )
+    }
+  }
+  if (!groupSqls.length) return ''
+  if (groupSqls.length === 1) return ` WHERE ${groupSqls[0]}`
+  return ` WHERE ${groupSqls.join(' OR ')}`
+}
+
+function resolveParamValue(
+  params: Record<string, unknown>,
+  key: string,
+): unknown {
+  if (key.includes('.')) return resolvePath(params, key)
+  return params[key]
+}
+
+function evalMybatisIfAtom(
+  atom: string,
+  params: Record<string, unknown>,
+): boolean {
+  const cmp = atom.match(
+    /^([A-Za-z_][A-Za-z0-9_.]*)\s*(!=|==)\s*(null|''|"")\s*$/i,
+  )
+  if (cmp) {
+    const val = resolveParamValue(params, cmp[1]!)
+    const op = cmp[2]!
+    const rhs = cmp[3]!.toLowerCase()
+    if (rhs === 'null') {
+      const isNull = val == null
+      return op === '!=' ? !isNull : isNull
+    }
+    const empty = val == null || String(val) === ''
+    return op === '!=' ? !empty : empty
+  }
+  const nameOnly = atom.match(/^([A-Za-z_][A-Za-z0-9_.]*)$/)
+  if (nameOnly) {
+    const val = resolveParamValue(params, nameOnly[1]!)
+    return val != null && val !== '' && val !== false
+  }
+  return false
+}
+
+function evalMybatisIfTest(
+  test: string,
+  params: Record<string, unknown>,
+): boolean {
+  if (!test) return false
+  const orParts = test.split(/\s*(?:\|\||\bor\b)\s*/i)
+  return orParts.some((orPart) =>
+    orPart
+      .split(/\s*(?:&&|\band\b)\s*/i)
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .every((atom) => evalMybatisIfAtom(atom, params)),
+  )
+}
+
+function applyMybatisIfTags(
+  sql: string,
+  params: Record<string, unknown>,
+): string {
+  const re = /<if\s+test\s*=\s*"([^"]*)"\s*>([\s\S]*?)<\/if>/gi
+  let prev = ''
+  let cur = sql
+  let guard = 0
+  while (prev !== cur && guard < 32) {
+    prev = cur
+    guard += 1
+    cur = cur.replace(re, (_m, test: string, body: string) =>
+      evalMybatisIfTest(String(test).trim(), params) ? body : '',
+    )
+  }
+  return cur
+}
+
+function applyCustomSql(
+  template: string,
+  params: Record<string, unknown>,
+  tableName: string,
+): string {
+  const tableIdent = quoteIdent(tableName)
+  let sql = applyMybatisIfTags(template, params)
+  sql = sql.replace(/\$\{\s*TABLE_NAME\s*\}/gi, tableIdent)
+  sql = sql.replace(/\{\s*TABLE_NAME\s*\}/gi, tableIdent)
+  sql = sql.replace(
+    /#\{\s*([A-Za-z_][A-Za-z0-9_.]*)\s*\}/g,
+    (_m, key: string) => sqlLiteral(resolveParamValue(params, key)),
+  )
+  sql = sql.replace(
+    /\$\{\s*([A-Za-z_][A-Za-z0-9_.]*)\s*\}/g,
+    (_m, key: string) => {
+      if (String(key).toUpperCase() === 'TABLE_NAME') return tableIdent
+      const v = resolveParamValue(params, key)
+      return v == null ? '' : String(v)
+    },
+  )
+  return sql
+}
+
+function buildQuerySql(
+  table: string,
+  config: DataMethodConfig,
+  params: Record<string, unknown>,
+) {
+  const fields = config.queryFields?.length ? config.queryFields : ['*']
+  const cols =
+    fields[0] === '*' ? '*' : fields.map((f) => quoteIdent(f)).join(', ')
+  const { current, pageSize } = pickPageMeta(params)
+  const offset = (current - 1) * pageSize
+  const where = buildWhereClause(config.conditionGroups, params)
+  const sql = `SELECT ${cols} FROM ${quoteIdent(table)}${where} LIMIT ${pageSize} OFFSET ${offset}`
+  return { sql, current, pageSize }
+}
+
+function buildInsertSql(
+  table: string,
+  mappings: DataMethodConfig['fieldMappings'],
+  params: Record<string, unknown>,
+) {
+  const list = (mappings || [])
+    .map((m) => ({ field: m.field.trim(), column: m.column.trim() }))
+    .filter((m) => m.field && m.column)
+  if (!list.length) throw new Error('请先配置插入字段映射')
+  const cols = list.map((m) => quoteIdent(m.field))
+  const values = list.map((m) => sqlLiteral(resolvePath(params, m.column)))
+  return `INSERT INTO ${quoteIdent(table)} (${cols.join(', ')}) VALUES (${values.join(', ')})`
+}
+
+function buildDeleteSql(
+  table: string,
+  config: DataMethodConfig,
+  params: Record<string, unknown>,
+) {
+  const where = buildWhereClause(config.conditionGroups, params)
+  if (!where) throw new Error('删除操作必须配置有效的查询条件')
+  return `DELETE FROM ${quoteIdent(table)}${where}`
+}
+
+function buildBatchInsertSql(
+  table: string,
+  mappings: DataMethodConfig['fieldMappings'],
+  params: Record<string, unknown>,
+  batchSourceParam: string,
+) {
+  const list = (mappings || [])
+    .map((m) => ({ field: m.field.trim(), column: m.column.trim() }))
+    .filter((m) => m.field && m.column)
+  if (!list.length) throw new Error('请先配置批量插入字段映射')
+  const configured = (batchSourceParam || '').trim()
+  const roots = new Set(
+    list.map((m) => m.column.split('.')[0]!.trim()).filter(Boolean),
+  )
+  const arrayName = configured || [...roots][0]
+  if (!arrayName) throw new Error('请先选择批量插入的源数组')
+  const arr = params[arrayName]
+  if (!Array.isArray(arr) || !arr.length) {
+    throw new Error(`入参「${arrayName}」需为非空数组`)
+  }
+  const cols = list.map((m) => quoteIdent(m.field))
+  const valueRows = arr.map((item) => {
+    const row = item as Record<string, unknown>
+    const vals = list.map((m) => {
+      const parts = m.column.split('.')
+      const fieldName = parts.slice(1).join('.')
+      if (!fieldName) return sqlLiteral(item)
+      return sqlLiteral(resolvePath(row, fieldName))
+    })
+    return `(${vals.join(', ')})`
+  })
+  return `INSERT INTO ${quoteIdent(table)} (${cols.join(', ')}) VALUES ${valueRows.join(', ')}`
+}
+
+function wrapOutput(
+  output: DataMethodOutputMeta,
+  config: DataMethodConfig,
+  rows: Record<string, unknown>[],
+  _meta: { current: number; pageSize: number; total: number },
+): unknown {
+  const mappings = (config.fieldMappings || [])
+    .map((m) => ({ field: m.field.trim(), column: m.column.trim() }))
+    .filter((m) => m.field && m.column)
+
+  const scalar = new Set(['number', 'string', 'boolean'])
+  if (scalar.has(output.type) && !output.typeRef) {
+    const row = rows[0] ?? {}
+    const mapped = mappings.find((m) => m.field === 'value')
+    let raw: unknown
+    if (mapped) raw = row[mapped.column]
+    else {
+      const keys = Object.keys(row)
+      raw = keys.length ? row[keys[0]!] : undefined
+    }
+    if (output.type === 'number') {
+      const n = Number(raw)
+      return Number.isFinite(n) ? n : 0
+    }
+    if (output.type === 'boolean') {
+      return Boolean(raw) && raw !== 0 && raw !== '0'
+    }
+    return raw == null ? '' : String(raw)
+  }
+
+  if (output.type === 'array') return rows
+  if (rows.length === 1) return rows[0]
+  return rows
+}
+
+export async function runDataMethod(options: {
+  table: string
+  config: DataMethodConfig
+  params: Record<string, unknown>
+  output: DataMethodOutputMeta
+  dryRun?: boolean
+}): Promise<unknown> {
+  const { table, config, params, output } = options
+  let sql = ''
+  let current = 1
+  let pageSize = 10
+  let isWrite = false
+
+  if (config.operation === 'query') {
+    const built = buildQuerySql(table, config, params)
+    sql = built.sql
+    current = built.current
+    pageSize = built.pageSize
+  } else if (config.operation === 'insert') {
+    sql = buildInsertSql(table, config.fieldMappings, params)
+    isWrite = true
+  } else if (config.operation === 'batchInsert') {
+    sql = buildBatchInsertSql(
+      table,
+      config.fieldMappings,
+      params,
+      config.batchSourceParam,
+    )
+    isWrite = true
+  } else if (config.operation === 'delete') {
+    sql = buildDeleteSql(table, config, params)
+    isWrite = true
+  } else if (config.operation === 'custom') {
+    if (!config.sql?.trim()) throw new Error('请先配置自定义 SQL')
+    sql = applyCustomSql(config.sql, params, table)
+  } else {
+    throw new Error(`不支持的操作：${config.operation}`)
+  }
+
+  const exec = await queryRows(sql)
+
+  if (isWrite) {
+    const affectedRows = exec.meta.affectedRows
+    const insertId = exec.meta.insertId
+    if (config.operation === 'batchInsert') {
+      const insertIds =
+        insertId > 0 && affectedRows > 0
+          ? Array.from({ length: affectedRows }, (_, i) => insertId + i)
+          : []
+      if (output.type === 'array') return insertIds
+      return insertIds[0] ?? 0
+    }
+    if (config.operation === 'delete') {
+      if (output.type === 'number') return affectedRows
+      if (output.type === 'boolean') return affectedRows > 0
+      return affectedRows
+    }
+    if (output.type === 'string') return String(insertId || '')
+    if (output.type === 'number') return insertId
+    if (output.type === 'boolean') return affectedRows > 0
+    return { affectedRows, insertId }
+  }
+
+  const rows = exec.rows
+  let total = rows.length
+  if (config.operation === 'query') {
+    if (rows.length < pageSize) {
+      total = (current - 1) * pageSize + rows.length
+    } else {
+      try {
+        const countSql = `SELECT COUNT(*) AS cnt FROM ${quoteIdent(table)}`
+        const countRes = await queryRows(countSql)
+        total = Number(countRes.rows[0]?.cnt ?? rows.length) || rows.length
+      } catch {
+        total = (current - 1) * pageSize + rows.length
+      }
+    }
+  }
+
+  return wrapOutput(output, config, rows, { current, pageSize, total })
+}

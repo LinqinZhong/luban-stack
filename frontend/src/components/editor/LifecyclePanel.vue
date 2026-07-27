@@ -28,6 +28,8 @@ const props = defineProps<{
   /** 组件参数：自定义代码中 $props 提示 */
   componentProps?: ComponentPropDef[] | null
   typeLibrary?: DataTypeLibrary | null
+  /** 项目路径：对象存储资源选择 */
+  projectPath?: string | null
 }>()
 
 const emit = defineEmits<{
@@ -97,6 +99,7 @@ function handleBindSave(value: string) {
       :icon-options="iconOptions"
       :component-props="componentProps"
       :type-library="typeLibrary"
+      :project-path="projectPath"
       @save="handleBindSave"
     />
   </div>

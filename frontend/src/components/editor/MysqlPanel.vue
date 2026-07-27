@@ -20,6 +20,7 @@ import type { DataTypeLibrary } from '../../types/data-types'
 const props = defineProps<{
   library: MysqlLibrary
   typeLibrary: DataTypeLibrary
+  projectPath?: string | null
 }>()
 
 const emit = defineEmits<{
@@ -253,7 +254,11 @@ async function removeTable(row: MysqlTableInfo) {
   }
   busy.value = true
   try {
-    const result = await dropMysqlTable({ ...conn, tableName: row.name })
+    const result = await dropMysqlTable({
+      ...conn,
+      tableName: row.name,
+      projectPath: props.projectPath || undefined,
+    })
     patchActiveTables(result.tables)
     ElMessage.success(`已删除表「${row.name}」`)
   } catch (err) {
@@ -278,7 +283,7 @@ function formatTime(ts: number | null): string {
     <div class="mysql-body">
       <aside class="db-pane">
         <div class="pane-head">
-          <span class="pane-title">数据库</span>
+          <span class="pane-title">连接</span>
           <el-button type="primary" link :icon="Plus" @click="openCreateDb">
             添加
           </el-button>
@@ -305,12 +310,14 @@ function formatTime(ts: number | null): string {
             >
               <div class="db-meta">
                 <div class="db-name">{{ db.name }}</div>
-                <div class="db-sub">
-                  {{ db.host }}:{{ db.port }}
-                  <span v-if="db.ssh.enabled"> · SSH</span>
+                <div class="db-sub-row">
+                  <div class="db-sub">
+                    {{ db.host }}:{{ db.port }}
+                    <span v-if="db.ssh.enabled"> · SSH</span>
+                  </div>
+                  <span class="db-count">{{ db.tables.length }}张表</span>
                 </div>
               </div>
-              <span class="db-count">{{ db.tables.length }}</span>
             </li>
             <template #dropdown>
               <el-dropdown-menu>
@@ -329,6 +336,7 @@ function formatTime(ts: number | null): string {
           v-if="viewingTable && connectionPayload"
           :connection="connectionPayload"
           :table="viewingTable"
+          :project-path="projectPath"
           @back="closeViewTable"
         />
         <template v-else>
@@ -359,7 +367,7 @@ function formatTime(ts: number | null): string {
 
           <el-empty
             v-if="!activeDb"
-            description="请选择或添加左侧数据库"
+            description="请选择或添加左侧连接"
             :image-size="64"
           />
           <el-empty
@@ -415,12 +423,14 @@ function formatTime(ts: number | null): string {
       :mode="tableDialogMode"
       :connection="connectionPayload"
       :table="editingTable"
+      :project-path="projectPath"
       @saved="handleTableSaved"
     />
     <MysqlDesignDialog
       v-model="designDialogVisible"
       :connection="connectionPayload"
       :table="designingTable"
+      :project-path="projectPath"
       @saved="handleTableSaved"
     />
     <MysqlToTypeDialog
@@ -428,6 +438,7 @@ function formatTime(ts: number | null): string {
       :connection="connectionPayload"
       :table="toTypeTable"
       :type-library="typeLibrary"
+      :project-path="projectPath"
       @save="handleTypeLibrarySave"
     />
   </div>
@@ -476,6 +487,7 @@ function formatTime(ts: number | null): string {
 }
 
 .pane-title {
+  margin-right: auto;
   font-size: 13px;
   font-weight: 600;
   color: #303133;
@@ -545,8 +557,17 @@ function formatTime(ts: number | null): string {
   white-space: nowrap;
 }
 
+.db-sub-row {
+  margin-top: 6px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
 .db-sub {
-  margin-top: 2px;
+  flex: 1;
+  min-width: 0;
   font-size: 11px;
   color: #94a3b8;
   overflow: hidden;
@@ -555,10 +576,10 @@ function formatTime(ts: number | null): string {
 }
 
 .db-count {
+  flex-shrink: 0;
   font-size: 11px;
   color: #94a3b8;
-  min-width: 16px;
-  text-align: center;
+  white-space: nowrap;
 }
 
 .table-wrap {

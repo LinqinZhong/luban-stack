@@ -1,7 +1,0 @@
-{
-  "component": true,
-  "styleIsolation": "apply-shared",
-  "usingComponents": {
-    "voider-icon": "/components/voider-icon/index"
-  }
-}

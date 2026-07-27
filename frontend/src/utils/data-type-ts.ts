@@ -77,7 +77,10 @@ export function dataTypeToTs(def: DataTypeDef, ctx: DataTypeTsContext): string {
     : ''
 
   if (def.kind === 'number' || def.kind === 'string' || def.kind === 'boolean') {
-    // 基本类型以 interface 空壳占位，避免使用 type 别名
+    // URI 等别名：type URI = string；其余基本类型仍用 interface 空壳占位
+    if (def.kind === 'string' && name === 'URI') {
+      return `${headRemark}type URI = string\n`
+    }
     return `${headRemark}interface ${name} {}\n`
   }
 

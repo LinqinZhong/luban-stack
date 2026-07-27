@@ -1,5 +1,0 @@
-<view wx:if="{{__modal_mask}}" bindtap="__hideModal___modal_mask" class="absolute inset-0 box-border" style="position:fixed;top:0;left:0;right:0;bottom:0;z-index:1000;pointer-events:auto;background:rgba(0,0,0,0.45)">
-  <view class="relative w-full h-full min-h-0 overflow-hidden box-border">
-    <view catchtap="__modalNoop" class="w-full min-w-0 h-arb-106_666667vw p-arb-3_2vw pt-0 pb-0 bg-arb-hffffff rounded-tl-arb-8vw rounded-tr-arb-8vw rounded-br-arb-0 rounded-bl-arb-0 absolute bottom-0 flex flex-col"></view>
-  </view>
-</view>

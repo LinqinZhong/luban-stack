@@ -6,6 +6,7 @@ import {
   deleteMysqlTableRow,
   insertMysqlTableRow,
   listMysqlTableRows,
+  resolveMysqlTableSchema,
   updateMysqlTableRow,
 } from '../../api/projects'
 import type {
@@ -13,11 +14,16 @@ import type {
   MysqlConnectionPayload,
   MysqlTableInfo,
 } from '../../types/mysql'
+import { isMysqlResourceColumn } from '../../utils/mysql-common-types'
+import type { OssBindingConfig } from '../../types/page-data'
 import BackLink from './BackLink.vue'
+import OssResourcePickerDialog from './OssResourcePickerDialog.vue'
+import MysqlSchemaConflictDialog from './MysqlSchemaConflictDialog.vue'
 
 const props = defineProps<{
   connection: MysqlConnectionPayload | null
   table: MysqlTableInfo
+  projectPath?: string | null
 }>()
 
 const emit = defineEmits<{
@@ -39,6 +45,13 @@ const formMode = ref<'create' | 'edit'>('edit')
 const formTitle = ref('编辑行')
 const editingKey = ref<Record<string, unknown> | null>(null)
 const editForm = reactive<Record<string, string>>({})
+
+const ossPickerVisible = ref(false)
+const ossPickerColumn = ref('')
+const conflictVisible = ref(false)
+const resolving = ref(false)
+const conflictLocal = ref<MysqlColumnDef[]>([])
+const conflictRemote = ref<MysqlColumnDef[]>([])
 
 const canMutate = computed(() => keyColumns.value.length > 0)
 const keyColumnSet = computed(() => new Set(keyColumns.value))
@@ -127,6 +140,7 @@ async function loadRows() {
       tableName: props.table.name,
       current: current.value,
       pageSize: pageSize.value,
+      projectPath: props.projectPath || undefined,
     })
     columns.value = result.columns
     keyColumns.value = result.keyColumns
@@ -135,10 +149,40 @@ async function loadRows() {
     total.value = result.total
     current.value = result.current
     pageSize.value = result.pageSize
+    if (result.conflict && result.local) {
+      conflictLocal.value = result.local
+      conflictRemote.value = result.remote
+      conflictVisible.value = true
+    }
   } catch (err) {
     ElMessage.error(err instanceof Error ? err.message : '加载数据失败')
   } finally {
     loading.value = false
+  }
+}
+
+async function handleConflictAdopt(side: 'local' | 'remote') {
+  if (!props.connection || !props.table?.name || !props.projectPath) {
+    ElMessage.error('缺少项目路径，无法解决冲突')
+    return
+  }
+  resolving.value = true
+  try {
+    await resolveMysqlTableSchema({
+      ...props.connection,
+      tableName: props.table.name,
+      projectPath: props.projectPath,
+      adopt: side,
+    })
+    conflictVisible.value = false
+    ElMessage.success(
+      side === 'local' ? '已采用本地结构并推送到数据库' : '已采用数据库结构并写入本地',
+    )
+    await loadRows()
+  } catch (err) {
+    ElMessage.error(err instanceof Error ? err.message : '解决冲突失败')
+  } finally {
+    resolving.value = false
   }
 }
 
@@ -178,6 +222,18 @@ function openCopy(row: Record<string, unknown>) {
 function isFieldDisabled(col: MysqlColumnDef): boolean {
   if (formMode.value === 'edit') return keyColumnSet.value.has(col.name)
   return col.autoIncrement
+}
+
+function openOssPickerForColumn(col: MysqlColumnDef) {
+  if (isFieldDisabled(col)) return
+  ossPickerColumn.value = col.name
+  ossPickerVisible.value = true
+}
+
+function onOssPicked(config: OssBindingConfig) {
+  const col = ossPickerColumn.value
+  if (!col) return
+  editForm[col] = config.url
 }
 
 async function saveForm() {
@@ -327,6 +383,12 @@ watch(
           <template #header>
             <span>{{ col.name }}</span>
             <span v-if="keyColumnSet.has(col.name)" class="key-tag">键</span>
+            <span
+              v-if="isMysqlResourceColumn(col)"
+              class="resource-tag"
+            >
+              资源
+            </span>
           </template>
           <template #default="{ row }">
             {{ formatCell(row[col.name]) }}
@@ -364,7 +426,7 @@ watch(
     <el-dialog
       v-model="formVisible"
       :title="formTitle"
-      width="520px"
+      width="560px"
       append-to-body
       destroy-on-close
     >
@@ -374,7 +436,26 @@ watch(
           :key="col.name"
           :label="col.name"
         >
+          <div
+            v-if="isMysqlResourceColumn(col)"
+            class="resource-field"
+          >
+            <el-input
+              v-model="editForm[col.name]"
+              :disabled="isFieldDisabled(col)"
+              placeholder="资源外链 URI"
+            />
+            <el-button
+              type="primary"
+              link
+              :disabled="isFieldDisabled(col)"
+              @click="openOssPickerForColumn(col)"
+            >
+              对象存储
+            </el-button>
+          </div>
           <el-input
+            v-else
             v-model="editForm[col.name]"
             :type="cellInputType(col)"
             :rows="cellInputType(col) === 'textarea' ? 3 : undefined"
@@ -394,6 +475,20 @@ watch(
         </el-button>
       </template>
     </el-dialog>
+
+    <OssResourcePickerDialog
+      v-model="ossPickerVisible"
+      :project-path="projectPath"
+      @confirm="onOssPicked"
+    />
+    <MysqlSchemaConflictDialog
+      v-model="conflictVisible"
+      :table-name="table.name"
+      :local="conflictLocal"
+      :remote="conflictRemote"
+      :resolving="resolving"
+      @adopt="handleConflictAdopt"
+    />
   </div>
 </template>
 
@@ -450,13 +545,34 @@ watch(
   min-height: 0;
 }
 
-.key-tag {
+.key-tag,
+.resource-tag {
   margin-left: 4px;
   padding: 0 4px;
   border-radius: 3px;
+  font-size: 11px;
+}
+
+.key-tag {
   background: #ecfdf5;
   color: #059669;
-  font-size: 11px;
+}
+
+.resource-tag {
+  background: #eff6ff;
+  color: #2563eb;
+}
+
+.resource-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+
+.resource-field .el-input {
+  flex: 1;
+  min-width: 0;
 }
 
 .rows-pager {
@@ -468,6 +584,5 @@ watch(
 .edit-form {
   max-height: 60vh;
   overflow: auto;
-  padding-right: 4px;
 }
 </style>

@@ -9,12 +9,14 @@ import type {
   MysqlTableDef,
   MysqlTableInfo,
 } from '../../types/mysql'
+import { MYSQL_COMMON_TYPE_OPTIONS } from '../../utils/mysql-common-types'
 
 const props = defineProps<{
   modelValue: boolean
   mode: 'create' | 'edit'
   connection: MysqlConnectionPayload | null
   table: MysqlTableInfo | null
+  projectPath?: string | null
 }>()
 
 const emit = defineEmits<{
@@ -31,19 +33,6 @@ const form = reactive({
   columns: [] as MysqlColumnDef[],
 })
 
-const COMMON_TYPES = [
-  'bigint',
-  'int',
-  'varchar(255)',
-  'varchar(64)',
-  'text',
-  'datetime',
-  'timestamp',
-  'decimal(10,2)',
-  'tinyint(1)',
-  'json',
-]
-
 function emptyColumn(partial?: Partial<MysqlColumnDef>): MysqlColumnDef {
   return {
     name: '',
@@ -53,6 +42,7 @@ function emptyColumn(partial?: Partial<MysqlColumnDef>): MysqlColumnDef {
     autoIncrement: false,
     defaultValue: '',
     comment: '',
+    resource: false,
     ...partial,
   }
 }
@@ -162,6 +152,7 @@ function buildCreateTable(): MysqlTableDef {
       autoIncrement: c.autoIncrement,
       defaultValue: c.defaultValue,
       comment: c.comment,
+      resource: Boolean(c.resource),
     })),
   }
 }
@@ -187,10 +178,12 @@ async function handleSave() {
       props.mode === 'create'
         ? await createMysqlTable({
             ...props.connection,
+            projectPath: props.projectPath || undefined,
             table: buildCreateTable(),
           })
         : await updateMysqlTableMeta({
             ...props.connection,
+            projectPath: props.projectPath || undefined,
             tableName: props.table?.name ?? form.name.trim(),
             name: form.name.trim(),
             remark: form.remark.trim(),
@@ -246,6 +239,7 @@ const dialogTitle = computed(() =>
           <div class="cols-row cols-header">
             <span>列名</span>
             <span>类型</span>
+            <span>资源</span>
             <span>可空</span>
             <span>主键</span>
             <span>自增</span>
@@ -268,8 +262,14 @@ const dialogTitle = computed(() =>
               default-first-option
               placeholder="类型"
             >
-              <el-option v-for="t in COMMON_TYPES" :key="t" :label="t" :value="t" />
+              <el-option
+                v-for="t in MYSQL_COMMON_TYPE_OPTIONS"
+                :key="t.value"
+                :label="t.label"
+                :value="t.value"
+              />
             </el-select>
+            <el-checkbox v-model="col.resource" />
             <el-checkbox v-model="col.nullable" />
             <el-checkbox v-model="col.primaryKey" @change="onPrimaryKeyChange(col)" />
             <el-checkbox
@@ -345,7 +345,7 @@ const dialogTitle = computed(() =>
 
 .cols-row {
   display: grid;
-  grid-template-columns: 1.1fr 1.2fr 52px 52px 52px 0.9fr 0.9fr 36px;
+  grid-template-columns: 1fr 1.1fr 48px 48px 48px 48px 0.85fr 0.85fr 36px;
   gap: 8px;
   align-items: center;
   padding: 8px 10px;

@@ -1,0 +1,79 @@
+{
+  "name": "voider-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Voider Electron 桌面端",
+  "main": "dist/main.js",
+  "scripts": {
+    "postinstall": "node node_modules/electron/install.js",
+    "build:main": "tsc -p tsconfig.json",
+    "dev": "npm run build:main && concurrently -k -n vite,electron -c cyan,magenta \"npm run dev:vite\" \"npm run dev:electron\"",
+    "dev:vite": "npm --prefix ../frontend run dev",
+    "dev:electron": "wait-on http://127.0.0.1:5173 && cross-env VOIDER_ELECTRON_DEV=1 electron .",
+    "prepack:app": "npm run build:main && npm --prefix ../frontend run build && npm --prefix ../server run build",
+    "pack": "npm run prepack:app && electron-builder --win dir",
+    "build": "npm run prepack:app && electron-builder --win",
+    "start": "npm run build:main && cross-env VOIDER_ELECTRON_DEV=1 electron ."
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.2",
+    "concurrently": "^9.2.1",
+    "cross-env": "^7.0.3",
+    "electron": "^37.2.0",
+    "electron-builder": "^26.0.12",
+    "typescript": "^5.9.2",
+    "wait-on": "^8.0.4"
+  },
+  "build": {
+    "appId": "com.voider.desktop",
+    "productName": "Voider",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../frontend/dist",
+        "to": "frontend"
+      },
+      {
+        "from": "../server/dist",
+        "to": "server/dist"
+      },
+      {
+        "from": "../server/package.json",
+        "to": "server/package.json"
+      },
+      {
+        "from": "../server/node_modules",
+        "to": "server/node_modules",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  }
+}

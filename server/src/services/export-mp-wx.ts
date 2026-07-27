@@ -1,4 +1,4 @@
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+﻿import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { openProject, ProjectError } from './project.js'
 import { listPages, getPage } from './pages.js'
@@ -6,14 +6,16 @@ import { listComponents, getComponent } from './components.js'
 import { listPageMethods } from './functions.js'
 import { getLifecycle } from './lifecycle.js'
 import { readIconLibrary } from './icons.js'
+import { readOssLibrary } from './oss.js'
 import {
   readBackendServiceLibrary,
   readServiceControllers,
 } from './backend-services.js'
 import { parseXml, findRootNode, type XmlNode } from './export-vue3/xml-parser.js'
-import { buildIconSvg } from './export-vue3/icon-export.js'
-import { generateVoiderIconFiles } from './export-mp-wx/voider-icon.js'
+import { localIconAssetFiles } from './export-vue3/icon-export.js'
+import { generateAppIconFiles } from './export-mp-wx/app-icon.js'
 import { scaffoldMpWxFiles } from './export-mp-wx/scaffold.js'
+import { buildExportApiBaseUrls } from './export-api-base.js'
 import {
   generatePageFiles,
   generateComponentFiles,
@@ -104,9 +106,11 @@ async function preloadApiResolver(
     string,
     Awaited<ReturnType<typeof readServiceControllers>>
   >()
+  const serviceNameById = new Map<string, string>()
 
   await Promise.all(
     library.services.map(async (svc) => {
+      if (svc.name?.trim()) serviceNameById.set(svc.id, svc.name.trim())
       try {
         const controllers = await readServiceControllers(projectPath, svc.id)
         byService.set(svc.id, controllers)
@@ -119,37 +123,52 @@ async function preloadApiResolver(
   return (raw: string): MpApiBinding | null => {
     const ids = parseApiPropBinding(raw)
     if (!ids) return null
+    const serviceName = serviceNameById.get(ids.serviceId)
     const controllers = byService.get(ids.serviceId) ?? []
     const ctrl = controllers.find((c) => c.id === ids.controllerId)
     const api = ctrl?.apis.find((a) => a.id === ids.apiId)
     if (!ctrl || !api) {
       return {
         ...ids,
+        ...(serviceName ? { serviceName } : {}),
         method: 'GET',
         path: '',
       }
     }
     return {
       ...ids,
+      ...(serviceName ? { serviceName } : {}),
       method: (api.method || 'GET').toUpperCase(),
       path: joinControllerApiPath(ctrl.path || '', api.path || ''),
     }
   }
 }
 
+export interface ExportMpWxOptions {
+  outputPath?: string
+  pageIds?: string[]
+  wechatAppId?: string
+  apiBaseUrls?: Record<string, string>
+}
+
 export async function exportMpWxProject(
   projectPathInput: string,
+  options: ExportMpWxOptions = {},
 ): Promise<ExportMpWxResult> {
   if (!projectPathInput?.trim()) {
     throw new ProjectError('请提供 projectPath')
   }
 
   const { path: projectPath, config } = await openProject(projectPathInput)
-  if (!config.wechatAppId?.trim()) {
-    throw new ProjectError('未配置微信小程序 AppID，请先在设置中填写', 400)
+  const wechatAppId =
+    options.wechatAppId?.trim() || config.wechatAppId?.trim() || ''
+  if (!wechatAppId) {
+    throw new ProjectError('未配置微信小程序 AppID', 400)
   }
 
-  const outputPath = path.join(projectPath, OUTPUT_DIR)
+  const outputPath = options.outputPath
+    ? path.resolve(options.outputPath)
+    : path.join(projectPath, OUTPUT_DIR)
 
   try {
     await rm(outputPath, { recursive: true, force: true })
@@ -159,7 +178,15 @@ export async function exportMpWxProject(
   }
   await mkdir(outputPath, { recursive: true })
 
-  const pageSummaries = await listPages(projectPath)
+  const pageSummariesAll = await listPages(projectPath)
+  const pageIdFilter = options.pageIds?.map((id) => id.trim()).filter(Boolean)
+  const pageSummaries = pageIdFilter?.length
+    ? pageSummariesAll.filter((p) => pageIdFilter.includes(p.id))
+    : pageSummariesAll
+  if (!pageSummaries.length) {
+    throw new ProjectError('没有可导出的页面', 400)
+  }
+
   const componentSummaries = await listComponents(projectPath)
 
   const pageDetails = await Promise.all(
@@ -169,7 +196,14 @@ export async function exportMpWxProject(
     componentSummaries.map((summary) => getComponent(projectPath, summary.id)),
   )
   const iconLibrary = await readIconLibrary(projectPath)
+  const ossLibrary = await readOssLibrary(projectPath)
   const resolveApi = await preloadApiResolver(projectPath)
+  const serviceLibrary = await readBackendServiceLibrary(projectPath)
+  const apiBaseUrls = buildExportApiBaseUrls(
+    config,
+    serviceLibrary.services,
+    options.apiBaseUrls,
+  )
 
   const componentConfigs = new Map<string, ComponentConfig>()
   const componentRoots = new Map<string, XmlNode>()
@@ -187,7 +221,8 @@ export async function exportMpWxProject(
   const scaffold = scaffoldMpWxFiles({
     config,
     pages: pageSummaries.map((p) => ({ id: p.id, title: p.title })),
-    projectPath,
+    apiBaseUrls,
+    wechatAppId,
   })
   await writeMany(outputPath, scaffold)
 
@@ -252,10 +287,8 @@ export async function exportMpWxProject(
   )
 
   const iconFiles: Record<string, string> = {
-    ...generateVoiderIconFiles(iconLibrary),
-  }
-  for (const icon of iconLibrary.icons) {
-    iconFiles[`assets/icons/${icon.id}.svg`] = buildIconSvg(icon)
+    ...generateAppIconFiles(iconLibrary, ossLibrary),
+    ...localIconAssetFiles(iconLibrary, 'assets/icons'),
   }
   await writeMany(outputPath, iconFiles)
 

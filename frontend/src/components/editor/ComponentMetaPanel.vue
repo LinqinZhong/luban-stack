@@ -215,14 +215,22 @@ function onEventParamTypeChange(
     itemItemTypeRef?: string
   },
 ) {
-  const fieldType = payload.type === 'void' ? 'any' : payload.type
+  const fieldType =
+    payload.type === 'void' || payload.type === 'generic' ? 'any' : payload.type
   param.type = dataFieldToMethodParamType(fieldType)
   param.typeRef = payload.typeRef
-  param.itemType = fieldType === 'array' ? payload.itemType || 'string' : undefined
+  param.itemType =
+    fieldType === 'array'
+      ? payload.itemType === 'generic'
+        ? 'any'
+        : payload.itemType || 'string'
+      : undefined
   param.itemTypeRef = fieldType === 'array' ? payload.itemTypeRef : undefined
   param.itemItemType =
     fieldType === 'array' && payload.itemType === 'array'
-      ? payload.itemItemType || 'string'
+      ? payload.itemItemType === 'generic'
+        ? 'any'
+        : payload.itemItemType || 'string'
       : undefined
   param.itemItemTypeRef =
     fieldType === 'array' && payload.itemType === 'array'

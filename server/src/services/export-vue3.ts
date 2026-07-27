@@ -4,6 +4,7 @@ import { openProject, ProjectError } from './project.js'
 import { listPages, getPage } from './pages.js'
 import { listComponents, getComponent } from './components.js'
 import { readIconLibrary } from './icons.js'
+import { readOssLibrary } from './oss.js'
 import type { ComponentConfig } from '../types/component.js'
 import type { DataField } from '../types/page-data.js'
 import { parseXml, findRootNode, type XmlNode } from './export-vue3/xml-parser.js'
@@ -15,7 +16,11 @@ import {
   type PageRefField,
 } from './export-vue3/vue-codegen.js'
 import { componentIdToFileName } from './export-vue3/naming.js'
-import { iconAssetFiles } from './export-vue3/icon-export.js'
+import { iconExportFiles } from './export-vue3/icon-export.js'
+import { buildExportApiBaseUrls } from './export-api-base.js'
+import {
+  readBackendServiceLibrary,
+} from './backend-services.js'
 
 export interface ExportVue3Result {
   outputPath: string
@@ -152,13 +157,26 @@ function migrateLegacyMaskNodes(nodes: XmlNode[]): XmlNode[] {
   return nodes.map(migrateMaskNode)
 }
 
-export async function exportVue3Project(projectPathInput: string): Promise<ExportVue3Result> {
+export interface ExportVue3Options {
+  outputPath?: string
+  pageIds?: string[]
+  /** H5 开发端口，写入 .env.local */
+  port?: number
+  apiBaseUrls?: Record<string, string>
+}
+
+export async function exportVue3Project(
+  projectPathInput: string,
+  options: ExportVue3Options = {},
+): Promise<ExportVue3Result> {
   if (!projectPathInput?.trim()) {
     throw new ProjectError('请提供 projectPath')
   }
 
   const { path: projectPath, config } = await openProject(projectPathInput)
-  const outputPath = path.join(projectPath, OUTPUT_DIR)
+  const outputPath = options.outputPath
+    ? path.resolve(options.outputPath)
+    : path.join(projectPath, OUTPUT_DIR)
 
   try {
     await rm(outputPath, { recursive: true, force: true })
@@ -169,7 +187,15 @@ export async function exportVue3Project(projectPathInput: string): Promise<Expor
   }
   await mkdir(outputPath, { recursive: true })
 
-  const pageSummaries = await listPages(projectPath)
+  const pageSummariesAll = await listPages(projectPath)
+  const pageIdFilter = options.pageIds?.map((id) => id.trim()).filter(Boolean)
+  const pageSummaries = pageIdFilter?.length
+    ? pageSummariesAll.filter((p) => pageIdFilter.includes(p.id))
+    : pageSummariesAll
+  if (!pageSummaries.length) {
+    throw new ProjectError('没有可导出的页面', 400)
+  }
+
   const componentSummaries = await listComponents(projectPath)
 
   const componentConfigs = new Map<string, ComponentConfig>()
@@ -190,6 +216,13 @@ export async function exportVue3Project(projectPathInput: string): Promise<Expor
   )
 
   const iconLibrary = await readIconLibrary(projectPath)
+  const ossLibrary = await readOssLibrary(projectPath)
+  const serviceLibrary = await readBackendServiceLibrary(projectPath)
+  const apiBaseUrls = buildExportApiBaseUrls(
+    config,
+    serviceLibrary.services,
+    options.apiBaseUrls,
+  )
 
   const scaffold = scaffoldFiles({
     projectName: config.name,
@@ -240,7 +273,20 @@ export async function exportVue3Project(projectPathInput: string): Promise<Expor
     )
   }
 
-  await writeMany(outputPath, iconAssetFiles(iconLibrary))
+  const envExtra =
+    options.port && options.port > 0
+      ? `\nVITE_DEV_PORT=${Math.floor(options.port)}\n`
+      : ''
+  const iconFiles = iconExportFiles(iconLibrary, {
+    ossLibrary,
+    apiBaseUrls,
+  })
+  if (envExtra && iconFiles['.env.local']) {
+    iconFiles['.env.local'] += envExtra
+  } else if (envExtra) {
+    iconFiles['.env.local'] = envExtra.trimStart()
+  }
+  await writeMany(outputPath, iconFiles)
 
   return {
     outputPath,

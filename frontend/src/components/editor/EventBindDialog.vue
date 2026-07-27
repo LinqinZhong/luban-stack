@@ -59,6 +59,8 @@ const props = defineProps<{
   typeLibrary?: import('../../types/data-types').DataTypeLibrary | null
   /** 组件参数定义：注入 $props 代码提示（组件内生命周期/事件自定义代码） */
   componentProps?: ComponentPropDef[] | null
+  /** 项目路径：对象存储资源选择 */
+  projectPath?: string | null
 }>()
 
 const emit = defineEmits<{
@@ -781,12 +783,14 @@ function handleClear() {
     v-model="objectDialogVisible"
     :fields="editingObjectFields"
     :icon-options="iconOptions"
+    :project-path="projectPath"
     @save="saveObjectFields"
   />
   <ArrayFieldsDialog
     v-model="arrayDialogVisible"
     :fields="editingArrayFields"
     :icon-options="iconOptions"
+    :project-path="projectPath"
     @save="saveArrayFields"
   />
 </template>

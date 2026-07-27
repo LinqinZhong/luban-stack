@@ -1,11 +1,10 @@
-/** 导出到小程序的 `utils/voider-api.js` 源码 */
+﻿/** 导出到小程序的 `utils/api.js` 源码 */
 
-export function generateVoiderApiJs(): string {
+export function generateApiJs(): string {
   return `/**
- * Voider runtime: wx.request API + getDeviceInfo
- * binding: { serviceId, controllerId, apiId, method, path }
- * base: getApp().globalData.apiBaseUrl (default http://127.0.0.1:6630)
- * project: getApp().globalData.projectPath -> header X-Voider-Project
+ * runtime: wx.request API + getDeviceInfo
+ * binding: { serviceId, serviceName?, controllerId, apiId, method, path }
+ * base: getApp().globalData.apiBaseUrls[serviceName|default]
  */
 
 function unwrapResult(data) {
@@ -36,6 +35,28 @@ function serializeQuery(data) {
   return out
 }
 
+function resolveApiBase(serviceId, serviceName) {
+  var app = typeof getApp === 'function' ? getApp() : null
+  var g = (app && app.globalData) || {}
+  var map = g.apiBaseUrls && typeof g.apiBaseUrls === 'object' ? g.apiBaseUrls : {}
+  var keys = [serviceName, serviceId, 'default', 'oss']
+  for (var i = 0; i < keys.length; i++) {
+    var k = keys[i]
+    if (!k || typeof k !== 'string') continue
+    var v = map[k]
+    if (typeof v === 'string' && v.trim()) {
+      return String(v).replace(/\\/+$/, '')
+    }
+  }
+  var values = Object.keys(map).map(function (key) { return map[key] })
+  for (var j = 0; j < values.length; j++) {
+    if (typeof values[j] === 'string' && values[j].trim()) {
+      return String(values[j]).replace(/\\/+$/, '')
+    }
+  }
+  return ''
+}
+
 /**
  * @param {object|null|undefined} binding
  * @param {object} [args]
@@ -58,32 +79,32 @@ function invoke(binding, args) {
     )
   }
 
-  var app = typeof getApp === 'function' ? getApp() : null
-  var g = (app && app.globalData) || {}
-  var base =
-    (typeof g.apiBaseUrl === 'string' ? g.apiBaseUrl : '') ||
-    'http://127.0.0.1:6630'
-  base = String(base).replace(/\\/+$/, '')
+  var base = resolveApiBase(binding.serviceId, binding.serviceName)
+  if (!base) {
+    return Promise.reject(
+      new Error(
+        'API baseUrl missing for serviceId=' +
+          (binding.serviceId || '') +
+          '（请在 app.js globalData.apiBaseUrls 配置）',
+      ),
+    )
+  }
   var url = path.indexOf('http://') === 0 || path.indexOf('https://') === 0
     ? path
     : base + (path.charAt(0) === '/' ? path : '/' + path)
 
   var method = String(binding.method || 'GET').toUpperCase()
   var payload = args && typeof args === 'object' ? args : {}
-  var projectPath = typeof g.projectPath === 'string' ? g.projectPath : ''
 
   var header = {
     'content-type': 'application/json',
   }
-  if (projectPath) {
-    header['X-Voider-Project'] = projectPath
-  }
 
   return new Promise(function (resolve, reject) {
     var opts = {
-      url: url,
-      method: method,
-      header: header,
+      url,
+      method,
+      header,
       success: function (res) {
         if (res.statusCode >= 200 && res.statusCode < 300) {
           resolve(unwrapResult(res.data))
@@ -110,8 +131,9 @@ function invoke(binding, args) {
 ${getDeviceInfoFnSource()}
 
 module.exports = {
-  invoke: invoke,
-  getDeviceInfo: getDeviceInfo,
+  invoke,
+  resolveApiBase,
+  getDeviceInfo,
 }
 `
 }
@@ -152,7 +174,7 @@ function readMenuButton() {
     if (!(height > 0)) return fallback
     return {
       width: Number(rect.width) || fallback.width,
-      height: height,
+      height,
       top: top || fallback.top,
       right: Number(rect.right) || 0,
       bottom: Number(rect.bottom) || 0,
@@ -174,20 +196,22 @@ function getDeviceInfo() {
 }
 
 /** 兼容旧路径；完整实现避免二次 require 失败 */
-export function generateVoiderDeviceJs(): string {
+export function generateDeviceJs(): string {
   return `/**
- * Voider getDeviceInfo (miniprogram)
+ * getDeviceInfo (miniprogram)
  */
 ${getDeviceInfoFnSource()}
 
 module.exports = {
-  getDeviceInfo: getDeviceInfo,
+  getDeviceInfo,
 }
 `
 }
 
 export type MpApiBinding = {
   serviceId: string
+  /** 服务名，便于 apiBaseUrls 用可读 key */
+  serviceName?: string
   controllerId: string
   apiId: string
   method: string

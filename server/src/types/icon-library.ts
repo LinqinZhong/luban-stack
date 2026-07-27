@@ -1,3 +1,5 @@
+import { normalizeOssBinding, type OssBindingConfig } from './page-data.js'
+
 export const ICONS_FILE = 'icons.json'
 
 export interface IconDefinition {
@@ -8,6 +10,8 @@ export interface IconDefinition {
   viewBox: string
   /** symbol 内部 markup（不含外层 svg），通过 sprite 复用 */
   content: string
+  /** 绑定到对象存储时同步上传/删除 */
+  ossBinding?: OssBindingConfig
 }
 
 export interface IconLibrary {
@@ -74,11 +78,13 @@ export function normalizeIconLibrary(input: unknown): IconLibrary {
 
     if (!id || !isValidIconId(id) || seen.has(id) || !content) continue
     seen.add(id)
+    const ossBinding = normalizeOssBinding(item.ossBinding)
     icons.push({
       id,
       label: label || id,
       viewBox,
       content,
+      ...(ossBinding ? { ossBinding } : {}),
     })
   }
 

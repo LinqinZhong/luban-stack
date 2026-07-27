@@ -129,7 +129,7 @@ export class ClassRegistry {
   toWxss(): string {
     if (!this.rules.size) return ''
     const lines: string[] = [
-      '/* Voider utilities — Tailwind semantics, WXSS-safe class names */',
+      '/* utilities — Tailwind semantics, WXSS-safe class names */',
     ]
     const names = [...this.rules.keys()].sort()
     for (const name of names) {

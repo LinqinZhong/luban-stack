@@ -21,12 +21,18 @@
       "tables": [
         {
           "name": "goods",
-          "remark": "",
+          "remark": "商品表名",
           "engine": "InnoDB",
-          "rows": 1
+          "rows": 16
+        },
+        {
+          "name": "goods_remark",
+          "remark": "商品评价",
+          "engine": "InnoDB",
+          "rows": 0
         }
       ],
-      "lastTestedAt": 1784480952309
+      "lastTestedAt": 1785181987765
     }
   ]
 }

@@ -12,6 +12,8 @@ export type DataFieldType =
   | 'ref'
   /** 后端控制器 API（组件参数） */
   | 'api'
+  /** 资源外链 URI（值类型等价 type URI = string） */
+  | 'resource'
 
 export type DataFieldValue =
   | string
@@ -41,8 +43,8 @@ export interface ArraySubField {
   objectFields?: ObjectSubField[]
 }
 
-/** 数据源绑定：控制器 = 绑定后端 API；计算 = 方法体 return 值 */
-export type DataSourceBinding = '' | 'controller' | 'computed'
+/** 数据源绑定：控制器 = 绑定后端 API；计算 = 方法体 return 值；对象存储 = 选资源外链 */
+export type DataSourceBinding = '' | 'controller' | 'computed' | 'oss'
 
 /** 控制器绑定：API 入参来源 */
 export type ControllerInputSource = 'literal' | 'binding'
@@ -69,6 +71,15 @@ export interface ControllerBindingConfig {
   inputs?: Record<string, ControllerInputParamConfig>
 }
 
+/** 对象存储资源绑定（数据池 resource 类型） */
+export interface OssBindingConfig {
+  connectionId: string
+  bucketName: string
+  objectKey: string
+  /** 资源外链 URI */
+  url: string
+}
+
 export interface DataField {
   name: string
   type: DataFieldType
@@ -80,6 +91,8 @@ export interface DataField {
   computeBody?: string
   /** binding === 'controller' 时的控制器配置 */
   controllerBinding?: ControllerBindingConfig
+  /** binding === 'oss' 时的对象存储资源配置 */
+  ossBinding?: OssBindingConfig
   /** 引用 types/ 库中的具名类型 id */
   typeRef?: string
   /** 具名泛型实参：形参名 → 类型库 type id */
@@ -106,8 +119,22 @@ export function createDefaultPageData(): PageData {
 }
 
 export function normalizeDataSourceBinding(raw: unknown): DataSourceBinding {
-  if (raw === 'computed' || raw === 'controller') return raw
+  if (raw === 'computed' || raw === 'controller' || raw === 'oss') return raw
   return ''
+}
+
+export function normalizeOssBinding(input: unknown): OssBindingConfig | undefined {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return undefined
+  const raw = input as Record<string, unknown>
+  const connectionId =
+    typeof raw.connectionId === 'string' ? raw.connectionId.trim() : ''
+  const bucketName =
+    typeof raw.bucketName === 'string' ? raw.bucketName.trim() : ''
+  const objectKey =
+    typeof raw.objectKey === 'string' ? raw.objectKey.trim() : ''
+  const url = typeof raw.url === 'string' ? raw.url.trim() : ''
+  if (!connectionId && !bucketName && !objectKey && !url) return undefined
+  return { connectionId, bucketName, objectKey, url }
 }
 
 function defaultControllerParseBody(type: DataField['type']): string {

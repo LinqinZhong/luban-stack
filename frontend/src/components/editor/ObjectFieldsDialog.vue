@@ -14,6 +14,7 @@ import {
   type DataFieldType,
   type ObjectEditorNode,
   type ObjectSubField,
+  type OssBindingConfig,
 } from '../../types/page-data'
 import type { DataTypeLibrary } from '../../types/data-types'
 import { objectFieldsFromTypeRef } from '../../utils/named-type-fields'
@@ -25,6 +26,7 @@ import IconValueSelect from './IconValueSelect.vue'
 import ColorPicker from './ColorPicker.vue'
 import DataFieldTypeTreeSelect from './DataFieldTypeTreeSelect.vue'
 import JsonCodeEditor from './JsonCodeEditor.vue'
+import OssResourcePickerDialog from './OssResourcePickerDialog.vue'
 
 type EditorMode = 'visual' | 'code'
 
@@ -38,6 +40,8 @@ const props = withDefaults(
     typeRef?: string | null
     /** 按具名类型给定字段：只改值，不可增删/改类型 */
     schemaLocked?: boolean
+    /** 项目路径：对象存储资源选择 */
+    projectPath?: string | null
   }>(),
   { schemaLocked: false, typeRef: '' },
 )
@@ -264,6 +268,22 @@ function handleTypeChange(payload: {
   node.itemTypeRef = payload.type === 'array' ? payload.itemTypeRef : undefined
 }
 
+const ossPickerVisible = ref(false)
+
+function openOssPicker() {
+  if (!props.projectPath?.trim()) {
+    ElMessage.warning('未打开项目，无法选择对象存储资源')
+    return
+  }
+  ossPickerVisible.value = true
+}
+
+function onOssPicked(config: OssBindingConfig) {
+  const node = selectedNode.value
+  if (!node || node.type !== 'resource') return
+  node.value = (config.url || '').trim()
+}
+
 function handleSave() {
   if (mode.value === 'code') {
     if (!applyCodeToVisual()) return
@@ -419,6 +439,18 @@ function handleSave() {
             @update:model-value="selectedNode.value = $event"
           />
         </div>
+        <div v-else-if="selectedNode.type === 'resource'" class="field-row">
+          <label>数据值</label>
+          <div class="resource-value">
+            <el-input
+              :model-value="String(selectedNode.value ?? '')"
+              clearable
+              placeholder="资源外链 URI"
+              @update:model-value="selectedNode.value = $event"
+            />
+            <el-button type="primary" link @click="openOssPicker">对象存储</el-button>
+          </div>
+        </div>
         <el-alert
           v-else-if="selectedNode.type === 'json'"
           type="info"
@@ -444,6 +476,12 @@ function handleSave() {
       <el-button @click="close">取消</el-button>
       <el-button type="primary" @click="handleSave">保存</el-button>
     </template>
+
+    <OssResourcePickerDialog
+      v-model="ossPickerVisible"
+      :project-path="projectPath"
+      @confirm="onOssPicked"
+    />
   </el-dialog>
 </template>
 
@@ -550,6 +588,19 @@ function handleSave() {
 .field-row label {
   font-size: 13px;
   color: #606266;
+}
+
+.resource-value {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+}
+
+.resource-value .el-input {
+  flex: 1;
+  min-width: 0;
 }
 
 .code-panel {

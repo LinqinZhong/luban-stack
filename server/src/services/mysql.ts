@@ -1,4 +1,4 @@
-import { access, readFile, writeFile } from 'node:fs/promises'
+import { access, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { constants } from 'node:fs'
 import { createServer, type AddressInfo, type Server } from 'node:net'
 import path from 'node:path'
@@ -7,6 +7,7 @@ import { Client, type ConnectConfig } from 'ssh2'
 import {
   createEmptyMysqlLibrary,
   MYSQL_FILE,
+  MYSQL_SCHEMA_DIR,
   normalizeMysqlLibrary,
   type MysqlColumnDef,
   type MysqlConnectionPayload,
@@ -14,6 +15,7 @@ import {
   type MysqlSshConfig,
   type MysqlTableDef,
   type MysqlTableInfo,
+  type MysqlTableSchemaFile,
 } from '../types/mysql.js'
 import { ProjectError } from './project.js'
 
@@ -22,6 +24,202 @@ const TYPE_RE = /^[A-Za-z][A-Za-z0-9_(),\s]*$/
 
 function mysqlPath(projectPath: string): string {
   return path.join(projectPath, MYSQL_FILE)
+}
+
+function schemaDir(projectPath: string): string {
+  return path.join(projectPath, MYSQL_SCHEMA_DIR)
+}
+
+function schemaFilePath(projectPath: string, tableName: string): string {
+  return path.join(schemaDir(projectPath), `${tableName}.json`)
+}
+
+function stripColumnMeta(col: MysqlColumnDef): MysqlColumnDef {
+  return {
+    name: col.name,
+    type: col.type,
+    nullable: col.nullable,
+    primaryKey: col.primaryKey,
+    autoIncrement: col.autoIncrement,
+    defaultValue: col.defaultValue ?? '',
+    comment: col.comment ?? '',
+    ...(col.resource ? { resource: true } : {}),
+  }
+}
+
+function structuralKey(col: MysqlColumnDef): string {
+  const type = col.type.trim().toLowerCase().replace(/\s+/g, '')
+  return [
+    col.name.trim(),
+    type,
+    col.nullable ? '1' : '0',
+    col.primaryKey ? '1' : '0',
+    col.autoIncrement ? '1' : '0',
+    (col.defaultValue ?? '').trim(),
+    (col.comment ?? '').trim(),
+  ].join('\0')
+}
+
+export function mysqlSchemasStructurallyEqual(
+  a: MysqlColumnDef[],
+  b: MysqlColumnDef[],
+): boolean {
+  if (a.length !== b.length) return false
+  for (let i = 0; i < a.length; i++) {
+    if (structuralKey(a[i]!) !== structuralKey(b[i]!)) return false
+  }
+  return true
+}
+
+export function mergeMysqlResourceFlags(
+  remote: MysqlColumnDef[],
+  local: MysqlColumnDef[] | null | undefined,
+): MysqlColumnDef[] {
+  if (!local?.length) {
+    return remote.map((c) => ({ ...c, resource: false }))
+  }
+  const byName = new Map(local.map((c) => [c.name, Boolean(c.resource)]))
+  return remote.map((c) => ({
+    ...c,
+    resource: byName.get(c.name) ?? false,
+  }))
+}
+
+function normalizeSchemaFile(
+  input: unknown,
+  fallbackName = '',
+): MysqlTableSchemaFile | null {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return null
+  const raw = input as Record<string, unknown>
+  const name =
+    typeof raw.name === 'string' && raw.name.trim()
+      ? raw.name.trim()
+      : fallbackName.trim()
+  if (!name || !IDENT_RE.test(name)) return null
+  const columnsRaw = Array.isArray(raw.columns) ? raw.columns : []
+  const columns: MysqlColumnDef[] = []
+  for (const item of columnsRaw) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) continue
+    const row = item as Record<string, unknown>
+    const colName = typeof row.name === 'string' ? row.name.trim() : ''
+    const type = typeof row.type === 'string' ? row.type.trim() : ''
+    if (!colName || !IDENT_RE.test(colName) || !type) continue
+    columns.push({
+      name: colName,
+      type,
+      nullable: Boolean(row.nullable),
+      primaryKey: Boolean(row.primaryKey),
+      autoIncrement: Boolean(row.autoIncrement),
+      defaultValue: typeof row.defaultValue === 'string' ? row.defaultValue : '',
+      comment: typeof row.comment === 'string' ? row.comment : '',
+      ...(row.resource ? { resource: true } : {}),
+    })
+  }
+  return {
+    name,
+    remark: typeof raw.remark === 'string' ? raw.remark : '',
+    columns,
+    syncedAt:
+      raw.syncedAt == null || raw.syncedAt === ''
+        ? null
+        : Number(raw.syncedAt) || null,
+  }
+}
+
+export async function ensureMysqlSchemaDir(projectPath: string): Promise<void> {
+  await mkdir(schemaDir(projectPath), { recursive: true })
+}
+
+export async function readMysqlTableSchema(
+  projectPath: string,
+  tableName: string,
+): Promise<MysqlTableSchemaFile | null> {
+  if (!IDENT_RE.test(tableName)) return null
+  const filePath = schemaFilePath(projectPath, tableName)
+  try {
+    await access(filePath, constants.R_OK)
+  } catch {
+    return null
+  }
+  try {
+    const raw = await readFile(filePath, 'utf-8')
+    return normalizeSchemaFile(JSON.parse(raw), tableName)
+  } catch {
+    return null
+  }
+}
+
+export async function writeMysqlTableSchema(
+  projectPath: string,
+  tableName: string,
+  schema: {
+    remark?: string
+    columns: MysqlColumnDef[]
+  },
+): Promise<MysqlTableSchemaFile> {
+  if (!IDENT_RE.test(tableName)) {
+    throw new ProjectError('表名不合法', 400)
+  }
+  await ensureMysqlSchemaDir(projectPath)
+  const file: MysqlTableSchemaFile = {
+    name: tableName,
+    remark: schema.remark ?? '',
+    columns: schema.columns.map(stripColumnMeta),
+    syncedAt: Date.now(),
+  }
+  try {
+    await writeFile(
+      schemaFilePath(projectPath, tableName),
+      `${JSON.stringify(file, null, 2)}\n`,
+      'utf-8',
+    )
+  } catch {
+    throw new ProjectError(`无法写入 ${MYSQL_SCHEMA_DIR}/${tableName}.json`, 500)
+  }
+  return file
+}
+
+export async function deleteMysqlTableSchema(
+  projectPath: string,
+  tableName: string,
+): Promise<void> {
+  if (!IDENT_RE.test(tableName)) return
+  try {
+    await rm(schemaFilePath(projectPath, tableName), { force: true })
+  } catch {
+    // ignore
+  }
+}
+
+export async function renameMysqlTableSchema(
+  projectPath: string,
+  fromName: string,
+  toName: string,
+): Promise<void> {
+  if (!IDENT_RE.test(fromName) || !IDENT_RE.test(toName) || fromName === toName) {
+    return
+  }
+  const from = schemaFilePath(projectPath, fromName)
+  const to = schemaFilePath(projectPath, toName)
+  try {
+    await access(from, constants.F_OK)
+  } catch {
+    return
+  }
+  const existing = await readMysqlTableSchema(projectPath, fromName)
+  if (existing) {
+    await writeMysqlTableSchema(projectPath, toName, {
+      remark: existing.remark,
+      columns: existing.columns,
+    })
+    await deleteMysqlTableSchema(projectPath, fromName)
+    return
+  }
+  try {
+    await rename(from, to)
+  } catch {
+    // ignore
+  }
 }
 
 export async function readMysqlLibrary(projectPath: string): Promise<MysqlLibrary> {
@@ -81,6 +279,7 @@ export async function ensureMysqlLibraryFile(projectPath: string): Promise<void>
     const initial = createEmptyMysqlLibrary()
     await writeFile(filePath, `${JSON.stringify(initial, null, 2)}\n`, 'utf-8')
   }
+  await ensureMysqlSchemaDir(projectPath)
 }
 
 function validateConnectionPayload(payload: MysqlConnectionPayload): void {
@@ -304,6 +503,7 @@ function normalizeColumnInput(input: unknown, index: number): MysqlColumnDef {
     autoIncrement: Boolean(row.autoIncrement),
     defaultValue: typeof row.defaultValue === 'string' ? row.defaultValue : '',
     comment: typeof row.comment === 'string' ? row.comment : '',
+    ...(row.resource ? { resource: true } : {}),
     originalName,
   }
 }
@@ -433,40 +633,113 @@ export async function getMysqlTableColumns(
   }
   return withMysqlConnection(payload, async (connection) => {
     await useDatabase(connection, payload.database)
-    const [rows] = await connection.query(
-      `SELECT COLUMN_NAME AS name,
-              COLUMN_TYPE AS type,
-              IS_NULLABLE AS nullable,
-              COLUMN_KEY AS columnKey,
-              EXTRA AS extra,
-              COLUMN_DEFAULT AS defaultValue,
-              COLUMN_COMMENT AS comment
-       FROM information_schema.COLUMNS
-       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?
-       ORDER BY ORDINAL_POSITION`,
-      [tableName],
-    )
-    const list = Array.isArray(rows) ? rows : []
-    return list.map((row: any) => {
-      const name = String(row.name ?? '')
-      return {
-        name,
-        type: String(row.type ?? ''),
-        nullable: String(row.nullable ?? '').toUpperCase() === 'YES',
-        primaryKey: String(row.columnKey ?? '') === 'PRI',
-        autoIncrement: String(row.extra ?? '').toLowerCase().includes('auto_increment'),
-        defaultValue:
-          row.defaultValue == null ? '' : String(row.defaultValue),
-        comment: String(row.comment ?? ''),
-        originalName: name,
-      }
-    })
+    return getColumnsOnConnection(connection, tableName)
   })
+}
+
+export interface MysqlTableColumnsResult {
+  columns: MysqlColumnDef[]
+  conflict: boolean
+  local: MysqlColumnDef[] | null
+  remote: MysqlColumnDef[]
+  localRemark: string
+  remoteRemark: string
+}
+
+/** 拉取远程列并与本地 mysql/{table}.json 比对；冲突时不自动合并 */
+export async function getMysqlTableColumnsWithSchema(
+  projectPath: string,
+  payload: MysqlConnectionPayload,
+  tableName: string,
+): Promise<MysqlTableColumnsResult> {
+  const remote = await getMysqlTableColumns(payload, tableName)
+  const localFile = projectPath.trim()
+    ? await readMysqlTableSchema(projectPath, tableName)
+    : null
+  const local = localFile?.columns ?? null
+  if (!local) {
+    return {
+      columns: remote.map((c) => ({ ...c, resource: false })),
+      conflict: false,
+      local: null,
+      remote,
+      localRemark: '',
+      remoteRemark: '',
+    }
+  }
+  if (mysqlSchemasStructurallyEqual(local, remote)) {
+    return {
+      columns: mergeMysqlResourceFlags(remote, local),
+      conflict: false,
+      local,
+      remote,
+      localRemark: localFile?.remark ?? '',
+      remoteRemark: '',
+    }
+  }
+  return {
+    columns: remote.map((c) => ({ ...c, resource: false })),
+    conflict: true,
+    local,
+    remote,
+    localRemark: localFile?.remark ?? '',
+    remoteRemark: '',
+  }
+}
+
+/** 解决本地与数据库表结构冲突 */
+export async function resolveMysqlTableSchemaConflict(
+  projectPath: string,
+  payload: MysqlConnectionPayload,
+  tableName: string,
+  adopt: 'local' | 'remote',
+): Promise<MysqlTableColumnsResult> {
+  if (!projectPath.trim()) {
+    throw new ProjectError('缺少项目路径', 400)
+  }
+  if (adopt === 'remote') {
+    const remote = await getMysqlTableColumns(payload, tableName)
+    const localFile = await readMysqlTableSchema(projectPath, tableName)
+    const columns = mergeMysqlResourceFlags(remote, localFile?.columns)
+    await writeMysqlTableSchema(projectPath, tableName, {
+      remark: localFile?.remark ?? '',
+      columns,
+    })
+    return {
+      columns,
+      conflict: false,
+      local: columns,
+      remote,
+      localRemark: localFile?.remark ?? '',
+      remoteRemark: '',
+    }
+  }
+
+  const localFile = await readMysqlTableSchema(projectPath, tableName)
+  if (!localFile?.columns.length) {
+    throw new ProjectError('本地无表结构可采纳', 400)
+  }
+  await updateMysqlTableSchema(payload, tableName, localFile.columns)
+  await writeMysqlTableSchema(projectPath, tableName, {
+    remark: localFile.remark,
+    columns: localFile.columns,
+  })
+  const remote = await getMysqlTableColumns(payload, tableName)
+  const columns = mergeMysqlResourceFlags(remote, localFile.columns)
+  return {
+    columns,
+    conflict: false,
+    local: localFile.columns,
+    remote,
+    localRemark: localFile.remark,
+    remoteRemark: '',
+  }
 }
 
 export async function createMysqlTable(
   payload: MysqlConnectionPayload,
   tableInput: unknown,
+  projectPath?: string,
 ): Promise<MysqlTableInfo[]> {
   const table = normalizeTableDef(tableInput)
   for (const col of table.columns) {
@@ -480,7 +753,7 @@ export async function createMysqlTable(
   if (table.columns.filter((c) => c.autoIncrement).length > 1) {
     throw new ProjectError('一张表只能有一列自增', 400)
   }
-  return withMysqlConnection(payload, async (connection) => {
+  const tables = await withMysqlConnection(payload, async (connection) => {
     await useDatabase(connection, payload.database)
     const colSql = table.columns.map((c) => columnSql(c)).join(',\n  ')
     const pkCols = table.columns.filter((c) => c.primaryKey).map((c) => quoteIdent(c.name))
@@ -493,12 +766,20 @@ export async function createMysqlTable(
     )
     return listTables(connection, payload.database)
   })
+  if (projectPath?.trim()) {
+    await writeMysqlTableSchema(projectPath, table.name, {
+      remark: table.remark,
+      columns: table.columns,
+    })
+  }
+  return tables
 }
 
 export async function updateMysqlTableMeta(
   payload: MysqlConnectionPayload,
   tableName: string,
   meta: { name: string; remark: string },
+  projectPath?: string,
 ): Promise<MysqlTableInfo[]> {
   if (!IDENT_RE.test(tableName)) {
     throw new ProjectError('原表名不合法', 400)
@@ -509,7 +790,7 @@ export async function updateMysqlTableMeta(
   }
   const remark = typeof meta.remark === 'string' ? meta.remark : ''
 
-  return withMysqlConnection(payload, async (connection) => {
+  const tables = await withMysqlConnection(payload, async (connection) => {
     await useDatabase(connection, payload.database)
     await connection.query(
       `ALTER TABLE ${quoteIdent(tableName)} COMMENT = '${escapeString(remark)}'`,
@@ -521,12 +802,27 @@ export async function updateMysqlTableMeta(
     }
     return listTables(connection, payload.database)
   })
+  if (projectPath?.trim()) {
+    if (name !== tableName) {
+      await renameMysqlTableSchema(projectPath, tableName, name)
+    }
+    const existing = await readMysqlTableSchema(projectPath, name)
+    if (existing) {
+      await writeMysqlTableSchema(projectPath, name, {
+        remark,
+        columns: existing.columns,
+      })
+    }
+  }
+  return tables
 }
 
 export async function updateMysqlTableSchema(
   payload: MysqlConnectionPayload,
   tableName: string,
   columnsInput: unknown,
+  projectPath?: string,
+  remark = '',
 ): Promise<MysqlTableInfo[]> {
   if (!IDENT_RE.test(tableName)) {
     throw new ProjectError('表名不合法', 400)
@@ -555,7 +851,7 @@ export async function updateMysqlTableSchema(
     throw new ProjectError('一张表只能有一列自增', 400)
   }
 
-  return withMysqlConnection(payload, async (connection) => {
+  const tables = await withMysqlConnection(payload, async (connection) => {
     await useDatabase(connection, payload.database)
 
     const existing = await getColumnsOnConnection(connection, tableName)
@@ -662,6 +958,14 @@ export async function updateMysqlTableSchema(
 
     return listTables(connection, payload.database)
   })
+
+  if (projectPath?.trim()) {
+    await writeMysqlTableSchema(projectPath, tableName, {
+      remark,
+      columns,
+    })
+  }
+  return tables
 }
 
 async function getColumnsOnConnection(
@@ -700,15 +1004,20 @@ async function getColumnsOnConnection(
 export async function dropMysqlTable(
   payload: MysqlConnectionPayload,
   tableName: string,
+  projectPath?: string,
 ): Promise<MysqlTableInfo[]> {
   if (!IDENT_RE.test(tableName)) {
     throw new ProjectError('表名不合法', 400)
   }
-  return withMysqlConnection(payload, async (connection) => {
+  const tables = await withMysqlConnection(payload, async (connection) => {
     await useDatabase(connection, payload.database)
     await connection.query(`DROP TABLE ${quoteIdent(tableName)}`)
     return listTables(connection, payload.database)
   })
+  if (projectPath?.trim()) {
+    await deleteMysqlTableSchema(projectPath, tableName)
+  }
+  return tables
 }
 
 export async function truncateMysqlTable(
@@ -842,6 +1151,7 @@ export async function listMysqlTableRows(
   payload: MysqlConnectionPayload,
   tableName: string,
   pagination: { current?: unknown; pageSize?: unknown },
+  projectPath?: string,
 ): Promise<{
   columns: MysqlColumnDef[]
   keyColumns: string[]
@@ -850,6 +1160,9 @@ export async function listMysqlTableRows(
   total: number
   current: number
   pageSize: number
+  conflict: boolean
+  local: MysqlColumnDef[] | null
+  remote: MysqlColumnDef[]
 }> {
   if (!IDENT_RE.test(tableName)) {
     throw new ProjectError('表名不合法', 400)
@@ -860,10 +1173,21 @@ export async function listMysqlTableRows(
 
   return withMysqlConnection(payload, async (connection) => {
     await useDatabase(connection, payload.database)
-    const columns = await getColumnsOnConnection(connection, tableName)
-    if (!columns.length) {
+    const remote = await getColumnsOnConnection(connection, tableName)
+    if (!remote.length) {
       throw new ProjectError(`表「${tableName}」不存在或无列`, 404)
     }
+    const localFile = projectPath?.trim()
+      ? await readMysqlTableSchema(projectPath, tableName)
+      : null
+    const local = localFile?.columns ?? null
+    const conflict = Boolean(
+      local && !mysqlSchemasStructurallyEqual(local, remote),
+    )
+    const columns = conflict
+      ? remote.map((c) => ({ ...c, resource: false }))
+      : mergeMysqlResourceFlags(remote, local)
+
     const unique = await resolveUniqueKeyColumns(connection, tableName)
     const keyColumns = unique?.columns ?? []
 
@@ -889,6 +1213,9 @@ export async function listMysqlTableRows(
       total,
       current,
       pageSize,
+      conflict,
+      local,
+      remote,
     }
   })
 }

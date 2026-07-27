@@ -1,4 +1,4 @@
-import type { PageMethod } from '../../types/page-method.js'
+﻿import type { PageMethod } from '../../types/page-method.js'
 import type { LifecycleConfig } from '../../types/lifecycle.js'
 import type { DataField } from '../../types/page-data.js'
 
@@ -16,7 +16,7 @@ function replacePromiseFinally(body: string): string {
   )
 }
 
-/** 将 Voider 组件方法体包成小程序 Component methods 实现 */
+/** 将组件方法体包成小程序 Component methods 实现 */
 export function generateComponentMethodFn(
   method: PageMethod,
   options: {
@@ -56,9 +56,9 @@ export function generateComponentMethodFn(
   const lines: string[] = []
   lines.push(`  ${name}(${paramList}) {`)
   lines.push(`    var that = this`)
-  lines.push(`    var voiderApi = require('../../utils/voider-api.js')`)
+  lines.push(`    var api = require('../../utils/api.js')`)
   if (/\bgetDeviceInfo\s*\(/.test(method.body || '')) {
-    lines.push(`    var getDeviceInfo = voiderApi.getDeviceInfo`)
+    lines.push(`    var getDeviceInfo = api.getDeviceInfo`)
   }
   lines.push(`    var setData = function (prop, value) {`)
   lines.push(`      var patch = {}`)
@@ -137,7 +137,7 @@ export function generateComponentMethodFn(
     if (apiProps.has(prop)) {
       lines.push(`    $props.${prop} = function (args) {`)
       lines.push(
-        `      return voiderApi.invoke(that.properties.${prop} || that.data.${prop}, args)`,
+        `      return api.invoke(that.properties.${prop} || that.data.${prop}, args)`,
       )
       lines.push(`    }`)
     } else if (arrayProps.has(prop)) {
@@ -281,7 +281,7 @@ function buildRecomputeMethod(
   )
   if (needsDevice) {
     lines.push(
-      `    var getDeviceInfo = require('../../utils/voider-api.js').getDeviceInfo`,
+      `    var getDeviceInfo = require('../../utils/api.js').getDeviceInfo`,
     )
   }
   lines.push(`    var $props = {}`)

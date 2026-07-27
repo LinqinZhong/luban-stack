@@ -1,79 +1,72 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import DataFieldTypeTreeSelect, {
+  type TypeSelectPayload,
+} from './DataFieldTypeTreeSelect.vue'
 import {
-  selectValueToTypeExpr,
-  typeExprToSelectValue,
+  isTypeExprCleared,
+  type DataTypeLibrary,
   type TypeExpr,
 } from '../../types/data-types'
+import {
+  selectPayloadToTypeExpr,
+  TYPE_EXPR_EXCLUDE_TYPES,
+  typeExprToSelectPayload,
+} from '../../utils/type-expr-select'
 
-const NONE_VALUE = '__none__'
-
-const props = defineProps<{
-  modelValue: TypeExpr | null
-  namedOptions?: Array<{ id: string; label: string }>
-  genericNames?: string[]
-  /** 允许选择「无约束」，值为 null */
-  allowNone?: boolean
-}>()
+const props = withDefaults(
+  defineProps<{
+    modelValue: TypeExpr | null
+    library?: DataTypeLibrary | null
+    genericNames?: string[]
+    excludeNamedIds?: string[]
+    /** 允许选择「无约束」，值为 null */
+    allowNone?: boolean
+    size?: 'large' | 'default' | 'small'
+  }>(),
+  {
+    allowNone: false,
+    size: 'default',
+  },
+)
 
 const emit = defineEmits<{
   'update:modelValue': [value: TypeExpr | null]
 }>()
 
-const options = computed(() => {
-  const base: Array<{ label: string; value: string }> = []
-  if (props.allowNone) {
-    base.push({ label: '无约束', value: NONE_VALUE })
-  }
-  base.push(
-    { label: '数字', value: 'number' },
-    { label: '字符串', value: 'string' },
-    { label: '布尔值', value: 'boolean' },
-    { label: 'any', value: 'any' },
-  )
-  for (const name of props.genericNames ?? []) {
-    base.push({ label: `泛型 ${name}`, value: `generic:${name}` })
-  }
-  for (const opt of props.namedOptions ?? []) {
-    base.push({ label: opt.label, value: `named:${opt.id}` })
-  }
-  return base
+const payload = computed(() => typeExprToSelectPayload(props.modelValue))
+
+const isEmpty = computed(() => {
+  if (props.modelValue == null) return true
+  return isTypeExprCleared(props.modelValue)
 })
 
-const selectValue = computed(() => {
-  if (props.modelValue == null) {
-    return props.allowNone ? NONE_VALUE : 'string'
-  }
-  return typeExprToSelectValue(props.modelValue)
-})
-
-function onChange(value: string) {
-  if (value === NONE_VALUE) {
-    emit('update:modelValue', null)
+function onChange(next: TypeSelectPayload) {
+  if (next.cleared) {
+    emit('update:modelValue', props.allowNone ? null : selectPayloadToTypeExpr(next))
     return
   }
-  emit('update:modelValue', selectValueToTypeExpr(value))
+  emit('update:modelValue', selectPayloadToTypeExpr(next))
 }
 </script>
 
 <template>
-  <el-select
-    :model-value="selectValue"
-    filterable
-    class="type-select"
-    @update:model-value="onChange"
-  >
-    <el-option
-      v-for="opt in options"
-      :key="opt.value"
-      :label="opt.label"
-      :value="opt.value"
-    />
-  </el-select>
+  <DataFieldTypeTreeSelect
+    :type="payload.cleared ? 'string' : payload.type"
+    :type-ref="payload.typeRef"
+    :item-type="payload.itemType"
+    :item-type-ref="payload.itemTypeRef"
+    :item-item-type="payload.itemItemType"
+    :item-item-type-ref="payload.itemItemTypeRef"
+    :empty="isEmpty"
+    :library="library"
+    :generic-names="genericNames"
+    :exclude-named-ids="excludeNamedIds"
+    :exclude-types="TYPE_EXPR_EXCLUDE_TYPES"
+    allow-any
+    empty-on-clear
+    clearable
+    :size="size"
+    @change="onChange"
+  />
 </template>
-
-<style scoped>
-.type-select {
-  width: 100%;
-}
-</style>

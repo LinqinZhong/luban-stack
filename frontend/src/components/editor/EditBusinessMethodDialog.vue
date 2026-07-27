@@ -18,7 +18,7 @@ import DataFieldTypeTreeSelect, {
 } from './DataFieldTypeTreeSelect.vue'
 import TypeGenericArgsDialog from './TypeGenericArgsDialog.vue'
 
-const PROCESSOR_EXCLUDE_TYPES: DataFieldType[] = ['color', 'ref', 'icon']
+const PROCESSOR_EXCLUDE_TYPES: DataFieldType[] = ['color', 'ref', 'icon', 'resource']
 
 export type BusinessMethodEditPayload = {
   name: string
@@ -156,13 +156,19 @@ function payloadToTypeExpr(
   payload: TypeSelectPayload,
   prev?: ProcessorTypeExpr,
 ): ProcessorTypeExpr {
+  const fieldType =
+    payload.type === 'void' || payload.type === 'generic' ? 'any' : payload.type
   const next: ProcessorTypeExpr = {
-    ...createEmptyProcessorTypeExpr(payload.type),
-    type: payload.type,
+    ...createEmptyProcessorTypeExpr(fieldType),
+    type: fieldType,
     typeRef: payload.typeRef ?? '',
-    itemType: payload.itemType ?? '',
+    itemType:
+      payload.itemType === 'generic' ? 'any' : (payload.itemType ?? ''),
     itemTypeRef: payload.itemTypeRef ?? '',
-    itemItemType: payload.itemItemType ?? '',
+    itemItemType:
+      payload.itemItemType === 'generic'
+        ? 'any'
+        : (payload.itemItemType ?? ''),
     itemItemTypeRef: payload.itemItemTypeRef ?? '',
     genericArgs: {},
   }

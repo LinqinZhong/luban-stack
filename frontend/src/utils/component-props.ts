@@ -113,7 +113,7 @@ export function normalizePropDefaultValue(
     const n = Number(value)
     return Number.isFinite(n) ? n : 0
   }
-  if (type === 'string' || type === 'icon' || type === 'color' || type === 'ref' || type === 'api') {
+  if (type === 'string' || type === 'icon' || type === 'color' || type === 'ref' || type === 'api' || type === 'resource') {
     if (value == null || typeof value === 'object') return ''
     return String(value)
   }
@@ -155,7 +155,7 @@ function coercePropValue(type: DataFieldType, raw: unknown): DataFieldValue {
     return defaultValue(type)
   }
   const str = raw == null ? '' : String(raw)
-  if (type === 'string' || type === 'icon' || type === 'color' || type === 'ref' || type === 'api') {
+  if (type === 'string' || type === 'icon' || type === 'color' || type === 'ref' || type === 'api' || type === 'resource') {
     return str
   }
   if (type === 'number') {

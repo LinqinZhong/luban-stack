@@ -54,15 +54,18 @@ import {
   getDataTypeLibrary,
   getIconLibrary,
   getMysqlLibrary,
+  getOssLibrary,
   saveBackendServiceLibrary as saveBackendServiceLibraryApi,
   saveDataTypeLibrary as saveDataTypeLibraryApi,
   saveIconLibrary as saveIconLibraryApi,
   saveMysqlLibrary as saveMysqlLibraryApi,
+  saveOssLibrary as saveOssLibraryApi,
   setProjectEntryPage,
 } from '../api/projects'
 import DataPoolPanel from '../components/editor/DataPoolPanel.vue'
 import DataTypesPanel from '../components/editor/DataTypesPanel.vue'
 import MysqlPanel from '../components/editor/MysqlPanel.vue'
+import OssPanel from '../components/editor/OssPanel.vue'
 import BackendServiceEditor from '../components/editor/BackendServiceEditor.vue'
 import BackendServiceWorkspace from '../components/editor/BackendServiceWorkspace.vue'
 import DataMethodDebugPanel from '../components/editor/DataMethodDebugPanel.vue'
@@ -77,6 +80,7 @@ import MethodsPanel from '../components/editor/MethodsPanel.vue'
 import LifecyclePanel from '../components/editor/LifecyclePanel.vue'
 import LeafIcon from '../components/icons/LeafIcon.vue'
 import MysqlIcon from '../components/icons/MysqlIcon.vue'
+import OssIcon from '../components/icons/OssIcon.vue'
 import DevelopIcon from '../components/icons/DevelopIcon.vue'
 import BackendIcon from '../components/icons/BackendIcon.vue'
 import ComponentMetaPanel from '../components/editor/ComponentMetaPanel.vue'
@@ -157,6 +161,10 @@ import {
   type MysqlLibrary,
 } from '../types/mysql'
 import {
+  createEmptyOssLibrary,
+  type OssLibrary,
+} from '../types/oss'
+import {
   createEmptyBackendService,
   createEmptyBackendServiceLibrary,
   isValidServiceId,
@@ -178,6 +186,7 @@ type WorkspaceMode =
   | 'datapool'
   | 'datatypes'
   | 'mysql'
+  | 'oss'
   | 'icons'
   | 'methods'
   | 'lifecycle'
@@ -185,7 +194,7 @@ type WorkspaceMode =
 const projectStore = useProjectStore()
 
 type ResourceKind = 'page' | 'component'
-type ProjectNav = 'datatypes' | 'mysql' | 'icons'
+type ProjectNav = 'datatypes' | 'mysql' | 'oss' | 'icons'
 /** 活动栏：前端 / 后端 / 项目级资源 */
 type TopNav = 'frontend' | 'backend' | ProjectNav
 
@@ -215,6 +224,7 @@ const addIntoSlotDebug = ref(false)
 const iconLibrary = ref<IconLibrary>(createEmptyIconLibrary())
 const dataTypeLibrary = ref<DataTypeLibrary>(createEmptyDataTypeLibrary())
 const mysqlLibrary = ref<MysqlLibrary>(createEmptyMysqlLibrary())
+const ossLibrary = ref<OssLibrary>(createEmptyOssLibrary())
 const backendServiceLibrary = ref<BackendServiceLibrary>(
   createEmptyBackendServiceLibrary(),
 )
@@ -770,6 +780,7 @@ const isEditMode = computed(() => workspaceMode.value === 'edit')
 const isDataPoolMode = computed(() => workspaceMode.value === 'datapool')
 const isDataTypesMode = computed(() => workspaceMode.value === 'datatypes')
 const isMysqlMode = computed(() => workspaceMode.value === 'mysql')
+const isOssMode = computed(() => workspaceMode.value === 'oss')
 const isIconsMode = computed(() => workspaceMode.value === 'icons')
 const isMethodsMode = computed(() => workspaceMode.value === 'methods')
 const isLifecycleMode = computed(() => workspaceMode.value === 'lifecycle')
@@ -778,6 +789,7 @@ const hideWidgetTree = computed(
     isDataPoolMode.value ||
     isDataTypesMode.value ||
     isMysqlMode.value ||
+    isOssMode.value ||
     isIconsMode.value ||
     isMethodsMode.value ||
     isLifecycleMode.value,
@@ -841,6 +853,7 @@ const backendLayerTitle = computed(
 const projectNavItems: { key: ProjectNav; label: string; icon: unknown }[] = [
   { key: 'datatypes', label: '数据类型', icon: Collection },
   { key: 'mysql', label: 'MySQL', icon: MysqlIcon },
+  { key: 'oss', label: '对象存储', icon: OssIcon },
   { key: 'icons', label: '图标库', icon: Picture },
 ]
 
@@ -850,6 +863,7 @@ const isProjectNav = computed(
   () =>
     topNav.value === 'datatypes' ||
     topNav.value === 'mysql' ||
+    topNav.value === 'oss' ||
     topNav.value === 'icons',
 )
 const showModeTabs = computed(() => isFrontendNav.value)
@@ -912,6 +926,7 @@ function applyWorkspaceUiState(saved: WorkspaceUiState) {
     top === 'backend' ||
     top === 'datatypes' ||
     top === 'mysql' ||
+    top === 'oss' ||
     top === 'icons'
   ) {
     topNav.value = top
@@ -919,7 +934,7 @@ function applyWorkspaceUiState(saved: WorkspaceUiState) {
   if (saved.resourceKind === 'page' || saved.resourceKind === 'component') {
     resourceKind.value = saved.resourceKind
   }
-  if (top === 'datatypes' || top === 'mysql' || top === 'icons') {
+  if (top === 'datatypes' || top === 'mysql' || top === 'oss' || top === 'icons') {
     workspaceMode.value = top
   } else if (
     saved.workspaceMode === 'preview' ||
@@ -1037,12 +1052,19 @@ const propsPlaceholderText = computed(() => {
     if (backendServiceLayer.value === 'service') {
       return '选中业务方法后可调试'
     }
-    return '在服务列表右键可重命名、配置或删除'
+    return '在模块列表右键可重命名、配置或删除'
   }
   if (isDataTypesMode.value) return '在分组列表右键可重命名或删除'
-  if (isMysqlMode.value) return '在数据库列表右键可配置或删除'
+  if (isMysqlMode.value) return '在连接列表右键可配置或删除'
+  if (isOssMode.value) return '在连接列表右键可配置或删除'
   if (isIconsMode.value) return '在图标上右键可编辑或删除'
-  if (!activePage.value && !isIconsMode.value && !isDataTypesMode.value && !isMysqlMode.value) {
+  if (
+    !activePage.value &&
+    !isIconsMode.value &&
+    !isDataTypesMode.value &&
+    !isMysqlMode.value &&
+    !isOssMode.value
+  ) {
     return '打开页面后可编辑'
   }
   if (isDataPoolMode.value) return '数据池模式下请在中间区域编辑'
@@ -1063,6 +1085,7 @@ async function loadPages(selectId?: string) {
       loadIconLibrary(),
       loadDataTypeLibrary(),
       loadMysqlLibrary(),
+      loadOssLibrary(),
       loadBackendServiceLibrary(),
     ])
     const [pageResult, componentResult] = await Promise.all([
@@ -1132,6 +1155,16 @@ async function loadMysqlLibrary() {
     mysqlLibrary.value = await getMysqlLibrary(projectStore.path)
   } catch (err) {
     mysqlLibrary.value = createEmptyMysqlLibrary()
+    console.error(err)
+  }
+}
+
+async function loadOssLibrary() {
+  if (!projectStore.path) return
+  try {
+    ossLibrary.value = await getOssLibrary(projectStore.path)
+  } catch (err) {
+    ossLibrary.value = createEmptyOssLibrary()
     console.error(err)
   }
 }
@@ -1494,6 +1527,7 @@ function leaveProjectNav() {
   if (
     workspaceMode.value === 'datatypes' ||
     workspaceMode.value === 'mysql' ||
+    workspaceMode.value === 'oss' ||
     workspaceMode.value === 'icons'
   ) {
     workspaceMode.value = 'preview'
@@ -1510,6 +1544,7 @@ function selectBackendNav() {
   if (
     workspaceMode.value === 'datatypes' ||
     workspaceMode.value === 'mysql' ||
+    workspaceMode.value === 'oss' ||
     workspaceMode.value === 'icons'
   ) {
     workspaceMode.value = 'preview'
@@ -2815,6 +2850,26 @@ async function handleMysqlLibraryUpdate(library: MysqlLibrary) {
   }, 400)
 }
 
+let ossSaveTimer: ReturnType<typeof setTimeout> | null = null
+
+async function handleOssLibraryUpdate(library: OssLibrary) {
+  if (!projectStore.path) return
+  ossLibrary.value = library
+
+  if (ossSaveTimer) clearTimeout(ossSaveTimer)
+  ossSaveTimer = setTimeout(async () => {
+    if (!projectStore.path) return
+    try {
+      ossLibrary.value = await saveOssLibraryApi({
+        projectPath: projectStore.path,
+        connections: ossLibrary.value.connections,
+      })
+    } catch (err) {
+      ElMessage.error(err instanceof Error ? err.message : '保存对象存储配置失败')
+    }
+  }, 400)
+}
+
 function persistBackendServices() {
   if (!projectStore.path) return
   if (backendServiceSaveTimer) clearTimeout(backendServiceSaveTimer)
@@ -2836,14 +2891,7 @@ function handleBackendServiceUpdate(service: BackendService) {
     (item) => item.id !== service.id && item.name === service.name,
   )
   if (nameTaken) {
-    ElMessage.error(`服务「${service.name}」已存在`)
-    return
-  }
-  const portTaken = backendServiceLibrary.value.services.some(
-    (item) => item.id !== service.id && item.port === service.port,
-  )
-  if (portTaken) {
-    ElMessage.error(`端口 ${service.port} 已被占用`)
+    ElMessage.error(`模块「${service.name}」已存在`)
     return
   }
   backendServiceLibrary.value = {
@@ -2862,7 +2910,7 @@ function openBackendServiceConfig(service: BackendService) {
 async function renameBackendService(service: BackendService) {
   let name = ''
   try {
-    const result = await ElMessageBox.prompt('请输入新的服务显示名', '重命名', {
+    const result = await ElMessageBox.prompt('请输入新的模块显示名', '重命名', {
       confirmButtonText: '确定',
       cancelButtonText: '取消',
       inputValue: service.name,
@@ -2879,7 +2927,7 @@ async function renameBackendService(service: BackendService) {
       (item) => item.id !== service.id && item.name === name,
     )
   ) {
-    ElMessage.error(`服务「${name}」已存在`)
+    ElMessage.error(`模块「${name}」已存在`)
     return
   }
   handleBackendServiceUpdate({ ...service, name })
@@ -2909,12 +2957,12 @@ async function addBackendService() {
   let id = ''
   try {
     const result = await ElMessageBox.prompt(
-      '服务 ID 将作为目录名 services/{id}/，仅允许英文（字母开头）',
-      '新建服务',
+      '模块 ID 将作为目录名 services/{id}/，仅允许英文（字母开头）',
+      '新建模块',
       {
         confirmButtonText: '添加',
         cancelButtonText: '取消',
-        inputPlaceholder: '如 goods',
+        inputPlaceholder: '如 shop',
         inputPattern: /^[A-Za-z][A-Za-z0-9_-]*$/,
         inputErrorMessage: '仅允许英文：字母开头，字母/数字/下划线/连字符',
       },
@@ -2924,18 +2972,14 @@ async function addBackendService() {
     return
   }
   if (!isValidServiceId(id)) {
-    ElMessage.error('服务 ID 不合法')
+    ElMessage.error('模块 ID 不合法')
     return
   }
   if (backendServiceLibrary.value.services.some((s) => s.id === id)) {
-    ElMessage.error(`服务「${id}」已存在`)
+    ElMessage.error(`模块「${id}」已存在`)
     return
   }
-  const usedPorts = new Set(backendServiceLibrary.value.services.map((s) => s.port))
-  let port = 3000
-  while (usedPorts.has(port)) port += 1
   const next = createEmptyBackendService(id)
-  next.port = port
   backendServiceLibrary.value = {
     services: [...backendServiceLibrary.value.services, next],
   }
@@ -2947,8 +2991,8 @@ async function addBackendService() {
 async function removeBackendService(service: BackendService) {
   try {
     await ElMessageBox.confirm(
-      `确定删除服务「${service.name}」吗？`,
-      '删除服务',
+      `确定删除模块「${service.name}」吗？`,
+      '删除模块',
       { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' },
     )
   } catch {
@@ -3444,7 +3488,7 @@ watch(
     <aside v-show="isBackendNav" class="side-panel">
       <div class="pages-section backend-services-section">
         <div class="section-header">
-          <span class="section-title">服务列表</span>
+          <span class="section-title">模块列表</span>
           <el-button type="primary" :icon="Plus" size="small" @click="addBackendService">
             新建
           </el-button>
@@ -3477,7 +3521,7 @@ watch(
                 <el-icon><BackendIcon /></el-icon>
                 <div class="page-meta">
                   <div class="page-name">{{ service.name }}</div>
-                  <div class="page-id">{{ service.id }} · :{{ service.port }}</div>
+                  <div class="page-id">{{ service.id }}</div>
                 </div>
               </button>
               <template #dropdown>
@@ -3561,6 +3605,10 @@ watch(
           <span class="preview-title">MySQL</span>
           <span class="preview-sub">mysql</span>
         </template>
+        <template v-else-if="isOssMode">
+          <span class="preview-title">对象存储</span>
+          <span class="preview-sub">oss</span>
+        </template>
         <template v-else-if="activeDoc">
           <span class="preview-title">{{ frontendModeTitle }}</span>
           <span class="preview-sub">
@@ -3635,6 +3683,7 @@ watch(
         <IconLibraryPanel
           v-if="isIconsMode"
           :library="iconLibrary"
+          :project-path="projectStore.path"
           @update:library="handleIconLibraryUpdate"
         />
         <DataTypesPanel
@@ -3646,8 +3695,14 @@ watch(
           v-else-if="isMysqlMode"
           :library="mysqlLibrary"
           :type-library="dataTypeLibrary"
+          :project-path="projectStore.path"
           @update:library="handleMysqlLibraryUpdate"
           @update:type-library="handleDataTypeLibraryUpdate"
+        />
+        <OssPanel
+          v-else-if="isOssMode"
+          :library="ossLibrary"
+          @update:library="handleOssLibraryUpdate"
         />
         <el-empty
           v-else-if="!activeDoc"
@@ -3690,6 +3745,7 @@ watch(
           :emit-events="isComponentResource ? activeComponent?.config.events : undefined"
           :component-props="editorConditionComponentProps"
           :type-library="dataTypeLibrary"
+          :project-path="projectStore.path"
           @update:lifecycle="handleLifecycleUpdate"
         />
         <PageCanvas

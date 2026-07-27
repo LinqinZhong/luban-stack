@@ -12,9 +12,8 @@ import {
   formatTypeExprPreview,
   isTypeExprCleared,
   isValidTypeName,
-  selectValueToTypeExpr,
-  typeExprToSelectValue,
   type DataTypeDef,
+  type DataTypeLibrary,
   type TypeAtom,
   type TypeExpr,
   type TypeGenericParam,
@@ -23,6 +22,7 @@ import {
 const props = defineProps<{
   modelValue: boolean
   typeDef: DataTypeDef | null
+  library?: DataTypeLibrary | null
   namedOptions: Array<{ id: string; label: string }>
   readonly?: boolean
 }>()
@@ -71,20 +71,9 @@ const genericNames = computed(() =>
   (draft.value?.generics ?? []).map((g) => g.name).filter(Boolean),
 )
 
-const fieldTypeOptions = computed(() => {
-  const base: Array<{ label: string; value: string }> = [
-    { label: '数字', value: 'number' },
-    { label: '字符串', value: 'string' },
-    { label: '布尔值', value: 'boolean' },
-    { label: 'any', value: 'any' },
-  ]
-  for (const name of genericNames.value) {
-    base.push({ label: `泛型 ${name}`, value: `generic:${name}` })
-  }
-  for (const opt of props.namedOptions) {
-    base.push({ label: opt.label, value: `named:${opt.id}` })
-  }
-  return base
+const excludeNamedIds = computed(() => {
+  const id = draft.value?.id
+  return id ? [id] : []
 })
 
 function namedLookup(id: string): string {
@@ -200,23 +189,15 @@ function save() {
   close()
 }
 
-function fieldSelectValue(index: number): string {
-  const field = draft.value?.fields[index]
-  if (!field) return ''
-  return typeExprToSelectValue(field.type)
-}
-
 function fieldTypeError(index: number): boolean {
   if (!showFieldErrors.value || !draft.value) return false
   const field = draft.value.fields[index]
   return Boolean(field && isTypeExprCleared(field.type))
 }
 
-function handleFieldTypeChange(index: number, value: string | null | undefined) {
+function handleFieldTypeChange(index: number, value: TypeExpr | null) {
   if (!draft.value) return
-  const next = value
-    ? selectValueToTypeExpr(value)
-    : createEmptyClearedTypeExpr()
+  const next = value ?? createEmptyClearedTypeExpr()
   draft.value.fields = draft.value.fields.map((f, i) =>
     i === index ? { ...f, type: next } : f,
   )
@@ -328,7 +309,7 @@ function saveGenericConfig() {
   <el-dialog
     :model-value="modelValue"
     :title="title"
-    width="820px"
+    width="920px"
     destroy-on-close
     append-to-body
     @update:model-value="emit('update:modelValue', $event)"
@@ -422,22 +403,18 @@ function saveGenericConfig() {
             placeholder="备注"
             style="flex: 1; min-width: 80px"
           />
-          <el-select
-            :model-value="fieldSelectValue(fi) || undefined"
-            placeholder="选择类型"
-            style="width: 150px"
-            filterable
-            clearable
-            :status="fieldTypeError(fi) ? 'error' : undefined"
-            @update:model-value="handleFieldTypeChange(fi, $event)"
+          <div
+            class="field-type-cell"
+            :class="{ 'is-error': fieldTypeError(fi) }"
           >
-            <el-option
-              v-for="opt in fieldTypeOptions"
-              :key="opt.value"
-              :label="opt.label"
-              :value="opt.value"
+            <TypeExprEditor
+              :model-value="field.type"
+              :library="library"
+              :generic-names="genericNames"
+              :exclude-named-ids="excludeNamedIds"
+              @update:model-value="handleFieldTypeChange(fi, $event)"
             />
-          </el-select>
+          </div>
           <el-button
             v-if="!readonly"
             type="danger"
@@ -526,8 +503,9 @@ function saveGenericConfig() {
             <TypeExprEditor
               class="cfg-editor"
               :model-value="genericDraft.constraint"
-              :named-options="namedOptions"
+              :library="library"
               :generic-names="genericNames"
+              :exclude-named-ids="excludeNamedIds"
               allow-none
               @update:model-value="genericDraft.constraint = $event"
             />
@@ -540,8 +518,9 @@ function saveGenericConfig() {
             <TypeExprEditor
               class="cfg-editor"
               :model-value="genericDraft.default"
-              :named-options="namedOptions"
+              :library="library"
               :generic-names="genericNames"
+              :exclude-named-ids="excludeNamedIds"
               allow-none
               @update:model-value="genericDraft.default = $event"
             />
@@ -632,6 +611,15 @@ function saveGenericConfig() {
   color: #606266;
   line-height: 1;
   white-space: nowrap;
+}
+
+.field-type-cell {
+  width: 220px;
+  flex-shrink: 0;
+}
+
+.field-type-cell.is-error :deep(.el-input__wrapper) {
+  box-shadow: 0 0 0 1px var(--el-color-danger) inset;
 }
 
 .preview {

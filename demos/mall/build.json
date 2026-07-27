@@ -1,0 +1,55 @@
+{
+  "schemes": [
+    {
+      "id": "bld_demo",
+      "name": "build1",
+      "description": "测试",
+      "backends": [
+        {
+          "name": "service1",
+          "port": 3030,
+          "moduleIds": [
+            "svc_mrqdgnhb_3ktq2g"
+          ]
+        }
+      ],
+      "frontends": [
+        {
+          "name": "app1",
+          "type": "vue3",
+          "pageIds": [
+            "home",
+            "chat",
+            "goods-detail"
+          ],
+          "port": 5173
+        },
+        {
+          "name": "app2",
+          "type": "mp-wx",
+          "pageIds": [
+            "home",
+            "chat",
+            "goods-detail"
+          ],
+          "wechatAppId": "wx063d4987d9089a28"
+        }
+      ]
+    },
+    {
+      "id": "bld_ms3s9s9r_pj4z",
+      "name": "build2",
+      "description": "",
+      "backends": [
+        {
+          "name": "service1",
+          "port": 3030,
+          "moduleIds": [
+            "svc_mrqdgnhb_3ktq2g"
+          ]
+        }
+      ],
+      "frontends": []
+    }
+  ]
+}

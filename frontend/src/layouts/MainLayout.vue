@@ -1,15 +1,25 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { Download, SwitchButton } from '@element-plus/icons-vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { SwitchButton } from '@element-plus/icons-vue'
+import { ElMessage } from 'element-plus'
 import { useProjectStore } from '../stores/project'
-import { exportProjectMpWx, exportProjectVue3 } from '../api/projects'
+import {
+  buildProject,
+  getBuildSchemes,
+} from '../api/projects'
 import WorkspaceSettingsButton from '../components/editor/WorkspaceSettingsButton.vue'
+import BuildSchemeDialog from '../components/editor/BuildSchemeDialog.vue'
+import BuildSchemeIcon from '../components/icons/BuildSchemeIcon.vue'
+import HammerIcon from '../components/icons/HammerIcon.vue'
 
 const router = useRouter()
 const projectStore = useProjectStore()
-const exporting = ref(false)
+const building = ref(false)
+const buildingSchemeName = ref('')
+const schemeDialogVisible = ref(false)
+const buildSelectVisible = ref(false)
+const buildSchemeOptions = ref<Array<{ name: string; description: string }>>([])
 const settingsButtonRef = ref<{ open: (tab?: string) => void } | null>(null)
 
 const pageTitle = computed(() => {
@@ -22,57 +32,64 @@ function closeProject() {
   void router.push('/')
 }
 
-async function ensureWechatAppIdConfigured(): Promise<boolean> {
-  if (projectStore.config?.wechatAppId?.trim()) return true
-  try {
-    await ElMessageBox.confirm(
-      '未配置微信小程序 AppID，请先在设置中填写后再导出。',
-      '无法导出',
-      {
-        confirmButtonText: '去配置',
-        cancelButtonText: '取消',
-        type: 'warning',
-        distinguishCancelAndClose: true,
-      },
-    )
-    settingsButtonRef.value?.open('project')
-  } catch {
-    // 取消 / 关闭
-  }
-  return false
-}
-
-async function handleExportCommand(command: string) {
+function openSchemeDialog() {
   if (!projectStore.path) {
     ElMessage.warning('请先打开项目')
     return
   }
+  schemeDialogVisible.value = true
+}
 
-  if (command === 'mp-wx') {
-    const ok = await ensureWechatAppIdConfigured()
-    if (!ok) return
-  } else if (command !== 'vue3') {
+async function handleBuild() {
+  if (!projectStore.path) {
+    ElMessage.warning('请先打开项目')
     return
   }
-
-  exporting.value = true
   try {
-    if (command === 'vue3') {
-      const result = await exportProjectVue3(projectStore.path)
-      ElMessage.success(
-        `已导出 Vue3 工程（${result.pages} 页 / ${result.components} 组件）到 ${result.outputPath}`,
-      )
+    const lib = await getBuildSchemes(projectStore.path)
+    if (!lib.schemes.length) {
+      ElMessage.warning('请先配置构建方案')
+      schemeDialogVisible.value = true
       return
     }
-    const result = await exportProjectMpWx(projectStore.path)
-    ElMessage.success(
-      `已导出微信小程序（${result.pages} 页 / ${result.components} 组件）到 ${result.outputPath}`,
-    )
+    buildSchemeOptions.value = lib.schemes.map((s) => ({
+      name: s.name,
+      description: s.description?.trim() || '',
+    }))
+    buildSelectVisible.value = true
   } catch (err) {
-    ElMessage.error(err instanceof Error ? err.message : '导出失败')
-  } finally {
-    exporting.value = false
+    ElMessage.error(err instanceof Error ? err.message : '读取构建方案失败')
   }
+}
+
+async function runBuild(schemeName: string) {
+  if (!projectStore.path || !schemeName || building.value) return
+  building.value = true
+  buildingSchemeName.value = schemeName
+  try {
+    const result = await buildProject({
+      projectPath: projectStore.path,
+      schemeName,
+    })
+    ElMessage.success(
+      `构建完成：${result.backends.length} 个后端 / ${result.frontends.length} 个前端 → ${result.outputRoot}`,
+    )
+    buildSelectVisible.value = false
+  } catch (err) {
+    ElMessage.error(err instanceof Error ? err.message : '构建失败')
+  } finally {
+    building.value = false
+    buildingSchemeName.value = ''
+  }
+}
+
+function onBuildSchemeRowClick(row: { name: string }) {
+  void runBuild(row.name)
+}
+
+function onBuildSelectClose(done: () => void) {
+  if (building.value) return
+  done()
 }
 </script>
 
@@ -85,31 +102,77 @@ async function handleExportCommand(command: string) {
       </div>
       <div class="header-actions">
         <WorkspaceSettingsButton ref="settingsButtonRef" />
-        <el-dropdown
-          trigger="click"
-          :disabled="exporting || !projectStore.path"
-          @command="handleExportCommand"
-        >
-          <el-button :icon="Download" :loading="exporting">
-            导出
+        <el-tooltip content="配置构建方案" placement="bottom" :enterable="false">
+          <el-button
+            class="header-icon-btn"
+            :disabled="!projectStore.path"
+            @click="openSchemeDialog"
+          >
+            <BuildSchemeIcon class="header-action-icon" />
           </el-button>
-          <template #dropdown>
-            <el-dropdown-menu>
-              <el-dropdown-item command="vue3">
-                导出为 vue3 工程
-              </el-dropdown-item>
-              <el-dropdown-item command="mp-wx">
-                导出为微信小程序
-              </el-dropdown-item>
-            </el-dropdown-menu>
-          </template>
-        </el-dropdown>
-        <el-button :icon="SwitchButton" @click="closeProject">关闭项目</el-button>
+        </el-tooltip>
+        <el-tooltip content="构建" placement="bottom" :enterable="false">
+          <el-button
+            class="header-icon-btn"
+            :loading="building"
+            :disabled="!projectStore.path"
+            @click="handleBuild"
+          >
+            <HammerIcon class="header-action-icon" />
+          </el-button>
+        </el-tooltip>
+        <el-tooltip content="关闭项目" placement="bottom" :enterable="false">
+          <el-button
+            class="header-icon-btn"
+            :icon="SwitchButton"
+            @click="closeProject"
+          />
+        </el-tooltip>
       </div>
     </header>
     <main class="main">
       <router-view />
     </main>
+
+    <BuildSchemeDialog
+      v-if="projectStore.path"
+      v-model="schemeDialogVisible"
+      :project-path="projectStore.path"
+    />
+
+    <el-dialog
+      v-model="buildSelectVisible"
+      title="选择要构建的方案"
+      width="480px"
+      align-center
+      destroy-on-close
+      append-to-body
+      :close-on-click-modal="!building"
+      :close-on-press-escape="!building"
+      :show-close="!building"
+      :before-close="onBuildSelectClose"
+    >
+      <div
+        v-loading="building"
+        class="build-scheme-cards"
+        :element-loading-text="
+          buildingSchemeName ? `正在构建 ${buildingSchemeName}…` : '正在构建…'
+        "
+      >
+        <button
+          v-for="item in buildSchemeOptions"
+          :key="item.name"
+          type="button"
+          class="build-scheme-card"
+          :class="{ 'is-building': building && buildingSchemeName === item.name }"
+          :disabled="building"
+          @click="onBuildSchemeRowClick(item)"
+        >
+          <div class="card-name">{{ item.name }}</div>
+          <div class="card-desc">{{ item.description || '暂无说明' }}</div>
+        </button>
+      </div>
+    </el-dialog>
   </div>
 </template>
 
@@ -141,15 +204,14 @@ async function handleExportCommand(command: string) {
 }
 
 .logo {
-  font-size: 18px;
   font-weight: 700;
-  color: #0f172a;
-  letter-spacing: 0.04em;
+  font-size: 18px;
+  color: #303133;
 }
 
 .title {
   font-size: 14px;
-  color: #64748b;
+  color: #606266;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -159,13 +221,88 @@ async function handleExportCommand(command: string) {
   display: flex;
   align-items: center;
   gap: 8px;
-  flex-shrink: 0;
+}
+
+.header-actions :deep(.header-icon-btn) {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border-radius: 8px;
+  border: 1px solid #dcdfe6;
+  background: #fff;
+  color: #606266;
+}
+
+.header-actions :deep(.header-icon-btn:hover) {
+  color: #409eff;
+  border-color: #c6e2ff;
+  background: #ecf5ff;
+}
+
+.header-action-icon {
+  width: 18px;
+  height: 18px;
+  display: block;
+}
+
+.build-scheme-cards {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 80px;
+}
+
+.build-scheme-card {
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 14px 16px;
+  text-align: left;
+  border: 1px solid #ebeef5;
+  border-radius: 10px;
+  background: #fff;
+  cursor: pointer;
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.build-scheme-card:hover:not(:disabled) {
+  border-color: #409eff;
+  background: #f5faff;
+  box-shadow: 0 2px 8px rgba(64, 158, 255, 0.12);
+}
+
+.build-scheme-card.is-building {
+  border-color: #409eff;
+  background: #f5faff;
+}
+
+.build-scheme-card:disabled {
+  cursor: not-allowed;
+}
+
+.card-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: #303133;
+  line-height: 1.4;
+  pointer-events: none;
+}
+
+.card-desc {
+  margin-top: 4px;
+  font-size: 12px;
+  color: #909399;
+  line-height: 1.5;
+  pointer-events: none;
 }
 
 .main {
   flex: 1;
   min-height: 0;
   overflow: hidden;
-  display: flex;
 }
 </style>

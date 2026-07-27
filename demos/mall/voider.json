@@ -7,5 +7,9 @@
     "width": 375
   },
   "entryPage": "home",
-  "wechatAppId": "wx063d4987d9089a28"
+  "wechatAppId": "wx063d4987d9089a28",
+  "apiBaseUrls": {
+    "default": "http://127.0.0.1:3030",
+    "shop": "http://127.0.0.1:3030"
+  }
 }

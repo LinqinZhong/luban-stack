@@ -14,3 +14,8 @@ body,
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
+
+/* 提示气泡不可点击，避免挡住下方按钮 */
+.el-popper[role='tooltip'] {
+  pointer-events: none !important;
+}

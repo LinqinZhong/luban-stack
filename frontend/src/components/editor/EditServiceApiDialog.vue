@@ -428,7 +428,7 @@ function handleSave() {
                     :type-ref="row.typeRef"
                     :library="typeLibrary"
                     composable
-                    :exclude-types="['api', 'icon', 'color', 'ref', 'array']"
+                    :exclude-types="['api', 'icon', 'color', 'ref', 'resource', 'array']"
                     size="small"
                     @change="handleInputTypeChange($index, $event)"
                   />
@@ -500,7 +500,7 @@ function handleSave() {
             :item-item-type-ref="draftOutput.itemItemTypeRef"
             :library="typeLibrary"
             composable
-            :exclude-types="['api', 'icon', 'color', 'ref']"
+            :exclude-types="['api', 'icon', 'color', 'ref', 'resource']"
             @change="handleOutputChange"
           />
           <el-button

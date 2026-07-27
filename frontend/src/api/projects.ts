@@ -9,6 +9,13 @@ import type {
   MysqlTableDef,
 } from '../types/mysql'
 import type {
+  OssBucketInfo,
+  OssConnectionConfig,
+  OssConnectionPayload,
+  OssLibrary,
+  OssObjectInfo,
+} from '../types/oss'
+import type {
   BackendService,
   BackendServiceLibrary,
   ProcessorLayerKind,
@@ -19,6 +26,7 @@ import type {
 export type { IconDefinition, IconLibrary }
 export type { DataTypeGroup, DataTypeLibrary }
 export type { MysqlDatabaseConfig, MysqlLibrary, MysqlColumnDef, MysqlTableDef }
+export type { OssBucketInfo, OssConnectionConfig, OssLibrary, OssObjectInfo }
 export type {
   BackendService,
   BackendServiceLibrary,
@@ -39,6 +47,10 @@ export interface VoiderProjectConfig {
   entryPage?: string
   /** 微信小程序 AppID */
   wechatAppId?: string
+  /** 导出前端 API 根地址字典 */
+  apiBaseUrls?: Record<string, string>
+  /** @deprecated 请用 apiBaseUrls.default */
+  wechatApiBaseUrl?: string
 }
 
 export interface ProjectResult {
@@ -139,6 +151,22 @@ export function saveMysqlLibrary(payload: {
   databases: MysqlDatabaseConfig[]
 }) {
   return request<MysqlLibrary>('/api/projects/mysql', {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  })
+}
+
+export function getOssLibrary(projectPath: string) {
+  return request<OssLibrary>(
+    `/api/projects/oss?projectPath=${encodeURIComponent(projectPath)}`,
+  )
+}
+
+export function saveOssLibrary(payload: {
+  projectPath: string
+  connections: OssConnectionConfig[]
+}) {
+  return request<OssLibrary>('/api/projects/oss', {
     method: 'PUT',
     body: JSON.stringify(payload),
   })
@@ -278,16 +306,40 @@ export function listMysqlTables(payload: MysqlConnectionPayload) {
 }
 
 export function getMysqlTableColumns(
-  payload: MysqlConnectionPayload & { tableName: string },
+  payload: MysqlConnectionPayload & { tableName: string; projectPath?: string },
 ) {
-  return mysqlTableRequest<{ columns: MysqlColumnDef[] }>(
-    '/api/projects/mysql/tables/columns',
-    payload,
-  )
+  return mysqlTableRequest<{
+    columns: MysqlColumnDef[]
+    conflict: boolean
+    local: MysqlColumnDef[] | null
+    remote: MysqlColumnDef[]
+    localRemark: string
+    remoteRemark: string
+  }>('/api/projects/mysql/tables/columns', payload)
+}
+
+export function resolveMysqlTableSchema(
+  payload: MysqlConnectionPayload & {
+    tableName: string
+    projectPath: string
+    adopt: 'local' | 'remote'
+  },
+) {
+  return mysqlTableRequest<{
+    columns: MysqlColumnDef[]
+    conflict: boolean
+    local: MysqlColumnDef[] | null
+    remote: MysqlColumnDef[]
+    localRemark: string
+    remoteRemark: string
+  }>('/api/projects/mysql/tables/schema/resolve', payload)
 }
 
 export function createMysqlTable(
-  payload: MysqlConnectionPayload & { table: MysqlTableDef },
+  payload: MysqlConnectionPayload & {
+    table: MysqlTableDef
+    projectPath?: string
+  },
 ) {
   return mysqlTableRequest<{ tables: MysqlLibrary['databases'][number]['tables'] }>(
     '/api/projects/mysql/tables/create',
@@ -300,6 +352,7 @@ export function updateMysqlTableMeta(
     tableName: string
     name: string
     remark: string
+    projectPath?: string
   },
 ) {
   return mysqlTableRequest<{ tables: MysqlLibrary['databases'][number]['tables'] }>(
@@ -312,6 +365,8 @@ export function designMysqlTable(
   payload: MysqlConnectionPayload & {
     tableName: string
     columns: MysqlColumnDef[]
+    projectPath?: string
+    remark?: string
   },
 ) {
   return mysqlTableRequest<{ tables: MysqlLibrary['databases'][number]['tables'] }>(
@@ -321,7 +376,10 @@ export function designMysqlTable(
 }
 
 export function dropMysqlTable(
-  payload: MysqlConnectionPayload & { tableName: string },
+  payload: MysqlConnectionPayload & {
+    tableName: string
+    projectPath?: string
+  },
 ) {
   return mysqlTableRequest<{ tables: MysqlLibrary['databases'][number]['tables'] }>(
     '/api/projects/mysql/tables/drop',
@@ -343,6 +401,7 @@ export function listMysqlTableRows(
     tableName: string
     current?: number
     pageSize?: number
+    projectPath?: string
   },
 ) {
   return mysqlTableRequest<{
@@ -353,6 +412,9 @@ export function listMysqlTableRows(
     total: number
     current: number
     pageSize: number
+    conflict: boolean
+    local: MysqlColumnDef[] | null
+    remote: MysqlColumnDef[]
   }>('/api/projects/mysql/tables/rows', payload)
 }
 
@@ -391,6 +453,144 @@ export function insertMysqlTableRow(
     '/api/projects/mysql/tables/rows/insert',
     payload,
   )
+}
+
+export function testOssConnection(payload: OssConnectionPayload) {
+  return request<{
+    ok: true
+    message: string
+    buckets: OssBucketInfo[]
+  }>('/api/projects/oss/test', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+function ossRequest<T>(path: string, payload: Record<string, unknown>) {
+  return request<T>(path, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export function listOssBuckets(payload: OssConnectionPayload) {
+  return ossRequest<{ buckets: OssBucketInfo[] }>('/api/projects/oss/buckets/list', payload)
+}
+
+export function createOssBucket(
+  payload: OssConnectionPayload & { bucketName: string },
+) {
+  return ossRequest<{ buckets: OssBucketInfo[] }>(
+    '/api/projects/oss/buckets/create',
+    payload,
+  )
+}
+
+export function deleteOssBucket(
+  payload: OssConnectionPayload & { bucketName: string },
+) {
+  return ossRequest<{ buckets: OssBucketInfo[] }>(
+    '/api/projects/oss/buckets/delete',
+    payload,
+  )
+}
+
+export function setOssBucketAccess(
+  payload: OssConnectionPayload & {
+    bucketName: string
+    access: 'public' | 'private'
+  },
+) {
+  return ossRequest<{ ok: true; access: 'public' | 'private' }>(
+    '/api/projects/oss/buckets/set-access',
+    payload,
+  )
+}
+
+export function listOssObjects(
+  payload: OssConnectionPayload & {
+    bucketName: string
+    prefix?: string
+    continuationToken?: string
+    maxKeys?: number
+  },
+) {
+  return ossRequest<{
+    objects: OssObjectInfo[]
+    prefixes: OssObjectInfo[]
+    prefix: string
+    isTruncated: boolean
+    nextContinuationToken: string | null
+  }>('/api/projects/oss/objects/list', payload)
+}
+
+export function uploadOssObject(
+  payload: OssConnectionPayload & {
+    bucketName: string
+    key: string
+    contentBase64: string
+    contentType?: string
+  },
+) {
+  return ossRequest<{ ok: true; key: string; size: number }>(
+    '/api/projects/oss/objects/upload',
+    payload,
+  )
+}
+
+export function deleteOssObject(
+  payload: OssConnectionPayload & {
+    bucketName: string
+    key: string
+  },
+) {
+  return ossRequest<{ ok: true }>('/api/projects/oss/objects/delete', payload)
+}
+
+export function getOssObjectMeta(
+  payload: OssConnectionPayload & {
+    bucketName: string
+    key: string
+  },
+) {
+  return ossRequest<{
+    key: string
+    size: number
+    contentType: string
+    lastModified: string | null
+    etag: string
+    publicUrl: string
+    signedUrl: string
+    isImage: boolean
+  }>('/api/projects/oss/objects/meta', payload)
+}
+
+export function signOssObject(
+  payload: OssConnectionPayload & {
+    bucketName: string
+    key: string
+    expiresIn?: number
+  },
+) {
+  return ossRequest<{
+    signedUrl: string
+    publicUrl: string
+    expiresIn: number
+  }>('/api/projects/oss/objects/sign', payload)
+}
+
+export function signOssObjectByProject(payload: {
+  projectPath: string
+  connectionId: string
+  bucketName: string
+  key: string
+  expiresIn?: number
+}) {
+  return ossRequest<{
+    signedUrl: string
+    publicUrl: string
+    expiresIn: number
+  }>('/api/projects/oss/objects/sign', payload)
 }
 
 export function setProjectEntryPage(payload: {
@@ -432,5 +632,78 @@ export function exportProjectMpWx(projectPath: string) {
   }>('/api/projects/export/mp-wx', {
     method: 'POST',
     body: JSON.stringify({ projectPath }),
+  })
+}
+
+export function exportProjectNestJs(projectPath: string) {
+  return request<{
+    outputPath: string
+    services: number
+    routes: number
+  }>('/api/projects/export/nestjs', {
+    method: 'POST',
+    body: JSON.stringify({ projectPath }),
+  })
+}
+
+/** @deprecated */
+export const exportProjectNextJs = exportProjectNestJs
+
+export type BuildFrontendType = 'vue3' | 'mp-wx'
+
+export interface BuildBackendService {
+  name: string
+  port: number
+  moduleIds: string[]
+}
+
+export interface BuildFrontendApp {
+  name: string
+  type: BuildFrontendType
+  port?: number
+  wechatAppId?: string
+  pageIds: string[]
+}
+
+export interface BuildScheme {
+  id: string
+  name: string
+  description: string
+  backends: BuildBackendService[]
+  frontends: BuildFrontendApp[]
+}
+
+export interface BuildSchemeLibrary {
+  schemes: BuildScheme[]
+}
+
+export function getBuildSchemes(projectPath: string) {
+  return request<BuildSchemeLibrary>(
+    `/api/projects/build-schemes?projectPath=${encodeURIComponent(projectPath)}`,
+  )
+}
+
+export function saveBuildSchemes(payload: {
+  projectPath: string
+  library: BuildSchemeLibrary
+}) {
+  return request<BuildSchemeLibrary>('/api/projects/build-schemes', {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  })
+}
+
+export function buildProject(payload: {
+  projectPath: string
+  schemeName: string
+}) {
+  return request<{
+    schemeName: string
+    outputRoot: string
+    backends: Array<{ name: string; outputPath: string; routes: number }>
+    frontends: Array<{ name: string; type: string; outputPath: string }>
+  }>('/api/projects/build', {
+    method: 'POST',
+    body: JSON.stringify(payload),
   })
 }

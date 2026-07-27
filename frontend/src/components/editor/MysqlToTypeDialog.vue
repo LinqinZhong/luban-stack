@@ -22,6 +22,7 @@ const props = defineProps<{
   connection: MysqlConnectionPayload | null
   table: MysqlTableInfo | null
   typeLibrary: DataTypeLibrary
+  projectPath?: string | null
 }>()
 
 const emit = defineEmits<{
@@ -78,7 +79,11 @@ async function loadColumns() {
     const result = await getMysqlTableColumns({
       ...conn,
       tableName: table.name,
+      projectPath: props.projectPath || undefined,
     })
+    if (result.conflict) {
+      ElMessage.warning('表结构与本地不一致，请先在「设计表」中解决冲突')
+    }
     const columns = result.columns ?? []
     if (!columns.length) {
       ElMessage.warning('该表没有可转换的列')

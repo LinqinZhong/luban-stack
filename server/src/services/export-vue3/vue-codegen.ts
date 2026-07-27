@@ -1,4 +1,4 @@
-import type { ComponentConfig, ComponentEventDef } from '../../types/component.js'
+﻿import type { ComponentConfig, ComponentEventDef } from '../../types/component.js'
 import type { PageData } from '../../types/page-data.js'
 import type { XmlNode } from './xml-parser.js'
 import { escapeHtmlAttr, escapeHtmlText, escapeTsString, escapeVueExprAttr } from './escape.js'
@@ -118,10 +118,10 @@ export interface CodegenContext {
   /** 事件辅助脚本（如滚动触边状态） */
   extraScript: string[]
   indent: number
-  /** 是否使用导出的 VoiderIcon 组件 */
-  needsVoiderIcon: boolean
-  /** 是否使用导出的 VoiderSwiper 组件 */
-  needsVoiderSwiper: boolean
+  /** 是否使用导出的 AppIcon 组件 */
+  needsAppIcon: boolean
+  /** 是否使用导出的 AppSwiper 组件 */
+  needsAppSwiper: boolean
 }
 
 /** 与编辑器 isOutOfFlowTree 一致：仅 Modal / 全 Modal Fragment 不占文档流 */
@@ -1923,12 +1923,12 @@ ${pad}</template>`
         inner: panel,
       }),
     })
-    // 挂到 .voider-page，随设计稿缩放；勿 Teleport 到 body（会逃出 scale）
-    return `${pad}<Teleport to=".voider-page">\n${overlay}\n${pad}</Teleport>`
+    // 挂到 .app-page，随设计稿缩放；勿 Teleport 到 body（会逃出 scale）
+    return `${pad}<Teleport to=".app-page">\n${overlay}\n${pad}</Teleport>`
   }
 
   if (tag === 'Swiper') {
-    ctx.needsVoiderSwiper = true
+    ctx.needsAppSwiper = true
     const slideNodes = node.children.filter((c) => c.tag !== '#text')
     const slideCount = slideNodes.length
     const indicator =
@@ -1943,7 +1943,7 @@ ${pad}</template>`
     const indicatorColor = (attrs.indicatorColor || '').trim() || 'rgba(0,0,0,0.25)'
     const indicatorActiveColor = (attrs.indicatorActiveColor || '').trim() || '#409eff'
     // 外层承载布局尺寸/绝对定位（与编辑器 WidgetSelectShell 一致），
-    // 避免 VoiderSwiper 内部 position/height:100% 盖掉 absolute / 固定宽高
+    // 避免 AppSwiper 内部 position/height:100% 盖掉 absolute / 固定宽高
     const shellTw = twWithRelative(attrs, parentTag, ['overflow-hidden'], twOpts)
     const slides = slideNodes
       .map((child, i) => {
@@ -1962,7 +1962,7 @@ ${pad}</template>`
         return formatVueElement({
           pad: `${pad}    `,
           tag: 'div',
-          attrs: ['class="voider-swiper-slide"', `:key="${i}"`],
+          attrs: ['class="app-swiper-slide"', `:key="${i}"`],
           inner: slide,
         })
       })
@@ -1970,7 +1970,7 @@ ${pad}</template>`
       .join('\n')
     const swiper = formatVueElement({
       pad: `${pad}  `,
-      tag: 'VoiderSwiper',
+      tag: 'AppSwiper',
       attrs: [
         'class="w-full h-full min-h-0"',
         `:slide-count="${slideCount}"`,
@@ -2284,7 +2284,7 @@ ${pad}</template>`
   }
 
   if (tag === 'Icon') {
-    ctx.needsVoiderIcon = true
+    ctx.needsAppIcon = true
     const iconRaw = attrs.iconId ?? 'help'
     const size = parseNumber(attrs.size) ?? 16
     const colorRes = resolveColorExpr('color', attrs.color, attrs, ctx, inRepeat, '#333')
@@ -2303,7 +2303,7 @@ ${pad}</template>`
       : `:color="${colorRes.expr}"`
     return formatVueElement({
       pad,
-      tag: 'VoiderIcon',
+      tag: 'AppIcon',
       attrs: [
         nameAttr,
         `:size="${size}"`,
@@ -2414,8 +2414,8 @@ export function generateViewSfc(options: {
     methodSeq: 0,
     extraScript: [],
     indent: 0,
-    needsVoiderIcon: false,
-    needsVoiderSwiper: false,
+    needsAppIcon: false,
+    needsAppSwiper: false,
   }
 
   for (const field of options.pageRefFields) {
@@ -2434,8 +2434,8 @@ export function generateViewSfc(options: {
     ...[...ctx.componentImports.entries()].map(
       ([id, name]) => `import ${name} from '../components/${componentIdToFileName(id)}.vue'`,
     ),
-    ctx.needsVoiderIcon ? `import VoiderIcon from '../components/VoiderIcon.vue'` : '',
-    ctx.needsVoiderSwiper ? `import VoiderSwiper from '../components/VoiderSwiper.vue'` : '',
+    ctx.needsAppIcon ? `import AppIcon from '../components/AppIcon.vue'` : '',
+    ctx.needsAppSwiper ? `import AppSwiper from '../components/AppSwiper.vue'` : '',
   ]
     .filter(Boolean)
     .join('\n')
@@ -2449,7 +2449,7 @@ export function generateViewSfc(options: {
   const needsInterpolate = scriptAndTemplate.includes('interpolate(')
   const needsEvalVShow = templateBody.includes('evalVShow(')
   const needsEvalVIf = templateBody.includes('evalVIf(')
-  const needsVoiderRuntime = needsEvalVShow || needsEvalVIf || needsInterpolate
+  const needsAppRuntime = needsEvalVShow || needsEvalVIf || needsInterpolate
   const needsNavigateTo = /\bnavigateTo\s*\(/.test(scriptAndTemplate)
   const needsNavigateBack = /\bnavigateBack\s*\(/.test(scriptAndTemplate)
   const needsShowToast = /\bshowToast\s*\(/.test(scriptAndTemplate)
@@ -2457,7 +2457,7 @@ export function generateViewSfc(options: {
   const needsNavigation = needsNavigateTo || needsNavigateBack
   const needsRoute =
     /\broute\./.test(scriptAndTemplate) ||
-    (needsVoiderRuntime && /\$route/.test(options.xml))
+    (needsAppRuntime && /\$route/.test(options.xml))
   const hasPageRefs = options.pageRefFields.length > 0
   const needsRef = pageData.needsRef || hasPageRefs
   const needsModal = ctx.modalNames.size > 0
@@ -2485,11 +2485,11 @@ export function generateViewSfc(options: {
     .filter(Boolean)
     .join(', ')
 
-  const voiderImports = [
+  const appImports = [
     needsEvalVIf ? 'evalVIf' : '',
     needsEvalVShow ? 'evalVShow' : '',
     needsInterpolate ? 'interpolate' : '',
-    needsVoiderRuntime ? 'type EventScope' : '',
+    needsAppRuntime ? 'type EventScope' : '',
   ]
     .filter(Boolean)
     .join(', ')
@@ -2498,7 +2498,7 @@ export function generateViewSfc(options: {
     vueImports ? `import { ${vueImports} } from 'vue'` : '',
     needsRoute ? `import { useRoute } from 'vue-router'` : '',
     helperImports ? `import { ${helperImports} } from '../runtime/helpers'` : '',
-    voiderImports ? `import { ${voiderImports} } from '../runtime/voider'` : '',
+    appImports ? `import { ${appImports} } from '../runtime/app'` : '',
     imports,
   ]
     .filter(Boolean)
@@ -2508,7 +2508,7 @@ export function generateViewSfc(options: {
     needsNavigation ? `const { ${navBindings} } = useNavigation()` : '',
     needsRoute ? `const route = useRoute()` : '',
     pageData.source.trimEnd(),
-    needsVoiderRuntime
+    needsAppRuntime
       ? generatePageStoreAdapter(pageData.fieldNames, pageData.writableFieldNames).trimEnd()
       : '',
     needsModal
@@ -2516,7 +2516,7 @@ export function generateViewSfc(options: {
       : '',
     hasPageRefs ? renderComponentRefDeclarations(options.pageRefFields).trim() : '',
     hasPageRefs ? renderModalRefDeclarations(options.pageRefFields).trim() : '',
-    needsVoiderRuntime
+    needsAppRuntime
       ? `function visibilityCtx(scope?: EventScope) {
   return {
     store: pageStore,
@@ -2570,8 +2570,8 @@ export function generateComponentSfc(options: {
     methodSeq: 0,
     extraScript: [],
     indent: 0,
-    needsVoiderIcon: false,
-    needsVoiderSwiper: false,
+    needsAppIcon: false,
+    needsAppSwiper: false,
   }
 
   const root = options.rootNodes[0]
@@ -2584,8 +2584,8 @@ export function generateComponentSfc(options: {
     ...[...ctx.componentImports.entries()].map(
       ([id, name]) => `import ${name} from './${componentIdToFileName(id)}.vue'`,
     ),
-    ctx.needsVoiderIcon ? `import VoiderIcon from './VoiderIcon.vue'` : '',
-    ctx.needsVoiderSwiper ? `import VoiderSwiper from './VoiderSwiper.vue'` : '',
+    ctx.needsAppIcon ? `import AppIcon from './AppIcon.vue'` : '',
+    ctx.needsAppSwiper ? `import AppSwiper from './AppSwiper.vue'` : '',
   ]
     .filter(Boolean)
     .join('\n')
@@ -2678,7 +2678,7 @@ defineExpose({ ${exposedMethods.join(', ')} })
   const importLines = [
     vueImports ? `import { ${vueImports} } from 'vue'` : '',
     helperImports ? `import { ${helperImports} } from '../runtime/helpers'` : '',
-    needsInterpolate ? `import { interpolate } from '../runtime/voider'` : '',
+    needsInterpolate ? `import { interpolate } from '../runtime/app'` : '',
     imports,
   ]
     .filter(Boolean)

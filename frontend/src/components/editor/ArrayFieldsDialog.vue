@@ -8,6 +8,7 @@ import ColorPicker from './ColorPicker.vue'
 import ObjectFieldsDialog from './ObjectFieldsDialog.vue'
 import DataFieldTypeTreeSelect from './DataFieldTypeTreeSelect.vue'
 import JsonCodeEditor from './JsonCodeEditor.vue'
+import OssResourcePickerDialog from './OssResourcePickerDialog.vue'
 import {
   buildArrayValue,
   buildObjectValue,
@@ -19,6 +20,7 @@ import {
   type DataFieldType,
   type DataFieldValue,
   type ObjectSubField,
+  type OssBindingConfig,
 } from '../../types/page-data'
 import type { DataTypeLibrary } from '../../types/data-types'
 import {
@@ -71,6 +73,8 @@ const props = defineProps<{
   /** 当 defaultItemType 为 array 时，内层数组元素类型 */
   defaultNestedItemType?: DataFieldType
   defaultNestedItemTypeRef?: string
+  /** 项目路径：对象存储资源选择 */
+  projectPath?: string | null
 }>()
 
 const emit = defineEmits<{
@@ -85,6 +89,8 @@ const objectDialogVisible = ref(false)
 const objectEditingKey = ref('')
 const nestedDialogVisible = ref(false)
 const nestedEditingKey = ref('')
+const ossPickerVisible = ref(false)
+const ossEditingKey = ref('')
 const mode = ref<EditorMode>('visual')
 const codeText = ref('[]')
 
@@ -426,6 +432,21 @@ function openNestedArrayEditor(key: string) {
   nestedDialogVisible.value = true
 }
 
+function openOssPicker(key: string) {
+  if (!props.projectPath?.trim()) {
+    ElMessage.warning('未打开项目，无法选择对象存储资源')
+    return
+  }
+  ossEditingKey.value = key
+  ossPickerVisible.value = true
+}
+
+function onOssPicked(config: OssBindingConfig) {
+  const item = findDraftItem(ossEditingKey.value)
+  if (!item || item.type !== 'resource') return
+  item.value = (config.url || '').trim()
+}
+
 function saveObjectFields(fields: ObjectSubField[]) {
   const item = findDraftItem(objectEditingKey.value)
   if (!item) return
@@ -739,6 +760,17 @@ function handleSave() {
               placeholder="#409eff / rgba(...)"
               @update:model-value="item.value = $event"
             />
+            <div v-else-if="item.type === 'resource'" class="resource-value">
+              <el-input
+                :model-value="String(item.value ?? '')"
+                clearable
+                placeholder="资源外链 URI"
+                @update:model-value="item.value = $event"
+              />
+              <el-button type="primary" link @click.stop="openOssPicker(item.key)">
+                对象存储
+              </el-button>
+            </div>
             <div v-else-if="item.type === 'json'" class="complex-value object-value">
               <div class="object-preview" :title="objectContentPreview(item)">
                 <code class="object-preview-json">{{ objectContentPreview(item) }}</code>
@@ -784,6 +816,7 @@ function handleSave() {
       :type-library="typeLibrary"
       :type-ref="editingObjectTypeRef"
       :schema-locked="editingObjectSchemaLocked"
+      :project-path="projectPath"
       @save="saveObjectFields"
     />
     <ArrayFieldsDialog
@@ -793,7 +826,13 @@ function handleSave() {
       :type-library="typeLibrary"
       :default-item-type="findDraftItem(nestedEditingKey)?.itemType"
       :default-item-type-ref="findDraftItem(nestedEditingKey)?.itemTypeRef"
+      :project-path="projectPath"
       @save="saveNestedArrayFields"
+    />
+    <OssResourcePickerDialog
+      v-model="ossPickerVisible"
+      :project-path="projectPath"
+      @confirm="onOssPicked"
     />
   </el-dialog>
 </template>
@@ -891,6 +930,19 @@ function handleSave() {
 }
 
 .value-cell {
+  min-width: 0;
+}
+
+.resource-value {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  width: 100%;
+}
+
+.resource-value .el-input {
+  flex: 1;
   min-width: 0;
 }
 

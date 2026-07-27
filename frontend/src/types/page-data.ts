@@ -12,6 +12,8 @@ export type DataFieldType =
   | 'ref'
   /** 后端控制器 API（组件参数：可调用；父级绑定具体接口） */
   | 'api'
+  /** 资源外链 URI（值类型等价 type URI = string） */
+  | 'resource'
 
 export type DataFieldValue =
   | string
@@ -43,8 +45,8 @@ export interface ArraySubField {
   objectFields?: ObjectSubField[]
 }
 
-/** 数据源绑定：控制器 = 绑定后端 API；计算 = 方法体 return 值 */
-export type DataSourceBinding = '' | 'controller' | 'computed'
+/** 数据源绑定：控制器 = 绑定后端 API；计算 = 方法体 return 值；对象存储 = 选资源外链 */
+export type DataSourceBinding = '' | 'controller' | 'computed' | 'oss'
 
 export const DATA_SOURCE_BINDING_OPTIONS: {
   label: string
@@ -54,7 +56,40 @@ export const DATA_SOURCE_BINDING_OPTIONS: {
   { label: '无', value: '' },
   { label: '控制器', value: 'controller' },
   { label: '计算', value: 'computed' },
+  { label: '对象存储', value: 'oss' },
 ]
+
+/** 对象存储资源绑定（数据池 resource 类型） */
+export interface OssBindingConfig {
+  connectionId: string
+  bucketName: string
+  objectKey: string
+  /** 资源外链 URI */
+  url: string
+}
+
+export function createEmptyOssBinding(): OssBindingConfig {
+  return {
+    connectionId: '',
+    bucketName: '',
+    objectKey: '',
+    url: '',
+  }
+}
+
+export function normalizeOssBinding(input: unknown): OssBindingConfig | undefined {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return undefined
+  const raw = input as Record<string, unknown>
+  const connectionId =
+    typeof raw.connectionId === 'string' ? raw.connectionId.trim() : ''
+  const bucketName =
+    typeof raw.bucketName === 'string' ? raw.bucketName.trim() : ''
+  const objectKey =
+    typeof raw.objectKey === 'string' ? raw.objectKey.trim() : ''
+  const url = typeof raw.url === 'string' ? raw.url.trim() : ''
+  if (!connectionId && !bucketName && !objectKey && !url) return undefined
+  return { connectionId, bucketName, objectKey, url }
+}
 
 /** 控制器绑定：API 入参来源 */
 export type ControllerInputSource = 'literal' | 'binding'
@@ -94,6 +129,8 @@ export interface DataField {
   computeBody?: string
   /** binding === 'controller' 时的控制器配置 */
   controllerBinding?: ControllerBindingConfig
+  /** binding === 'oss' 时的对象存储资源配置 */
+  ossBinding?: OssBindingConfig
   /** 引用 types/ 库中的具名类型 id（展示用；值按 type 处理，多为 json） */
   typeRef?: string
   /**
@@ -134,6 +171,7 @@ export const DATA_FIELD_TYPE_OPTIONS: { label: string; value: DataFieldType }[] 
   { label: '布尔值', value: 'boolean' },
   { label: '图标', value: 'icon' },
   { label: '颜色', value: 'color' },
+  { label: '资源', value: 'resource' },
   { label: '对象', value: 'json' },
   { label: '数组', value: 'array' },
   { label: '任意', value: 'any' },
@@ -158,6 +196,7 @@ export const NESTED_FIELD_TYPE_OPTIONS: { label: string; value: DataFieldType }[
   { label: '布尔值', value: 'boolean' },
   { label: '图标', value: 'icon' },
   { label: '颜色', value: 'color' },
+  { label: '资源', value: 'resource' },
   { label: '数组', value: 'array' },
 ]
 
@@ -221,7 +260,7 @@ export function createEmptyControllerBinding(
 }
 
 export function normalizeDataSourceBinding(raw: unknown): DataSourceBinding {
-  if (raw === 'computed' || raw === 'controller') return raw
+  if (raw === 'computed' || raw === 'controller' || raw === 'oss') return raw
   // 旧版「接口」视为未绑定
   return ''
 }
@@ -300,6 +339,7 @@ export function defaultValue(type: DataFieldType): DataFieldValue {
     case 'color':
     case 'ref':
     case 'api':
+    case 'resource':
       return ''
     default:
       return ''

@@ -480,7 +480,7 @@ const namedOptionsForConfig = computed(() => {
             type="info"
             :closable="false"
             show-icon
-            title="common 中 ResultCode / Result / QueryPageDto / QueryPageVo 为系统预设，不可修改；其余类型可正常编辑"
+            title="common 中 ResultCode / Result / QueryPageDto / QueryPageVo / URI 为系统预设，不可修改；其余类型可正常编辑"
             class="common-readonly-tip"
           />
           <el-table
@@ -580,6 +580,7 @@ const namedOptionsForConfig = computed(() => {
     <TypeConfigDialog
       v-model="configVisible"
       :type-def="editingType"
+      :library="library"
       :named-options="namedOptionsForConfig"
       :readonly="editingTypeReadonly"
       @save="saveConfig"

@@ -15,9 +15,19 @@ export interface VoiderProjectConfig {
   }
   /** 入口页面 id（pages/ 下目录名） */
   entryPage?: string
-  /** 微信小程序 AppID */
+  /**
+   * @deprecated 微信 AppID 改由构建方案中的小程序应用配置
+   */
   wechatAppId?: string
-  /** 微信小程序 API 基址（wx.request 前缀，如 https://api.example.com） */
+  /**
+   * 导出前端 API 根地址字典（key: serviceName / `default` / `oss`）。
+   * 构建时也可由方案 backends 生成。
+   */
+  apiBaseUrls?: Record<string, string>
+  /**
+   * @deprecated 请用 apiBaseUrls.default；仍兼容写入 default
+   * 微信小程序 / 导出前端默认 API 基址
+   */
   wechatApiBaseUrl?: string
 }
 
@@ -81,6 +91,20 @@ export function isValidProjectConfig(value: unknown): value is VoiderProjectConf
     typeof config.wechatApiBaseUrl !== 'string'
   ) {
     return false
+  }
+
+  if (config.apiBaseUrls !== undefined) {
+    if (
+      !config.apiBaseUrls ||
+      typeof config.apiBaseUrls !== 'object' ||
+      Array.isArray(config.apiBaseUrls)
+    ) {
+      return false
+    }
+    for (const [key, value] of Object.entries(config.apiBaseUrls)) {
+      if (typeof key !== 'string' || !key.trim()) return false
+      if (typeof value !== 'string') return false
+    }
   }
 
   return true

@@ -13,10 +13,12 @@ export function isValidServiceId(id: string): boolean {
 export interface BackendService {
   /** 目录名，如 goods */
   id: string
-  /** 服务显示名 */
+  /** 模块显示名（原「服务」） */
   name: string
-  /** 服务监听端口 */
-  port: number
+  /**
+   * @deprecated 端口改由构建方案里的后端服务配置；读写仍兼容旧数据
+   */
+  port?: number
   /**
    * 测试环境数据库：引用 mysql.json 中 databases[].id
    */
@@ -36,7 +38,6 @@ export function createEmptyBackendService(id = 'service'): BackendService {
   return {
     id: safeId,
     name: safeId,
-    port: 3000,
     testMysqlId: '',
     productionMysqlId: '',
   }
@@ -74,7 +75,6 @@ export function normalizeBackendService(
     typeof input.name === 'string' && input.name.trim()
       ? input.name.trim()
       : rawId
-  const port = Number(input.port)
 
   const testMysqlId =
     typeof input.testMysqlId === 'string'
@@ -95,7 +95,6 @@ export function normalizeBackendService(
   return {
     id: rawId,
     name,
-    port: Number.isFinite(port) && port > 0 ? Math.floor(port) : 3000,
     testMysqlId,
     productionMysqlId,
   }
@@ -117,7 +116,6 @@ export function serializeServiceConfig(service: BackendService): Record<string, 
   return {
     id: service.id,
     name: service.name,
-    port: service.port,
     testMysqlId: service.testMysqlId,
     productionMysqlId: service.productionMysqlId,
   }

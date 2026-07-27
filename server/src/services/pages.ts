@@ -6,6 +6,7 @@ import {
   createDefaultPageData,
   normalizeControllerBinding,
   normalizeDataSourceBinding,
+  normalizeOssBinding,
   type ArraySubField,
   type DataField,
   type ObjectSubField,
@@ -154,6 +155,7 @@ const DATA_FIELD_TYPES = new Set([
   'color',
   'any',
   'ref',
+  'resource',
 ])
 
 function optionalTypeRef(raw: unknown): string | undefined {
@@ -441,6 +443,14 @@ function normalizeDataField(raw: unknown): DataField | null {
     field.controllerBinding = controllerBinding
   }
 
+  const ossBinding = normalizeOssBinding(
+    (item as { ossBinding?: unknown }).ossBinding,
+  )
+  if (ossBinding && field.binding === 'oss') {
+    field.ossBinding = ossBinding
+    if (ossBinding.url) field.value = ossBinding.url
+  }
+
   const typeRef = optionalTypeRef(item.typeRef)
   if (typeRef) field.typeRef = typeRef
 
@@ -483,6 +493,18 @@ function normalizeDataField(raw: unknown): DataField | null {
     field.binding = ''
     delete field.computeBody
     delete field.controllerBinding
+    delete field.ossBinding
+    field.value =
+      typeof field.value === 'string' ? field.value : String(field.value ?? '')
+  }
+
+  // 对象存储绑定仅资源类型可用
+  if (field.binding === 'oss' && field.type !== 'resource') {
+    field.binding = ''
+    delete field.ossBinding
+  }
+
+  if (field.type === 'resource') {
     field.value =
       typeof field.value === 'string' ? field.value : String(field.value ?? '')
   }

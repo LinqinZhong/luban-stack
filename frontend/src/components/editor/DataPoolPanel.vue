@@ -8,10 +8,12 @@ import DataFieldTypeTreeSelect from './DataFieldTypeTreeSelect.vue'
 import IconValueSelect from './IconValueSelect.vue'
 import ColorPicker from './ColorPicker.vue'
 import ObjectFieldsDialog from './ObjectFieldsDialog.vue'
+import OssResourcePickerDialog from './OssResourcePickerDialog.vue'
 import TypeGenericArgsDialog from './TypeGenericArgsDialog.vue'
 import {
   createEmptyControllerBinding,
   createEmptyDataField,
+  createEmptyOssBinding,
   DATA_SOURCE_BINDING_OPTIONS,
   buildArrayValue,
   buildObjectValue,
@@ -25,6 +27,7 @@ import {
   type DataFieldType,
   type DataSourceBinding,
   type ObjectSubField,
+  type OssBindingConfig,
   type PageData,
 } from '../../types/page-data'
 import { resolveComputedPageData } from '../../utils/compute-runtime'
@@ -79,6 +82,7 @@ const objectDialogVisible = ref(false)
 const arrayDialogVisible = ref(false)
 const computeDialogVisible = ref(false)
 const controllerDialogVisible = ref(false)
+const ossPickerVisible = ref(false)
 const editingIndex = ref(-1)
 
 const genericDialogVisible = ref(false)
@@ -241,8 +245,14 @@ function handleTypeChange(
           binding: '' as const,
           computeBody: '',
           controllerBinding: undefined,
+          ossBinding: undefined,
         }
-      : {}),
+      : type !== 'resource' && prev?.binding === 'oss'
+        ? {
+            binding: '' as const,
+            ossBinding: undefined,
+          }
+        : {}),
   })
   if (names.length) {
     openFieldGenerics(index)
@@ -380,10 +390,32 @@ function openControllerEditor(index: number) {
   controllerDialogVisible.value = true
 }
 
+function openOssPicker(index: number) {
+  editingIndex.value = index
+  ossPickerVisible.value = true
+}
+
 function controllerBindingSummary(row: DataField): string {
   const cfg = row.controllerBinding
   if (!cfg?.serviceId || !cfg.controllerId || !cfg.apiId) return '未配置 API'
   return '已绑定'
+}
+
+function ossBindingSummary(row: DataField): string {
+  const cfg = row.ossBinding
+  if (!cfg?.url) return '未选择资源'
+  const key = cfg.objectKey || cfg.url
+  const short = key.length > 28 ? `…${key.slice(-28)}` : key
+  return short
+}
+
+function bindingOptionsFor(row: DataField) {
+  return DATA_SOURCE_BINDING_OPTIONS.map((opt) => ({
+    ...opt,
+    disabled:
+      opt.disabled ||
+      (opt.value === 'oss' && row.type !== 'resource'),
+  }))
 }
 
 function handleBindingChange(index: number, binding: DataSourceBinding) {
@@ -396,6 +428,7 @@ function handleBindingChange(index: number, binding: DataSourceBinding) {
         ? field.computeBody
         : defaultComputeBody(field.type),
       controllerBinding: undefined,
+      ossBinding: undefined,
     })
     openComputeEditor(index)
     return
@@ -406,13 +439,29 @@ function handleBindingChange(index: number, binding: DataSourceBinding) {
       computeBody: '',
       controllerBinding:
         field.controllerBinding ?? createEmptyControllerBinding(field.type),
+      ossBinding: undefined,
     })
     openControllerEditor(index)
+    return
+  }
+  if (binding === 'oss') {
+    if (field.type !== 'resource') {
+      ElMessage.warning('对象存储仅可用于「资源」类型')
+      return
+    }
+    updateField(index, {
+      binding: 'oss',
+      computeBody: '',
+      controllerBinding: undefined,
+      ossBinding: field.ossBinding ?? createEmptyOssBinding(),
+    })
+    openOssPicker(index)
     return
   }
   updateField(index, {
     binding: '',
     controllerBinding: undefined,
+    ossBinding: undefined,
   })
 }
 
@@ -422,6 +471,7 @@ function saveComputeBody(body: string) {
     binding: 'computed',
     computeBody: body,
     controllerBinding: undefined,
+    ossBinding: undefined,
   })
 }
 
@@ -431,6 +481,19 @@ function saveControllerBinding(config: ControllerBindingConfig) {
     binding: 'controller',
     computeBody: '',
     controllerBinding: config,
+    ossBinding: undefined,
+  })
+}
+
+function saveOssBinding(config: OssBindingConfig) {
+  if (editingIndex.value < 0) return
+  updateField(editingIndex.value, {
+    binding: 'oss',
+    type: 'resource',
+    computeBody: '',
+    controllerBinding: undefined,
+    ossBinding: config,
+    value: config.url,
   })
 }
 </script>
@@ -500,7 +563,7 @@ function saveControllerBinding(config: ControllerBindingConfig) {
               @update:model-value="handleBindingChange($index, $event)"
             >
               <el-option
-                v-for="opt in DATA_SOURCE_BINDING_OPTIONS"
+                v-for="opt in bindingOptionsFor(row)"
                 :key="opt.value || 'none'"
                 :label="opt.label"
                 :value="opt.value"
@@ -534,6 +597,33 @@ function saveControllerBinding(config: ControllerBindingConfig) {
                 @click="openControllerEditor($index)"
               >
                 配置
+              </el-button>
+            </div>
+            <div v-else-if="row.binding === 'oss'" class="complex-value">
+              <span class="value-preview" :title="String(row.value ?? '')">
+                对象存储 · {{ ossBindingSummary(row) }}
+              </span>
+              <el-button
+                type="primary"
+                link
+                :icon="Setting"
+                @click="openOssPicker($index)"
+              >
+                选择
+              </el-button>
+            </div>
+            <div v-else-if="row.type === 'resource'" class="resource-value">
+              <el-input
+                :model-value="colorSafeString(row.value)"
+                placeholder="资源外链 URI"
+                @update:model-value="updateField($index, { value: $event })"
+              />
+              <el-button
+                type="primary"
+                link
+                @click="openOssPicker($index)"
+              >
+                对象存储
               </el-button>
             </div>
             <el-input
@@ -633,6 +723,7 @@ function saveControllerBinding(config: ControllerBindingConfig) {
       :type-library="typeLibrary"
       :type-ref="editingObjectTypeRef"
       :schema-locked="Boolean(editingObjectTypeRef)"
+      :project-path="projectPath"
       @save="saveObjectFields"
     />
     <ArrayFieldsDialog
@@ -644,6 +735,7 @@ function saveControllerBinding(config: ControllerBindingConfig) {
       :default-item-type-ref="fields[editingIndex]?.itemTypeRef"
       :default-nested-item-type="fields[editingIndex]?.itemItemType"
       :default-nested-item-type-ref="fields[editingIndex]?.itemItemTypeRef"
+      :project-path="projectPath"
       @save="saveArrayFields"
     />
     <ComputedBindingDialog
@@ -668,6 +760,12 @@ function saveControllerBinding(config: ControllerBindingConfig) {
       :emit-events="emitEvents"
       :type-library="typeLibrary"
       @save="saveControllerBinding"
+    />
+    <OssResourcePickerDialog
+      v-model="ossPickerVisible"
+      :project-path="projectPath"
+      :initial="editingField?.ossBinding"
+      @confirm="saveOssBinding"
     />
     <TypeGenericArgsDialog
       v-model="genericDialogVisible"
@@ -718,6 +816,20 @@ function saveControllerBinding(config: ControllerBindingConfig) {
   display: flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
+}
+
+.resource-value {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  width: 100%;
+}
+
+.resource-value .el-input {
+  flex: 1;
+  min-width: 0;
 }
 
 .binding-disabled {

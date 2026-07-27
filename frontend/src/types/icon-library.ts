@@ -1,8 +1,12 @@
+import type { OssBindingConfig } from './page-data'
+
 export interface IconDefinition {
   id: string
   label: string
   viewBox: string
   content: string
+  /** 绑定到对象存储时同步上传/删除 */
+  ossBinding?: OssBindingConfig
 }
 
 export interface IconLibrary {

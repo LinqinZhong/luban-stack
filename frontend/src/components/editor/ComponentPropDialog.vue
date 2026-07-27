@@ -132,23 +132,28 @@ function formatTypeExpr(expr: ProcessorTypeExpr | null | undefined): string {
 
 function payloadToTypeExpr(
   payload: {
-    type: DataFieldType | 'void'
+    type: DataFieldType | 'void' | 'generic'
     typeRef?: string
-    itemType?: DataFieldType
+    itemType?: DataFieldType | 'generic'
     itemTypeRef?: string
-    itemItemType?: DataFieldType
+    itemItemType?: DataFieldType | 'generic'
     itemItemTypeRef?: string
   },
   prev?: ProcessorTypeExpr,
 ): ProcessorTypeExpr {
-  const fieldType = payload.type === 'void' ? 'any' : payload.type
+  const fieldType =
+    payload.type === 'void' || payload.type === 'generic' ? 'any' : payload.type
   const next: ProcessorTypeExpr = {
     ...createEmptyProcessorTypeExpr(fieldType),
     type: fieldType,
     typeRef: payload.typeRef ?? '',
-    itemType: payload.itemType ?? '',
+    itemType:
+      payload.itemType === 'generic' ? 'any' : (payload.itemType ?? ''),
     itemTypeRef: payload.itemTypeRef ?? '',
-    itemItemType: payload.itemItemType ?? '',
+    itemItemType:
+      payload.itemItemType === 'generic'
+        ? 'any'
+        : (payload.itemItemType ?? ''),
     itemItemTypeRef: payload.itemItemTypeRef ?? '',
     genericArgs: {},
   }
@@ -291,22 +296,30 @@ function removeApiParam(index: number) {
 function onApiParamTypeChange(
   param: MethodParam,
   payload: {
-    type: DataFieldType | 'void'
+    type: DataFieldType | 'void' | 'generic'
     typeRef?: string
-    itemType?: DataFieldType
+    itemType?: DataFieldType | 'generic'
     itemTypeRef?: string
-    itemItemType?: DataFieldType
+    itemItemType?: DataFieldType | 'generic'
     itemItemTypeRef?: string
   },
 ) {
-  const fieldType = payload.type === 'void' ? 'any' : payload.type
+  const fieldType =
+    payload.type === 'void' || payload.type === 'generic' ? 'any' : payload.type
   param.type = dataFieldToMethodParamType(fieldType)
   param.typeRef = payload.typeRef
-  param.itemType = fieldType === 'array' ? payload.itemType || 'string' : undefined
+  param.itemType =
+    fieldType === 'array'
+      ? payload.itemType === 'generic'
+        ? 'any'
+        : payload.itemType || 'string'
+      : undefined
   param.itemTypeRef = fieldType === 'array' ? payload.itemTypeRef : undefined
   param.itemItemType =
     fieldType === 'array' && payload.itemType === 'array'
-      ? payload.itemItemType || 'string'
+      ? payload.itemItemType === 'generic'
+        ? 'any'
+        : payload.itemItemType || 'string'
       : undefined
   param.itemItemTypeRef =
     fieldType === 'array' && payload.itemType === 'array'

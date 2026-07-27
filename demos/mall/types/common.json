@@ -314,6 +314,28 @@
           }
         ]
       }
+    },
+    {
+      "id": "type_common_URI",
+      "name": "URI",
+      "kind": "string",
+      "remark": "资源外链（type URI = string）",
+      "tableName": "",
+      "category": "other",
+      "generics": [],
+      "fields": [],
+      "enumMembers": [],
+      "combination": {
+        "intersections": [
+          {
+            "alternatives": [
+              {
+                "kind": "string"
+              }
+            ]
+          }
+        ]
+      }
     }
   ]
 }

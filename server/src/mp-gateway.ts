@@ -5,6 +5,16 @@ import {
   findApiByHttpPath,
   invokeMatchedApi,
 } from './services/mp-gateway/invoke.js'
+import { signOssObjectByConnectionId } from './services/oss.js'
+
+function resolveProjectPath(req: express.Request): string {
+  return (
+    String(req.headers['x-project-path'] || '').trim() ||
+    String(req.headers['x-voider-project'] || '').trim() ||
+    String(req.query.projectPath || '').trim() ||
+    String((req.body as { projectPath?: string } | undefined)?.projectPath || '').trim()
+  )
+}
 
 /** 微信小程序本地联调网关（默认 6630） */
 export function createMpGatewayApp() {
@@ -13,9 +23,59 @@ export function createMpGatewayApp() {
   app.use(express.json({ limit: '4mb' }))
   app.use(express.urlencoded({ extended: true }))
 
-  app.get('/__voider/health', (_req, res) => {
-    res.json({ ok: true, service: 'voider-mp-gateway' })
-  })
+  const health = (_req: express.Request, res: express.Response) => {
+    res.json({ ok: true, service: 'mp-gateway' })
+  }
+  app.get('/health', health)
+  // 兼容旧路径
+  app.get('/__voider/health', health)
+
+  const ossSign = async (req: express.Request, res: express.Response) => {
+    try {
+      const projectPath = resolveProjectPath(req)
+      if (!projectPath) {
+        res.status(400).json({
+          code: 400,
+          message: '缺少项目路径：请在请求头 X-Project-Path 中带上 projectPath',
+          data: null,
+        })
+        return
+      }
+      const body = req.body ?? {}
+      const result = await signOssObjectByConnectionId(
+        projectPath,
+        String(body.connectionId ?? ''),
+        String(body.bucketName ?? ''),
+        String(body.key ?? body.objectKey ?? ''),
+        body.expiresIn == null ? 7 * 24 * 3600 : Number(body.expiresIn),
+      )
+      res.json({
+        code: 0,
+        message: 'ok',
+        data: result,
+      })
+    } catch (err) {
+      if (err instanceof ProjectError) {
+        res.status(err.status || 400).json({
+          code: err.status || 400,
+          message: err.message,
+          data: null,
+        })
+        return
+      }
+      console.error('[mp-gateway] oss/sign', err)
+      res.status(500).json({
+        code: 500,
+        message: err instanceof Error ? err.message : '签名失败',
+        data: null,
+      })
+    }
+  }
+
+  /** 私有桶对象：运行时签名（小程序 / H5 联调） */
+  app.post('/oss/sign', ossSign)
+  // 兼容旧路径
+  app.post('/__voider/oss/sign', ossSign)
 
   app.use(async (req, res) => {
     try {
@@ -30,14 +90,12 @@ export function createMpGatewayApp() {
         }
       }
 
-      const projectPath =
-        String(req.headers['x-voider-project'] || '').trim() ||
-        String(req.query.projectPath || '').trim()
+      const projectPath = resolveProjectPath(req)
       if (!projectPath) {
         res.status(400).json({
           code: 400,
           message:
-            '缺少项目路径：请在请求头 X-Voider-Project 中带上导出时的 projectPath',
+            '缺少项目路径：请在请求头 X-Project-Path 中带上导出时的 projectPath',
           data: null,
         })
         return

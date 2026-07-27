@@ -7,24 +7,35 @@ import {
 
 /** 与 DataFieldTypeTreeSelect 的 change payload 对齐 */
 export type FlowTypeSelectPayload = {
-  type: DataFieldType | 'void'
+  type: DataFieldType | 'void' | 'generic'
   typeRef?: string
-  itemType?: DataFieldType
+  itemType?: DataFieldType | 'generic'
   itemTypeRef?: string
-  itemItemType?: DataFieldType
+  itemItemType?: DataFieldType | 'generic'
   itemItemTypeRef?: string
+  cleared?: boolean
 }
 
 /** 流程节点类型选择：与后端方法一致，排除 UI 专用类型 */
-export const FLOW_TYPE_EXCLUDE: DataFieldType[] = ['color', 'ref', 'icon']
+export const FLOW_TYPE_EXCLUDE: DataFieldType[] = ['color', 'ref', 'icon', 'resource']
 
 export function dataFieldToMethodParamType(
-  type: DataFieldType | 'void',
+  type: DataFieldType | 'void' | 'generic',
 ): MethodParamType {
-  if (type === 'void') return 'any'
+  if (type === 'void' || type === 'generic') return 'any'
   if (type === 'json') return 'object'
-  if (type === 'icon' || type === 'color' || type === 'ref') return 'string'
+  if (type === 'icon' || type === 'color' || type === 'ref' || type === 'resource') {
+    return 'string'
+  }
   return type as MethodParamType
+}
+
+/** Cascader payload 叶子 → 数据字段类型（泛型/void 落为 any） */
+export function resolvePayloadFieldType(
+  type: DataFieldType | 'void' | 'generic' | undefined | null,
+): DataFieldType {
+  if (!type || type === 'void' || type === 'generic') return 'any'
+  return type
 }
 
 export function methodTypeToDataField(

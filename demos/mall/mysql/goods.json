@@ -1,0 +1,53 @@
+{
+  "name": "goods",
+  "remark": "商品表名",
+  "columns": [
+    {
+      "name": "id",
+      "type": "bigint",
+      "nullable": false,
+      "primaryKey": true,
+      "autoIncrement": true,
+      "defaultValue": "",
+      "comment": ""
+    },
+    {
+      "name": "name",
+      "type": "varchar(255)",
+      "nullable": true,
+      "primaryKey": false,
+      "autoIncrement": false,
+      "defaultValue": "",
+      "comment": ""
+    },
+    {
+      "name": "price",
+      "type": "decimal(10,2)",
+      "nullable": true,
+      "primaryKey": false,
+      "autoIncrement": false,
+      "defaultValue": "",
+      "comment": ""
+    },
+    {
+      "name": "stock",
+      "type": "int",
+      "nullable": true,
+      "primaryKey": false,
+      "autoIncrement": false,
+      "defaultValue": "",
+      "comment": ""
+    },
+    {
+      "name": "img",
+      "type": "varchar(255)",
+      "nullable": true,
+      "primaryKey": false,
+      "autoIncrement": false,
+      "defaultValue": "",
+      "comment": "",
+      "resource": true
+    }
+  ],
+  "syncedAt": 1785181788399
+}

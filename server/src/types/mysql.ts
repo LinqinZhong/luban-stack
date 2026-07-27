@@ -1,6 +1,8 @@
 /** 项目级 MySQL 连接配置（mysql.json） */
 
 export const MYSQL_FILE = 'mysql.json'
+/** 每张表的结构元数据目录：mysql/{tableName}.json */
+export const MYSQL_SCHEMA_DIR = 'mysql'
 
 export type MysqlSshAuthType = 'password' | 'privateKey'
 
@@ -34,8 +36,18 @@ export interface MysqlColumnDef {
   autoIncrement: boolean
   defaultValue: string
   comment: string
+  /** 是否资源外链列（存于 mysql/{table}.json，非 DDL） */
+  resource?: boolean
   /** 编辑时：原列名，用于 CHANGE COLUMN */
   originalName?: string
+}
+
+/** 本地持久化的表结构（mysql/{tableName}.json） */
+export interface MysqlTableSchemaFile {
+  name: string
+  remark: string
+  columns: MysqlColumnDef[]
+  syncedAt: number | null
 }
 
 export interface MysqlTableDef {

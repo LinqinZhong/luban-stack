@@ -1,0 +1,52 @@
+{
+  "name": "goods_remark",
+  "remark": "商品评价",
+  "columns": [
+    {
+      "name": "id",
+      "type": "bigint",
+      "nullable": false,
+      "primaryKey": true,
+      "autoIncrement": true,
+      "defaultValue": "",
+      "comment": "ID"
+    },
+    {
+      "name": "goods_id",
+      "type": "bigint",
+      "nullable": true,
+      "primaryKey": false,
+      "autoIncrement": false,
+      "defaultValue": "",
+      "comment": "商品ID"
+    },
+    {
+      "name": "content",
+      "type": "varchar(255)",
+      "nullable": true,
+      "primaryKey": false,
+      "autoIncrement": false,
+      "defaultValue": "",
+      "comment": "内容"
+    },
+    {
+      "name": "score",
+      "type": "tinyint(1)",
+      "nullable": true,
+      "primaryKey": false,
+      "autoIncrement": false,
+      "defaultValue": "",
+      "comment": "评分(0-10)"
+    },
+    {
+      "name": "user_id",
+      "type": "bigint",
+      "nullable": true,
+      "primaryKey": false,
+      "autoIncrement": false,
+      "defaultValue": "",
+      "comment": "用户ID"
+    }
+  ],
+  "syncedAt": 1785181987761
+}

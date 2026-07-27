@@ -11,6 +11,7 @@ import {
 import { ensureIconLibraryFile } from './icons.js'
 import { ensureDataTypeLibraryFile } from './data-types.js'
 import { ensureMysqlLibraryFile } from './mysql.js'
+import { ensureOssLibraryFile } from './oss.js'
 import { ensureBackendServiceLibraryFile } from './backend-services.js'
 
 export class ProjectError extends Error {
@@ -100,6 +101,25 @@ async function readConfigFile(projectPath: string): Promise<VoiderProjectConfig>
   }
   if (typeof parsed.wechatAppId === 'string' && parsed.wechatAppId.trim()) {
     config.wechatAppId = parsed.wechatAppId.trim()
+  }
+  if (
+    typeof parsed.wechatApiBaseUrl === 'string' &&
+    parsed.wechatApiBaseUrl.trim()
+  ) {
+    config.wechatApiBaseUrl = parsed.wechatApiBaseUrl.trim()
+  }
+  if (
+    parsed.apiBaseUrls &&
+    typeof parsed.apiBaseUrls === 'object' &&
+    !Array.isArray(parsed.apiBaseUrls)
+  ) {
+    const urls: Record<string, string> = {}
+    for (const [key, value] of Object.entries(parsed.apiBaseUrls)) {
+      const k = key.trim()
+      if (!k || typeof value !== 'string' || !value.trim()) continue
+      urls[k] = value.trim()
+    }
+    if (Object.keys(urls).length) config.apiBaseUrls = urls
   }
   return config
 }
@@ -234,6 +254,7 @@ export async function createProject(options: {
     await ensureIconLibraryFile(projectPath)
     await ensureDataTypeLibraryFile(projectPath)
     await ensureMysqlLibraryFile(projectPath)
+    await ensureOssLibraryFile(projectPath)
     await ensureBackendServiceLibraryFile(projectPath)
   } catch {
     throw new ProjectError(`无法写入 ${VOIDER_CONFIG_FILE}`, 500)

@@ -7,12 +7,33 @@ H5 低代码开发工具（前后端分离本地系统）。
 ```
 voider/
 ├── frontend/   # Vue 3 + TypeScript + Element Plus
-└── server/     # Node.js + Express + TypeScript
+├── server/     # Node.js + Express + TypeScript
+└── desktop/    # Electron 桌面端（内嵌 server + frontend）
 ```
 
 ## 快速开始
 
-### 1. 启动后端
+### 桌面端（推荐）
+
+一次性拉起本地 API（3000）与 Vite（5173），并打开 Electron 窗口：
+
+```bash
+cd server && npm install && cd ..
+cd frontend && npm install && cd ..
+cd desktop && npm install
+npm run dev
+```
+
+打包 Windows 安装包 / 便携包（会先构建 frontend 与 server）：
+
+```bash
+cd desktop
+npm run build
+```
+
+产物在 `desktop/release/`。安装包启动后由主进程拉起 Express（托管 `frontend/dist` + `/api`），无需另开终端。
+
+### 1. 启动后端（浏览器联调）
 
 ```bash
 cd server
@@ -22,7 +43,7 @@ npm run dev
 
 后端默认运行在 `http://localhost:3000`
 
-### 2. 启动前端
+### 2. 启动前端（浏览器联调）
 
 ```bash
 cd frontend
@@ -120,4 +141,10 @@ npm start
 cd frontend
 npm run build
 npm run preview
+
+# 桌面端（Windows NSIS + portable）
+cd desktop
+npm run build
 ```
+
+桌面端生产环境通过 `VOIDER_STATIC_DIR` 由 Express 托管前端静态资源；开发态仍走 Vite，API 经 proxy 访问 `127.0.0.1:3000`。

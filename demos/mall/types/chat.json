@@ -3,7 +3,7 @@
   "types": [
     {
       "id": "type_mrqq9v55_7fzo9v",
-      "name": "MessageList",
+      "name": "Message",
       "kind": "interface",
       "remark": "",
       "tableName": "",
@@ -70,6 +70,24 @@
                 "alternatives": [
                   {
                     "kind": "string"
+                  }
+                ]
+              }
+            ]
+          },
+          "remark": "",
+          "optional": false
+        },
+        {
+          "id": "field_ms3mlua4_8pwg8v",
+          "name": "avatar",
+          "type": {
+            "intersections": [
+              {
+                "alternatives": [
+                  {
+                    "kind": "named",
+                    "ref": "type_common_URI"
                   }
                 ]
               }

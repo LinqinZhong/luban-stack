@@ -83,8 +83,12 @@ export function resolveNamedTypeAsField(
       return { type: 'number' }
     case 'boolean':
       return { type: 'boolean' }
-    case 'enum':
     case 'string':
+      if (def.name === 'URI' || def.id === 'type_common_URI') {
+        return { type: 'resource' }
+      }
+      return { type: 'string' }
+    case 'enum':
     default:
       return { type: 'string' }
   }

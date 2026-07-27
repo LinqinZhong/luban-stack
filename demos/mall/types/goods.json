@@ -11,7 +11,7 @@
       "generics": [],
       "fields": [
         {
-          "id": "field_mrs1wk66_2tem17",
+          "id": "field_ms3mjs02_lh2nop",
           "name": "id",
           "type": {
             "intersections": [
@@ -28,7 +28,7 @@
           "optional": false
         },
         {
-          "id": "field_mrs1wk66_8fe84l",
+          "id": "field_ms3mjs02_ng1rag",
           "name": "name",
           "type": {
             "intersections": [
@@ -45,7 +45,7 @@
           "optional": false
         },
         {
-          "id": "field_mrs1wk66_xvuu2x",
+          "id": "field_ms3mjs02_ewansd",
           "name": "price",
           "type": {
             "intersections": [
@@ -62,7 +62,7 @@
           "optional": false
         },
         {
-          "id": "field_mrs1wk66_h318ty",
+          "id": "field_ms3mjs02_m6dlh5",
           "name": "stock",
           "type": {
             "intersections": [
@@ -79,14 +79,15 @@
           "optional": false
         },
         {
-          "id": "field_mrs1wk66_matb66",
+          "id": "field_ms3mjs02_7r9f5o",
           "name": "img",
           "type": {
             "intersections": [
               {
                 "alternatives": [
                   {
-                    "kind": "string"
+                    "kind": "named",
+                    "ref": "type_common_URI"
                   }
                 ]
               }

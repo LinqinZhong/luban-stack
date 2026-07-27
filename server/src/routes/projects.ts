@@ -22,13 +22,29 @@ import {
   updateMysqlTableSchema,
   dropMysqlTable,
   truncateMysqlTable,
-  getMysqlTableColumns,
+  getMysqlTableColumnsWithSchema,
+  resolveMysqlTableSchemaConflict,
   refreshMysqlTables,
   listMysqlTableRows,
   updateMysqlTableRow,
   deleteMysqlTableRow,
   insertMysqlTableRow,
 } from '../services/mysql.js'
+import {
+  readOssLibrary,
+  saveOssLibrary,
+  testOssConnection,
+  listOssBuckets,
+  createOssBucket,
+  deleteOssBucket,
+  listOssObjects,
+  uploadOssObject,
+  deleteOssObject,
+  getOssObjectMeta,
+  setOssBucketAccess,
+  signOssObject,
+  signOssObjectByConnectionId,
+} from '../services/oss.js'
 import {
   readBackendServiceLibrary,
   readServiceControllers,
@@ -40,6 +56,12 @@ import {
 import { debugDataLayerMethod } from '../services/data-method-debug.js'
 import { exportVue3Project } from '../services/export-vue3.js'
 import { exportMpWxProject } from '../services/export-mp-wx.js'
+import { exportNestJsProject } from '../services/export-nextjs.js'
+import {
+  readBuildSchemeLibrary,
+  writeBuildSchemeLibrary,
+} from '../services/build-schemes.js'
+import { buildProject } from '../services/build-project.js'
 import { DEFAULT_CANVAS_WIDTH, ENGINE_VERSION } from '../types/voider-project.js'
 
 const router = Router()
@@ -185,6 +207,91 @@ router.post('/export/mp-wx', async (req, res) => {
       return
     }
     const result = await exportMpWxProject(projectPath.trim())
+    res.json(result)
+  } catch (err) {
+    handleError(res, err)
+  }
+})
+
+router.post('/export/nestjs', async (req, res) => {
+  try {
+    const projectPath =
+      typeof req.body?.projectPath === 'string' ? req.body.projectPath : ''
+    if (!projectPath.trim()) {
+      res.status(400).json({ message: '请提供 projectPath' })
+      return
+    }
+    const result = await exportNestJsProject(projectPath.trim())
+    res.json(result)
+  } catch (err) {
+    handleError(res, err)
+  }
+})
+
+/** @deprecated */
+router.post('/export/nextjs', async (req, res) => {
+  try {
+    const projectPath =
+      typeof req.body?.projectPath === 'string' ? req.body.projectPath : ''
+    if (!projectPath.trim()) {
+      res.status(400).json({ message: '请提供 projectPath' })
+      return
+    }
+    const result = await exportNestJsProject(projectPath.trim())
+    res.json(result)
+  } catch (err) {
+    handleError(res, err)
+  }
+})
+
+router.get('/build-schemes', async (req, res) => {
+  try {
+    const projectPath =
+      typeof req.query.projectPath === 'string' ? req.query.projectPath : ''
+    if (!projectPath.trim()) {
+      res.status(400).json({ message: '请提供 projectPath' })
+      return
+    }
+    const library = await readBuildSchemeLibrary(projectPath.trim())
+    res.json(library)
+  } catch (err) {
+    handleError(res, err)
+  }
+})
+
+router.put('/build-schemes', async (req, res) => {
+  try {
+    const projectPath =
+      typeof req.body?.projectPath === 'string' ? req.body.projectPath : ''
+    if (!projectPath.trim()) {
+      res.status(400).json({ message: '请提供 projectPath' })
+      return
+    }
+    const library = await writeBuildSchemeLibrary(
+      projectPath.trim(),
+      req.body?.library ?? { schemes: req.body?.schemes ?? [] },
+    )
+    res.json(library)
+  } catch (err) {
+    handleError(res, err)
+  }
+})
+
+router.post('/build', async (req, res) => {
+  try {
+    const projectPath =
+      typeof req.body?.projectPath === 'string' ? req.body.projectPath : ''
+    const schemeName =
+      typeof req.body?.schemeName === 'string' ? req.body.schemeName : ''
+    if (!projectPath.trim()) {
+      res.status(400).json({ message: '请提供 projectPath' })
+      return
+    }
+    if (!schemeName.trim()) {
+      res.status(400).json({ message: '请提供 schemeName' })
+      return
+    }
+    const result = await buildProject(projectPath.trim(), schemeName.trim())
     res.json(result)
   } catch (err) {
     handleError(res, err)
@@ -436,6 +543,190 @@ router.post('/services/processors/debug', async (req, res) => {
   }
 })
 
+router.get('/oss', async (req, res) => {
+  try {
+    const projectPath = typeof req.query.projectPath === 'string' ? req.query.projectPath : ''
+    if (!projectPath.trim()) {
+      res.status(400).json({ message: '请提供 projectPath' })
+      return
+    }
+    const library = await readOssLibrary(projectPath.trim())
+    res.json(library)
+  } catch (err) {
+    handleError(res, err)
+  }
+})
+
+router.put('/oss', async (req, res) => {
+  try {
+    const { projectPath, connections } = req.body ?? {}
+    if (!projectPath || typeof projectPath !== 'string' || !projectPath.trim()) {
+      res.status(400).json({ message: '请提供 projectPath' })
+      return
+    }
+    const library = await saveOssLibrary(projectPath.trim(), { connections })
+    res.json(library)
+  } catch (err) {
+    handleError(res, err)
+  }
+})
+
+router.post('/oss/test', async (req, res) => {
+  try {
+    const result = await testOssConnection(parseOssConnection(req.body ?? {}))
+    res.json(result)
+  } catch (err) {
+    handleError(res, err)
+  }
+})
+
+router.post('/oss/buckets/list', async (req, res) => {
+  try {
+    const buckets = await listOssBuckets(parseOssConnection(req.body ?? {}))
+    res.json({ buckets })
+  } catch (err) {
+    handleError(res, err)
+  }
+})
+
+router.post('/oss/buckets/create', async (req, res) => {
+  try {
+    const body = req.body ?? {}
+    const buckets = await createOssBucket(
+      parseOssConnection(body),
+      String(body.bucketName ?? ''),
+    )
+    res.json({ buckets })
+  } catch (err) {
+    handleError(res, err)
+  }
+})
+
+router.post('/oss/buckets/delete', async (req, res) => {
+  try {
+    const body = req.body ?? {}
+    const buckets = await deleteOssBucket(
+      parseOssConnection(body),
+      String(body.bucketName ?? ''),
+    )
+    res.json({ buckets })
+  } catch (err) {
+    handleError(res, err)
+  }
+})
+
+router.post('/oss/buckets/set-access', async (req, res) => {
+  try {
+    const body = req.body ?? {}
+    const access = body.access === 'public' ? 'public' : 'private'
+    const result = await setOssBucketAccess(
+      parseOssConnection(body),
+      String(body.bucketName ?? ''),
+      access,
+    )
+    res.json(result)
+  } catch (err) {
+    handleError(res, err)
+  }
+})
+
+router.post('/oss/objects/list', async (req, res) => {
+  try {
+    const body = req.body ?? {}
+    const result = await listOssObjects(
+      parseOssConnection(body),
+      String(body.bucketName ?? ''),
+      {
+        prefix: typeof body.prefix === 'string' ? body.prefix : '',
+        continuationToken:
+          typeof body.continuationToken === 'string' ? body.continuationToken : undefined,
+        maxKeys: body.maxKeys,
+      },
+    )
+    res.json(result)
+  } catch (err) {
+    handleError(res, err)
+  }
+})
+
+router.post('/oss/objects/upload', async (req, res) => {
+  try {
+    const body = req.body ?? {}
+    const result = await uploadOssObject(
+      parseOssConnection(body),
+      String(body.bucketName ?? ''),
+      {
+        key: String(body.key ?? ''),
+        contentBase64: String(body.contentBase64 ?? ''),
+        contentType: typeof body.contentType === 'string' ? body.contentType : undefined,
+      },
+    )
+    res.json(result)
+  } catch (err) {
+    handleError(res, err)
+  }
+})
+
+router.post('/oss/objects/delete', async (req, res) => {
+  try {
+    const body = req.body ?? {}
+    const result = await deleteOssObject(
+      parseOssConnection(body),
+      String(body.bucketName ?? ''),
+      String(body.key ?? ''),
+    )
+    res.json(result)
+  } catch (err) {
+    handleError(res, err)
+  }
+})
+
+router.post('/oss/objects/meta', async (req, res) => {
+  try {
+    const body = req.body ?? {}
+    const result = await getOssObjectMeta(
+      parseOssConnection(body),
+      String(body.bucketName ?? ''),
+      String(body.key ?? ''),
+    )
+    res.json(result)
+  } catch (err) {
+    handleError(res, err)
+  }
+})
+
+router.post('/oss/objects/sign', async (req, res) => {
+  try {
+    const body = req.body ?? {}
+    const expiresIn =
+      body.expiresIn == null ? 7 * 24 * 3600 : Number(body.expiresIn)
+    const projectPath =
+      typeof body.projectPath === 'string' ? body.projectPath.trim() : ''
+    const connectionId =
+      typeof body.connectionId === 'string' ? body.connectionId.trim() : ''
+    if (projectPath && connectionId) {
+      const result = await signOssObjectByConnectionId(
+        projectPath,
+        connectionId,
+        String(body.bucketName ?? ''),
+        String(body.key ?? body.objectKey ?? ''),
+        expiresIn,
+      )
+      res.json(result)
+      return
+    }
+    const result = await signOssObject(
+      parseOssConnection(body),
+      String(body.bucketName ?? ''),
+      String(body.key ?? body.objectKey ?? ''),
+      expiresIn,
+    )
+    res.json(result)
+  } catch (err) {
+    handleError(res, err)
+  }
+})
+
 router.post('/mysql/test', async (req, res) => {
   try {
     const body = req.body ?? {}
@@ -468,8 +759,31 @@ router.post('/mysql/tables/columns', async (req, res) => {
   try {
     const body = req.body ?? {}
     const tableName = String(body.tableName ?? '')
-    const columns = await getMysqlTableColumns(parseMysqlConnection(body), tableName)
-    res.json({ columns })
+    const projectPath = String(body.projectPath ?? '')
+    const result = await getMysqlTableColumnsWithSchema(
+      projectPath,
+      parseMysqlConnection(body),
+      tableName,
+    )
+    res.json(result)
+  } catch (err) {
+    handleError(res, err)
+  }
+})
+
+router.post('/mysql/tables/schema/resolve', async (req, res) => {
+  try {
+    const body = req.body ?? {}
+    const tableName = String(body.tableName ?? '')
+    const projectPath = String(body.projectPath ?? '')
+    const adopt = body.adopt === 'local' ? 'local' : 'remote'
+    const result = await resolveMysqlTableSchemaConflict(
+      projectPath,
+      parseMysqlConnection(body),
+      tableName,
+      adopt,
+    )
+    res.json(result)
   } catch (err) {
     handleError(res, err)
   }
@@ -478,7 +792,11 @@ router.post('/mysql/tables/columns', async (req, res) => {
 router.post('/mysql/tables/create', async (req, res) => {
   try {
     const body = req.body ?? {}
-    const tables = await createMysqlTable(parseMysqlConnection(body), body.table)
+    const tables = await createMysqlTable(
+      parseMysqlConnection(body),
+      body.table,
+      String(body.projectPath ?? ''),
+    )
     res.json({ tables })
   } catch (err) {
     handleError(res, err)
@@ -489,10 +807,15 @@ router.post('/mysql/tables/update', async (req, res) => {
   try {
     const body = req.body ?? {}
     const tableName = String(body.tableName ?? '')
-    const tables = await updateMysqlTableMeta(parseMysqlConnection(body), tableName, {
-      name: String(body.name ?? ''),
-      remark: String(body.remark ?? ''),
-    })
+    const tables = await updateMysqlTableMeta(
+      parseMysqlConnection(body),
+      tableName,
+      {
+        name: String(body.name ?? ''),
+        remark: String(body.remark ?? ''),
+      },
+      String(body.projectPath ?? ''),
+    )
     res.json({ tables })
   } catch (err) {
     handleError(res, err)
@@ -507,6 +830,8 @@ router.post('/mysql/tables/design', async (req, res) => {
       parseMysqlConnection(body),
       tableName,
       body.columns,
+      String(body.projectPath ?? ''),
+      String(body.remark ?? ''),
     )
     res.json({ tables })
   } catch (err) {
@@ -518,7 +843,11 @@ router.post('/mysql/tables/drop', async (req, res) => {
   try {
     const body = req.body ?? {}
     const tableName = String(body.tableName ?? '')
-    const tables = await dropMysqlTable(parseMysqlConnection(body), tableName)
+    const tables = await dropMysqlTable(
+      parseMysqlConnection(body),
+      tableName,
+      String(body.projectPath ?? ''),
+    )
     res.json({ tables })
   } catch (err) {
     handleError(res, err)
@@ -540,10 +869,15 @@ router.post('/mysql/tables/rows', async (req, res) => {
   try {
     const body = req.body ?? {}
     const tableName = String(body.tableName ?? '')
-    const result = await listMysqlTableRows(parseMysqlConnection(body), tableName, {
-      current: body.current,
-      pageSize: body.pageSize,
-    })
+    const result = await listMysqlTableRows(
+      parseMysqlConnection(body),
+      tableName,
+      {
+        current: body.current,
+        pageSize: body.pageSize,
+      },
+      String(body.projectPath ?? ''),
+    )
     res.json(result)
   } catch (err) {
     handleError(res, err)
@@ -603,6 +937,16 @@ function parseMysqlConnection(body: any) {
       privateKey: String(body.ssh?.privateKey ?? ''),
       passphrase: String(body.ssh?.passphrase ?? ''),
     },
+  }
+}
+
+function parseOssConnection(body: any) {
+  return {
+    endpoint: String(body.endpoint ?? ''),
+    region: String(body.region ?? 'us-east-1'),
+    accessKeyId: String(body.accessKeyId ?? ''),
+    secretAccessKey: String(body.secretAccessKey ?? ''),
+    forcePathStyle: body.forcePathStyle !== false,
   }
 }
 

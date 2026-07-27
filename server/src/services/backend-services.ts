@@ -172,27 +172,22 @@ export async function saveBackendServiceLibrary(
   const normalized = normalizeBackendServiceLibrary(library)
   const ids = new Set<string>()
   const names = new Set<string>()
-  const ports = new Set<number>()
 
   for (const svc of normalized.services) {
     if (!isValidServiceId(svc.id)) {
       throw new ProjectError(
-        `服务 ID 仅允许英文：字母开头，字母/数字/下划线/连字符（当前：${svc.id}）`,
+        `模块 ID 仅允许英文：字母开头，字母/数字/下划线/连字符（当前：${svc.id}）`,
         400,
       )
     }
     if (ids.has(svc.id)) {
-      throw new ProjectError(`服务 ID 重复：${svc.id}`, 400)
+      throw new ProjectError(`模块 ID 重复：${svc.id}`, 400)
     }
     ids.add(svc.id)
     if (names.has(svc.name)) {
-      throw new ProjectError(`服务名称重复：${svc.name}`, 400)
+      throw new ProjectError(`模块名称重复：${svc.name}`, 400)
     }
     names.add(svc.name)
-    if (ports.has(svc.port)) {
-      throw new ProjectError(`服务端口重复：${svc.port}`, 400)
-    }
-    ports.add(svc.port)
   }
 
   const root = await ensureServicesDir(projectPath)

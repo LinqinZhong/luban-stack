@@ -7,14 +7,18 @@ import {
 } from '../../types/page-data'
 import type { DataTypeLibrary } from '../../types/data-types'
 
+export type TypeSelectLeafType = DataFieldType | 'void' | 'generic'
+
 export type TypeSelectPayload = {
-  type: DataFieldType | 'void'
+  type: TypeSelectLeafType
   typeRef?: string
-  itemType?: DataFieldType
+  itemType?: DataFieldType | 'generic'
   itemTypeRef?: string
   /** itemType === 'array' 时，内层数组的元素类型 */
-  itemItemType?: DataFieldType
+  itemItemType?: DataFieldType | 'generic'
   itemItemTypeRef?: string
+  /** clearable + emptyOnClear 清空时为 true */
+  cleared?: boolean
 }
 
 interface CascaderNode {
@@ -23,19 +27,31 @@ interface CascaderNode {
   children?: CascaderNode[]
 }
 
+const GENERIC_GROUP = '__group__:__generics__'
+
 const props = withDefaults(
   defineProps<{
-    type: DataFieldType | 'void'
+    type: TypeSelectLeafType
     typeRef?: string | null
-    itemType?: DataFieldType | null
+    itemType?: DataFieldType | 'generic' | null
     itemTypeRef?: string | null
-    itemItemType?: DataFieldType | null
+    itemItemType?: DataFieldType | 'generic' | null
     itemItemTypeRef?: string | null
+    /** 为 true 时 cascader 显示为空（未选择） */
+    empty?: boolean
     library?: DataTypeLibrary | null
+    /** 当前类型上的泛型参数名（如 T / U），展示在「泛型」分组 */
+    genericNames?: string[]
+    /** 排除的具名类型 id（如正在编辑的类型自身） */
+    excludeNamedIds?: string[]
     allowRef?: boolean
     allowNamed?: boolean
     /** 允许选择 void（方法出参等） */
     allowVoid?: boolean
+    /** 顶层也展示「任意」（类型库字段等；数据池仅数组元素层有 any） */
+    allowAny?: boolean
+    /** 清空时发出 cleared: true（类型库字段等） */
+    emptyOnClear?: boolean
     composable?: boolean
     nested?: boolean
     excludeTypes?: DataFieldType[]
@@ -49,6 +65,9 @@ const props = withDefaults(
     allowRef: false,
     allowNamed: true,
     allowVoid: false,
+    allowAny: false,
+    emptyOnClear: false,
+    empty: false,
     composable: false,
     nested: false,
     clearable: false,
@@ -82,12 +101,26 @@ function baseOptions(): Array<{ label: string; value: DataFieldType }> {
   return base
 }
 
+function genericGroupNode(): CascaderNode | null {
+  const names = (props.genericNames ?? []).map((n) => n.trim()).filter(Boolean)
+  if (!names.length) return null
+  return {
+    value: GENERIC_GROUP,
+    label: '泛型',
+    children: names.map((name) => ({
+      value: `generic:${name}`,
+      label: name,
+    })),
+  }
+}
+
 function namedGroupNodes(): CascaderNode[] {
   if (props.allowNamed === false) return []
+  const ban = new Set(props.excludeNamedIds ?? [])
   const nodes: CascaderNode[] = []
   for (const group of props.library?.groups ?? []) {
     const children = (group.types ?? [])
-      .filter((t) => t.name?.trim())
+      .filter((t) => t.name?.trim() && !ban.has(t.id))
       .map((t) => ({
         value: `named:${t.id}`,
         label: t.name.trim(),
@@ -109,7 +142,7 @@ function namedGroupNodes(): CascaderNode[] {
 function buildCascaderOptions(arrayDepth: number, forArrayElement = false): CascaderNode[] {
   // 数组元素类型不含「引用」（引用仅数据池顶层）
   const base = baseOptions().filter((o) => {
-    if (o.value === 'any') return forArrayElement
+    if (o.value === 'any') return forArrayElement || props.allowAny
     if (o.value === 'ref') return !forArrayElement
     if (o.value === 'array' && arrayDepth < 0) return false
     return true
@@ -128,6 +161,8 @@ function buildCascaderOptions(arrayDepth: number, forArrayElement = false): Casc
       nodes.push({ value: opt.value, label: opt.label })
     }
   }
+  const generics = genericGroupNode()
+  if (generics) nodes.push(generics)
   nodes.push(...named)
   return nodes
 }
@@ -149,36 +184,57 @@ function findNamedPath(typeRef: string): string[] {
   return [`named:${typeRef}`]
 }
 
-function encodeLeaf(type: DataFieldType, typeRef?: string | null): string[] {
+function findGenericPath(name: string): string[] {
+  return [GENERIC_GROUP, `generic:${name}`]
+}
+
+function encodeLeaf(
+  type: DataFieldType | 'generic',
+  typeRef?: string | null,
+): string[] {
+  if (type === 'generic' && typeRef) return findGenericPath(typeRef)
   if (typeRef) return findNamedPath(typeRef)
   return [type]
 }
 
 const cascaderValue = computed<string[]>(() => {
+  if (props.empty) return []
   if (props.type === 'void') return ['void']
+  if (props.type === 'generic') {
+    return encodeLeaf('generic', props.typeRef)
+  }
   if (props.type === 'array') {
     if (props.itemType === 'array') {
       return [
         'array',
         'array',
-        ...encodeLeaf(props.itemItemType || 'string', props.itemItemTypeRef),
+        ...encodeLeaf(
+          (props.itemItemType || 'string') as DataFieldType | 'generic',
+          props.itemItemTypeRef,
+        ),
       ]
     }
     return [
       'array',
-      ...encodeLeaf(props.itemType || 'string', props.itemTypeRef),
+      ...encodeLeaf(
+        (props.itemType || 'string') as DataFieldType | 'generic',
+        props.itemTypeRef,
+      ),
     ]
   }
   return encodeLeaf(props.type, props.typeRef)
 })
 
 function decodeLeaf(path: string[]): {
-  type: DataFieldType
+  type: DataFieldType | 'generic'
   typeRef?: string
 } {
   const last = path[path.length - 1] || 'string'
   if (last.startsWith('named:')) {
     return { type: 'json', typeRef: last.slice(6) }
+  }
+  if (last.startsWith('generic:')) {
+    return { type: 'generic', typeRef: last.slice(8) }
   }
   if (last.startsWith('__group__:')) {
     return { type: 'string' }
@@ -194,7 +250,9 @@ function decodePath(path: string[]): TypeSelectPayload {
   let arrayDepth = 0
   while (path[arrayDepth] === 'array') arrayDepth += 1
   const leafPath = path.slice(arrayDepth)
-  const leaf = leafPath.length ? decodeLeaf(leafPath) : { type: 'string' as DataFieldType }
+  const leaf = leafPath.length
+    ? decodeLeaf(leafPath)
+    : { type: 'string' as DataFieldType }
 
   if (arrayDepth === 0) {
     return { type: leaf.type, typeRef: leaf.typeRef }
@@ -216,6 +274,10 @@ function decodePath(path: string[]): TypeSelectPayload {
 
 function onChange(value: string[] | null | undefined) {
   if (!value?.length) {
+    if (props.emptyOnClear) {
+      emit('change', { type: 'string', cleared: true })
+      return
+    }
     emit('change', props.allowVoid ? { type: 'void' } : { type: 'string' })
     return
   }

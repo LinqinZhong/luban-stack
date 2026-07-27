@@ -1,4 +1,4 @@
-import type { PageData } from '../../types/page-data.js'
+﻿import type { PageData } from '../../types/page-data.js'
 import type { ComponentConfig } from '../../types/component.js'
 import type { LifecycleConfig } from '../../types/lifecycle.js'
 import type { PageMethod } from '../../types/page-method.js'
@@ -372,7 +372,7 @@ function parseEvtBindings(raw: string | undefined): EvtBinding[] {
   }
 }
 
-/** Voider ???????????bind* */
+/** 事件名 → 小程序 bind* */
 const WX_EVENT_BIND: Record<
   string,
   { bind: string; kind: 'scroll' | 'touch' | 'tap' | 'plain' }
@@ -589,9 +589,9 @@ function buildPresetEventBindAttrs(
         } else {
           const i = dataIdx++
           const expr = normalizeExpr(path)
-          dataAttrs.push(`data-voider-v${i}="{{${expr}}}"`)
+          dataAttrs.push(`data-val${i}="{{${expr}}}"`)
           stmts.push(
-            `this.setData({ ${prop}: e.currentTarget.dataset.voiderV${i} })`,
+            `this.setData({ ${prop}: e.currentTarget.dataset.val${i} })`,
           )
         }
       } else {
@@ -617,9 +617,9 @@ function buildPresetEventBindAttrs(
           )
         } else {
           const i = dataIdx++
-          dataAttrs.push(`data-voider-v${i}="{{${normalizeExpr(toBind[1]!)}}}"`)
+          dataAttrs.push(`data-val${i}="{{${normalizeExpr(toBind[1]!)}}}"`)
           stmts.push(
-            `wx.navigateTo({ url: '/pages/' + e.currentTarget.dataset.voiderV${i} + '/index' })`,
+            `wx.navigateTo({ url: '/pages/' + e.currentTarget.dataset.val${i} + '/index' })`,
           )
         }
       } else {
@@ -645,9 +645,9 @@ function buildPresetEventBindAttrs(
           )
         } else {
           const i = dataIdx++
-          dataAttrs.push(`data-voider-v${i}="{{${normalizeExpr(msgBind[1]!)}}}"`)
+          dataAttrs.push(`data-val${i}="{{${normalizeExpr(msgBind[1]!)}}}"`)
           stmts.push(
-            `wx.showToast({ title: String(e.currentTarget.dataset.voiderV${i} || ''), icon: 'none' })`,
+            `wx.showToast({ title: String(e.currentTarget.dataset.val${i} || ''), icon: 'none' })`,
           )
         }
       } else {
@@ -676,8 +676,8 @@ function buildPresetEventBindAttrs(
             // 列表 item 仍走 data-*；props/data 在 handler 里读，避免对象被 dataset 串化
             if (expr === 'item' || expr === 'index' || expr.startsWith('item.')) {
               const i = dataIdx++
-              dataAttrs.push(`data-voider-v${i}="{{${expr}}}"`)
-              detailParts.push(`${safeKey}: e.currentTarget.dataset.voiderV${i}`)
+              dataAttrs.push(`data-val${i}="{{${expr}}}"`)
+              detailParts.push(`${safeKey}: e.currentTarget.dataset.val${i}`)
             } else {
               detailParts.push(`${safeKey}: ${runtimePropExpr(expr)}`)
             }
@@ -799,9 +799,9 @@ function collectScrollTouchEventAttrs(
 }
 
 /**
- * ?? Voider ????????pullHeight + touch + refresh??
- * ???? scroll-view ??? touch????????????? refresher?
- * ???????? slot="refresher" ??????? UI?
+ * 下拉刷新：pullHeight + touch + refresh
+ * 优先 scroll-view 原生 touch；否则用 refresher
+ * 自定义 slot="refresher" 时渲染 UI
  */
 function shouldUseNativeCustomRefresher(
   attrs: Record<string, string>,
@@ -1880,7 +1880,7 @@ function renderWidget(
       ...ctx.classRegistry.useMany(['relative', 'min-h-0', 'overflow-hidden']),
     ]
     const paneClass = ctx.classRegistry.shell(
-      'voider-mw-pane',
+      'mw-pane',
       'position:absolute;left:0;top:0;right:0;bottom:0;width:100%;height:100%;display:flex;flex-direction:column;overflow:hidden;box-sizing:border-box',
     )
     const panes = node.children
@@ -1972,7 +1972,7 @@ function renderWidget(
     if (!hasPadding) {
       classes.push(
         ctx.classRegistry.shell(
-          'voider-button',
+          'app-button',
           `padding:${pxToVw(8, ctx.designWidth)} ${pxToVw(14, ctx.designWidth)}`,
         ),
       )
@@ -2093,7 +2093,7 @@ function renderWidget(
         : '',
     )
 
-    ctx.usedComponents.set('voider-icon', '/components/voider-icon/index')
+    ctx.usedComponents.set('app-icon', '/components/app-icon/index')
     const nameAttr = isBinding(iconId)
       ? `name="{{${normalizeExpr(iconId.replace(/^\{|\}$/g, ''))}}}"`
       : `name="${escapeXml(iconId)}"`
@@ -2107,7 +2107,7 @@ function renderWidget(
       ? `color="${escapeXml(colorRes.static)}"`
       : `color="{{${colorRes.expr}}}"`
     const iconOpen = openTag(
-      'voider-icon',
+      'app-icon',
       [nameAttr, colorAttr],
       ctx.indent + 1,
       true,
@@ -2253,7 +2253,7 @@ function renderWidget(
   if (isRelative && contentInner.trim()) {
     const innerPad = pad(ctx.indent + 1)
     const innerClass = ctx.classRegistry.shell(
-      'voider-relative-inner',
+      'relative-inner',
       'position:relative;width:100%;height:100%;min-height:0;box-sizing:border-box',
     )
     bodyInner = `${innerPad}<view class="${innerClass}">\n${contentInner}\n${innerPad}</view>`
@@ -2317,7 +2317,7 @@ export function generatePageFiles(options: {
   componentConfigs: Map<string, ComponentConfig>
   componentRoots?: Map<string, XmlNode>
   resolveApi: (raw: string) => MpApiBinding | null
-  /** 画布设计宽度（voider.json canvas.width） */
+  /** 画布设计宽度（项目 canvas.width） */
   designWidth?: number
   /** 全局工具类注册表（跨页面/组件共享） */
   classRegistry?: ClassRegistry
@@ -2484,7 +2484,7 @@ export function generateComponentFiles(options: {
   lifecycle?: LifecycleConfig
   componentConfigs?: Map<string, ComponentConfig>
   componentRoots?: Map<string, XmlNode>
-  /** 画布设计宽度（voider.json canvas.width） */
+  /** 画布设计宽度（项目 canvas.width） */
   designWidth?: number
   classRegistry?: ClassRegistry
 }): { wxml: string; wxss: string; js: string; json: string } {
@@ -2572,10 +2572,10 @@ export function generateComponentFiles(options: {
         type: Number,
         value: Number.isFinite(n) ? n : 0,
       }
-    } else if (def.type === 'json' || def.type === 'object') {
+    } else if (def.type === 'json' || (def.type as string) === 'object') {
       properties[name] = { type: Object, value: null }
     } else {
-      // string / icon / color / ref 等：带上 config 默认值，避免 {{prop}} 渲染出 "null"
+      // string / icon / color / ref / resource 等：带上 config 默认值
       const dv = def.defaultValue
       const strDefault =
         dv == null || dv === ''
