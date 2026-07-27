@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { ref } from 'vue'
 import EventBindDialog from './EventBindDialog.vue'
 import {
   LIFECYCLE_HOOKS,
@@ -25,7 +25,6 @@ const props = defineProps<{
   componentMethodsMap?: ComponentMethodsMap
   iconOptions?: Array<{ id: string; label: string }>
   emitEvents?: ComponentEventDef[]
-  forComponent?: boolean
   /** 组件参数：自定义代码中 $props 提示 */
   componentProps?: ComponentPropDef[] | null
   typeLibrary?: DataTypeLibrary | null
@@ -34,12 +33,6 @@ const props = defineProps<{
 const emit = defineEmits<{
   'update:lifecycle': [value: LifecycleConfig]
 }>()
-
-const panelDesc = computed(() =>
-  props.forComponent
-    ? '组件 lifecycle.json · 在预览进入/离开组件时依次执行'
-    : '页面 lifecycle.json · 在预览进入/离开页面时依次执行',
-)
 
 function summaryFor(key: LifecycleHookKey): string {
   const count = countEventBindings(props.lifecycle[key])
@@ -67,13 +60,6 @@ function handleBindSave(value: string) {
 
 <template>
   <div class="lifecycle-panel">
-    <div class="toolbar">
-      <div>
-        <div class="title">生命周期</div>
-        <div class="desc">{{ panelDesc }}</div>
-      </div>
-    </div>
-
     <div class="hook-list">
       <div
         v-for="hook in LIFECYCLE_HOOKS"
@@ -123,28 +109,6 @@ function handleBindSave(value: string) {
   flex-direction: column;
   overflow: hidden;
   background: #fff;
-}
-
-.toolbar {
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 12px 16px;
-  border-bottom: 1px solid #ebeef5;
-}
-
-.title {
-  font-size: 15px;
-  font-weight: 600;
-  color: #303133;
-}
-
-.desc {
-  margin-top: 2px;
-  font-size: 12px;
-  color: #94a3b8;
 }
 
 .hook-list {

@@ -1473,7 +1473,7 @@ watch(isStartSelected, (ok) => {
 .panel-header {
   flex-shrink: 0;
   height: 48px;
-  padding: 0 12px 0 16px;
+  padding: 0 14px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1494,7 +1494,7 @@ watch(isStartSelected, (ok) => {
 
 .panel-sticky {
   flex-shrink: 0;
-  padding: 8px 12px 10px;
+  padding: 8px 14px 10px;
   border-bottom: 1px solid #ebeef5;
   background: #fff;
   z-index: 2;
@@ -1507,7 +1507,7 @@ watch(isStartSelected, (ok) => {
   flex: 1;
   min-height: 0;
   overflow: auto;
-  padding: 14px 16px 24px;
+  padding: 12px 14px 16px;
   display: flex;
   flex-direction: column;
   gap: 18px;

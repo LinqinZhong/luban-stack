@@ -704,8 +704,8 @@ export function moveWidget(
 }
 
 export const INTERACTION_EVENTS = [
-  { key: 'onClick', label: '点击 (onClick)' },
-  { key: 'onLongClick', label: '长按 (onLongClick)' },
+  { key: 'onClick', label: '点击' },
+  { key: 'onLongClick', label: '长按' },
 ] as const
 
 const SCROLL_EVENT_PARAMS = [

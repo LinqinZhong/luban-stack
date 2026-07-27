@@ -1,8 +1,8 @@
-<view bindtap="__onEvt_0" style="width:100%;height:auto;padding:0rpx;overflow:hidden;background:#ffffff;border-radius:24rpx;display:flex;flex-direction:column">
-  <image src="{{data.img}}" mode="aspectFill" style="width:100%;height:230rpx" />
-  <text style="width:auto;height:auto;padding-right:0rpx;padding-top:0rpx;margin-left:24rpx;margin-right:24rpx;margin-top:24rpx;color:#303133;font-size:28rpx">{{data.name}}</text>
-  <view style="width:100%;height:auto;padding:0rpx;padding-top:12rpx;margin-left:24rpx;margin-right:24rpx;margin-top:20rpx;margin-bottom:20rpx;display:flex;flex-direction:row">
-    <text style="width:auto;height:auto;padding-bottom:0rpx;margin:0rpx;margin-top:0rpx;margin-bottom:0rpx;color:#ff0000;font-size:28rpx">￥</text>
-    <text style="width:auto;height:auto;padding-top:0rpx;color:#ff0000;font-size:40rpx">{{data.price}}</text>
+<view bindtap="__onEvt_0" class="w-full min-w-0 h-fit p-0 overflow-hidden bg-arb-hffffff rounded-arb-3_2vw flex flex-col">
+  <image src="{{data.img}}" mode="aspectFill" class="w-full min-w-0 h-arb-30_666667vw" />
+  <text class="w-fit max-w-full h-fit pr-0 pt-0 ml-arb-3_2vw mr-arb-3_2vw mt-arb-3_2vw text-arb-h303133 text-size-arb-3_733333vw">{{data.name}}</text>
+  <view class="w-arb-calc100p---6_4vw min-w-0 h-fit p-0 pt-arb-1_6vw ml-arb-3_2vw mr-arb-3_2vw mt-arb-2_666667vw mb-arb-2_666667vw flex flex-row items-end">
+    <text class="w-fit max-w-full h-fit pb-0 m-0 mt-0 mb-0 text-arb-hff0000 text-size-arb-3_733333vw">￥</text>
+    <text class="w-fit max-w-full h-fit pt-0 text-arb-hff0000 text-size-arb-5_333333vw">{{data.price}}</text>
   </view>
 </view>

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch, onBeforeUnmount } from 'vue'
-import { Plus } from '@element-plus/icons-vue'
+import { Delete, EditPen, SetUp } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   getServiceProcessors,
@@ -830,7 +830,12 @@ function updateDebugParams(params: Record<string, unknown>) {
   updateMethod(index, { debugParams: { ...params } })
 }
 
-defineExpose({ updateDebugParams, applyFlowDebugCursor: onFlowDebugCursor })
+defineExpose({
+  updateDebugParams,
+  applyFlowDebugCursor: onFlowDebugCursor,
+  openCreateDialog,
+  addMethod,
+})
 </script>
 
 <template>
@@ -858,16 +863,10 @@ defineExpose({ updateDebugParams, applyFlowDebugCursor: onFlowDebugCursor })
   />
   <div v-else class="proc-workspace">
     <aside class="proc-pane">
-      <div class="pane-head">
-        <span class="pane-title">处理器</span>
-        <el-button type="primary" link :icon="Plus" @click="openCreateDialog">
-          创建
-        </el-button>
-      </div>
       <el-skeleton v-if="loading" :rows="4" animated style="padding: 12px" />
       <el-empty
         v-else-if="!processors.length"
-        description="暂无处理器，点击创建"
+        description="暂无处理器，点击顶部创建"
         :image-size="56"
       />
       <ul v-else class="proc-list">
@@ -906,18 +905,6 @@ defineExpose({ updateDebugParams, applyFlowDebugCursor: onFlowDebugCursor })
     </aside>
 
     <section class="method-pane">
-      <div class="pane-head">
-        <span class="pane-title">方法</span>
-        <el-button
-          type="primary"
-          link
-          :icon="Plus"
-          :disabled="!activeProcessor"
-          @click="addMethod"
-        >
-          创建
-        </el-button>
-      </div>
       <el-empty
         v-if="!activeProcessor"
         description="请选择或创建左侧处理器"
@@ -928,7 +915,7 @@ defineExpose({ updateDebugParams, applyFlowDebugCursor: onFlowDebugCursor })
           :data="methods"
           border
           stripe
-          empty-text="暂无方法，点击创建"
+          empty-text="暂无方法，点击顶部创建"
           highlight-current-row
           :row-class-name="
             ({ row }) =>
@@ -984,13 +971,13 @@ defineExpose({ updateDebugParams, applyFlowDebugCursor: onFlowDebugCursor })
               <span class="cell-text">{{ formatTypeExpr(row.output) }}</span>
             </template>
           </el-table-column>
-          <el-table-column label="操作" width="160" align="center" fixed="right">
+          <el-table-column label="操作" width="220" align="center" fixed="right">
             <template #default="{ $index }">
               <el-button
                 v-if="isDataLayer"
                 type="primary"
                 link
-                size="small"
+                :icon="EditPen"
                 @click.stop="openDataMethodDialog($index)"
               >
                 编辑
@@ -999,7 +986,7 @@ defineExpose({ updateDebugParams, applyFlowDebugCursor: onFlowDebugCursor })
                 <el-button
                   type="primary"
                   link
-                  size="small"
+                  :icon="SetUp"
                   @click.stop="openBusinessMethodDesign($index)"
                 >
                   设计
@@ -1007,7 +994,7 @@ defineExpose({ updateDebugParams, applyFlowDebugCursor: onFlowDebugCursor })
                 <el-button
                   type="primary"
                   link
-                  size="small"
+                  :icon="EditPen"
                   @click.stop="openFlowEditor($index)"
                 >
                   编辑
@@ -1016,7 +1003,7 @@ defineExpose({ updateDebugParams, applyFlowDebugCursor: onFlowDebugCursor })
               <el-button
                 type="danger"
                 link
-                size="small"
+                :icon="Delete"
                 @click.stop="removeMethod($index)"
               >
                 删除
@@ -1147,25 +1134,6 @@ defineExpose({ updateDebugParams, applyFlowDebugCursor: onFlowDebugCursor })
 .proc-pane {
   border-right: 1px solid #ebeef5;
   background: #fafafa;
-}
-
-.pane-head {
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  height: 44px;
-  box-sizing: border-box;
-  padding: 0 12px;
-  border-bottom: 1px solid #ebeef5;
-  background: #fff;
-}
-
-.pane-title {
-  font-size: 13px;
-  font-weight: 600;
-  color: #303133;
-  line-height: 1;
 }
 
 .proc-list {

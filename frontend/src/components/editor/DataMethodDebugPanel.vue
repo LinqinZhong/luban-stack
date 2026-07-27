@@ -1244,6 +1244,7 @@ async function handleRun() {
   padding: 0 14px;
   display: flex;
   align-items: center;
+  font-size: 14px;
   font-weight: 600;
   color: #303133;
   border-bottom: 1px solid #ebeef5;

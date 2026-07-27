@@ -1,9 +1,11 @@
+@import "./styles/utilities.wxss";
+
 page {
   height: 100%;
   width: 100%;
   background: #f5f7fa;
   color: #303133;
-  font-size: 28rpx;
+  font-size: 3.733333vw;
   box-sizing: border-box;
 }
 

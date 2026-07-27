@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, reactive, ref, watch } from 'vue'
 import { Delete, Plus } from '@element-plus/icons-vue'
+import BackLink from './BackLink.vue'
 import ColorPicker from './ColorPicker.vue'
 import DynamicStyleStateDialog from './DynamicStyleStateDialog.vue'
 import EventBindDialog from './EventBindDialog.vue'
@@ -88,12 +89,15 @@ const props = defineProps<{
   statusBarConfig?: Partial<StatusBarConfig> | null
   /** 画布场景：H5 下提示状态栏不可控 */
   canvasScene?: 'h5' | 'miniprogram'
+  /** 有值时在标题位显示返回，替代「属性」文案 */
+  backLabel?: string
 }>()
 
 const emit = defineEmits<{
   'update:xml': [xml: string]
   'update:tab': [tab: PropsTab]
   'update:status-bar': [config: StatusBarConfig]
+  back: []
 }>()
 
 const isStatusBarSelected = computed(() => isStatusBarNodeId(props.selectedId))
@@ -293,13 +297,9 @@ const selectableEvents = computed(() => {
       .map((item) => {
         const name = item.name.trim()
         if (!name) return null
-        const params = (item.params ?? [])
-          .filter((p) => p.name.trim())
-          .map((p) => `${p.name.trim()}: ${p.type}`)
-          .join(', ')
         return {
           key: name,
-          label: params ? `${name}(${params})` : name,
+          label: name,
         }
       })
       .filter((item): item is { key: string; label: string } => Boolean(item))
@@ -316,12 +316,9 @@ const selectableEvents = computed(() => {
     (tag === 'LinearLayout' || tag === 'RelativeLayout')
   ) {
     for (const item of SCROLL_INTERACTION_EVENTS) {
-      const params = item.params
-        .map((p) => `${p.name}: ${p.type}`)
-        .join(', ')
       list.push({
         key: item.key,
-        label: params ? `${item.label}(${params})` : `${item.label} (${item.key})`,
+        label: item.label,
       })
     }
   }
@@ -1125,7 +1122,12 @@ function saveVisibilityConfig(config: VisibilityConditionConfig) {
 <template>
   <aside class="props-panel">
     <div class="panel-header">
-      <span>属性</span>
+      <BackLink
+        v-if="backLabel"
+        :label="backLabel"
+        @click="emit('back')"
+      />
+      <span v-else>属性</span>
       <el-radio-group
         :model-value="tab"
         size="small"
@@ -1975,13 +1977,17 @@ function saveVisibilityConfig(config: VisibilityConditionConfig) {
             description="该组件暂无事件方法，请先在组件设置中添加"
             :image-size="48"
           />
-          <el-form v-else label-position="top" size="small">
-            <el-form-item
+          <div v-else class="event-list">
+            <div
               v-for="event in selectableEvents"
               :key="event.key"
-              :label="event.label"
+              class="event-card"
             >
-              <div class="event-row">
+              <div class="event-main">
+                <div class="event-name">{{ event.label }}</div>
+                <div class="event-key">{{ event.key }}</div>
+              </div>
+              <div class="event-actions">
                 <span class="event-summary">{{ eventBindingSummary(event.key) }}</span>
                 <el-button
                   type="primary"
@@ -1991,8 +1997,8 @@ function saveVisibilityConfig(config: VisibilityConditionConfig) {
                   配置
                 </el-button>
               </div>
-            </el-form-item>
-          </el-form>
+            </div>
+          </div>
 
           <EventBindDialog
             v-model="eventBindVisible"
@@ -2442,6 +2448,52 @@ function saveVisibilityConfig(config: VisibilityConditionConfig) {
   justify-content: space-between;
   gap: 8px;
   width: 100%;
+}
+
+.event-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.event-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid #ebeef5;
+  border-radius: 8px;
+  background: #fafbfc;
+}
+
+.event-card:hover {
+  border-color: #c6e2ff;
+  background: #f5f9ff;
+}
+
+.event-main {
+  min-width: 0;
+}
+
+.event-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: #303133;
+}
+
+.event-key {
+  margin-top: 4px;
+  font-size: 12px;
+  color: #909399;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.event-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
 }
 
 .visibility-row {

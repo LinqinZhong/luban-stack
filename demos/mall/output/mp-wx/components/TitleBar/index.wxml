@@ -1,8 +1,10 @@
-<view style="width:100%;height:auto;display:flex;flex-direction:column">
-  <view style="width:100%;height:{{height}}px;padding-top:{{offsetTop}}px;background:{{background}};position:relative;box-sizing:border-box">
-    <view style="position:relative;width:100%;height:100%;min-height:0;box-sizing:border-box">
-      <image wx:if="{{showBack}}" catchtap="__onEvt_0" src="/assets/icons/back.svg" mode="aspectFit" style="width:auto;height:auto;color:{{color}};font-size:40rpx;position:absolute;top:50%;left:20rpx;-webkit-transform:translateY(-50%);transform:translateY(-50%);width:40rpx;height:40rpx" />
-      <text style="width:auto;height:auto;color:{{color}};font-size:28rpx;position:absolute;left:50%;top:50%;-webkit-transform:translate(-50%,-50%);transform:translate(-50%,-50%)">{{title}}</text>
+<view class="w-full min-w-0 h-fit flex flex-col">
+  <view class="w-full min-w-0 relative box-border" style="height:{{height}}px;padding-top:{{offsetTop}}px;background:{{background}}">
+    <view class="voider-relative-inner">
+      <view wx:if="{{showBack}}" catchtap="__onEvt_0" class="absolute top-1-2 left-arb-2_666667vw -translate-y-1-2 w-arb-5_333333vw h-arb-5_333333vw inline-flex shrink-0">
+        <voider-icon name="back" color="{{(color)}}" />
+      </view>
+      <text class="w-fit max-w-full h-fit text-size-arb-3_733333vw absolute left-1-2 top-1-2 -translate-xy-1-2" style="color:{{(color)}}">{{title}}</text>
     </view>
   </view>
 </view>

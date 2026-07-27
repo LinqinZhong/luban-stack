@@ -1,17 +1,19 @@
-<view style="width:100%;height:100%;background:#ededed;display:flex;flex-direction:column">
-  <title-bar title="聊天" style="width:100%;height:auto" />
-  <view style="width:100%;flex:1;min-height:0;height:0;padding:0rpx;position:relative;box-sizing:border-box">
-    <view style="position:relative;width:100%;height:100%;min-height:0;box-sizing:border-box">
-      <view style="width:100%;height:80rpx;padding:0rpx;padding-left:20rpx;padding-right:20rpx;background:#ffffff;position:absolute;bottom:0;display:flex;flex-direction:row;align-items:center;justify-content:center">
-        <input value="{{content}}" placeholder="请输入消息" style="flex:1;min-width:0;width:0;height:60rpx;padding-left:24rpx;padding-right:24rpx;background:#ffffff;border-radius:8rpx;color:#303133;font-size:28rpx" />
-        <view style="width:200rpx;height:60rpx;display:flex;align-items:center;justify-content:center" class="voider-button">按钮</view>
+<view class="w-full min-w-0 h-full min-h-0 bg-arb-hededed flex flex-col">
+  <view class="w-full min-w-0 h-fit box-border">
+    <title-bar title="聊天" />
+  </view>
+  <view class="w-full min-w-0 flex-1 min-h-0 h-0 p-0 relative box-border">
+    <view class="voider-relative-inner">
+      <view class="w-full min-w-0 h-arb-10_666667vw p-0 pl-arb-2_666667vw pr-arb-2_666667vw bg-arb-hffffff absolute bottom-0 flex flex-row items-center">
+        <input value="{{content}}" placeholder="请输入消息" class="flex-1 min-w-0 w-0 h-arb-8vw pl-arb-3_2vw pr-arb-3_2vw bg-arb-hffffff rounded-arb-1_066667vw text-arb-h303133 text-size-arb-3_733333vw mr-arb-2_666667vw" />
+        <view class="w-arb-26_666667vw h-arb-8vw flex items-center justify-center text-arb-hffffff rounded-arb-1_066667vw voider-button" style="background:{{((content == null || content === '' || content.length === 0)) ? '#cdcdcd' : ('transparent')}}">按钮</view>
       </view>
-      <scroll-view scroll-y="true" enhanced="true" show-scrollbar="false" enable-flex="true" style="width:100%;height:100%;padding:16rpx;position:absolute;bottom:0;top:0rpx;bottom:80rpx;display:flex;flex-direction:column">
-        <view wx:for="{{messageList}}" wx:for-item="item" wx:for-index="index" wx:key="index" style="width:100%;height:auto;padding:16rpx;flex-shrink:0;display:flex;flex-direction:row;justify-content:flex-end">
-          <view style="width:auto;height:auto;padding-left:20rpx;padding-right:20rpx;padding-top:10rpx;padding-bottom:10rpx;margin-left:60rpx;margin-right:20rpx;margin-top:20rpx;background:#409eff;border-radius:10rpx;display:flex;flex-direction:column">
-            <text style="width:auto;height:auto;color:#ffffff;font-size:28rpx;flex-shrink:0">{{item.content}}</text>
+      <scroll-view scroll-y="true" enhanced="true" show-scrollbar="false" enable-flex="true" class="w-full min-w-0 h-full min-h-0 p-arb-2_133333vw absolute top-0 bottom-arb-10_666667vw flex flex-col">
+        <view wx:for="{{messageList}}" wx:for-item="item" wx:for-index="index" wx:key="index" class="w-full min-w-0 h-fit p-arb-2_133333vw shrink-0 flex flex-row justify-end">
+          <view class="w-fit max-w-full h-fit pl-arb-2_666667vw pr-arb-2_666667vw pt-arb-1_333333vw pb-arb-1_333333vw ml-arb-8vw mr-arb-2_666667vw mt-arb-2_666667vw bg-arb-h409eff rounded-arb-1_333333vw flex flex-col">
+            <text class="w-fit max-w-full h-fit text-arb-hffffff text-size-arb-3_733333vw shrink-0">{{item.content}}</text>
           </view>
-          <image src="" mode="aspectFill" style="width:80rpx;height:80rpx;border-radius:200rpx" />
+          <image src="https://placehold.co/200x200?text=avatar&amp;bg=00f&amp;color=fff" mode="aspectFill" class="w-arb-10_666667vw h-arb-10_666667vw rounded-arb-26_666667vw" />
         </view>
       </scroll-view>
     </view>

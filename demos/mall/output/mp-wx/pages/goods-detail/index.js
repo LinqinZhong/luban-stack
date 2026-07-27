@@ -10,9 +10,32 @@ Page({
   },
   onShow() {},
   onReady() {},
-  __onEvt_0(e) {
-    this.setData({ titleBarOpacity: (e && e.detail && e.detail.scrollTop != null) ? e.detail.scrollTop : 0 })
-    if (typeof this.__recomputeComputed === 'function') this.__recomputeComputed()
+  __onScroll_0(e) {
+    var that = this
+    var setData = function (prop, value) {
+      var patch = {}
+      patch[prop] = value
+      that.setData(patch)
+    }
+    var showToast = function (message, duration) {
+      wx.showToast({ title: String(message == null ? '' : message), icon: 'none', duration: duration === 'long' ? 3000 : 1500 })
+    }
+    var specSelectRef = (function () {
+      var __c = that.selectComponent("#specSelectRef")
+      return {
+        open: function () { if (__c && typeof __c.open === 'function') return __c.open.apply(__c, arguments) },
+        close: function () { if (__c && typeof __c.close === 'function') return __c.close.apply(__c, arguments) },
+      }
+    })()
+    var titleBarOpacity = that.data.titleBarOpacity
+    var titleBarColor = that.data.titleBarColor
+    var titleTextColor = that.data.titleTextColor
+    var statusBarColor = that.data.statusBarColor
+    var scrollTop = e && e.detail && e.detail.scrollTop != null ? e.detail.scrollTop : 0
+    var scrollLeft = e && e.detail && e.detail.scrollLeft != null ? e.detail.scrollLeft : 0
+    var scrollHeight = e && e.detail && e.detail.scrollHeight != null ? e.detail.scrollHeight : 0
+    setData('titleBarOpacity', Math.min(Math.max((scrollTop - 100)/100, 0), 1))
+    if (typeof that.__recomputeComputed === 'function') that.__recomputeComputed()
   },
   __onClick_1(e) {
     var that = this
@@ -24,10 +47,16 @@ Page({
     var showToast = function (message, duration) {
       wx.showToast({ title: String(message == null ? '' : message), icon: 'none', duration: duration === 'long' ? 3000 : 1500 })
     }
+    var specSelectRef = (function () {
+      var __c = that.selectComponent("#specSelectRef")
+      return {
+        open: function () { if (__c && typeof __c.open === 'function') return __c.open.apply(__c, arguments) },
+        close: function () { if (__c && typeof __c.close === 'function') return __c.close.apply(__c, arguments) },
+      }
+    })()
     var titleBarOpacity = that.data.titleBarOpacity
     var titleBarColor = that.data.titleBarColor
     var titleTextColor = that.data.titleTextColor
-    var specSelectRef = that.data.specSelectRef
     var statusBarColor = that.data.statusBarColor
     specSelectRef.open()
     if (typeof that.__recomputeComputed === 'function') that.__recomputeComputed()
@@ -42,10 +71,16 @@ Page({
     var showToast = function (message, duration) {
       wx.showToast({ title: String(message == null ? '' : message), icon: 'none', duration: duration === 'long' ? 3000 : 1500 })
     }
+    var specSelectRef = (function () {
+      var __c = that.selectComponent("#specSelectRef")
+      return {
+        open: function () { if (__c && typeof __c.open === 'function') return __c.open.apply(__c, arguments) },
+        close: function () { if (__c && typeof __c.close === 'function') return __c.close.apply(__c, arguments) },
+      }
+    })()
     var titleBarOpacity = that.data.titleBarOpacity
     var titleBarColor = that.data.titleBarColor
     var titleTextColor = that.data.titleTextColor
-    var specSelectRef = that.data.specSelectRef
     var statusBarColor = that.data.statusBarColor
     specSelectRef.open()
     if (typeof that.__recomputeComputed === 'function') that.__recomputeComputed()

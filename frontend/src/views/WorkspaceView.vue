@@ -5,11 +5,14 @@ import {
   Box,
   Coin,
   Collection,
+  Connection,
+  Cpu,
   Document,
   EditPen,
   Lightning,
   Picture,
   Plus,
+  Timer,
   View,
 } from '@element-plus/icons-vue'
 import {
@@ -77,10 +80,10 @@ import MysqlIcon from '../components/icons/MysqlIcon.vue'
 import DevelopIcon from '../components/icons/DevelopIcon.vue'
 import BackendIcon from '../components/icons/BackendIcon.vue'
 import ComponentMetaPanel from '../components/editor/ComponentMetaPanel.vue'
-import BackLink from '../components/editor/BackLink.vue'
 import PreviewDebugPanel, {
   type EmitLogEntry,
 } from '../components/editor/PreviewDebugPanel.vue'
+import PreviewCanvasToolbar from '../components/editor/PreviewCanvasToolbar.vue'
 import PropsPanel, { type PropsTab } from '../components/editor/PropsPanel.vue'
 import PageCanvas from '../components/xml/PageCanvas.vue'
 import WidgetTree from '../components/xml/WidgetTree.vue'
@@ -239,6 +242,7 @@ const flowDebugTarget = computed(() => {
 const backendWorkspaceRef = ref<InstanceType<
   typeof BackendServiceWorkspace
 > | null>(null)
+const dataPoolPanelRef = ref<InstanceType<typeof DataPoolPanel> | null>(null)
 let backendServiceSaveTimer: ReturnType<typeof setTimeout> | null = null
 /** 编辑态临时隐藏，不写入 XML；预览模式不生效 */
 const editorHiddenNodeIds = ref<string[]>([])
@@ -251,6 +255,39 @@ let lifecycleSessionActive = false
 let lifecycleSaveTimer: ReturnType<typeof setTimeout> | null = null
 /** 预览运行时就绪后递增，驱动嵌套 Component 挂载生命周期 */
 const previewLifecycleGate = ref(0)
+/**
+ * 预览会话代次：切页/切组件/离开预览时递增。
+ * 旧会话里未完成的 setData / updateProps / 生命周期回调据此静默丢弃，避免打到新文档数据池。
+ */
+let previewSessionGen = 0
+/** 打开页面/组件的导航代次，用于取消被更快切换打断的 in-flight open* */
+let previewNavSeq = 0
+/** setData 高频时合并 onUpdate，避免滚动帧内反复跑生命周期 */
+let lifecycleUpdateTimer: ReturnType<typeof setTimeout> | null = null
+
+function bumpPreviewSession() {
+  previewSessionGen += 1
+  if (lifecycleUpdateTimer != null) {
+    clearTimeout(lifecycleUpdateTimer)
+    lifecycleUpdateTimer = null
+  }
+}
+
+function isPreviewSessionLive(sessionGen: number) {
+  return sessionGen === previewSessionGen
+}
+
+function beginPreviewNavigation() {
+  const nav = ++previewNavSeq
+  bumpPreviewSession()
+  // 立刻关闸，丢弃旧画布上尚未处理完的嵌套 Component mount
+  previewLifecycleGate.value = 0
+  return nav
+}
+
+function isPreviewNavCurrent(nav: number) {
+  return nav === previewNavSeq
+}
 /** 预览态 navigateTo / navigateBack 历史（含路由参数） */
 const pageHistory = ref<Array<{ pageId: string; params: Record<string, unknown> }>>([])
 /** 预览态当前页跳转参数（navigateTo 传入） */
@@ -573,6 +610,17 @@ async function handlePreviewGoEntry() {
 }
 
 async function handlePreviewRefresh() {
+  if (isComponentResource.value && activeComponentId.value) {
+    bumpPreviewSession()
+    const sessionGen = previewSessionGen
+    await preparePreviewRuntime()
+    if (!isPreviewSessionLive(sessionGen)) return
+    previewLifecycleGate.value += 1
+    await nextTick()
+    if (!isPreviewSessionLive(sessionGen)) return
+    await syncLifecycleSession()
+    return
+  }
   if (!activePageId.value) return
   const pageId = activePageId.value
   const params = { ...routeParams.value }
@@ -773,6 +821,23 @@ const modeTabs = [
   { key: 'lifecycle' as const, label: '生命周期', icon: LeafIcon },
 ]
 
+const frontendModeTitle = computed(
+  () => modeTabs.find((tab) => tab.key === workspaceMode.value)?.label ?? '预览',
+)
+
+const backendLayerTabs = [
+  { key: 'controller' as const, label: '控制器', icon: Connection },
+  { key: 'service' as const, label: '业务层', icon: Cpu },
+  { key: 'data' as const, label: '数据层', icon: Coin },
+  { key: 'schedule' as const, label: '定时任务', icon: Timer },
+]
+
+const backendLayerTitle = computed(
+  () =>
+    backendLayerTabs.find((tab) => tab.key === backendServiceLayer.value)
+      ?.label ?? '控制器',
+)
+
 const projectNavItems: { key: ProjectNav; label: string; icon: unknown }[] = [
   { key: 'datatypes', label: '数据类型', icon: Collection },
   { key: 'mysql', label: 'MySQL', icon: MysqlIcon },
@@ -794,6 +859,10 @@ const activeBackendService = computed(
     backendServiceLibrary.value.services.find(
       (item) => item.id === activeServiceId.value,
     ) ?? null,
+)
+
+const showBackendLayerTabs = computed(
+  () => isBackendNav.value && Boolean(activeBackendService.value),
 )
 
 const activeBackendUi = computed(
@@ -915,15 +984,10 @@ function onBackendDataSelection(state: ProcessorSelectionState) {
   })
 }
 
-const centerFileLabel = computed(() => {
-  if (isBackendNav.value) return 'services/'
-  if (isDataPoolMode.value) return 'data.json'
-  if (isDataTypesMode.value) return 'types/'
-  if (isMysqlMode.value) return 'mysql.json'
-  if (isIconsMode.value) return 'icons.json'
-  if (isMethodsMode.value) return 'function/'
-  if (isLifecycleMode.value) return 'lifecycle.json'
-  return 'index.xml'
+/** 顶栏路径只展示到目录，不显示具体文件名 */
+const centerDirSegment = computed(() => {
+  if (isMethodsMode.value) return 'function'
+  return ''
 })
 
 function formatRouteParamValue(value: unknown): string {
@@ -949,6 +1013,20 @@ const centerPathQuery = computed(() => {
         `${encodeURIComponent(key)}=${encodeURIComponent(formatRouteParamValue(value))}`,
     )
     .join('&')}`
+})
+
+/** 后端顶栏路径：services/{层}，不展示服务 id，无尾斜杠 */
+const backendCenterPath = computed(() => {
+  if (!activeBackendService.value) return 'services'
+  const layer =
+    backendServiceLayer.value === 'controller'
+      ? 'controllers'
+      : backendServiceLayer.value === 'service'
+        ? 'business'
+        : backendServiceLayer.value === 'data'
+          ? 'data'
+          : 'schedules'
+  return `services/${layer}`
 })
 
 const propsPlaceholderText = computed(() => {
@@ -1233,6 +1311,7 @@ async function openPage(
   },
 ) {
   if (!projectStore.path) return
+  const nav = beginPreviewNavigation()
 
   if (!options?.keepHistory) {
     pageHistory.value = []
@@ -1248,6 +1327,7 @@ async function openPage(
   }
 
   await teardownLifecycleSession()
+  if (!isPreviewNavCurrent(nav)) return
 
   // 侧栏立即高亮；画布内容等新页就绪后再换，避免抖动
   activePageId.value = pageId
@@ -1258,22 +1338,24 @@ async function openPage(
   if (!softNav) loadingPage.value = true
   try {
     const detail = await getPage(projectStore.path, pageId)
+    if (!isPreviewNavCurrent(nav)) return
     const migrated = migrateLegacyMaskToModal(detail.xml)
     const nextPage: PageDetail = migrated.changed
       ? { ...detail, xml: migrated.xml }
       : detail
 
-    // 预览：先关生命周期闸门 → 备好并 commit 数据池 → 再换页 → 再放行执行
+    // 预览：先关生命周期闸门 → 备好数据 → 再换文档 → 再 commit / 放行
     const inPreview = workspaceMode.value === 'preview'
     let nextPreview: import('../types/page-data').PageData | null = null
     let nextCompMap: ComponentRenderMap | null = null
     if (inPreview) {
       previewLifecycleGate.value = 0
       await nextTick()
+      if (!isPreviewNavCurrent(nav)) return
       const prepared = await buildPreviewRuntimeSnapshot(nextPage.data)
+      if (!isPreviewNavCurrent(nav)) return
       nextPreview = prepared.data
       nextCompMap = prepared.componentMap
-      commitPreviewRuntime(nextPreview, nextCompMap)
     } else {
       clearPreviewRuntime()
     }
@@ -1283,29 +1365,38 @@ async function openPage(
     activeComponent.value = null
     activePage.value = nextPage
     await Promise.all([loadPageMethods(pageId), loadLifecycle(pageId)])
+    if (!isPreviewNavCurrent(nav)) return
     if (migrated.changed) {
       await handleXmlUpdate(migrated.xml)
+      if (!isPreviewNavCurrent(nav)) return
     }
 
-    if (inPreview && nextPreview) {
+    if (inPreview && nextPreview && nextCompMap) {
+      // 须在 resourceKind/activeDoc 切换后再 commit，避免仍按组件恢复 debugProps
+      commitPreviewRuntime(nextPreview, nextCompMap)
       previewLifecycleGate.value += 1
       await nextTick()
+      if (!isPreviewNavCurrent(nav)) return
       await fireControllerBindingEvents(nextPreview)
+      if (!isPreviewNavCurrent(nav)) return
     }
     await syncLifecycleSession()
   } catch (err) {
+    if (!isPreviewNavCurrent(nav)) return
     activePage.value = null
     pageMethods.value = []
     lifecycleConfig.value = createEmptyLifecycleConfig()
     ElMessage.error(err instanceof Error ? err.message : '打开页面失败')
   } finally {
-    loadingPage.value = false
+    if (isPreviewNavCurrent(nav)) loadingPage.value = false
   }
 }
 
 async function openComponent(componentId: string) {
   if (!projectStore.path) return
+  const nav = beginPreviewNavigation()
   await teardownLifecycleSession()
+  if (!isPreviewNavCurrent(nav)) return
 
   const softNav = Boolean(activeComponent.value || activePage.value)
   selectedNodeId.value = ''
@@ -1313,9 +1404,12 @@ async function openComponent(componentId: string) {
   pageHistory.value = []
   routeParams.value = {}
   modalStack.closeAll()
+  // 侧栏立即高亮（此时 activeComponent 仍可能是旧文档，勿据此恢复 debugProps）
+  activeComponentId.value = componentId
   if (!softNav) loadingPage.value = true
   try {
     const detail = await getComponent(projectStore.path, componentId)
+    if (!isPreviewNavCurrent(nav)) return
     const migrated = migrateLegacyMaskToModal(detail.xml)
     const nextComponent = migrated.changed
       ? { ...detail, xml: migrated.xml }
@@ -1327,10 +1421,11 @@ async function openComponent(componentId: string) {
     if (inPreview) {
       previewLifecycleGate.value = 0
       await nextTick()
+      if (!isPreviewNavCurrent(nav)) return
       const prepared = await buildPreviewRuntimeSnapshot(nextComponent.data)
+      if (!isPreviewNavCurrent(nav)) return
       nextPreview = prepared.data
       nextCompMap = prepared.componentMap
-      commitPreviewRuntime(nextPreview, nextCompMap)
     } else {
       clearPreviewRuntime()
     }
@@ -1341,23 +1436,30 @@ async function openComponent(componentId: string) {
     activePage.value = null
     activeComponent.value = nextComponent
     await Promise.all([loadPageMethods(componentId), loadLifecycle(componentId)])
+    if (!isPreviewNavCurrent(nav)) return
     if (migrated.changed) {
       await handleXmlUpdate(migrated.xml)
+      if (!isPreviewNavCurrent(nav)) return
     }
 
-    if (inPreview && nextPreview) {
+    if (inPreview && nextPreview && nextCompMap) {
+      // 先切好组件文档再 commit，才能用本组件 debugProps 作为 $props
+      commitPreviewRuntime(nextPreview, nextCompMap)
       previewLifecycleGate.value += 1
       await nextTick()
+      if (!isPreviewNavCurrent(nav)) return
       await fireControllerBindingEvents(nextPreview)
+      if (!isPreviewNavCurrent(nav)) return
     }
     await syncLifecycleSession()
   } catch (err) {
+    if (!isPreviewNavCurrent(nav)) return
     activeComponent.value = null
     pageMethods.value = []
     lifecycleConfig.value = createEmptyLifecycleConfig()
     ElMessage.error(err instanceof Error ? err.message : '打开组件失败')
   } finally {
-    loadingPage.value = false
+    if (isPreviewNavCurrent(nav)) loadingPage.value = false
   }
 }
 
@@ -1990,6 +2092,7 @@ async function runPreviewBindings(
   },
 ) {
   if (!activeDoc.value) return
+  const sessionGen = previewSessionGen
   const ownerId = options?.dataOwnerComponentId?.trim() || ''
   const ownerInfo = ownerId ? canvasComponentMap.value[ownerId] : null
   if (ownerId && !ownerInfo) {
@@ -1997,11 +2100,29 @@ async function runPreviewBindings(
     return
   }
 
+  // 绑定创建时固化 config / host，避免 Promise 回调时 activeComponent 已切走
+  const boundUpdatePropsConfig =
+    ownerInfo?.config ??
+    (isComponentResource.value ? activeComponent.value?.config : undefined)
+  const boundHostAttrs = options?.updatePropsHostAttrs
+  const boundHostDataOwnerId = options?.updatePropsHostDataOwnerId
+  const boundDollarProps = options?.dollarProps ?? editorDollarProps.value
+  const boundLocalMethods = ownerId
+    ? (componentMethodsMap.value[ownerId] ?? []).filter((item) => !item.builtin)
+    : pageMethods.value.filter((item) => !item.builtin)
+  const boundResolveMethod = (name: string) =>
+    ownerId
+      ? (componentMethodsMap.value[ownerId] ?? []).find(
+          (item) => item.name === name && !item.builtin,
+        )
+      : pageMethods.value.find((item) => item.name === name && !item.builtin)
+
   const debugEmit = options?.emitFn ?? createPreviewDebugEmit()
   const debugEmitWithArgs =
     options?.emitWithArgs ??
     (isComponentResource.value
       ? (eventName: string, args: Record<string, unknown>) => {
+          if (!isPreviewSessionLive(sessionGen)) return
           const params =
             activeComponent.value?.config.events?.find(
               (item) => item.name.trim() === eventName,
@@ -2041,22 +2162,16 @@ async function runPreviewBindings(
     componentMap: canvasComponentMap.value,
     componentMethodsMap: componentMethodsMap.value,
     runComponentMethod: runComponentExposedMethod,
-    resolveMethod: (name) =>
-      ownerId
-        ? (componentMethodsMap.value[ownerId] ?? []).find(
-            (item) => item.name === name && !item.builtin,
-          )
-        : pageMethods.value.find((item) => item.name === name && !item.builtin),
-    localMethods: ownerId
-      ? (componentMethodsMap.value[ownerId] ?? []).filter((item) => !item.builtin)
-      : pageMethods.value.filter((item) => !item.builtin),
+    resolveMethod: boundResolveMethod,
+    localMethods: boundLocalMethods,
     scope: options?.scope,
     eventArgs: options?.eventArgs,
-    dollarProps: options?.dollarProps ?? editorDollarProps.value,
+    dollarProps: boundDollarProps,
     emit: debugEmit,
     emitWithArgs: debugEmitWithArgs,
     hasPage: (pageId) => pages.value.some((item) => item.id === pageId),
     navigateTo: async (pageId, params) => {
+      if (!isPreviewSessionLive(sessionGen)) return
       if (activePageId.value && activePageId.value !== pageId) {
         pageHistory.value.push({
           pageId: activePageId.value,
@@ -2072,6 +2187,7 @@ async function runPreviewBindings(
       })
     },
     navigateBack: async () => {
+      if (!isPreviewSessionLive(sessionGen)) return
       const prev = pageHistory.value.pop()
       if (!prev) {
         ElMessage.info('没有可返回的页面')
@@ -2083,6 +2199,7 @@ async function runPreviewBindings(
       })
     },
     setData: (prop, value) => {
+      if (!isPreviewSessionLive(sessionGen)) return
       if (ownerId) {
         applyComponentPreviewSetData(ownerId, prop, value)
       } else {
@@ -2090,18 +2207,21 @@ async function runPreviewBindings(
       }
     },
     updateProps: (prop, value) => {
+      if (!isPreviewSessionLive(sessionGen)) return
       applyPreviewUpdateProps(prop, value, {
         componentId: ownerId || undefined,
-        config: ownerInfo?.config ?? activeComponent.value?.config,
-        hostAttrs: options?.updatePropsHostAttrs,
-        hostDataOwnerId: options?.updatePropsHostDataOwnerId,
+        config: boundUpdatePropsConfig,
+        hostAttrs: boundHostAttrs,
+        hostDataOwnerId: boundHostDataOwnerId,
       })
     },
     showToast: (message, duration) => {
+      if (!isPreviewSessionLive(sessionGen)) return
       showPreviewToast(message, duration)
     },
     getDeviceInfo: previewGetDeviceInfo,
     onUnknownMethod: (name) => {
+      if (!isPreviewSessionLive(sessionGen)) return
       if (name.startsWith('navigateTo:')) {
         ElMessage.warning(name.replace(/^navigateTo:\s*/, ''))
       } else if (name.startsWith('自定义方法')) {
@@ -2161,7 +2281,9 @@ function commitPreviewRuntime(
 async function fireControllerBindingEvents(
   data: import('../types/page-data').PageData,
 ) {
+  const sessionGen = previewSessionGen
   for (const field of data.fields) {
+    if (!isPreviewSessionLive(sessionGen)) return
     if (field.binding !== 'controller') continue
     const raw = field.controllerBinding?.onSuccess?.trim()
     if (raw) {
@@ -2177,6 +2299,7 @@ async function hydratePreviewControllerBindings() {
   if (!hasControllerBoundFields(runtime)) return
 
   const seq = ++previewControllerHydrateSeq
+  const sessionGen = previewSessionGen
   try {
     const next = await loadControllerBoundPageData(runtime, {
       projectPath: path,
@@ -2185,6 +2308,7 @@ async function hydratePreviewControllerBindings() {
         runPreviewBindings(raw, { eventArgs }),
     })
     if (seq !== previewControllerHydrateSeq) return
+    if (!isPreviewSessionLive(sessionGen)) return
     if (workspaceMode.value !== 'preview') return
     previewRuntimeData.value = next
   } catch (err) {
@@ -2193,6 +2317,7 @@ async function hydratePreviewControllerBindings() {
 }
 
 async function preparePreviewRuntime() {
+  const sessionGen = previewSessionGen
   if (!activeDoc.value) {
     clearPreviewRuntime()
     return
@@ -2208,6 +2333,7 @@ async function preparePreviewRuntime() {
         projectStore.path,
         activeComponentId.value,
       )
+      if (!isPreviewSessionLive(sessionGen)) return
       if (activeComponent.value?.id === detail.id) {
         activeComponent.value = {
           ...activeComponent.value,
@@ -2221,7 +2347,9 @@ async function preparePreviewRuntime() {
       console.warn('[voider] 同步组件调试 Props 失败:', err)
     }
   }
+  if (!isPreviewSessionLive(sessionGen) || !activeDoc.value) return
   const snap = await buildPreviewRuntimeSnapshot(activeDoc.value.data)
+  if (!isPreviewSessionLive(sessionGen)) return
   if (workspaceMode.value !== 'preview') return
   commitPreviewRuntime(snap.data, snap.componentMap)
   await fireControllerBindingEvents(snap.data)
@@ -2241,12 +2369,19 @@ async function runNestedComponentLifecycle(
 ) {
   if (!activeDoc.value) return
   if (phase === 'mount' && workspaceMode.value !== 'preview') return
+  const sessionGen = previewSessionGen
   const componentId = payload.componentEmit?.componentId?.trim() || ''
   if (!componentId) return
   const lifecycle = canvasComponentMap.value[componentId]?.lifecycle
   if (!lifecycle) return
   const keys = phase === 'unmount' ? LIFECYCLE_UNMOUNT_KEYS : LIFECYCLE_MOUNT_KEYS
   for (const key of keys) {
+    if (
+      phase === 'mount' &&
+      (!isPreviewSessionLive(sessionGen) || previewLifecycleGate.value <= 0)
+    ) {
+      return
+    }
     const raw = lifecycle[key]
     if (!raw?.trim()) continue
     // 卸载钩子在离开预览时仍需执行，绕过 handlePreviewInteract 的 preview 门闩
@@ -2302,7 +2437,6 @@ async function runLifecycleUpdateSequence() {
 }
 
 /** setData 高频时合并 onUpdate，避免滚动帧内反复跑生命周期 */
-let lifecycleUpdateTimer: ReturnType<typeof setTimeout> | null = null
 function scheduleLifecycleUpdate() {
   if (lifecycleUpdateTimer != null) return
   lifecycleUpdateTimer = setTimeout(() => {
@@ -2313,32 +2447,48 @@ function scheduleLifecycleUpdate() {
 
 watch(workspaceMode, async (mode, prev) => {
   if (prev === 'preview' && mode !== 'preview') {
+    bumpPreviewSession()
     previewLifecycleGate.value = 0
     await teardownLifecycleSession()
     clearPreviewRuntime()
     return
   }
   if (mode === 'preview' && prev !== 'preview') {
+    bumpPreviewSession()
+    const sessionGen = previewSessionGen
     await preparePreviewRuntime()
+    if (!isPreviewSessionLive(sessionGen)) return
     previewLifecycleGate.value += 1
     await nextTick()
+    if (!isPreviewSessionLive(sessionGen)) return
     await syncLifecycleSession()
   }
 })
 
 watch(
-  () => [isComponentResource.value, activeComponentId.value] as const,
+  () =>
+    [
+      isComponentResource.value,
+      activeComponentId.value,
+      activeComponent.value?.id,
+    ] as const,
   () => {
     if (!isComponentResource.value || !activeComponentId.value) return
+    // 文档尚未切到目标组件时不要恢复，避免沿用上一个组件的 debugProps
+    if (activeComponent.value?.id !== activeComponentId.value) return
     previewPropOverrides.value = restoreComponentDebugProps()
   },
 )
 
 async function handlePreviewInteract(payload: PreviewInteractPayload) {
+  const sessionGen = previewSessionGen
+
   if (payload.eventKey === '__lifecycle') {
     const phase = payload.eventArgs?.phase
     if (phase === 'mount') {
       if (workspaceMode.value !== 'preview' || !activeDoc.value) return
+      if (!isPreviewSessionLive(sessionGen)) return
+      if (previewLifecycleGate.value <= 0) return
       await runNestedComponentLifecycle('mount', payload)
     } else if (phase === 'unmount') {
       // 离开预览时 mode 可能已切走，仍允许跑卸载钩子
@@ -2349,6 +2499,7 @@ async function handlePreviewInteract(payload: PreviewInteractPayload) {
   }
 
   if (workspaceMode.value !== 'preview' || !activeDoc.value) return
+  if (!isPreviewSessionLive(sessionGen)) return
 
   if (payload.eventKey === '__setData') {
     const prop = payload.eventArgs?.prop
@@ -2409,7 +2560,16 @@ async function handlePreviewInteract(payload: PreviewInteractPayload) {
     return (eventName: string, args: Record<string, unknown>) => {
       const packed = packEmitArgs(layer, eventName, args)
       const raw = layer.hostAttrs[eventName]
+      // 组件资源预览：子组件 emit 时父级可能未绑定，仍要记入调试日志
+      if (isComponentResource.value && !raw?.trim()) {
+        pushPreviewEmitLog(eventName, packed)
+        return
+      }
       if (!raw?.trim()) return
+      // 组件资源预览：有父级绑定时也先记一条，便于调试
+      if (isComponentResource.value) {
+        pushPreviewEmitLog(eventName, packed)
+      }
       const parent = findOuterWithEvent(layer.outer, eventName)
       // hostAttrs 写在父级 XML 上：有 outer 则父组件数据池，否则页面数据池
       const hostDataOwner = layer.outer?.componentId?.trim() || undefined
@@ -2434,13 +2594,37 @@ async function handlePreviewInteract(payload: PreviewInteractPayload) {
     }
   }
 
+  /** 组件资源预览：根 XML 上的 emit（无 componentEmit）直接写入调试日志 */
+  function captureRootComponentEmit(
+    eventName: string,
+    args: Record<string, unknown>,
+  ) {
+    const events = activeComponent.value?.config.events ?? []
+    pushPreviewEmitLog(
+      eventName,
+      packEmitArgs(
+        {
+          componentId: activeComponentId.value || '',
+          events,
+          hostAttrs: {},
+        },
+        eventName,
+        args,
+      ),
+    )
+  }
+
   const hostEmit = payload.componentEmit
-  const emitWithArgs = hostEmit ? createLayerEmitWithArgs(hostEmit) : undefined
+  const emitWithArgs = hostEmit
+    ? createLayerEmitWithArgs(hostEmit)
+    : isComponentResource.value
+      ? captureRootComponentEmit
+      : undefined
   const emitFn = hostEmit
     ? createComponentEmit(hostEmit.events, (eventName, args) => {
         createLayerEmitWithArgs(hostEmit)(eventName, args)
       })
-    : undefined
+    : createPreviewDebugEmit()
 
   // 绑定写在组件定义内（如 Pager 的 onScrollToLower）→ 写组件数据池
   await runPreviewBindings(payload.raw, {
@@ -2939,6 +3123,12 @@ async function handleOpenRepeatConfig(nodeId: string) {
   openRepeatRequest.value += 1
 }
 
+function handleOpenEventConfig(nodeId: string) {
+  if (!isEditMode.value || !nodeId) return
+  selectedNodeId.value = nodeId
+  propsTab.value = 'event'
+}
+
 async function handleAddWidget(tag: WidgetTag) {
   if (!activeDoc.value) return
 
@@ -3245,6 +3435,7 @@ watch(
         :component-map="componentMap"
         @select="selectedNodeId = $event"
         @open-repeat="handleOpenRepeatConfig"
+        @open-event="handleOpenEventConfig"
         @move="handleMoveWidget"
         @toggle-hidden="toggleEditorHidden"
       />
@@ -3304,43 +3495,97 @@ watch(
       </div>
     </aside>
 
+    <div class="workspace-stage">
     <section class="center-panel">
       <div class="preview-header">
         <template v-if="isBackendNav">
-          <span class="preview-title">后端</span>
-          <span class="preview-sub">
-            services/{{
-              activeBackendService
-                ? `${activeBackendService.id}/${
-                    backendServiceLayer === 'controller'
-                      ? 'controllers/'
-                      : backendServiceLayer === 'service'
-                        ? 'business/'
-                        : backendServiceLayer === 'data'
-                          ? 'data/'
-                          : 'schedules/'
-                  }`
-                : ''
-            }}
-          </span>
+          <span class="preview-title">{{
+            activeBackendService ? backendLayerTitle : '后端'
+          }}</span>
+          <span class="preview-sub">{{ backendCenterPath }}</span>
+          <template v-if="activeBackendService && backendServiceLayer === 'controller'">
+            <div class="preview-header-actions">
+              <el-button
+                type="primary"
+                link
+                :icon="Plus"
+                @click="backendWorkspaceRef?.openCreateController()"
+              >
+                创建控制器
+              </el-button>
+              <el-button
+                type="primary"
+                link
+                :icon="Plus"
+                @click="backendWorkspaceRef?.addApi()"
+              >
+                创建 API
+              </el-button>
+            </div>
+          </template>
+          <template
+            v-else-if="
+              activeBackendService &&
+              (backendServiceLayer === 'service' || backendServiceLayer === 'data')
+            "
+          >
+            <div class="preview-header-actions">
+              <el-button
+                type="primary"
+                link
+                :icon="Plus"
+                @click="backendWorkspaceRef?.openCreateProcessor()"
+              >
+                创建处理器
+              </el-button>
+              <el-button
+                type="primary"
+                link
+                :icon="Plus"
+                @click="backendWorkspaceRef?.addProcessorMethod()"
+              >
+                创建方法
+              </el-button>
+            </div>
+          </template>
         </template>
         <template v-else-if="isIconsMode">
           <span class="preview-title">图标库</span>
-          <span class="preview-sub">icons.json</span>
+          <span class="preview-sub">icons</span>
         </template>
         <template v-else-if="isDataTypesMode">
           <span class="preview-title">数据类型</span>
-          <span class="preview-sub">types/</span>
+          <span class="preview-sub">types</span>
         </template>
         <template v-else-if="isMysqlMode">
           <span class="preview-title">MySQL</span>
-          <span class="preview-sub">mysql.json</span>
+          <span class="preview-sub">mysql</span>
         </template>
         <template v-else-if="activeDoc">
-          <span class="preview-title">{{ activeDoc.config.title || activeDoc.config.name }}</span>
+          <span class="preview-title">{{ frontendModeTitle }}</span>
           <span class="preview-sub">
-            {{ isComponentResource ? 'components' : 'pages' }}/{{ activeDoc.id }}/{{ centerFileLabel }}{{ centerPathQuery }}
+            {{ isComponentResource ? 'components' : 'pages' }}/{{ activeDoc.id }}{{ centerDirSegment ? `/${centerDirSegment}` : '' }}{{ centerPathQuery }}
           </span>
+          <el-button
+            v-if="isMethodsMode"
+            class="preview-header-action"
+            type="primary"
+            link
+            :icon="Plus"
+            @click="openAddMethod"
+          >
+            添加方法
+          </el-button>
+          <el-button
+            v-else-if="isDataPoolMode"
+            class="preview-header-action"
+            type="primary"
+            link
+            :icon="Plus"
+            @click="dataPoolPanelRef?.addField()"
+          >
+            添加字段
+          </el-button>
         </template>
         <span v-else class="preview-title">{{ isComponentResource ? '组件预览' : '页面预览' }}</span>
       </div>
@@ -3410,6 +3655,7 @@ watch(
         />
         <DataPoolPanel
           v-else-if="isDataPoolMode"
+          ref="dataPoolPanelRef"
           :data="activeDoc.data ?? { fields: [] }"
           :xml="activeDoc.xml"
           :icon-options="iconOptions"
@@ -3429,8 +3675,6 @@ watch(
         <MethodsPanel
           v-else-if="isMethodsMode"
           :methods="editorMethods"
-          :for-component="isComponentResource"
-          @add="openAddMethod"
           @edit="openEditMethod"
           @remove="handleRemoveMethod"
         />
@@ -3438,7 +3682,6 @@ watch(
           v-else-if="isLifecycleMode"
           :lifecycle="lifecycleConfig"
           :methods="editorMethods"
-          :for-component="isComponentResource"
           :data-fields="activeDoc.data?.fields ?? []"
           :xml="activeDoc.xml"
           :component-map="componentMap"
@@ -3459,6 +3702,8 @@ watch(
           :xml="activeDoc.xml"
           :canvas-width="canvasFrameWidth"
           :canvas-height="canvasFrameHeight === undefined ? undefined : canvasFrameHeight"
+          :phone-screen-width="canvasWidth"
+          :phone-screen-height="667"
           :selected-id="selectedNodeId"
           :selectable="isEditMode"
           :show-add-button="isEditMode"
@@ -3483,31 +3728,26 @@ watch(
           :navigation-bar-title="activePage?.config.title || activePage?.config.name || ''"
           @select="selectedNodeId = $event"
           @open-repeat="handleOpenRepeatConfig"
+          @open-event="handleOpenEventConfig"
           @add-window="handleAddMultiWindow"
           @interact="handlePreviewInteract"
           @add="openAddWidgetDialog"
           @add-debug="openAddDebugDialog"
           @delete="handleDeleteWidget"
         />
+        <PreviewCanvasToolbar
+          v-if="workspaceMode === 'preview' && activeDoc"
+          :mode="isComponentResource ? 'component' : 'page'"
+          :can-go-back="canPreviewGoBack"
+          :has-entry-page="hasEntryPage"
+          :config="activeComponent?.config"
+          :methods="editorMethods"
+          @back="handlePreviewNavigateBack"
+          @go-entry="handlePreviewGoEntry"
+          @refresh="handlePreviewRefresh"
+          @invoke-method="invokeActiveExposedMethod($event.name, $event.args)"
+        />
         </template>
-      </div>
-
-      <div v-if="showModeTabs" class="mode-tabs">
-        <el-tooltip
-          v-for="tab in modeTabs"
-          :key="tab.key"
-          :content="tab.label"
-          placement="top"
-        >
-          <button
-            type="button"
-            class="mode-tab"
-            :class="{ active: workspaceMode === tab.key }"
-            @click="setWorkspaceMode(tab.key)"
-          >
-            <el-icon :size="18"><component :is="tab.icon" /></el-icon>
-          </button>
-        </el-tooltip>
       </div>
     </section>
 
@@ -3520,28 +3760,26 @@ watch(
         :type-library="dataTypeLibrary"
         @update:config="handleComponentConfigUpdate"
       />
-      <div v-else class="props-with-back">
-        <div class="back-bar">
-          <BackLink label="返回组件设置" @click="selectedNodeId = ''" />
-        </div>
-        <PropsPanel
-          v-model:tab="propsTab"
-          :xml="activeDoc.xml"
-          :selected-id="selectedNodeId"
-          :data-fields="activeDoc.data?.fields ?? []"
-          :icon-options="iconOptions"
-          :methods="editorMethods"
-          :emit-events="activeComponent?.config.events"
-          :component-props="editorConditionComponentProps"
-          :route-params="null"
-          :component-map="componentMap"
-          :component-methods-map="componentMethodsMap"
-          :project-path="projectStore.path || undefined"
-          :type-library="dataTypeLibrary"
-          :open-repeat-request="openRepeatRequest"
-          @update:xml="handleXmlUpdate"
-        />
-      </div>
+      <PropsPanel
+        v-else
+        v-model:tab="propsTab"
+        back-label="返回组件设置"
+        :xml="activeDoc.xml"
+        :selected-id="selectedNodeId"
+        :data-fields="activeDoc.data?.fields ?? []"
+        :icon-options="iconOptions"
+        :methods="editorMethods"
+        :emit-events="activeComponent?.config.events"
+        :component-props="editorConditionComponentProps"
+        :route-params="null"
+        :component-map="componentMap"
+        :component-methods-map="componentMethodsMap"
+        :project-path="projectStore.path || undefined"
+        :type-library="dataTypeLibrary"
+        :open-repeat-request="openRepeatRequest"
+        @update:xml="handleXmlUpdate"
+        @back="selectedNodeId = ''"
+      />
     </template>
     <PropsPanel
       v-else-if="isFrontendNav && activeDoc && isEditMode"
@@ -3566,21 +3804,15 @@ watch(
     <PreviewDebugPanel
       v-else-if="isFrontendNav && workspaceMode === 'preview' && activeDoc"
       :mode="isComponentResource ? 'component' : 'page'"
-      :can-go-back="canPreviewGoBack"
-      :has-entry-page="hasEntryPage"
       :config="activeComponent?.config"
-      :methods="editorMethods"
       :prop-values="previewDebugDollarProps"
       :page-data="resolvedPageData"
       :emit-logs="previewEmitLogs"
       :type-library="dataTypeLibrary"
       :project-path="projectStore.path || undefined"
-      @back="handlePreviewNavigateBack"
-      @go-entry="handlePreviewGoEntry"
       @refresh="handlePreviewRefresh"
       @update:prop="handlePreviewPropUpdate"
       @update:data-field="applyPreviewSetData"
-      @invoke-method="invokeActiveExposedMethod($event.name, $event.args)"
       @clear-emit-logs="previewEmitLogs = []"
     />
     <DataMethodDebugPanel
@@ -3606,13 +3838,62 @@ watch(
         (state) => backendWorkspaceRef?.applyFlowDebugCursor(state)
       "
     />
-    <aside v-else class="props-placeholder">
+    <aside
+      v-else-if="
+        !(
+          (isFrontendNav &&
+            (isDataPoolMode || isMethodsMode || isLifecycleMode)) ||
+          (isBackendNav && backendServiceLayer === 'schedule')
+        )
+      "
+      class="props-placeholder"
+    >
       <div class="panel-header">{{ isBackendNav ? '服务' : '属性' }}</div>
       <el-empty
         :description="propsPlaceholderText"
         :image-size="64"
       />
     </aside>
+
+    <div v-if="showModeTabs" class="mode-tabs">
+      <div class="mode-tabs-bar">
+        <el-tooltip
+          v-for="tab in modeTabs"
+          :key="tab.key"
+          :content="tab.label"
+          placement="top"
+        >
+          <button
+            type="button"
+            class="mode-tab"
+            :class="{ active: workspaceMode === tab.key }"
+            @click="setWorkspaceMode(tab.key)"
+          >
+            <el-icon :size="18"><component :is="tab.icon" /></el-icon>
+          </button>
+        </el-tooltip>
+      </div>
+    </div>
+    <div v-else-if="showBackendLayerTabs" class="mode-tabs">
+      <div class="mode-tabs-bar">
+        <el-tooltip
+          v-for="tab in backendLayerTabs"
+          :key="tab.key"
+          :content="tab.label"
+          placement="top"
+        >
+          <button
+            type="button"
+            class="mode-tab"
+            :class="{ active: backendServiceLayer === tab.key }"
+            @click="onBackendLayerUpdate(tab.key)"
+          >
+            <el-icon :size="18"><component :is="tab.icon" /></el-icon>
+          </button>
+        </el-tooltip>
+      </div>
+    </div>
+    </div>
 
     <MethodEditDialog
       v-model="methodDialogVisible"
@@ -3965,6 +4246,15 @@ watch(
   overflow: hidden;
 }
 
+.workspace-stage {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  position: relative;
+  overflow: hidden;
+}
+
 .preview-header {
   flex-shrink: 0;
   display: flex;
@@ -3993,30 +4283,41 @@ watch(
   white-space: nowrap;
 }
 
-.preview-body {
-  flex: 1;
-  min-height: 0;
-  overflow: hidden;
-  position: relative;
+.preview-header-action {
+  margin-left: auto;
+  flex-shrink: 0;
 }
 
-.preview-pane-fill {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  flex-direction: column;
-  overflow: auto;
-}
-
-.mode-tabs {
+.preview-header-actions {
+  margin-left: auto;
   flex-shrink: 0;
   display: flex;
   align-items: center;
+  gap: 4px;
+}
+
+.mode-tabs {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 12px;
+  z-index: 30;
+  display: flex;
+  align-items: center;
   justify-content: center;
-  gap: 8px;
-  height: 48px;
+  pointer-events: none;
+}
+
+.mode-tabs-bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px;
+  border-radius: 12px;
   background: #fff;
-  border-top: 1px solid #ebeef5;
+  border: 1px solid #ebeef5;
+  box-shadow: 0 4px 16px rgba(15, 23, 42, 0.12);
+  pointer-events: auto;
 }
 
 .mode-tab {
@@ -4042,29 +4343,19 @@ watch(
   color: #409eff;
 }
 
-.props-with-back {
-  width: var(--workspace-right-width, 300px);
-  flex-shrink: 0;
+.preview-body {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  position: relative;
+}
+
+.preview-pane-fill {
+  position: absolute;
+  inset: 0;
   display: flex;
   flex-direction: column;
-  height: 100%;
-  overflow: hidden;
-  background: #fff;
-  border-left: 1px solid #ebeef5;
-}
-
-.back-bar {
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  padding: 8px 14px;
-  background: #f8fafc;
-  border-bottom: 1px solid #ebeef5;
-}
-
-.props-with-back :deep(.props-panel) {
-  width: 100%;
-  border-left: none;
+  overflow: auto;
 }
 
 .props-placeholder {

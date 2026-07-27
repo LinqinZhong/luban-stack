@@ -1,7 +1,10 @@
 Component({
   options: {
     multipleSlots: true,
+    // 有对外方法时不能 virtualHost，否则页面 selectComponent 取不到实例
     virtualHost: true,
+    // 允许使用 app.wxss / 页面工具类（默认 isolated 会导致 class 全部失效）
+    styleIsolation: 'apply-shared',
   },
   properties: {
     "bottomText": {

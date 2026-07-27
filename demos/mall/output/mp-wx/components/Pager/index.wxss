@@ -1,4 +1,6 @@
 /* components/Pager/index.wxss */
+@import "../../styles/utilities.wxss";
+
 :host {
   display: flex;
   flex-direction: column;

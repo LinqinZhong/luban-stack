@@ -1,65 +1,71 @@
-<view style="width:100%;height:100%;padding:0rpx;margin:0rpx;background:#ededed;display:flex;flex-direction:column">
-  <view style="width:100%;flex:1;min-height:0;height:0;padding:0rpx;position:relative;box-sizing:border-box">
-    <view style="position:relative;width:100%;height:100%;min-height:0;box-sizing:border-box">
-      <view style="width:100%;height:100%;padding:0rpx;position:absolute;display:flex;flex-direction:column">
-        <title-bar title="商城" showBack="{{false}}" background="#409EFF" color="#ffffff" isFillScreen="{{false}}" style="width:100%;height:auto;background:#409EFF;color:#ffffff" />
-        <view style="width:100%;flex:1;min-height:0;height:0;margin-bottom:130rpx;position:relative;min-height:0;overflow:hidden">
-          <view wx:if="{{(currentNav + '') === 'home'}}" style="position:absolute;left:0;top:0;right:0;bottom:0;width:100%;height:100%;display:flex;flex-direction:column;overflow:hidden;box-sizing:border-box">
-            <view style="width:100%;flex:1;min-height:0;height:0;display:flex;flex-direction:column">
-              <view wx:if="{{((currentNav + '') === 'home')}}" style="width:100%;flex:1;min-height:0;height:0;overflow:hidden;display:flex;flex-direction:column">
-                <c-pager fetchApi="{{__api_fetchApi_0}}" data="{{goodsList}}" bind:update:data="__sync_data_goodsList" style="width:100%;flex:1;min-height:0;height:0">
-                  <view style="width:100%;height:auto;padding-left:20rpx;padding-right:20rpx;padding-top:20rpx;display:flex;flex-direction:column">
-                    <swiper indicator-dots="true" autoplay="false" circular="true" interval="3000" duration="280" current="0" indicator-color="rgba(0,0,0,.3)" indicator-active-color="#409eff" style="width:100%;height:280rpx;overflow:hidden;background:#ffffff;overflow:hidden">
-                      <swiper-item>
-                        <image src="https://placebeard.it/370x200" mode="aspectFill" style="width:100%;height:280rpx;border-radius:0rpx" />
-                      </swiper-item>
-                      <swiper-item>
-                        <image src="" mode="aspectFill" style="width:100%;height:280rpx" />
-                      </swiper-item>
-                    </swiper>
-                  </view>
-                  <view style="width:100%;height:auto;padding-left:20rpx;padding-right:20rpx;padding-top:20rpx;box-sizing:border-box">
-                    <goods-list data="{{goodsList}}" style="width:100%;height:auto;box-sizing:border-box" bind:select="__onEvt_0" />
-                  </view>
-                </c-pager>
+<view class="w-full min-w-0 h-full min-h-0 p-0 m-0 bg-arb-hededed flex flex-col">
+  <view class="w-full min-w-0 flex-1 min-h-0 h-0 p-0 relative box-border">
+    <view class="voider-relative-inner">
+      <view class="w-full min-w-0 h-full min-h-0 p-0 absolute flex flex-col">
+        <view class="w-full min-w-0 h-fit bg-arb-h409EFF text-arb-hffffff box-border">
+          <title-bar title="商城" showBack="{{false}}" background="#409EFF" color="#ffffff" isFillScreen="{{false}}" />
+        </view>
+        <view class="w-full min-w-0 flex-1 min-h-0 h-0 mb-arb-17_333333vw relative overflow-hidden">
+          <view wx:if="{{(currentNav + '') === 'home'}}" class="voider-mw-pane">
+            <view class="w-full min-w-0 flex-1 min-h-0 h-0 flex flex-col">
+              <view wx:if="{{((currentNav + '') === 'home')}}" class="w-full min-w-0 flex-1 min-h-0 h-0 overflow-hidden flex flex-col">
+                <view class="w-full min-w-0 flex-1 min-h-0 h-0 box-border">
+                  <c-pager fetchApi="{{__api_fetchApi_0}}" data="{{goodsList}}" bind:update:data="__sync_data_goodsList">
+                    <view class="w-full min-w-0 h-fit pl-arb-2_666667vw pr-arb-2_666667vw pt-arb-2_666667vw flex flex-col">
+                      <swiper indicator-dots="true" autoplay="false" circular="true" interval="3000" duration="280" current="0" indicator-color="rgba(0,0,0,.3)" indicator-active-color="#409eff" class="w-full min-w-0 h-arb-37_333333vw overflow-hidden bg-arb-hffffff">
+                        <swiper-item>
+                          <image src="https://placebeard.it/370x200" mode="aspectFill" class="w-full min-w-0 h-arb-37_333333vw rounded-arb-0" />
+                        </swiper-item>
+                        <swiper-item>
+                          <image src="" mode="aspectFill" class="w-full min-w-0 h-arb-37_333333vw" />
+                        </swiper-item>
+                      </swiper>
+                    </view>
+                    <view class="w-full min-w-0 h-auto pl-arb-2_666667vw pr-arb-2_666667vw pt-arb-2_666667vw box-border">
+                      <goods-list data="{{goodsList}}" bind:select="__onEvt_0" />
+                    </view>
+                  </c-pager>
+                </view>
               </view>
             </view>
           </view>
-          <view wx:if="{{(currentNav + '') === 'message'}}" style="position:absolute;left:0;top:0;right:0;bottom:0;width:100%;height:100%;display:flex;flex-direction:column;overflow:hidden;box-sizing:border-box">
-            <view style="width:100%;flex:1;min-height:0;height:0;display:flex;flex-direction:column">
-              <view wx:if="{{((currentNav + '') === 'message')}}" style="width:100%;flex:1;min-height:0;height:0;padding:24rpx;display:flex;flex-direction:column">
-                <view style="width:100%;height:auto;padding:0rpx;display:flex;flex-direction:column;align-items:center;justify-content:center">
-                  <view wx:for="{{messagList}}" wx:for-item="item" wx:for-index="index" wx:key="index" bindtap="__onEvt_1" style="width:100%;height:auto;padding:16rpx;padding-left:16rpx;padding-right:16rpx;padding-top:16rpx;padding-bottom:16rpx;margin:0rpx;margin-left:0rpx;margin-right:0rpx;margin-top:0rpx;margin-bottom:0rpx;background:#ffffff;display:flex;flex-direction:row;align-items:center;justify-content:center">
-                    <view style="width:auto;height:auto;padding:0rpx;background:#446ecf;border-radius:88rpx;display:flex;flex-direction:column;align-items:center;justify-content:center">
-                      <image src="{{item.avatar}}" mode="aspectFill" style="width:80rpx;height:80rpx;border-radius:80rpx" />
+          <view wx:if="{{(currentNav + '') === 'message'}}" class="voider-mw-pane">
+            <view class="w-full min-w-0 flex-1 min-h-0 h-0 flex flex-col">
+              <view wx:if="{{((currentNav + '') === 'message')}}" class="w-full min-w-0 flex-1 min-h-0 h-0 p-arb-3_2vw flex flex-col">
+                <view class="w-full min-w-0 h-fit p-0 flex flex-col justify-center">
+                  <view wx:for="{{messagList}}" wx:for-item="item" wx:for-index="index" wx:key="index" bindtap="__onEvt_1" class="w-full min-w-0 h-fit p-arb-2_133333vw pl-arb-2_133333vw pr-arb-2_133333vw pt-arb-2_133333vw pb-arb-2_133333vw m-0 ml-0 mr-0 mt-0 mb-0 bg-arb-hffffff flex flex-row items-center">
+                    <view class="w-fit max-w-full h-fit p-0 bg-arb-h446ecf rounded-arb-11_733333vw flex flex-col justify-center">
+                      <image src="{{item.avatar}}" mode="aspectFill" class="w-arb-10_666667vw h-arb-10_666667vw rounded-arb-10_666667vw" />
                     </view>
-                    <view style="flex:1;min-width:0;width:0;height:auto;padding:16rpx;margin-left:22rpx;display:flex;flex-direction:column">
-                      <text style="width:auto;height:auto;color:#303133;font-size:32rpx">{{item.name}}</text>
-                      <text style="width:auto;height:auto;color:#8a8a8a;font-size:24rpx">{{item.content}}</text>
+                    <view class="flex-1 min-w-0 w-0 h-fit p-arb-2_133333vw ml-arb-2_933333vw flex flex-col">
+                      <text class="w-fit max-w-full h-fit text-arb-h303133 text-size-arb-4_266667vw">{{item.name}}</text>
+                      <text class="w-fit max-w-full h-fit text-arb-h8a8a8a text-size-arb-3_2vw">{{item.content}}</text>
                     </view>
-                    <text style="width:auto;height:auto;color:#303133;font-size:20rpx">{{item.time}}</text>
+                    <text class="w-fit max-w-full h-fit text-arb-h303133 text-size-arb-2_666667vw">{{item.time}}</text>
                   </view>
                 </view>
               </view>
             </view>
           </view>
-          <view wx:if="{{(currentNav + '') === 'me'}}" style="position:absolute;left:0;top:0;right:0;bottom:0;width:100%;height:100%;display:flex;flex-direction:column;overflow:hidden;box-sizing:border-box">
-            <view style="width:100%;height:auto;padding:16rpx;display:flex;flex-direction:column"></view>
+          <view wx:if="{{(currentNav + '') === 'me'}}" class="voider-mw-pane">
+            <view class="w-full min-w-0 h-fit p-arb-2_133333vw flex flex-col"></view>
           </view>
         </view>
       </view>
-      <view style="width:100%;height:130rpx;padding:0rpx;background:#ffffff;position:absolute;bottom:0;display:flex;flex-direction:row">
-        <view wx:for="{{navs}}" wx:for-item="item" wx:for-index="index" wx:key="index" bindtap="__onEvt_2" data-voider-v0="{{item.key}}" style="flex:1;min-width:0;width:0;height:100%;padding:16rpx;display:flex;flex-direction:column;align-items:center;justify-content:center">
-          <image src="{{'/assets/icons/' + (item.icon) + '.svg'}}" mode="aspectFit" style="width:auto;height:auto;color:#555;font-size:40rpx;width:40rpx;height:40rpx" />
-          <text style="width:auto;height:auto;padding-top:10rpx;color:#555">{{item.label}}</text>
+      <view class="w-full min-w-0 h-arb-17_333333vw p-0 bg-arb-hffffff absolute bottom-0 flex flex-row">
+        <view wx:for="{{navs}}" wx:for-item="item" wx:for-index="index" wx:key="index" bindtap="__onEvt_2" data-voider-v0="{{item.key}}" class="flex-1 min-w-0 w-0 h-full min-h-0 p-arb-2_133333vw flex flex-col justify-center items-center">
+          <view class="w-arb-5_333333vw h-arb-5_333333vw inline-flex shrink-0">
+            <voider-icon name="{{item.icon}}" color="{{(((((index + '') === '0') && ((currentNav + '') === 'home')) || (((index + '') === '1') && ((currentNav + '') === 'message')) || (((index + '') === '2') && ((currentNav + '') === 'me')))) ? '#409eff' : ('#555')}}" />
+          </view>
+          <text class="w-fit max-w-full h-fit pt-arb-1_333333vw" style="color:{{(((((index + '') === '0') && ((currentNav + '') === 'home')) || (((index + '') === '1') && ((currentNav + '') === 'message')) || (((index + '') === '2') && ((currentNav + '') === 'me')))) ? '#409eff' : ('#555')}}">{{item.label}}</text>
         </view>
       </view>
-      <swiper indicator-dots="true" autoplay="false" circular="true" interval="3000" duration="280" current="0" indicator-color="#ffffff" indicator-active-color="#ff0000" style="width:120rpx;height:120rpx;overflow:hidden;position:absolute;left:0;bottom:0;left:20rpx;bottom:200rpx;z-index:1000;overflow:hidden">
+      <swiper indicator-dots="true" autoplay="false" circular="true" interval="3000" duration="280" current="0" indicator-color="#ffffff" indicator-active-color="#ff0000" class="w-arb-16vw h-arb-16vw overflow-hidden absolute left-arb-2_666667vw bottom-arb-26_666667vw z-arb-1000">
         <swiper-item>
-          <image catchtap="__onEvt_3" src="https://ts3.tc.mm.bing.net/th/id/OIP-C.BaTVG1gAGyDZczd-kwb5kgAAAA?w=108&amp;h=108&amp;c=1&amp;bgcl=f66a1b&amp;r=0&amp;o=7&amp;pid=ImgRC&amp;rm=3" mode="aspectFill" style="width:120rpx;height:120rpx" />
+          <image catchtap="__onEvt_3" src="https://ts3.tc.mm.bing.net/th/id/OIP-C.BaTVG1gAGyDZczd-kwb5kgAAAA?w=108&amp;h=108&amp;c=1&amp;bgcl=f66a1b&amp;r=0&amp;o=7&amp;pid=ImgRC&amp;rm=3" mode="aspectFill" class="w-arb-16vw h-arb-16vw" />
         </swiper-item>
         <swiper-item>
-          <image src="https://ts3.tc.mm.bing.net/th/id/OIP-C.trK-7XBjUo2GwvRAHp3kgwAAAA?w=108&amp;h=108&amp;c=1&amp;bgcl=b0a5d8&amp;r=0&amp;o=7&amp;pid=ImgRC&amp;rm=3" mode="aspectFill" style="width:120rpx;height:120rpx" />
+          <image src="https://ts3.tc.mm.bing.net/th/id/OIP-C.trK-7XBjUo2GwvRAHp3kgwAAAA?w=108&amp;h=108&amp;c=1&amp;bgcl=b0a5d8&amp;r=0&amp;o=7&amp;pid=ImgRC&amp;rm=3" mode="aspectFill" class="w-arb-16vw h-arb-16vw" />
         </swiper-item>
       </swiper>
     </view>

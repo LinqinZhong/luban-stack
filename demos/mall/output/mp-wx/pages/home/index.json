@@ -3,7 +3,8 @@
   "usingComponents": {
     "title-bar": "/components/TitleBar/index",
     "c-pager": "/components/Pager/index",
-    "goods-list": "/components/GoodsList/index"
+    "goods-list": "/components/GoodsList/index",
+    "voider-icon": "/components/voider-icon/index"
   },
   "navigationBarBackgroundColor": "#409eff",
   "navigationBarTextStyle": "white",

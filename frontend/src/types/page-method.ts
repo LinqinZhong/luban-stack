@@ -372,6 +372,8 @@ export interface PageMethod {
   body: string
   /** 预置只读方法 */
   builtin?: boolean
+  /** 预置方法列表中的作用说明 */
+  summary?: string
 }
 
 export const METHOD_PARAM_TYPE_OPTIONS: Array<{
@@ -404,6 +406,7 @@ export const BUILTIN_METHODS: PageMethod[] = [
     returnType: 'void',
     body: '// 跳转到指定页面\n// to: 页面 id；params: 路由参数对象',
     builtin: true,
+    summary: '跳转到指定页面，可携带路由参数',
   },
   {
     name: 'navigateBack',
@@ -411,6 +414,7 @@ export const BUILTIN_METHODS: PageMethod[] = [
     returnType: 'void',
     body: '// 返回上一页',
     builtin: true,
+    summary: '返回上一页（预览栈或运行时历史）',
   },
   {
     name: 'setData',
@@ -421,6 +425,7 @@ export const BUILTIN_METHODS: PageMethod[] = [
     returnType: 'void',
     body: '// 写入数据池字段\n// prop: 字段名；value: 任意值',
     builtin: true,
+    summary: '写入当前页/组件数据池字段',
   },
   {
     name: 'showToast',
@@ -434,6 +439,7 @@ export const BUILTIN_METHODS: PageMethod[] = [
       "// message: 提示内容\n" +
       "// duration: 'short'（短，默认）或 'long'（长）",
     builtin: true,
+    summary: '弹出 Toast 提示（duration 为 short / long）',
   },
   {
     name: 'getDeviceInfo',
@@ -448,6 +454,7 @@ export const BUILTIN_METHODS: PageMethod[] = [
       '// - platform: \'h5\' | \'miniprogram\'\n' +
       '// 用法：const info = getDeviceInfo()',
     builtin: true,
+    summary: '获取设备信息（状态栏高度、平台、胶囊等）',
   },
 ]
 
@@ -466,6 +473,7 @@ export const COMPONENT_BUILTIN_METHODS: PageMethod[] = [
       "// 事件名对应组件设置里「事件方法」的名称；其后参数按该事件定义的参数依次传入\n" +
       "// 例如事件 onClick 定义了参数 id，则：emit('onClick', id)",
     builtin: true,
+    summary: '向父级抛出组件事件（事件名与参数见组件设置）',
   },
   {
     name: 'updateProps',
@@ -480,6 +488,7 @@ export const COMPONENT_BUILTIN_METHODS: PageMethod[] = [
       '// 参数名须为组件设置中开启「双向绑定」的参数；新值类型与该参数一致\n' +
       "// 例如：updateProps('data', list)",
     builtin: true,
+    summary: '更新已开启双向绑定的入参，并通知父级',
   },
 ]
 

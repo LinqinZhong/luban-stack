@@ -1,7 +1,1 @@
-/* pages/home/index.wxss */
-.voider-button {
-  background: #409eff;
-  color: #ffffff;
-  border-radius: 8rpx;
-  padding: 16rpx 28rpx;
-}
+/* pages/home/index.wxss — utilities live in app.wxss */

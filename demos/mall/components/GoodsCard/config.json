@@ -30,10 +30,7 @@
   "debugProps": {
     "data": {
       "id": "1",
-      "name": "商品",
-      "stock": 10,
-      "price": 10,
-      "img": "https://fastly.picsum.photos/id/40/100/100.jpg?hmac=cvD8NPYN2w1E72A6nFHr9VmARbkhCh2dt2-r59hcjaY"
+      "name": "阿达"
     }
   }
 }

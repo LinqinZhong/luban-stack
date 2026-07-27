@@ -25,6 +25,13 @@ export function generateComponentMethodFn(
     apiPropNames: string[]
     arrayPropNames?: string[]
     siblingMethodNames: string[]
+    /** 数据池 type=ref 字段（组件 selectComponent / Modal show·hide） */
+    refFields?: Array<{
+      name: string
+      kind: 'component' | 'modal'
+      modalName?: string
+      exposedMethods?: string[]
+    }>
   },
 ): string {
   const name = method.name.trim()
@@ -41,6 +48,9 @@ export function generateComponentMethodFn(
   const arrayProps = new Set((options.arrayPropNames ?? []).filter(isValidIdent))
   const siblings = options.siblingMethodNames.filter(
     (n) => isValidIdent(n) && n !== name,
+  )
+  const refNames = new Set(
+    (options.refFields ?? []).map((f) => f.name).filter(isValidIdent),
   )
 
   const lines: string[] = []
@@ -77,8 +87,47 @@ export function generateComponentMethodFn(
     lines.push(`    var ${sib} = function () { return that.${sib}.apply(that, arguments) }`)
   }
 
+  // ref 局部变量（优先于 data 字段同名）
+  for (const field of options.refFields ?? []) {
+    if (!isValidIdent(field.name)) continue
+    if (field.kind === 'modal' && field.modalName) {
+      const key = `__modal_${String(field.modalName).replace(/[^a-zA-Z0-9_$]/g, '_')}`
+      lines.push(`    var ${field.name} = {`)
+      lines.push(
+        `      show: function () { var p = {}; p[${JSON.stringify(key)}] = true; that.setData(p) },`,
+      )
+      lines.push(
+        `      hide: function () { var p = {}; p[${JSON.stringify(key)}] = false; that.setData(p) },`,
+      )
+      lines.push(`    }`)
+    } else if (field.kind === 'component') {
+      const methods = (field.exposedMethods ?? []).filter((m) =>
+        /^[A-Za-z_$][\w$]*$/.test(m),
+      )
+      if (!methods.length) {
+        lines.push(
+          `    var ${field.name} = that.selectComponent(${JSON.stringify('#' + field.name)})`,
+        )
+      } else {
+        lines.push(`    var ${field.name} = (function () {`)
+        lines.push(
+          `      var __c = that.selectComponent(${JSON.stringify('#' + field.name)})`,
+        )
+        lines.push(`      return {`)
+        for (const m of methods) {
+          lines.push(
+            `        ${m}: function () { if (__c && typeof __c.${m} === 'function') return __c.${m}.apply(__c, arguments) },`,
+          )
+        }
+        lines.push(`      }`)
+        lines.push(`    })()`)
+      }
+    }
+  }
+
   for (const field of dataNames) {
     if (propNames.includes(field) || params.includes(field)) continue
+    if (refNames.has(field)) continue
     lines.push(`    var ${field} = that.data.${field}`)
   }
 

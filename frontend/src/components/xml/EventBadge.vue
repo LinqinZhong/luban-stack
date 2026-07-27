@@ -4,20 +4,34 @@ withDefaults(
     title?: string
     size?: number
     count?: number
+    clickable?: boolean
   }>(),
   {
     title: '已绑定事件方法',
     size: 16,
     count: 0,
+    clickable: false,
   },
 )
+
+const emit = defineEmits<{
+  click: [event: MouseEvent]
+}>()
+
+function handleClick(event: MouseEvent) {
+  event.stopPropagation()
+  emit('click', event)
+}
 </script>
 
 <template>
   <span
     class="event-badge"
+    :class="{ clickable }"
     :title="count > 0 ? `${title}（${count}）` : title"
     :style="{ width: `${size}px`, height: `${size}px` }"
+    role="button"
+    @click="clickable ? handleClick($event) : undefined"
   >
     <svg class="event-badge-icon" viewBox="0 0 24 24" aria-hidden="true">
       <path
@@ -39,6 +53,15 @@ withDefaults(
   justify-content: center;
   pointer-events: none;
   box-shadow: 0 1px 3px rgba(15, 23, 42, 0.2);
+}
+
+.event-badge.clickable {
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+.event-badge.clickable:hover {
+  background: #ea580c;
 }
 
 .event-badge-icon {

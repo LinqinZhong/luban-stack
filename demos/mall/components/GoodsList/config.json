@@ -2,7 +2,7 @@
   "name": "商品列表",
   "title": "商品列表",
   "width": "match_parent",
-  "height": "match_parent",
+  "height": "wrap_content",
   "props": [
     {
       "name": "data",

@@ -1,11 +1,9 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import {
-  Coin,
-  Connection,
-  Cpu,
-  Plus,
-  Timer,
+  Delete,
+  EditPen,
+  SetUp,
 } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
@@ -77,19 +75,7 @@ const businessProcessorPanelRef = ref<InstanceType<
   typeof ServiceProcessorPanel
 > | null>(null)
 
-const layerTabs = [
-  { key: 'controller' as const, label: '控制器', icon: Connection },
-  { key: 'service' as const, label: '业务层', icon: Cpu },
-  { key: 'data' as const, label: '数据层', icon: Coin },
-  { key: 'schedule' as const, label: '定时任务', icon: Timer },
-]
-
-const activeLayer = computed({
-  get: () => props.layer ?? 'controller',
-  set: (layer: ServiceLayer) => {
-    emit('update:layer', layer)
-  },
-})
+const activeLayer = computed(() => props.layer ?? 'controller')
 const controllers = ref<ServiceController[]>([])
 const activeControllerId = ref('')
 const loading = ref(false)
@@ -98,13 +84,6 @@ const dialogName = ref('')
 const dialogPath = ref('')
 const dialogRemark = ref('')
 const editingControllerId = ref<string | null>(null)
-
-function setLayer(layer: ServiceLayer) {
-  activeLayer.value = layer
-  if (layer === 'schedule') {
-    emit('update:debug-target', null)
-  }
-}
 
 function onDebugTarget(target: ProcessorDebugTarget | null) {
   if (activeLayer.value === 'controller') return
@@ -135,7 +114,26 @@ function applyFlowDebugCursor(state: {
   businessProcessorPanelRef.value?.applyFlowDebugCursor(state)
 }
 
-defineExpose({ applyDebugParams, applyFlowDebugCursor })
+defineExpose({
+  applyDebugParams,
+  applyFlowDebugCursor,
+  openCreateController: openCreateDialog,
+  addApi,
+  openCreateProcessor() {
+    if (activeLayer.value === 'service') {
+      businessProcessorPanelRef.value?.openCreateDialog()
+    } else if (activeLayer.value === 'data') {
+      dataProcessorPanelRef.value?.openCreateDialog()
+    }
+  },
+  addProcessorMethod() {
+    if (activeLayer.value === 'service') {
+      businessProcessorPanelRef.value?.addMethod()
+    } else if (activeLayer.value === 'data') {
+      dataProcessorPanelRef.value?.addMethod()
+    }
+  },
+})
 
 let saveTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -754,16 +752,10 @@ onBeforeUnmount(() => {
       class="svc-workspace-body"
     >
       <aside class="ctrl-pane">
-        <div class="pane-head">
-          <span class="pane-title">控制器</span>
-          <el-button type="primary" link :icon="Plus" @click="openCreateDialog">
-            创建
-          </el-button>
-        </div>
         <el-skeleton v-if="loading" :rows="4" animated style="padding: 12px" />
         <el-empty
           v-else-if="!controllers.length"
-          description="暂无控制器，点击创建"
+          description="暂无控制器，点击顶部创建"
           :image-size="56"
         />
         <ul v-else class="ctrl-list">
@@ -807,18 +799,6 @@ onBeforeUnmount(() => {
       </aside>
 
       <section class="api-pane">
-        <div class="pane-head">
-          <span class="pane-title">API</span>
-          <el-button
-            type="primary"
-            link
-            :icon="Plus"
-            :disabled="!activeController"
-            @click="addApi"
-          >
-            创建
-          </el-button>
-        </div>
         <el-empty
           v-if="!activeController"
           description="请选择或创建左侧控制器"
@@ -829,7 +809,7 @@ onBeforeUnmount(() => {
             :data="apis"
             border
             stripe
-            empty-text="暂无 API，点击创建"
+            empty-text="暂无 API，点击顶部创建"
             highlight-current-row
             :row-class-name="
               ({ row }) => (row.id === selectedApiId ? 'is-selected-row' : '')
@@ -888,12 +868,12 @@ onBeforeUnmount(() => {
                 <span class="cell-text">{{ row.requireAuth ? '是' : '否' }}</span>
               </template>
             </el-table-column>
-            <el-table-column label="操作" width="160" align="center" fixed="right">
+            <el-table-column label="操作" width="220" align="center" fixed="right">
               <template #default="{ $index }">
                 <el-button
                   type="primary"
                   link
-                  size="small"
+                  :icon="SetUp"
                   @click.stop="openApiDesign($index)"
                 >
                   设计
@@ -901,7 +881,7 @@ onBeforeUnmount(() => {
                 <el-button
                   type="primary"
                   link
-                  size="small"
+                  :icon="EditPen"
                   @click.stop="openApiFlow($index)"
                 >
                   编辑
@@ -909,7 +889,7 @@ onBeforeUnmount(() => {
                 <el-button
                   type="danger"
                   link
-                  size="small"
+                  :icon="Delete"
                   @click.stop="removeApi($index)"
                 >
                   删除
@@ -952,24 +932,6 @@ onBeforeUnmount(() => {
     />
     <div v-else class="layer-placeholder">
       <el-empty description="定时任务稍后实现" :image-size="80" />
-    </div>
-
-    <div class="layer-tabs">
-      <el-tooltip
-        v-for="tab in layerTabs"
-        :key="tab.key"
-        :content="tab.label"
-        placement="top"
-      >
-        <button
-          type="button"
-          class="layer-tab"
-          :class="{ active: activeLayer === tab.key }"
-          @click="setLayer(tab.key)"
-        >
-          <el-icon :size="18"><component :is="tab.icon" /></el-icon>
-        </button>
-      </el-tooltip>
     </div>
 
     <el-dialog
@@ -1050,25 +1012,6 @@ onBeforeUnmount(() => {
 .ctrl-pane {
   border-right: 1px solid #ebeef5;
   background: #fafafa;
-}
-
-.pane-head {
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  height: 44px;
-  box-sizing: border-box;
-  padding: 0 12px;
-  border-bottom: 1px solid #ebeef5;
-  background: #fff;
-}
-
-.pane-title {
-  font-size: 13px;
-  font-weight: 600;
-  color: #303133;
-  line-height: 1;
 }
 
 .ctrl-list {
@@ -1171,40 +1114,6 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-}
-
-.layer-tabs {
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  height: 48px;
-  background: #fff;
-  border-top: 1px solid #ebeef5;
-}
-
-.layer-tab {
-  width: 36px;
-  height: 36px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border: 0;
-  border-radius: 8px;
-  background: transparent;
-  color: #64748b;
-  cursor: pointer;
-}
-
-.layer-tab:hover {
-  background: #f5f7fa;
-  color: #303133;
-}
-
-.layer-tab.active {
-  background: #ecf5ff;
-  color: #409eff;
 }
 
 .cell-text {

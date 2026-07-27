@@ -55,6 +55,10 @@ const props = defineProps<{
   modalStack?: ModalStackApi
   /** 页面预览显示状态栏/胶囊；组件预览不显示 */
   showDeviceChrome?: boolean
+  /** 组件居中参照：手机屏宽（默认与 canvasWidth 相同） */
+  phoneScreenWidth?: number
+  /** 组件居中参照：手机屏高 */
+  phoneScreenHeight?: number
   /** 状态栏是否可选中（编辑态） */
   statusBarSelectable?: boolean
   /** 状态栏背景色 */
@@ -75,6 +79,7 @@ const emit = defineEmits<{
   'add-debug': []
   delete: []
   'open-repeat': [id: string]
+  'open-event': [id: string]
   'add-window': [parentId: string]
   interact: [payload: import('../../utils/event-runtime').PreviewInteractPayload]
 }>()
@@ -462,6 +467,42 @@ const phoneFitContent = computed(
   () => props.canvasHeight === 'auto' || typeof props.canvasHeight === 'number',
 )
 
+/** 组件预览参照手机屏尺寸；小于该尺寸的方向居中 */
+const phoneScreenW = computed(
+  () =>
+    (typeof props.phoneScreenWidth === 'number' && props.phoneScreenWidth > 0
+      ? props.phoneScreenWidth
+      : props.canvasWidth) || 375,
+)
+const phoneScreenH = computed(
+  () =>
+    (typeof props.phoneScreenHeight === 'number' && props.phoneScreenHeight > 0
+      ? props.phoneScreenHeight
+      : 667),
+)
+
+const centerPhoneX = computed(() => {
+  if (!phoneFitContent.value) return false
+  return props.canvasWidth < phoneScreenW.value
+})
+
+const centerPhoneY = computed(() => {
+  if (!phoneFitContent.value) return false
+  if (props.canvasHeight === 'auto') return true
+  if (typeof props.canvasHeight === 'number') {
+    return props.canvasHeight < phoneScreenH.value
+  }
+  return false
+})
+
+const phoneSlotStyle = computed(() => {
+  if (!phoneFitContent.value) return undefined
+  return {
+    width: `${phoneScreenW.value}px`,
+    height: `${phoneScreenH.value}px`,
+  }
+})
+
 /** ???? / ???????????????? */
 const panX = defineModel<number>('panX', { default: 0 })
 const panY = defineModel<number>('panY', { default: 0 })
@@ -654,10 +695,35 @@ watch(
   },
 )
 
-function resetView() {
+/** 底部悬浮模式 tab 占用高度（含间距），初始适配时避开 */
+const BOTTOM_UI_SAFE = 56
+const STAGE_PAD = 24
+
+function fitView() {
+  const stage = stageRef.value
+  const phone = phoneRef.value
   panX.value = 0
   panY.value = 0
-  zoom.value = 1
+  if (!stage || !phone) {
+    zoom.value = 1
+    return
+  }
+  const availW = Math.max(1, stage.clientWidth - STAGE_PAD * 2)
+  const availH = Math.max(
+    1,
+    stage.clientHeight - STAGE_PAD * 2 - BOTTOM_UI_SAFE,
+  )
+  const phoneW = phone.offsetWidth
+  const phoneH = phone.offsetHeight
+  if (phoneW < 1 || phoneH < 1) {
+    zoom.value = 1
+    return
+  }
+  zoom.value = clampZoom(Math.min(1, availW / phoneW, availH / phoneH))
+}
+
+function resetView() {
+  fitView()
 }
 
 function clampZoom(value: number) {
@@ -748,7 +814,20 @@ onMounted(() => {
   stageRef.value?.addEventListener('wheel', onStageWheel, { passive: false })
   window.addEventListener('resize', scheduleMeasureSync)
   window.addEventListener('scroll', scheduleMeasureSync, true)
+  void nextTick(() => {
+    fitView()
+    // 等一帧再适配，确保手机框尺寸已布局完成
+    requestAnimationFrame(() => fitView())
+  })
 })
+
+watch(
+  () => [props.canvasWidth, props.canvasHeight] as const,
+  async () => {
+    await nextTick()
+    requestAnimationFrame(() => fitView())
+  },
+)
 
 onBeforeUnmount(() => {
   endPan()
@@ -822,29 +901,42 @@ watch(
       </el-tooltip>
     </div>
 
-    <div class="stage-world" :style="worldStyle">
+    <div
+      class="stage-world"
+      :class="{ 'is-component': phoneFitContent }"
+      :style="worldStyle"
+    >
       <div
-        ref="phoneRef"
-        class="phone"
+        class="phone-slot"
         :class="{
-          'is-picking': colorPickState.picking.value,
-          'is-fit-content': phoneFitContent,
-          'is-edit': selectable,
-          'is-preview': showTouchCursor,
-          'is-miniprogram': showDeviceChrome && scene === 'miniprogram',
-          'has-status-bar': showDeviceChrome,
-          'has-navigation-bar': showNavigationBar,
-          'status-bar-cover': showDeviceChrome && statusBarCover,
+          'is-framed': phoneFitContent,
+          'center-x': centerPhoneX,
+          'center-y': centerPhoneY,
         }"
-        :style="phoneFrameStyle"
-        @click="handlePhoneClick"
-        @mouseleave="clearHover"
-        @pointermove="onPhonePointerMove"
-        @pointerdown="onPhonePointerDown"
-        @pointerup="onPhonePointerUp"
-        @pointercancel="onPhonePointerUp"
-        @pointerleave="onPhonePointerLeave"
+        :style="phoneFitContent ? phoneSlotStyle : undefined"
       >
+        <div
+          ref="phoneRef"
+          class="phone"
+          :class="{
+            'is-picking': colorPickState.picking.value,
+            'is-fit-content': phoneFitContent,
+            'is-edit': selectable,
+            'is-preview': showTouchCursor,
+            'is-miniprogram': showDeviceChrome && scene === 'miniprogram',
+            'has-status-bar': showDeviceChrome,
+            'has-navigation-bar': showNavigationBar,
+            'status-bar-cover': showDeviceChrome && statusBarCover,
+          }"
+          :style="phoneFrameStyle"
+          @click="handlePhoneClick"
+          @mouseleave="clearHover"
+          @pointermove="onPhonePointerMove"
+          @pointerdown="onPhonePointerDown"
+          @pointerup="onPhonePointerUp"
+          @pointercancel="onPhonePointerUp"
+          @pointerleave="onPhonePointerLeave"
+        >
         <div
           v-if="showDeviceChrome"
           class="device-status-bar color-pick-ignore"
@@ -953,6 +1045,7 @@ watch(
             @select="emit('select', $event)"
             @hover="handleHover"
             @open-repeat="emit('open-repeat', $event)"
+            @open-event="emit('open-event', $event)"
             @add-window="emit('add-window', $event)"
             @interact="emit('interact', $event)"
           />
@@ -1017,6 +1110,7 @@ watch(
           :style="touchCursorStyle"
           aria-hidden="true"
         />
+      </div>
       </div>
     </div>
 
@@ -1131,7 +1225,6 @@ watch(
     linear-gradient(rgba(15, 23, 42, 0.04) 1px, transparent 1px);
   background-size: 16px 16px;
   background-color: #e8edf3;
-  /* ???????? */
   cursor: default;
 }
 
@@ -1150,6 +1243,30 @@ watch(
   min-width: 100%;
   min-height: 100%;
   box-sizing: border-box;
+}
+
+.stage-world.is-component {
+  align-items: center;
+}
+
+.phone-slot.is-framed {
+  display: flex;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  justify-content: flex-start;
+  align-items: flex-start;
+}
+
+.phone-slot:not(.is-framed) {
+  display: contents;
+}
+
+.phone-slot.center-x {
+  justify-content: center;
+}
+
+.phone-slot.center-y {
+  align-items: center;
 }
 
 .stage-toolbar {
@@ -1182,7 +1299,8 @@ watch(
   --ctrl-h: 28px;
   position: absolute;
   right: 16px;
-  bottom: 16px;
+  /* 避开底部悬浮模式 tab */
+  bottom: 64px;
   z-index: 2;
   display: flex;
   align-items: center;
@@ -1780,7 +1898,6 @@ watch(
 .phone.is-fit-content {
   height: auto;
   min-height: 0;
-  align-self: flex-start;
   /* ?????????????????? */
   background: transparent;
   border-color: transparent;

@@ -2,7 +2,6 @@
 import { computed, reactive, ref, watch } from 'vue'
 import { Delete, EditPen, Plus, RefreshRight } from '@element-plus/icons-vue'
 import type { ComponentConfig, ComponentPropDef } from '../../types/component'
-import type { MethodParam, PageMethod } from '../../types/page-method'
 import type { DataField, DataFieldValue, PageData } from '../../types/page-data'
 import type {
   DataTypeLibrary,
@@ -43,10 +42,7 @@ type PropFormModel = {
 
 const props = defineProps<{
   mode: 'page' | 'component'
-  canGoBack?: boolean
-  hasEntryPage?: boolean
   config?: ComponentConfig | null
-  methods?: PageMethod[]
   propValues?: Record<string, unknown>
   /** 预览运行时数据池（含 setData / 计算字段实时值） */
   pageData?: PageData | null
@@ -56,14 +52,30 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  back: []
-  'go-entry': []
   refresh: []
   'update:prop': [name: string, value: unknown]
   'update:data-field': [name: string, value: DataFieldValue]
-  'invoke-method': [payload: { name: string; args: unknown[] }]
   'clear-emit-logs': []
 }>()
+
+/** 组件调试：数据（入参+数据池）/ 日志（emit） */
+const debugTab = ref<'data' | 'log'>('data')
+
+watch(
+  () => props.mode,
+  () => {
+    debugTab.value = 'data'
+  },
+)
+
+watch(
+  () => props.emitLogs?.length ?? 0,
+  (len, prev) => {
+    if (props.mode === 'component' && len > (prev ?? 0)) {
+      debugTab.value = 'log'
+    }
+  },
+)
 
 const dataFields = computed(() =>
   (props.pageData?.fields ?? []).filter((item) => item.name.trim()),
@@ -108,24 +120,217 @@ function onDataJsonBlur(field: DataField, text: string) {
   }
 }
 
+type DataFieldFormModel = {
+  field: DataField
+  mode: 'scalar' | 'object' | 'json' | 'array'
+  typeLabel: string
+  fields: ObjectFieldForm[]
+  itemKind?: FieldKind
+  itemEnumOptions?: string[]
+  readonly: boolean
+}
+
+function objectFieldsFromSubFields(
+  subs: Array<{ name: string; type?: string; remark?: string; typeRef?: string }> | undefined,
+): ObjectFieldForm[] {
+  if (!subs?.length) return []
+  return subs
+    .map((f) => {
+      const name = f.name.trim()
+      if (!name) return null
+      const info = fieldKindFromType(f.type, f.typeRef)
+      return {
+        name,
+        remark: f.remark?.trim() || '',
+        kind: info.kind,
+        enumOptions: info.enumOptions,
+      }
+    })
+    .filter((x): x is ObjectFieldForm => Boolean(x))
+}
+
+function resolveDataObjectFields(field: DataField): ObjectFieldForm[] {
+  const ref = field.typeRef?.trim() || ''
+  if (ref) {
+    const fromType = objectFieldsOf(ref)
+    if (fromType.length) return fromType
+  }
+  return objectFieldsFromSubFields(
+    (field.objectFields ?? []).map((f) => ({
+      name: f.name,
+      type: f.type,
+      typeRef: f.typeRef,
+    })),
+  )
+}
+
+function resolveDataFieldForm(field: DataField): DataFieldFormModel {
+  const readonly = isReadonlyDataField(field)
+  const bindingHint =
+    field.binding === 'computed'
+      ? ' · 计算'
+      : field.binding === 'controller'
+        ? ' · 控制器'
+        : ''
+
+  if (field.type === 'array') {
+    if (field.itemType === 'array') {
+      return {
+        field,
+        mode: 'json',
+        typeLabel: `数组 / 数组 / ${atomTypeLabel(field.itemItemType, field.itemItemTypeRef)}${bindingHint}`,
+        fields: [],
+        readonly,
+      }
+    }
+    const ref = field.itemTypeRef?.trim() || ''
+    if (ref) {
+      const fields = objectFieldsOf(ref)
+      if (fields.length) {
+        return {
+          field,
+          mode: 'array',
+          typeLabel: `数组 / ${namedTypeLabel(ref)}${bindingHint}`,
+          fields,
+          readonly,
+        }
+      }
+      const named = findDataTypeDef(props.typeLibrary, ref)
+      if (named?.kind === 'enum') {
+        return {
+          field,
+          mode: 'array',
+          typeLabel: `数组 / ${named.name || ref}${bindingHint}`,
+          fields: [],
+          itemKind: 'enum',
+          itemEnumOptions: named.enumMembers.map((m) => m.name).filter(Boolean),
+          readonly,
+        }
+      }
+    }
+    const itemType = field.itemType || 'string'
+    const itemKind: FieldKind =
+      itemType === 'number'
+        ? 'number'
+        : itemType === 'boolean'
+          ? 'boolean'
+          : itemType === 'json'
+            ? 'json'
+            : 'string'
+    // 无具名类型时，尝试从首个数组项的 objectFields 推断
+    const sampleObjFields = field.arrayFields?.[0]?.objectFields
+    const inferred = objectFieldsFromSubFields(
+      sampleObjFields?.map((f) => ({
+        name: f.name,
+        type: f.type,
+        typeRef: f.typeRef,
+      })),
+    )
+    return {
+      field,
+      mode: 'array',
+      typeLabel: `数组 / ${atomTypeLabel(itemType, ref)}${bindingHint}`,
+      fields: inferred,
+      itemKind: inferred.length ? undefined : itemKind,
+      itemEnumOptions: [],
+      readonly,
+    }
+  }
+
+  if (field.type === 'json') {
+    const fields = resolveDataObjectFields(field)
+    const ref = field.typeRef?.trim() || ''
+    if (fields.length) {
+      return {
+        field,
+        mode: 'object',
+        typeLabel: (ref ? namedTypeLabel(ref) : '对象') + bindingHint,
+        fields,
+        readonly,
+      }
+    }
+    return {
+      field,
+      mode: 'json',
+      typeLabel: (ref ? namedTypeLabel(ref) : '对象') + bindingHint,
+      fields: [],
+      readonly,
+    }
+  }
+
+  if (field.type === 'ref' || field.type === 'api') {
+    return {
+      field,
+      mode: 'scalar',
+      typeLabel: dataFieldTypeLabel(field),
+      fields: [],
+      readonly: true,
+    }
+  }
+
+  return {
+    field,
+    mode: 'scalar',
+    typeLabel: (field.remark?.trim()
+      ? `${field.type} · ${field.remark.trim()}`
+      : field.type) + bindingHint,
+    fields: [],
+    readonly,
+  }
+}
+
+const dataFieldForms = computed(() =>
+  dataFields.value.map(resolveDataFieldForm),
+)
+
+function getDataArrayItems(field: DataField): unknown[] {
+  return Array.isArray(field.value) ? field.value : []
+}
+
+function dataObjectFieldValue(field: DataField, fieldName: string): unknown {
+  const obj = field.value
+  if (obj && typeof obj === 'object' && !Array.isArray(obj)) {
+    return (obj as Record<string, unknown>)[fieldName]
+  }
+  return undefined
+}
+
+function setDataObjectField(
+  form: DataFieldFormModel,
+  fieldName: string,
+  value: unknown,
+) {
+  if (form.readonly) return
+  const cur = form.field.value
+  const base =
+    cur && typeof cur === 'object' && !Array.isArray(cur)
+      ? { ...(cur as Record<string, unknown>) }
+      : buildObjectDefault(form.fields)
+  base[fieldName] = value
+  onDataFieldInput(form.field, base)
+}
+
+function onDataObjectFieldJsonBlur(
+  form: DataFieldFormModel,
+  fieldName: string,
+  text: string,
+  asArray: boolean,
+) {
+  const raw = text.trim()
+  if (!raw) {
+    setDataObjectField(form, fieldName, asArray ? [] : {})
+    return
+  }
+  try {
+    setDataObjectField(form, fieldName, JSON.parse(raw))
+  } catch {
+    // keep
+  }
+}
+
 const propDefs = computed(() =>
   (props.config?.props ?? []).filter((item) => item.name.trim()),
 )
-
-const exposedMethods = computed(() => {
-  const names = props.config?.exposedMethods ?? []
-  const list = props.methods ?? []
-  return names
-    .map((name) => {
-      const method = list.find((item) => item.name === name && !item.builtin)
-      return {
-        name,
-        params: method?.params ?? [],
-        hasBody: Boolean(method?.body?.trim()),
-      }
-    })
-    .filter((item) => item.name.trim())
-})
 
 function fieldKindFromType(
   type: string | undefined,
@@ -404,6 +609,7 @@ function objectFieldValue(def: ComponentPropDef, fieldName: string): unknown {
 const itemDialogVisible = ref(false)
 const itemDialogTitle = ref('')
 const itemEditDef = ref<ComponentPropDef | null>(null)
+const itemEditDataField = ref<DataField | null>(null)
 const itemEditIndex = ref(-1)
 const itemEditFields = ref<ObjectFieldForm[]>([])
 const itemEditIsObject = ref(true)
@@ -411,6 +617,7 @@ const itemEditKind = ref<FieldKind>('string')
 const itemEditEnumOptions = ref<string[]>([])
 const itemEditDraft = reactive<Record<string, unknown>>({})
 const itemEditScalar = ref<unknown>('')
+const itemEditReadonly = ref(false)
 
 function clearItemEditDraft() {
   for (const key of Object.keys(itemEditDraft)) delete itemEditDraft[key]
@@ -418,6 +625,8 @@ function clearItemEditDraft() {
 
 function openAddArrayItem(form: PropFormModel) {
   itemEditDef.value = form.def
+  itemEditDataField.value = null
+  itemEditReadonly.value = false
   itemEditIndex.value = -1
   itemEditFields.value = form.fields
   itemEditIsObject.value = form.fields.length > 0
@@ -437,6 +646,8 @@ function openEditArrayItem(form: PropFormModel, index: number) {
   const items = getArrayItems(form.def)
   const current = items[index]
   itemEditDef.value = form.def
+  itemEditDataField.value = null
+  itemEditReadonly.value = false
   itemEditIndex.value = index
   itemEditFields.value = form.fields
   itemEditIsObject.value = form.fields.length > 0
@@ -458,10 +669,64 @@ function openEditArrayItem(form: PropFormModel, index: number) {
   itemDialogVisible.value = true
 }
 
+function openAddDataArrayItem(form: DataFieldFormModel) {
+  if (form.readonly) return
+  itemEditDef.value = null
+  itemEditDataField.value = form.field
+  itemEditReadonly.value = false
+  itemEditIndex.value = -1
+  itemEditFields.value = form.fields
+  itemEditIsObject.value = form.fields.length > 0
+  itemEditKind.value = form.itemKind || 'string'
+  itemEditEnumOptions.value = form.itemEnumOptions || []
+  itemDialogTitle.value = `添加 · ${form.field.name}`
+  clearItemEditDraft()
+  if (itemEditIsObject.value) {
+    Object.assign(itemEditDraft, buildObjectDefault(form.fields))
+  } else {
+    itemEditScalar.value = defaultForKind(itemEditKind.value)
+  }
+  itemDialogVisible.value = true
+}
+
+function openEditDataArrayItem(form: DataFieldFormModel, index: number) {
+  const items = getDataArrayItems(form.field)
+  const current = items[index]
+  itemEditDef.value = null
+  itemEditDataField.value = form.field
+  itemEditReadonly.value = form.readonly
+  itemEditIndex.value = index
+  itemEditFields.value = form.fields
+  itemEditIsObject.value = form.fields.length > 0
+  itemEditKind.value = form.itemKind || 'string'
+  itemEditEnumOptions.value = form.itemEnumOptions || []
+  itemDialogTitle.value = `${form.readonly ? '查看' : '编辑'} · ${form.field.name}[${index}]`
+  clearItemEditDraft()
+  if (itemEditIsObject.value) {
+    const base = buildObjectDefault(form.fields)
+    if (current && typeof current === 'object' && !Array.isArray(current)) {
+      Object.assign(itemEditDraft, base, current as Record<string, unknown>)
+    } else {
+      Object.assign(itemEditDraft, base)
+    }
+  } else {
+    itemEditScalar.value =
+      current !== undefined ? current : defaultForKind(itemEditKind.value)
+  }
+  itemDialogVisible.value = true
+}
+
 function removeArrayItem(def: ComponentPropDef, index: number) {
   const next = [...getArrayItems(def)]
   next.splice(index, 1)
   onPropInput(def, next)
+}
+
+function removeDataArrayItem(field: DataField, index: number) {
+  if (isReadonlyDataField(field)) return
+  const next = [...getDataArrayItems(field)]
+  next.splice(index, 1)
+  onDataFieldInput(field, next)
 }
 
 function setItemField(name: string, value: unknown) {
@@ -482,81 +747,36 @@ function onItemNestedJsonBlur(fieldName: string, text: string, asArray: boolean)
 }
 
 function saveItemDialog() {
-  const def = itemEditDef.value
-  if (!def) return
-  const next = [...getArrayItems(def)]
+  if (itemEditReadonly.value) {
+    itemDialogVisible.value = false
+    return
+  }
   const value = itemEditIsObject.value
     ? { ...itemEditDraft }
     : itemEditScalar.value
+
+  if (itemEditDataField.value) {
+    const field = itemEditDataField.value
+    const next = [...getDataArrayItems(field)]
+    if (itemEditIndex.value >= 0) next[itemEditIndex.value] = value
+    else next.push(value)
+    onDataFieldInput(field, next)
+    itemDialogVisible.value = false
+    return
+  }
+
+  const def = itemEditDef.value
+  if (!def) return
+  const next = [...getArrayItems(def)]
   if (itemEditIndex.value >= 0) next[itemEditIndex.value] = value
   else next.push(value)
   onPropInput(def, next)
   itemDialogVisible.value = false
 }
 
-const invokeVisible = ref(false)
-const invokeName = ref('')
-const invokeParams = ref<MethodParam[]>([])
-const invokeDraft = reactive<Record<string, string>>({})
-
-function openInvoke(method: { name: string; params: MethodParam[] }) {
-  if (!method.params.length) {
-    emit('invoke-method', { name: method.name, args: [] })
-    return
-  }
-  invokeName.value = method.name
-  invokeParams.value = method.params
-  for (const key of Object.keys(invokeDraft)) delete invokeDraft[key]
-  for (const param of method.params) {
-    const key = param.name.trim()
-    if (!key) continue
-    invokeDraft[key] =
-      param.type === 'boolean'
-        ? 'false'
-        : param.type === 'number'
-          ? '0'
-          : param.type === 'object' || param.type === 'array'
-            ? param.type === 'array'
-              ? '[]'
-              : '{}'
-            : ''
-  }
-  invokeVisible.value = true
-}
-
-function parseParamValue(param: MethodParam, raw: string): unknown {
-  const text = raw.trim()
-  if (param.type === 'boolean') {
-    const s = text.toLowerCase()
-    return s === 'true' || s === '1'
-  }
-  if (param.type === 'number') {
-    const n = Number(text)
-    return Number.isFinite(n) ? n : 0
-  }
-  if (param.type === 'object' || param.type === 'array' || param.type === 'any') {
-    if (!text) return param.type === 'array' ? [] : {}
-    try {
-      return JSON.parse(text)
-    } catch {
-      return text
-    }
-  }
-  return raw
-}
-
-function confirmInvoke() {
-  const args = invokeParams.value.map((param) =>
-    parseParamValue(param, invokeDraft[param.name.trim()] ?? ''),
-  )
-  emit('invoke-method', { name: invokeName.value, args })
-  invokeVisible.value = false
-}
-
 watch(
   () => props.mode,
   () => {
-    invokeVisible.value = false
     itemDialogVisible.value = false
   },
 )
@@ -564,26 +784,30 @@ watch(
 
 <template>
   <aside class="preview-debug">
-    <div class="panel-header">调试</div>
+    <div class="panel-header">
+      <span>调试</span>
+      <el-radio-group
+        v-if="mode === 'component'"
+        v-model="debugTab"
+        size="small"
+        class="panel-tabs"
+      >
+        <el-radio-button value="data">数据</el-radio-button>
+        <el-radio-button value="log">
+          日志
+          <span v-if="emitLogs?.length" class="tab-badge">{{ emitLogs.length }}</span>
+        </el-radio-button>
+      </el-radio-group>
+    </div>
 
     <div class="panel-body">
-      <div v-if="mode === 'page'" class="section">
-        <div class="section-title">页面导航</div>
-        <div class="nav-actions">
-          <el-button @click="emit('back')" :disabled="!canGoBack">返回</el-button>
-          <el-button @click="emit('go-entry')" :disabled="!hasEntryPage">
-            回到入口页
-          </el-button>
-          <el-button :icon="RefreshRight" @click="emit('refresh')">刷新</el-button>
-        </div>
-      </div>
-
-      <template v-if="mode === 'component'">
+      <!-- 组件 · 数据：入参 + 数据池 -->
+      <template v-if="mode === 'component' && debugTab === 'data'">
       <div class="section">
-        <div class="section-title">Props</div>
+        <div class="section-title">入参</div>
         <el-empty
           v-if="!propForms.length"
-          description="暂无 Props"
+          description="暂无入参"
           :image-size="48"
         />
         <div v-else class="prop-list">
@@ -756,43 +980,13 @@ watch(
           </div>
         </div>
       </div>
+      </template>
 
-      <div class="section">
-        <div class="section-title">暴露方法</div>
-        <el-empty
-          v-if="!exposedMethods.length"
-          description="暂无暴露方法"
-          :image-size="48"
-        />
-        <div v-else class="method-list">
-          <div
-            v-for="method in exposedMethods"
-            :key="method.name"
-            class="method-row"
-          >
-            <div class="method-meta">
-              <span class="method-name">{{ method.name }}</span>
-              <span class="method-params">
-                {{
-                  method.params.length
-                    ? `(${method.params.map((p) => p.name).join(', ')})`
-                    : '()'
-                }}
-              </span>
-            </div>
-            <el-button
-              type="primary"
-              link
-              :disabled="!method.hasBody"
-              @click="openInvoke(method)"
-            >
-              {{ method.params.length ? '执行…' : '执行' }}
-            </el-button>
-          </div>
-        </div>
-      </div>
-
-      <div class="section emit-section">
+      <!-- 组件 · 日志：Emit -->
+      <div
+        v-if="mode === 'component' && debugTab === 'log'"
+        class="section emit-section"
+      >
         <div class="section-title row">
           <span>Emit 日志</span>
           <el-button
@@ -807,22 +1001,25 @@ watch(
         </div>
         <el-empty
           v-if="!emitLogs?.length"
-          description="尚无 emit 触发"
+          description="点击画布触发 emit 后显示在这里"
           :image-size="48"
         />
-        <ul v-else class="emit-log">
-          <li v-for="item in emitLogs" :key="item.id" class="emit-item">
+        <div v-else class="emit-log">
+          <div v-for="item in emitLogs" :key="item.id" class="emit-card">
             <div class="emit-head">
               <span class="emit-event">{{ item.event }}</span>
               <span class="emit-time">{{ item.time }}</span>
             </div>
             <pre class="emit-args">{{ formatJson(item.args) }}</pre>
-          </li>
-        </ul>
+          </div>
+        </div>
       </div>
-      </template>
 
-      <div class="section">
+      <!-- 数据池：页面始终显示；组件在「数据」页 -->
+      <div
+        v-if="mode === 'page' || debugTab === 'data'"
+        class="section"
+      >
         <div class="section-title row">
           <span>数据池</span>
           <el-button
@@ -836,78 +1033,206 @@ watch(
           </el-button>
         </div>
         <el-empty
-          v-if="!dataFields.length"
+          v-if="!dataFieldForms.length"
           description="暂无数据池字段"
           :image-size="48"
         />
-        <div v-else class="prop-list">
+        <div v-else class="param-list">
           <div
-            v-for="field in dataFields"
-            :key="field.name"
-            class="prop-row"
+            v-for="form in dataFieldForms"
+            :key="form.field.name"
+            class="param-block"
           >
             <div class="prop-label">
-              <span class="prop-name">{{ field.name }}</span>
-              <span class="prop-type">{{ dataFieldTypeLabel(field) }}</span>
+              <span class="prop-name">{{ form.field.name }}</span>
+              <span class="prop-type">{{ form.typeLabel }}</span>
             </div>
 
-            <template v-if="isReadonlyDataField(field)">
+            <!-- 标量 -->
+            <template v-if="form.mode === 'scalar'">
               <el-switch
-                v-if="field.type === 'boolean'"
-                :model-value="field.value === true"
-                disabled
-              />
-              <pre
-                v-else-if="field.type === 'json' || field.type === 'array'"
-                class="data-readonly-json"
-              >{{ formatJson(field.value) }}</pre>
-              <el-input
-                v-else
-                :model-value="
-                  field.value == null ? '' : String(field.value)
-                "
-                readonly
-              />
-            </template>
-            <template v-else>
-              <el-switch
-                v-if="field.type === 'boolean'"
-                :model-value="field.value === true"
-                @update:model-value="onDataFieldInput(field, $event === true)"
+                v-if="form.field.type === 'boolean'"
+                :model-value="form.field.value === true"
+                :disabled="form.readonly"
+                @update:model-value="onDataFieldInput(form.field, $event === true)"
               />
               <el-input-number
-                v-else-if="field.type === 'number'"
-                :model-value="Number(field.value ?? 0)"
+                v-else-if="form.field.type === 'number'"
+                :model-value="Number(form.field.value ?? 0)"
+                :disabled="form.readonly"
                 controls-position="right"
                 style="width: 100%"
-                @update:model-value="onDataFieldInput(field, $event ?? 0)"
+                @update:model-value="onDataFieldInput(form.field, $event ?? 0)"
               />
               <ColorPicker
-                v-else-if="field.type === 'color'"
-                :model-value="String(field.value ?? '')"
+                v-else-if="form.field.type === 'color' && !form.readonly"
+                :model-value="String(form.field.value ?? '')"
                 placeholder="#409eff / rgba(...)"
-                @update:model-value="onDataFieldInput(field, $event)"
+                @update:model-value="onDataFieldInput(form.field, $event)"
               />
               <el-input
-                v-else-if="field.type === 'json' || field.type === 'array'"
-                type="textarea"
-                :rows="3"
-                :model-value="formatJson(field.value)"
-                @blur="
-                  onDataJsonBlur(
-                    field,
-                    ($event.target as HTMLTextAreaElement).value,
-                  )
-                "
+                v-else-if="form.field.type === 'color'"
+                :model-value="String(form.field.value ?? '')"
+                readonly
               />
               <el-input
                 v-else
                 :model-value="
-                  field.value == null ? '' : String(field.value)
+                  form.field.value == null ? '' : String(form.field.value)
                 "
-                @update:model-value="onDataFieldInput(field, $event)"
+                :readonly="form.readonly"
+                @update:model-value="onDataFieldInput(form.field, $event)"
               />
             </template>
+
+            <!-- 具名对象：展开字段 -->
+            <div v-else-if="form.mode === 'object'" class="object-fields">
+              <div
+                v-for="sub in form.fields"
+                :key="sub.name"
+                class="object-field"
+              >
+                <div class="object-field-label">
+                  <span class="prop-name">{{ sub.name }}</span>
+                  <span v-if="sub.remark" class="prop-type">{{ sub.remark }}</span>
+                </div>
+                <el-switch
+                  v-if="sub.kind === 'boolean'"
+                  :model-value="dataObjectFieldValue(form.field, sub.name) === true"
+                  :disabled="form.readonly"
+                  @update:model-value="
+                    setDataObjectField(form, sub.name, $event === true)
+                  "
+                />
+                <el-input-number
+                  v-else-if="sub.kind === 'number'"
+                  :model-value="
+                    Number(dataObjectFieldValue(form.field, sub.name) ?? 0)
+                  "
+                  :disabled="form.readonly"
+                  controls-position="right"
+                  style="width: 100%"
+                  @update:model-value="
+                    setDataObjectField(form, sub.name, $event ?? 0)
+                  "
+                />
+                <el-select
+                  v-else-if="sub.kind === 'enum'"
+                  :model-value="
+                    String(dataObjectFieldValue(form.field, sub.name) ?? '')
+                  "
+                  :disabled="form.readonly"
+                  clearable
+                  placeholder="选择"
+                  style="width: 100%"
+                  @update:model-value="
+                    setDataObjectField(form, sub.name, $event ?? '')
+                  "
+                >
+                  <el-option
+                    v-for="opt in sub.enumOptions"
+                    :key="opt"
+                    :label="opt"
+                    :value="opt"
+                  />
+                </el-select>
+                <el-input
+                  v-else-if="sub.kind === 'json' || sub.kind === 'array'"
+                  type="textarea"
+                  :rows="2"
+                  :readonly="form.readonly"
+                  :model-value="
+                    formatJson(dataObjectFieldValue(form.field, sub.name))
+                  "
+                  @blur="
+                    form.readonly
+                      ? undefined
+                      : onDataObjectFieldJsonBlur(
+                          form,
+                          sub.name,
+                          ($event.target as HTMLTextAreaElement).value,
+                          sub.kind === 'array',
+                        )
+                  "
+                />
+                <el-input
+                  v-else
+                  :readonly="form.readonly"
+                  :model-value="
+                    String(dataObjectFieldValue(form.field, sub.name) ?? '')
+                  "
+                  @update:model-value="
+                    setDataObjectField(form, sub.name, String($event ?? ''))
+                  "
+                />
+              </div>
+            </div>
+
+            <!-- 数组：逐项列表 -->
+            <div v-else-if="form.mode === 'array'" class="array-list">
+              <div
+                v-if="!getDataArrayItems(form.field).length"
+                class="array-empty"
+              >
+                暂无数据{{ form.readonly ? '' : '，点击下方添加' }}
+              </div>
+              <div
+                v-for="(item, index) in getDataArrayItems(form.field)"
+                :key="`${form.field.name}-${index}`"
+                class="array-item"
+                @click="openEditDataArrayItem(form, index)"
+              >
+                <div class="array-item-main">
+                  <span class="array-index">{{ index + 1 }}</span>
+                  <span class="array-summary">{{
+                    summarizeItem(item, form.fields)
+                  }}</span>
+                </div>
+                <div class="array-item-actions" @click.stop>
+                  <el-button
+                    type="primary"
+                    link
+                    :icon="EditPen"
+                    @click="openEditDataArrayItem(form, index)"
+                  />
+                  <el-button
+                    v-if="!form.readonly"
+                    type="danger"
+                    link
+                    :icon="Delete"
+                    @click="removeDataArrayItem(form.field, index)"
+                  />
+                </div>
+              </div>
+              <el-button
+                v-if="!form.readonly"
+                class="array-add"
+                type="primary"
+                link
+                :icon="Plus"
+                @click="openAddDataArrayItem(form)"
+              >
+                添加
+              </el-button>
+            </div>
+
+            <!-- 无结构对象 / 嵌套数组：JSON -->
+            <pre
+              v-else-if="form.readonly"
+              class="data-readonly-json"
+            >{{ formatJson(form.field.value) }}</pre>
+            <el-input
+              v-else
+              type="textarea"
+              :rows="3"
+              :model-value="formatJson(form.field.value)"
+              @blur="
+                onDataJsonBlur(
+                  form.field,
+                  ($event.target as HTMLTextAreaElement).value,
+                )
+              "
+            />
           </div>
         </div>
       </div>
@@ -1036,49 +1361,16 @@ watch(
         </div>
       </div>
       <template #footer>
-        <el-button @click="itemDialogVisible = false">取消</el-button>
-        <el-button type="primary" @click="saveItemDialog">确定</el-button>
-      </template>
-    </el-dialog>
-
-    <el-dialog
-      v-model="invokeVisible"
-      :title="`执行 ${invokeName}`"
-      width="420px"
-      destroy-on-close
-      append-to-body
-    >
-      <el-form label-width="88px">
-        <el-form-item
-          v-for="param in invokeParams"
-          :key="param.name"
-          :label="param.name"
+        <el-button @click="itemDialogVisible = false">
+          {{ itemEditReadonly ? '关闭' : '取消' }}
+        </el-button>
+        <el-button
+          v-if="!itemEditReadonly"
+          type="primary"
+          @click="saveItemDialog"
         >
-          <el-select
-            v-if="param.type === 'boolean'"
-            v-model="invokeDraft[param.name]"
-            style="width: 100%"
-          >
-            <el-option label="true" value="true" />
-            <el-option label="false" value="false" />
-          </el-select>
-          <el-input
-            v-else-if="param.type === 'object' || param.type === 'array' || param.type === 'any'"
-            v-model="invokeDraft[param.name]"
-            type="textarea"
-            :rows="3"
-            :placeholder="param.type === 'array' ? '[]' : '{}'"
-          />
-          <el-input
-            v-else
-            v-model="invokeDraft[param.name]"
-            :placeholder="param.type"
-          />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="invokeVisible = false">取消</el-button>
-        <el-button type="primary" @click="confirmInvoke">执行</el-button>
+          确定
+        </el-button>
       </template>
     </el-dialog>
   </aside>
@@ -1101,9 +1393,48 @@ watch(
   padding: 0 14px;
   display: flex;
   align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 14px;
   font-weight: 600;
   color: #303133;
   border-bottom: 1px solid #ebeef5;
+}
+
+.panel-tabs {
+  flex-shrink: 0;
+}
+
+.panel-tabs :deep(.el-radio-button__inner) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 11px;
+  box-sizing: border-box;
+  line-height: 1;
+}
+
+.tab-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.35);
+  color: inherit;
+  font-size: 10px;
+  line-height: 1;
+  box-sizing: border-box;
+  flex-shrink: 0;
+}
+
+.panel-tabs :deep(.el-radio-button:not(.is-active) .tab-badge) {
+  background: #409eff;
+  color: #fff;
 }
 
 .panel-body {
@@ -1136,22 +1467,18 @@ watch(
   justify-content: space-between;
 }
 
-.nav-actions {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.nav-actions .el-button {
-  margin: 0;
-  width: 100%;
-}
-
 .prop-list,
-.method-list {
+.method-list,
+.param-list {
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+
+.param-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .data-readonly-json {
@@ -1312,7 +1639,7 @@ watch(
 
 .emit-section {
   flex: 1;
-  min-height: 120px;
+  min-height: 0;
   display: flex;
   flex-direction: column;
 }
@@ -1325,8 +1652,9 @@ watch(
   flex-direction: column;
   gap: 8px;
   overflow: auto;
+  flex: 1;
+  min-height: 0;
   scrollbar-width: none;
-  scrollbar-gutter: auto;
 }
 
 .emit-log::-webkit-scrollbar {
@@ -1334,11 +1662,25 @@ watch(
   height: 0;
 }
 
-.emit-item {
-  padding: 8px 10px;
+.emit-log:hover {
+  scrollbar-width: thin;
+  scrollbar-color: #c0c4cc transparent;
+}
+
+.emit-log:hover::-webkit-scrollbar {
+  width: 6px;
+}
+
+.emit-log:hover::-webkit-scrollbar-thumb {
+  background: #c0c4cc;
+  border-radius: 3px;
+}
+
+.emit-card {
+  padding: 10px 12px;
+  border: 1px solid #ebeef5;
   border-radius: 8px;
-  background: #0f172a;
-  color: #e2e8f0;
+  background: #fafbfc;
 }
 
 .emit-head {
@@ -1346,24 +1688,29 @@ watch(
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  margin-bottom: 4px;
+  margin-bottom: 6px;
 }
 
 .emit-event {
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 600;
-  color: #7dd3fc;
+  color: #303133;
 }
 
 .emit-time {
   font-size: 11px;
   color: #94a3b8;
+  flex-shrink: 0;
 }
 
 .emit-args {
   margin: 0;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: #0f172a;
+  color: #e2e8f0;
   font-size: 11px;
-  line-height: 1.4;
+  line-height: 1.45;
   white-space: pre-wrap;
   word-break: break-all;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;

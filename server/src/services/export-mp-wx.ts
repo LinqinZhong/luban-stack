@@ -1,4 +1,4 @@
-import { mkdir, rm, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { openProject, ProjectError } from './project.js'
 import { listPages, getPage } from './pages.js'
@@ -12,10 +12,12 @@ import {
 } from './backend-services.js'
 import { parseXml, findRootNode, type XmlNode } from './export-vue3/xml-parser.js'
 import { buildIconSvg } from './export-vue3/icon-export.js'
+import { generateVoiderIconFiles } from './export-mp-wx/voider-icon.js'
 import { scaffoldMpWxFiles } from './export-mp-wx/scaffold.js'
 import {
   generatePageFiles,
   generateComponentFiles,
+  ClassRegistry,
 } from './export-mp-wx/wx-codegen.js'
 import {
   joinControllerApiPath,
@@ -178,6 +180,10 @@ export async function exportMpWxProject(
     if (root) componentRoots.set(c.id, root)
   }
 
+  const designWidth =
+    config.canvas?.width > 0 ? config.canvas.width : 375
+  const classRegistry = new ClassRegistry()
+
   const scaffold = scaffoldMpWxFiles({
     config,
     pages: pageSummaries.map((p) => ({ id: p.id, title: p.title })),
@@ -197,6 +203,8 @@ export async function exportMpWxProject(
       componentRoots,
       resolveApi,
       statusBar: page.config.statusBar,
+      designWidth,
+      classRegistry,
     })
     const base = `pages/${page.id}/index`
     await writeProjectFile(outputPath, `${base}.wxml`, files.wxml)
@@ -221,6 +229,8 @@ export async function exportMpWxProject(
       lifecycle,
       componentConfigs,
       componentRoots,
+      designWidth,
+      classRegistry,
     })
     const base = `components/${component.id}/index`
     await writeProjectFile(outputPath, `${base}.wxml`, files.wxml)
@@ -229,7 +239,21 @@ export async function exportMpWxProject(
     await writeProjectFile(outputPath, `${base}.json`, files.json)
   }
 
-  const iconFiles: Record<string, string> = {}
+  // 工具类写入共享文件：组件 @import；app.wxss 须把 @import 放在最前
+  const utilities =
+    classRegistry.toWxss() ||
+    '/* Voider utilities — none generated */\n'
+  await writeProjectFile(outputPath, 'styles/utilities.wxss', utilities)
+  const existing = await readFile(path.join(outputPath, 'app.wxss'), 'utf-8')
+  await writeProjectFile(
+    outputPath,
+    'app.wxss',
+    `@import "./styles/utilities.wxss";\n\n${existing.trim()}\n`,
+  )
+
+  const iconFiles: Record<string, string> = {
+    ...generateVoiderIconFiles(iconLibrary),
+  }
   for (const icon of iconLibrary.icons) {
     iconFiles[`assets/icons/${icon.id}.svg`] = buildIconSvg(icon)
   }

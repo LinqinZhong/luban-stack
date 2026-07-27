@@ -10,7 +10,7 @@ import {
   type CSSProperties,
   type Ref,
 } from 'vue'
-import { BADGE_HOST_KEY } from '../../composables/useModalStack'
+import { BADGE_HOST_KEY, CANVAS_TOOL_MODE_KEY, type CanvasToolMode } from '../../composables/useModalStack'
 import {
   hasMargin,
   marginStyle,
@@ -59,6 +59,7 @@ const emit = defineEmits<{
   click: [event: MouseEvent]
   mouseenter: []
   'open-repeat': []
+  'open-event': []
 }>()
 
 const matchParentWidth = computed(() => props.width === 'match_parent')
@@ -255,11 +256,14 @@ const showMarginFrame = computed(
 
 const showContentFrame = computed(() => props.selected || props.hovered)
 
-const hasBadges = computed(
-  () => Boolean(props.repeatBadge) || (props.eventBadgeCount ?? 0) > 0,
-)
-
 const badgeHostRef = inject<Ref<HTMLElement | null> | null>(BADGE_HOST_KEY, null)
+const toolMode = inject<Ref<CanvasToolMode> | null>(CANVAS_TOOL_MODE_KEY, null)
+
+const hasBadges = computed(
+  () =>
+    toolMode?.value !== 'measure' &&
+    (Boolean(props.repeatBadge) || (props.eventBadgeCount ?? 0) > 0),
+)
 const badgeHostEl = computed(() => badgeHostRef?.value ?? null)
 const contentBoxRef = ref<HTMLElement | null>(null)
 const badgeAnchorStyle = ref<CSSProperties>({ visibility: 'hidden' })
@@ -406,6 +410,8 @@ onBeforeUnmount(() => {
           <EventBadge
             v-if="(eventBadgeCount ?? 0) > 0"
             :count="eventBadgeCount"
+            clickable
+            @click="emit('open-event')"
           />
           <RepeatBadge
             v-if="repeatBadge"
@@ -421,6 +427,8 @@ onBeforeUnmount(() => {
           <EventBadge
             v-if="(eventBadgeCount ?? 0) > 0"
             :count="eventBadgeCount"
+            clickable
+            @click="emit('open-event')"
           />
           <RepeatBadge
             v-if="repeatBadge"

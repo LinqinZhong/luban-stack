@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { Plus } from '@element-plus/icons-vue'
+import { Delete, EditPen, Setting } from '@element-plus/icons-vue'
 import ArrayFieldsDialog from './ArrayFieldsDialog.vue'
 import ComputedBindingDialog from './ComputedBindingDialog.vue'
 import ControllerBindingDialog from './ControllerBindingDialog.vue'
@@ -265,6 +265,8 @@ function addField() {
   fields.value = [...fields.value, createEmptyDataField()]
 }
 
+defineExpose({ addField })
+
 function removeField(index: number) {
   fields.value = fields.value.filter((_, i) => i !== index)
 }
@@ -435,14 +437,6 @@ function saveControllerBinding(config: ControllerBindingConfig) {
 
 <template>
   <div class="data-pool">
-    <div class="data-pool-toolbar">
-      <div class="data-pool-title">数据池</div>
-      <div class="data-pool-sub">data.json</div>
-      <el-button type="primary" :icon="Plus" size="small" @click="addField">
-        添加字段
-      </el-button>
-    </div>
-
     <div class="data-pool-table">
       <el-table :data="fields" border stripe empty-text="暂无数据字段，点击添加字段">
         <el-table-column label="字段名" min-width="140">
@@ -476,7 +470,6 @@ function saveControllerBinding(config: ControllerBindingConfig) {
                 v-if="genericNamesOf(leafNamedTypeRef(row)).length"
                 type="primary"
                 link
-                size="small"
                 class="type-generic-btn"
                 @click="openFieldGenerics($index)"
               >
@@ -521,7 +514,12 @@ function saveControllerBinding(config: ControllerBindingConfig) {
           <template #default="{ row, $index }">
             <div v-if="row.binding === 'computed'" class="complex-value">
               <span class="value-preview">计算 · {{ computedValueSummary(row) }}</span>
-              <el-button type="primary" link @click="openComputeEditor($index)">
+              <el-button
+                type="primary"
+                link
+                :icon="EditPen"
+                @click="openComputeEditor($index)"
+              >
                 编辑逻辑
               </el-button>
             </div>
@@ -532,6 +530,7 @@ function saveControllerBinding(config: ControllerBindingConfig) {
               <el-button
                 type="primary"
                 link
+                :icon="Setting"
                 @click="openControllerEditor($index)"
               >
                 配置
@@ -583,11 +582,25 @@ function saveControllerBinding(config: ControllerBindingConfig) {
             />
             <div v-else-if="row.type === 'json'" class="complex-value">
               <span class="value-preview">{{ objectFieldCount(row) }} 个字段</span>
-              <el-button type="primary" link @click="openObjectEditor($index)">编辑</el-button>
+              <el-button
+                type="primary"
+                link
+                :icon="EditPen"
+                @click="openObjectEditor($index)"
+              >
+                编辑
+              </el-button>
             </div>
             <div v-else-if="row.type === 'array'" class="complex-value">
               <span class="value-preview">{{ arrayItemCount(row) }} 项</span>
-              <el-button type="primary" link @click="openArrayEditor($index)">编辑</el-button>
+              <el-button
+                type="primary"
+                link
+                :icon="EditPen"
+                @click="openArrayEditor($index)"
+              >
+                编辑
+              </el-button>
             </div>
             <el-input
               v-else
@@ -598,12 +611,12 @@ function saveControllerBinding(config: ControllerBindingConfig) {
           </template>
         </el-table-column>
 
-        <el-table-column label="操作" width="72" fixed="right" align="center">
+        <el-table-column label="操作" width="88" fixed="right" align="center">
           <template #default="{ $index }">
             <el-button
               type="danger"
               link
-              size="small"
+              :icon="Delete"
               @click="removeField($index)"
             >
               删除
@@ -674,27 +687,6 @@ function saveControllerBinding(config: ControllerBindingConfig) {
   flex-direction: column;
   overflow: hidden;
   background: #fff;
-}
-
-.data-pool-toolbar {
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 12px 16px;
-  border-bottom: 1px solid #ebeef5;
-}
-
-.data-pool-title {
-  font-size: 15px;
-  font-weight: 600;
-  color: #303133;
-}
-
-.data-pool-sub {
-  flex: 1;
-  font-size: 12px;
-  color: #94a3b8;
 }
 
 .data-pool-table {

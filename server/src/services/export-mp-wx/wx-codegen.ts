@@ -3,6 +3,7 @@ import type { ComponentConfig } from '../../types/component.js'
 import type { LifecycleConfig } from '../../types/lifecycle.js'
 import type { PageMethod } from '../../types/page-method.js'
 import type { XmlNode } from '../export-vue3/xml-parser.js'
+import { DEFAULT_CANVAS_WIDTH } from '../../types/voider-project.js'
 import {
   parseApiPropBinding,
   type MpApiBinding,
@@ -13,6 +14,20 @@ import {
   generateComputedObservers,
   generatePageSyncHandlers,
 } from './method-codegen.js'
+import {
+  ClassRegistry,
+  classAttr,
+  hasWidthClass,
+  hasHeightClass,
+} from './wx-tw.js'
+import {
+  collectMpRefFields,
+  modalVisibleDataKey,
+  renderRefLocalVars,
+  type MpRefField,
+} from './wx-refs.js'
+
+export { ClassRegistry } from './wx-tw.js'
 
 function escapeXml(text: string): string {
   return text
@@ -22,19 +37,40 @@ function escapeXml(text: string): string {
     .replace(/"/g, '&quot;')
 }
 
-/** ????px ??rpx?? 375 ??1px ??1rpx ??????????????? 750??*/
-function pxToRpx(value: number): string {
-  return `${Math.round(value * 2)}rpx`
+/**
+ * 设计稿 px → 相对视口宽度（生成时算好数值）。
+ * 画布宽 375、尺寸 20 → 5.333333vw（即 20/375*100）
+ * 设备实测尺寸（状态栏等）勿走此函数，应保留 px。
+ */
+function pxToVw(value: number, designWidth: number): string {
+  const w = designWidth > 0 ? designWidth : DEFAULT_CANVAS_WIDTH
+  if (!Number.isFinite(value) || value === 0) return '0'
+  const vw = (value / w) * 100
+  return `${formatVwNumber(vw)}vw`
 }
 
-function parseSize(raw: string | undefined): string | null {
+/** 绑定设计稿尺寸：预计算 100/designWidth 系数，运行时 {{expr*k}}vw */
+function pxBindToVw(expr: string, designWidth: number): string {
+  const w = designWidth > 0 ? designWidth : DEFAULT_CANVAS_WIDTH
+  const k = formatVwNumber(100 / w)
+  return `{{${expr}*${k}}}vw`
+}
+
+function formatVwNumber(n: number): string {
+  if (!Number.isFinite(n)) return '0'
+  if (Number.isInteger(n)) return String(n)
+  // 去掉多余尾零，最多保留 6 位小数
+  return String(Number(n.toFixed(6)))
+}
+
+function parseSize(raw: string | undefined, designWidth: number): string | null {
   if (!raw?.trim()) return null
   const v = raw.trim()
   if (v.includes('{')) return null
   if (v === 'match_parent') return '100%'
   if (v === 'wrap_content') return 'auto'
   const n = Number(v.replace(/px$/i, ''))
-  if (Number.isFinite(n)) return pxToRpx(n)
+  if (Number.isFinite(n)) return pxToVw(n, designWidth)
   return v
 }
 
@@ -181,23 +217,100 @@ function compileVisibilityExpr(raw: string | undefined): string | null {
   if (!raw?.trim()) return null
   try {
     const parsed = JSON.parse(raw) as { scenarios?: VisibilityScenario[] }
-    const active = (parsed.scenarios ?? []).filter((s) =>
-      (s.conditions ?? []).some((c) => c.field?.trim()),
-    )
-    if (!active.length) return 'true'
-    const sceneExprs = active.map((scene) => {
-      const conds = (scene.conditions ?? [])
-        .filter((c) => c.field?.trim())
-        .map((c) => visibilityConditionExpr(c))
-      if (!conds.length) return 'true'
-      if (conds.length === 1) return conds[0]!
-      return `(${conds.join(' && ')})`
-    })
-    if (sceneExprs.length === 1) return sceneExprs[0]!
-    return `(${sceneExprs.join(' || ')})`
+    return compileScenariosOrExpr(parsed.scenarios ?? [])
   } catch {
     return null
   }
+}
+
+interface DynamicStyleStateParsed {
+  scenarios: VisibilityScenario[]
+  styles: Record<string, string>
+}
+
+function parseDynamicStylesStates(
+  raw: string | undefined,
+): DynamicStyleStateParsed[] {
+  if (!raw?.trim()) return []
+  try {
+    const parsed = JSON.parse(raw) as {
+      states?: Array<{
+        scenarios?: VisibilityScenario[]
+        styles?: Record<string, string>
+      }>
+    }
+    if (!Array.isArray(parsed.states)) return []
+    return parsed.states
+      .filter((s) => s && typeof s === 'object')
+      .map((s) => ({
+        scenarios: Array.isArray(s.scenarios) ? s.scenarios : [],
+        styles:
+          s.styles && typeof s.styles === 'object'
+            ? Object.fromEntries(
+                Object.entries(s.styles).filter(
+                  (entry): entry is [string, string] =>
+                    typeof entry[1] === 'string' && !!entry[1].trim(),
+                ),
+              )
+            : {},
+      }))
+  } catch {
+    return []
+  }
+}
+
+function compileScenariosOrExpr(
+  scenarios: VisibilityScenario[] | undefined,
+): string | null {
+  const active = (scenarios ?? []).filter((s) =>
+    (s.conditions ?? []).some((c) => c.field?.trim()),
+  )
+  if (!active.length) return null
+  const sceneExprs = active.map((scene) => {
+    const conds = (scene.conditions ?? [])
+      .filter((c) => c.field?.trim())
+      .map((c) => visibilityConditionExpr(c))
+    if (!conds.length) return 'true'
+    if (conds.length === 1) return conds[0]!
+    return `(${conds.join(' && ')})`
+  })
+  if (sceneExprs.length === 1) return sceneExprs[0]!
+  return `(${sceneExprs.join(' || ')})`
+}
+
+/** 静态值 / 绑定 / dynamicStyles → WXML {{ }} 内表达式 */
+function resolveDynamicStyleExpr(
+  styleKey: string,
+  baseRaw: string | undefined,
+  attrs: Record<string, string>,
+  fallback: string,
+): { static?: string; expr: string } {
+  const base = baseRaw && baseRaw !== 'null' ? baseRaw.trim() : ''
+  const baseExpr = base
+    ? isBinding(base)
+      ? `(${normalizeExpr(base.replace(/^\{|\}$/g, ''))})`
+      : `'${escapeWxmlStr(base)}'`
+    : `'${escapeWxmlStr(fallback)}'`
+
+  const states = parseDynamicStylesStates(attrs.dynamicStyles).filter((s) =>
+    s.styles[styleKey]?.trim(),
+  )
+  if (!states.length) {
+    if (base && !isBinding(base)) return { static: base, expr: baseExpr }
+    return { expr: baseExpr }
+  }
+
+  let expr = baseExpr
+  for (let i = states.length - 1; i >= 0; i--) {
+    const state = states[i]!
+    const override = state.styles[styleKey]!.trim()
+    const overrideExpr = isBinding(override)
+      ? `(${normalizeExpr(override.replace(/^\{|\}$/g, ''))})`
+      : `'${escapeWxmlStr(override)}'`
+    const when = compileScenariosOrExpr(state.scenarios) ?? 'true'
+    expr = `(${when}) ? ${overrideExpr} : (${expr})`
+  }
+  return { expr }
 }
 
 /**
@@ -296,9 +409,12 @@ function buildEventHandlerPrelude(
       `    var ${name} = function () { return that.${name}.apply(that, arguments) }`,
     )
   }
+  const refNames = new Set((ctx.refFields ?? []).map((f) => f.name))
+  lines.push(...renderRefLocalVars(ctx.refFields ?? []))
   for (const field of ctx.dataFieldNames) {
     if (!/^[A-Za-z_$][\w$]*$/.test(field)) continue
     if (ctx.siblingMethodNames.includes(field)) continue
+    if (refNames.has(field)) continue
     lines.push(`    var ${field} = that.data.${field}`)
   }
   if (kind === 'scroll') {
@@ -780,23 +896,97 @@ function isOutOfFlowTree(node: XmlNode): boolean {
   return false
 }
 
-const OUT_OF_FLOW_HOST_STYLE =
-  'position:absolute;top:0;left:0;width:0;height:0;margin:0;overflow:visible;pointer-events:none'
+const OUT_OF_FLOW_HOST_CLASSES = [
+  'absolute',
+  'top-0',
+  'left-0',
+  'w-0',
+  'h-0',
+  'm-0',
+  'overflow-visible',
+  'pointer-events-none',
+] as const
 
 function isTrueAttr(raw: string | undefined): boolean {
   return raw === 'true' || raw === '1'
 }
 
-function attrStyle(
+type LayoutResult = { classes: string[]; style: string }
+
+const SPACING_TW: Record<string, { prefix: string; prop: string }> = {
+  padding: { prefix: 'p', prop: 'padding' },
+  paddingLeft: { prefix: 'pl', prop: 'padding-left' },
+  paddingRight: { prefix: 'pr', prop: 'padding-right' },
+  paddingTop: { prefix: 'pt', prop: 'padding-top' },
+  paddingBottom: { prefix: 'pb', prop: 'padding-bottom' },
+  margin: { prefix: 'm', prop: 'margin' },
+  marginLeft: { prefix: 'ml', prop: 'margin-left' },
+  marginRight: { prefix: 'mr', prop: 'margin-right' },
+  marginTop: { prefix: 'mt', prop: 'margin-top' },
+  marginBottom: { prefix: 'mb', prop: 'margin-bottom' },
+}
+
+/** 与编辑器 marginValues 一致：单侧缺省时回退到统一 margin */
+function marginPxValues(attrs: Record<string, string>): {
+  top: number
+  right: number
+  bottom: number
+  left: number
+} {
+  const allRaw = attrs.margin?.trim()
+  const allN =
+    allRaw && !isBinding(allRaw)
+      ? Number(allRaw.replace(/px$/i, ''))
+      : NaN
+  const all = Number.isFinite(allN) ? allN : 0
+  const hasAll = Boolean(allRaw && !isBinding(allRaw) && Number.isFinite(allN))
+  const side = (key: string): number => {
+    const raw = attrs[key]?.trim()
+    if (!raw || raw === 'null') return hasAll ? all : 0
+    if (isBinding(raw)) return hasAll ? all : 0
+    const n = Number(raw.replace(/px$/i, ''))
+    return Number.isFinite(n) ? n : hasAll ? all : 0
+  }
+  return {
+    top: side('marginTop'),
+    right: side('marginRight'),
+    bottom: side('marginBottom'),
+    left: side('marginLeft'),
+  }
+}
+
+/** match_parent 扣除 margin，避免 100% + margin 溢出（对齐编辑器 matchParentAxisSize） */
+function matchParentSizeCss(
+  axis: 'width' | 'height',
   attrs: Record<string, string>,
+  designWidth: number,
+): string {
+  const m = marginPxValues(attrs)
+  const offsetPx = axis === 'width' ? m.left + m.right : m.top + m.bottom
+  if (!(offsetPx > 0)) return '100%'
+  return `calc(100% - ${pxToVw(offsetPx, designWidth)})`
+}
+
+function attrLayout(
+  attrs: Record<string, string>,
+  reg: ClassRegistry,
   options?: {
     flexParent?: 'row' | 'column'
     isComponent?: boolean
-    /** RelativeLayout 子节点：与编辑器一致，一律 absolute */
     isRelativeChild?: boolean
+    designWidth?: number
   },
-): string {
+): LayoutResult {
+  const designWidth = options?.designWidth ?? DEFAULT_CANVAS_WIDTH
+  const classes: string[] = []
   const parts: string[] = []
+  const pushKnown = (...names: string[]) => {
+    classes.push(...reg.useMany(names))
+  }
+  const pushArb = (prefix: string, prop: string, value: string) => {
+    classes.push(reg.arb(prefix, prop, value))
+  }
+
   const wRaw = attrs.width?.trim()
   const hRaw = attrs.height?.trim()
   const isRelativeChild = Boolean(options?.isRelativeChild)
@@ -817,7 +1007,6 @@ function attrStyle(
         return Boolean(raw) && raw !== 'null'
       },
     )
-  // 相对布局中铺满且可滚：用 inset 固定视口（与 vue3 inset-0 一致）
   const useRelativeInset =
     isRelativeChild &&
     isScrollContainer &&
@@ -831,27 +1020,50 @@ function attrStyle(
   } else if (wBind) {
     parts.push(`width:{{${wBind}}}px`)
   } else if (wRaw === 'match_parent' && options?.flexParent === 'row') {
-    parts.push('flex:1', 'min-width:0', 'width:0')
+    pushKnown('flex-1', 'min-w-0', 'w-0')
+  } else if (wRaw === 'match_parent') {
+    const size = matchParentSizeCss('width', attrs, designWidth)
+    if (size === '100%') pushKnown('w-full', 'min-w-0')
+    else {
+      pushArb('w', 'width', size)
+      pushKnown('min-w-0')
+    }
+  } else if (wRaw === 'wrap_content') {
+    pushKnown('w-fit', 'max-w-full')
   } else {
-    const w = parseSize(wRaw)
-    if (w) parts.push(`width:${w}`)
+    const w = parseSize(wRaw, designWidth)
+    if (w && w !== '100%' && w !== 'auto') pushArb('w', 'width', w)
+    else if (w === '100%') pushKnown('w-full')
+    else if (w === 'auto') pushKnown('w-auto')
   }
+
   const hBind = styleBindingExpr(hRaw)
   if (useRelativeInset) {
     /* height 由 inset 承担 */
   } else if (hBind) {
     parts.push(`height:{{${hBind}}}px`)
   } else if (hRaw === 'match_parent' && options?.flexParent === 'column') {
-    parts.push('flex:1', 'min-height:0', 'height:0')
+    pushKnown('flex-1', 'min-h-0', 'h-0')
   } else if (
     hRaw === 'match_parent' &&
     options?.isComponent &&
     !options?.flexParent
   ) {
-    parts.push('height:auto')
+    pushKnown('h-auto')
+  } else if (hRaw === 'match_parent') {
+    const size = matchParentSizeCss('height', attrs, designWidth)
+    if (size === '100%') pushKnown('h-full', 'min-h-0')
+    else {
+      pushArb('h', 'height', size)
+      pushKnown('min-h-0')
+    }
+  } else if (hRaw === 'wrap_content') {
+    pushKnown('h-fit')
   } else {
-    const h = parseSize(hRaw)
-    if (h) parts.push(`height:${h}`)
+    const h = parseSize(hRaw, designWidth)
+    if (h && h !== '100%' && h !== 'auto') pushArb('h', 'height', h)
+    else if (h === '100%') pushKnown('h-full')
+    else if (h === 'auto') pushKnown('h-auto')
   }
 
   const pad = attrs.padding?.trim()
@@ -860,99 +1072,156 @@ function attrStyle(
     parts.push(`padding:{{${padBind}}}px`)
   } else if (pad && !isBinding(pad)) {
     const n = Number(pad.replace(/px$/i, ''))
-    if (Number.isFinite(n)) parts.push(`padding:${pxToRpx(n)}`)
+    if (Number.isFinite(n)) pushArb('p', 'padding', pxToVw(n, designWidth))
   }
-  for (const [key, css] of [
-    ['paddingLeft', 'padding-left'],
-    ['paddingRight', 'padding-right'],
-    ['paddingTop', 'padding-top'],
-    ['paddingBottom', 'padding-bottom'],
-    ['margin', 'margin'],
-    ['marginLeft', 'margin-left'],
-    ['marginRight', 'margin-right'],
-    ['marginTop', 'margin-top'],
-    ['marginBottom', 'margin-bottom'],
-  ] as const) {
+  for (const [key, meta] of Object.entries(SPACING_TW)) {
+    if (key === 'padding') continue
     const raw = attrs[key]?.trim()
     if (!raw) continue
     const bind = styleBindingExpr(raw)
     if (bind) {
-      parts.push(`${css}:{{${bind}}}px`)
+      parts.push(`${meta.prop}:{{${bind}}}px`)
       continue
     }
     if (isBinding(raw)) continue
     const n = Number(raw.replace(/px$/i, ''))
-    if (Number.isFinite(n)) parts.push(`${css}:${pxToRpx(n)}`)
+    if (Number.isFinite(n)) pushArb(meta.prefix, meta.prop, pxToVw(n, designWidth))
   }
 
   const overflow = (attrs.overflow || '').trim().toLowerCase()
-  if (overflow === 'hidden') parts.push('overflow:hidden')
-  else if (overflow === 'scroll') {
-    /* scroll ? scroll-view???? overflow */
-  } else if (overflow === 'visible') parts.push('overflow:visible')
+  if (overflow === 'hidden') pushKnown('overflow-hidden')
+  else if (overflow === 'visible') pushKnown('overflow-visible')
 
   const bg = attrs.background?.trim()
   const bgBind = styleBindingExpr(bg)
-  if (bgBind) {
+  const bgDyn = parseDynamicStylesStates(attrs.dynamicStyles).some((s) =>
+    s.styles.background?.trim(),
+  )
+  if (bgDyn) {
+    const res = resolveDynamicStyleExpr(
+      'background',
+      bg,
+      attrs,
+      'transparent',
+    )
+    parts.push(`background:{{${res.expr}}}`)
+  } else if (bgBind) {
     parts.push(`background:{{${bgBind}}}`)
   } else if (bg && bg !== 'transparent' && !isBinding(bg)) {
-    parts.push(`background:${bg}`)
+    pushArb('bg', 'background', bg)
   }
   const radius = attrs.borderRadius?.trim()
-  if (radius && !isBinding(radius)) {
-    const n = Number(radius.replace(/px$/i, ''))
-    if (Number.isFinite(n)) parts.push(`border-radius:${pxToRpx(n)}`)
+  const cornerKeys = [
+    ['borderTopLeftRadius', 'rounded-tl', 'border-top-left-radius'],
+    ['borderTopRightRadius', 'rounded-tr', 'border-top-right-radius'],
+    ['borderBottomRightRadius', 'rounded-br', 'border-bottom-right-radius'],
+    ['borderBottomLeftRadius', 'rounded-bl', 'border-bottom-left-radius'],
+  ] as const
+  const hasCornerAttr = cornerKeys.some(([key]) => {
+    const raw = attrs[key]?.trim()
+    return Boolean(raw) && raw !== 'null' && !isBinding(raw)
+  })
+  const uniformN =
+    radius && radius !== 'null' && !isBinding(radius)
+      ? Number(radius.replace(/px$/i, ''))
+      : NaN
+  const uniform = Number.isFinite(uniformN) ? uniformN : null
+  if (hasCornerAttr) {
+    // 分角优先；未单独设置的角回退统一 borderRadius，再回退 0（对齐编辑器）
+    // 勿再写 border-radius 简写，否则会盖掉分角
+    for (const [key, prefix, prop] of cornerKeys) {
+      const raw = attrs[key]?.trim()
+      let n: number | null = null
+      if (raw && raw !== 'null' && !isBinding(raw)) {
+        const v = Number(raw.replace(/px$/i, ''))
+        if (Number.isFinite(v)) n = v
+      } else if (uniform != null) {
+        n = uniform
+      } else {
+        n = 0
+      }
+      pushArb(prefix, prop, pxToVw(n, designWidth))
+    }
+  } else if (uniform != null) {
+    pushArb('rounded', 'border-radius', pxToVw(uniform, designWidth))
   }
-  const color = attrs.textColor?.trim() || attrs.color?.trim()
-  const colorBind = styleBindingExpr(color)
-  if (colorBind) {
-    parts.push(`color:{{${colorBind}}}`)
-  } else if (color && !isBinding(color)) {
-    parts.push(`color:${color}`)
+  const textColorRaw = attrs.textColor?.trim()
+  const colorRaw = attrs.color?.trim()
+  const hasTextColorDyn = parseDynamicStylesStates(attrs.dynamicStyles).some(
+    (s) => s.styles.textColor?.trim(),
+  )
+  const hasColorDyn = parseDynamicStylesStates(attrs.dynamicStyles).some((s) =>
+    s.styles.color?.trim(),
+  )
+  if (hasTextColorDyn || (textColorRaw && textColorRaw !== 'null')) {
+    const res = resolveDynamicStyleExpr(
+      'textColor',
+      textColorRaw && textColorRaw !== 'null' ? textColorRaw : undefined,
+      attrs,
+      '#303133',
+    )
+    if (res.static && !hasTextColorDyn) {
+      pushArb('text', 'color', res.static)
+    } else {
+      parts.push(`color:{{${res.expr}}}`)
+    }
+  } else if (hasColorDyn) {
+    const res = resolveDynamicStyleExpr('color', colorRaw, attrs, '#303133')
+    parts.push(`color:{{${res.expr}}}`)
+  } else {
+    const color = textColorRaw || colorRaw
+    const colorBind = styleBindingExpr(color)
+    if (colorBind) {
+      parts.push(`color:{{${colorBind}}}`)
+    } else if (color && color !== 'null' && !isBinding(color)) {
+      pushArb('text', 'color', color)
+    }
   }
   const fontSize = attrs.textSize?.trim() || attrs.size?.trim()
   if (fontSize && !isBinding(fontSize)) {
     const n = Number(fontSize.replace(/px$/i, ''))
-    if (Number.isFinite(n)) parts.push(`font-size:${pxToRpx(n)}`)
+    // 字号用 text-size-[…] 避免与 text-[#color] 冲突
+    if (Number.isFinite(n)) {
+      pushArb('text-size', 'font-size', pxToVw(n, designWidth))
+    }
   }
 
-  // transform：小程序需 -webkit-；仅 Z 轴时用 rotate()（rotateZ 真机常不生效）
   const transformFns = buildTransformFunctions(attrs)
-  // RelativeLayout 定位（子节点一律 absolute，与编辑器 / vue3 一致）
-  const relative: string[] = []
+  let centerTranslate: 'xy' | 'x' | 'y' | null = null
+
   if (isTrueAttr(attrs.layout_centerInParent)) {
-    relative.push('position:absolute', 'left:50%', 'top:50%')
-    transformFns.push('translate(-50%,-50%)')
+    pushKnown('absolute', 'left-1/2', 'top-1/2')
+    centerTranslate = 'xy'
   } else if (isRelativeChild || hasRelativeEdge) {
-    relative.push('position:absolute')
+    pushKnown('absolute')
     if (useRelativeInset) {
-      relative.push('left:0', 'top:0', 'right:0', 'bottom:0')
+      pushKnown('inset-0')
     } else {
       if (
         isTrueAttr(attrs.layout_alignParentLeft) ||
         isTrueAttr(attrs.layout_alignParentStart)
       ) {
-        relative.push('left:0')
+        pushKnown('left-0')
       }
       if (
         isTrueAttr(attrs.layout_alignParentRight) ||
         isTrueAttr(attrs.layout_alignParentEnd)
       ) {
-        relative.push('right:0')
+        pushKnown('right-0')
       }
-      if (isTrueAttr(attrs.layout_alignParentTop)) relative.push('top:0')
-      if (isTrueAttr(attrs.layout_alignParentBottom)) relative.push('bottom:0')
+      if (isTrueAttr(attrs.layout_alignParentTop)) pushKnown('top-0')
+      if (isTrueAttr(attrs.layout_alignParentBottom)) pushKnown('bottom-0')
       if (isTrueAttr(attrs.layout_centerHorizontal)) {
-        relative.push('left:50%')
-        transformFns.push('translateX(-50%)')
+        pushKnown('left-1/2')
+        centerTranslate = 'x'
       }
       if (isTrueAttr(attrs.layout_centerVertical)) {
-        relative.push('top:50%')
-        transformFns.push('translateY(-50%)')
+        pushKnown('top-1/2')
+        centerTranslate = centerTranslate === 'x' ? 'xy' : 'y'
       }
     }
   }
-  // layout_margin*：相对父边缘的偏移（覆盖 left:0 / bottom:0 等）；忽略字面量 "null"
+
   for (const [attrKey, css] of [
     ['layout_marginLeft', 'left'],
     ['layout_marginRight', 'right'],
@@ -963,25 +1232,71 @@ function attrStyle(
     if (!raw || raw === 'null') continue
     const bind = styleBindingExpr(raw)
     if (bind) {
-      relative.push(`${css}:{{${bind}}}px`)
+      parts.push(`${css}:{{${bind}}}px`)
       continue
     }
     if (isBinding(raw)) continue
     const n = Number(raw.replace(/px$/i, ''))
-    if (Number.isFinite(n)) relative.push(`${css}:${pxToRpx(n)}`)
+    if (Number.isFinite(n)) {
+      const vw = pxToVw(n, designWidth)
+      pushArb(css, css, vw)
+    }
   }
+
   const zIndex = attrs.zIndex?.trim()
   if (zIndex && zIndex !== 'null' && !isBinding(zIndex)) {
     const n = Number(zIndex)
-    if (Number.isFinite(n)) relative.push(`z-index:${n}`)
-  }
-  parts.push(...relative)
-  if (transformFns.length) {
-    const t = transformFns.join(' ')
-    parts.push(`-webkit-transform:${t}`, `transform:${t}`)
+    if (Number.isFinite(n)) pushArb('z', 'z-index', String(n))
   }
 
-  return parts.join(';')
+  // 仅有居中 translate、无旋转：用工具类；否则合并进 style
+  if (centerTranslate && !transformFns.length) {
+    if (centerTranslate === 'xy') {
+      classes.push(
+        reg.shell(
+          '-translate-xy-1-2',
+          '-webkit-transform:translate(-50%,-50%);transform:translate(-50%,-50%)',
+        ),
+      )
+    } else if (centerTranslate === 'x') {
+      pushKnown('-translate-x-1/2')
+    } else {
+      pushKnown('-translate-y-1/2')
+    }
+  } else {
+    const fns = [...transformFns]
+    if (centerTranslate === 'xy') fns.push('translate(-50%,-50%)')
+    else if (centerTranslate === 'x') fns.push('translateX(-50%)')
+    else if (centerTranslate === 'y') fns.push('translateY(-50%)')
+    if (fns.length) {
+      const t = fns.join(' ')
+      parts.push(`-webkit-transform:${t}`, `transform:${t}`)
+    }
+  }
+
+  return {
+    classes,
+    style: parts.join(';'),
+  }
+}
+
+/** @deprecated 兼容旧调用：仅返回 style 字符串（无 registry 时退回纯 style） */
+function attrStyle(
+  attrs: Record<string, string>,
+  options?: {
+    flexParent?: 'row' | 'column'
+    isComponent?: boolean
+    isRelativeChild?: boolean
+    designWidth?: number
+    registry?: ClassRegistry
+  },
+): string {
+  if (!options?.registry) {
+    // 无 registry：走临时 registry，丢弃类（不应再走到）
+    const tmp = new ClassRegistry()
+    return attrLayout(attrs, tmp, options).style
+  }
+  return attrLayout(attrs, options.registry, options).style
 }
 
 /** 解析 rotateX/Y/Z → transform 函数列表（支持 {angle} 绑定） */
@@ -1020,22 +1335,51 @@ function buildTransformFunctions(attrs: Record<string, string>): string[] {
   return t
 }
 
-function flexStyle(attrs: Record<string, string>): string {
+function flexClasses(attrs: Record<string, string>, reg: ClassRegistry): string[] {
   const orientation = (attrs.orientation || 'vertical').toLowerCase()
-  const parts = [
-    'display:flex',
-    orientation === 'horizontal' ? 'flex-direction:row' : 'flex-direction:column',
-  ]
-  // ?? CSS gap??? WebView ??????????? margin ??
-  const gravity = attrs.gravity || ''
-  if (gravity.includes('center')) {
-    parts.push('align-items:center', 'justify-content:center')
-  } else if (gravity.includes('right') || gravity.includes('end')) {
-    parts.push(
-      orientation === 'horizontal' ? 'justify-content:flex-end' : 'align-items:flex-end',
-    )
+  const horizontal = orientation === 'horizontal'
+  const classes = reg.useMany([
+    'flex',
+    horizontal ? 'flex-row' : 'flex-col',
+  ])
+  // 与编辑器 / vue 导出 mapGravityMain、mapGravityCross 一致
+  const gravity = (attrs.gravity || '').toLowerCase().trim()
+  if (!gravity) return classes
+
+  if (horizontal) {
+    if (gravity.includes('right') || gravity.includes('end')) {
+      classes.push(reg.use('justify-end'))
+    } else if (gravity.includes('left') || gravity.includes('start')) {
+      classes.push(reg.use('justify-start'))
+    } else if (gravity.includes('center_horizontal') || gravity === 'center') {
+      classes.push(reg.use('justify-center'))
+    }
+
+    if (gravity.includes('bottom')) {
+      classes.push(reg.use('items-end'))
+    } else if (gravity.includes('top')) {
+      classes.push(reg.use('items-start'))
+    } else if (gravity.includes('center_vertical') || gravity === 'center') {
+      classes.push(reg.use('items-center'))
+    }
+  } else {
+    if (gravity.includes('bottom')) {
+      classes.push(reg.use('justify-end'))
+    } else if (gravity.includes('top')) {
+      classes.push(reg.use('justify-start'))
+    } else if (gravity.includes('center_vertical') || gravity === 'center') {
+      classes.push(reg.use('justify-center'))
+    }
+
+    if (gravity.includes('right') || gravity.includes('end')) {
+      classes.push(reg.use('items-end'))
+    } else if (gravity.includes('left') || gravity.includes('start')) {
+      classes.push(reg.use('items-start'))
+    } else if (gravity.includes('center_horizontal') || gravity === 'center') {
+      classes.push(reg.use('items-center'))
+    }
   }
-  return parts.join(';')
+  return classes
 }
 
 function parseGapPx(attrs: Record<string, string>): number | undefined {
@@ -1045,51 +1389,47 @@ function parseGapPx(attrs: Record<string, string>): number | undefined {
   return Number.isFinite(n) && n > 0 ? n : undefined
 }
 
-/** padding / margin ?????virtualHost ???? style ?? padding ????? */
-function spacingStyleFromAttrs(attrs: Record<string, string>): string {
-  const parts: string[] = []
+/** 组件 spacing wrap：静态 padding/margin → 工具类 */
+function spacingClassesFromAttrs(
+  attrs: Record<string, string>,
+  reg: ClassRegistry,
+  designWidth: number,
+): string[] {
+  const classes: string[] = []
   const pad = attrs.padding?.trim()
   if (pad && !isBinding(pad)) {
     const n = Number(pad.replace(/px$/i, ''))
-    if (Number.isFinite(n)) parts.push(`padding:${pxToRpx(n)}`)
+    if (Number.isFinite(n)) {
+      classes.push(reg.arb('p', 'padding', pxToVw(n, designWidth)))
+    }
   }
-  for (const [key, css] of [
-    ['paddingLeft', 'padding-left'],
-    ['paddingRight', 'padding-right'],
-    ['paddingTop', 'padding-top'],
-    ['paddingBottom', 'padding-bottom'],
-    ['margin', 'margin'],
-    ['marginLeft', 'margin-left'],
-    ['marginRight', 'margin-right'],
-    ['marginTop', 'margin-top'],
-    ['marginBottom', 'margin-bottom'],
-  ] as const) {
+  for (const [key, meta] of Object.entries(SPACING_TW)) {
+    if (key === 'padding') continue
     const raw = attrs[key]?.trim()
     if (!raw || isBinding(raw)) continue
     const n = Number(raw.replace(/px$/i, ''))
-    if (Number.isFinite(n)) parts.push(`${css}:${pxToRpx(n)}`)
+    if (Number.isFinite(n)) {
+      classes.push(reg.arb(meta.prefix, meta.prop, pxToVw(n, designWidth)))
+    }
   }
-  return parts.join(';')
+  return classes
 }
 
-function siblingGapMarginStyle(
+function siblingGapClasses(
   ctx: RenderCtx,
   options?: { everyItem?: boolean },
-): string | null {
-  if (ctx.flexGapPx == null) return null
-  if (!(ctx.flexGapPx > 0)) return null
-  if (!options?.everyItem && ctx.isLastFlexChild) return null
-  if (ctx.parentFlex === 'row') return `margin-right:${pxToRpx(ctx.flexGapPx)}`
-  if (ctx.parentFlex === 'column') return `margin-bottom:${pxToRpx(ctx.flexGapPx)}`
-  return null
-}
-
-function withSiblingGap(
-  style: string,
-  ctx: RenderCtx,
-  options?: { everyItem?: boolean },
-): string {
-  return mergeStyle(style, siblingGapMarginStyle(ctx, options))
+): string[] {
+  if (ctx.flexGapPx == null) return []
+  if (!(ctx.flexGapPx > 0)) return []
+  if (!options?.everyItem && ctx.isLastFlexChild) return []
+  const gap = pxToVw(ctx.flexGapPx, ctx.designWidth)
+  if (ctx.parentFlex === 'row') {
+    return [ctx.classRegistry.arb('mr', 'margin-right', gap)]
+  }
+  if (ctx.parentFlex === 'column') {
+    return [ctx.classRegistry.arb('mb', 'margin-bottom', gap)]
+  }
+  return []
 }
 
 function mergeStyle(...chunks: Array<string | null | undefined>): string {
@@ -1102,7 +1442,26 @@ function mergeStyle(...chunks: Array<string | null | undefined>): string {
 
 function styleAttr(style: string): string {
   if (!style) return ''
-  return ` style="${escapeXml(style)}"`
+  // style 里常有 color:{{ a && b ? ... }}；若把 && 写成 &amp;&amp;，WXML 会报 unexpected ';'
+  // 双引号属性内只需转义 "，mustache 表达式保持原样
+  return ` style="${style.replace(/"/g, '&quot;')}"`
+}
+
+/** class + 可选动态 style */
+function classStyleAttrs(
+  classes: Array<string | null | undefined>,
+  style?: string | null,
+  extraClass?: string | null,
+): string[] {
+  const list = [...classes.filter(Boolean), extraClass].filter(
+    (c): c is string => Boolean(c),
+  )
+  const out: string[] = []
+  const c = classAttr(list)
+  if (c) out.push(c)
+  const s = styleAttr(style || '').trim()
+  if (s) out.push(s)
+  return out
 }
 
 type SyncHandler = { handlerName: string; fieldName: string }
@@ -1111,58 +1470,62 @@ type PageHandler = { name: string; body: string }
 
 type RenderCtx = {
   indent: number
-  /** ???????????? componentId ???? */
   usedComponents: Map<string, string>
   kind: 'page' | 'component'
-  /** componentId ??????????type=api / twoWay??*/
   componentConfigs: Map<string, ComponentConfig>
-  /** componentId → 定义树根；用于 Modal-only 组件脱离文档流 */
   componentRoots: Map<string, XmlNode>
-  /** ?? API ?? ????method/path ??????*/
   resolveApi: (raw: string) => MpApiBinding | null
-  /** ?? Page.data ??API ???? */
   apiData: Record<string, MpApiBinding>
   apiDataSeq: { n: number }
-  /** ?? prop ?? handler */
   syncHandlers: SyncHandler[]
-  /** ??/?????onClick / onScroll / onTouch* ?? */
   pageHandlers: PageHandler[]
   handlerSeq: { n: number }
-  /** ???????????? loadData / refresh??*/
   siblingMethodNames: string[]
-  /** ?????????????????? */
   dataFieldNames: string[]
-  /** LinearLayout ????match_parent ? flex:1 */
+  designWidth: number
+  /** 全局工具类注册表 */
+  classRegistry: ClassRegistry
+  /** 当前节点路径（0:Tag/1:Tag） */
+  nodePath?: string
+  /** path → 数据池 ref 字段名 */
+  refPathMap?: Map<string, string>
+  /** 数据池 type=ref */
+  refFields?: MpRefField[]
+  /** 已注册的 Modal 显隐 data key */
+  modalVisibleKeys?: Set<string>
   parentFlex?: 'row' | 'column'
-  /** 父节点为 RelativeLayout：子节点一律 absolute，且不吃 flexParent */
   parentIsRelative?: boolean
-  /**
-   * 处在 overflow=scroll 的纵向内容列内：子项需 flex-shrink:0，
-   * 否则 scroll-view enable-flex 会把固定高度压扁
-   */
   inScrollColumn?: boolean
-  /** ?? gap?px?????? margin ????? flex gap ????? */
   flexGapPx?: number
-  /** ???? flex ??????????????? gap margin? */
   isLastFlexChild?: boolean
 }
 
-/** 统一布局样式：RelativeLayout 子节点带 isRelativeChild */
+/** 统一布局：静态 → class，绑定 → style */
+function layoutResult(
+  attrs: Record<string, string>,
+  ctx: RenderCtx,
+  options?: { isComponent?: boolean },
+): LayoutResult {
+  const base = attrLayout(attrs, ctx.classRegistry, {
+    flexParent: ctx.parentIsRelative ? undefined : ctx.parentFlex,
+    isRelativeChild: Boolean(ctx.parentIsRelative),
+    isComponent: options?.isComponent,
+    designWidth: ctx.designWidth,
+  })
+  const classes = [...base.classes]
+  if (ctx.inScrollColumn && ctx.parentFlex !== 'row') {
+    classes.push(ctx.classRegistry.use('shrink-0'))
+  }
+  return { classes, style: base.style }
+}
+
+/** @deprecated 仅返回 style 字符串的旧接口 */
 function layoutAttrStyle(
   attrs: Record<string, string>,
   ctx: RenderCtx,
   options?: { isComponent?: boolean },
 ): string {
-  const base = attrStyle(attrs, {
-    flexParent: ctx.parentIsRelative ? undefined : ctx.parentFlex,
-    isRelativeChild: Boolean(ctx.parentIsRelative),
-    isComponent: options?.isComponent,
-  })
-  // 纵向滚动列内禁止被 flex 压缩（与 vue3 shrink-0 / 编辑器一致）
-  if (ctx.inScrollColumn && ctx.parentFlex !== 'row') {
-    return mergeStyle(base, 'flex-shrink:0')
-  }
-  return base
+  return layoutResult(attrs, ctx, options).style
 }
 
 function pad(n: number): string {
@@ -1170,16 +1533,24 @@ function pad(n: number): string {
 }
 
 function renderChildren(children: XmlNode[], ctx: RenderCtx): string {
-  const list = children.filter(
-    (c) => c.tag !== '#text' || Boolean((c.text || '').trim()),
-  )
-  return list
-    .map((child, i) =>
-      renderNode(child, {
-        ...ctx,
-        isLastFlexChild: i === list.length - 1,
-      }),
+  const parentPath = ctx.nodePath || ''
+  const entries = children
+    .map((child, index) => ({ child, index }))
+    .filter(
+      ({ child }) =>
+        child.tag !== '#text' || Boolean((child.text || '').trim()),
     )
+  return entries
+    .map(({ child, index }, i) => {
+      const childPath = parentPath
+        ? `${parentPath}/${index}:${child.tag}`
+        : `0:${child.tag}`
+      return renderNode(child, {
+        ...ctx,
+        nodePath: childPath,
+        isLastFlexChild: i === entries.length - 1,
+      })
+    })
     .filter(Boolean)
     .join('\n')
 }
@@ -1229,8 +1600,88 @@ export function renderNode(node: XmlNode, ctx: RenderCtx): string {
   }
 
   if (node.tag === 'Modal') {
-    // v1????????????????
-    return `${pad(ctx.indent)}<!-- Modal??{escapeXml(attrs.name || '')}?????????? -->`
+    const modalName = attrs.name?.trim() || `modal_${ctx.indent}`
+    const dataKey = modalVisibleDataKey(modalName)
+    ctx.modalVisibleKeys?.add(dataKey)
+    const hideName = `__hideModal_${dataKey}`
+    if (!ctx.pageHandlers.some((h) => h.name === hideName)) {
+      ctx.pageHandlers.push({
+        name: hideName,
+        body: `    var p = {}; p[${JSON.stringify(dataKey)}] = false; this.setData(p)`,
+      })
+    }
+    if (!ctx.pageHandlers.some((h) => h.name === '__modalNoop')) {
+      ctx.pageHandlers.push({
+        name: '__modalNoop',
+        body: `    /* catchtap: 阻止冒泡关闭 */`,
+      })
+    }
+    const closeOnClick =
+      attrs.closeOnClick == null ||
+      attrs.closeOnClick === '' ||
+      attrs.closeOnClick === 'true' ||
+      attrs.closeOnClick === '1'
+    const bg = (attrs.background || 'rgba(0,0,0,0.45)').trim()
+    const overlayClasses = ctx.classRegistry.useMany([
+      'absolute',
+      'inset-0',
+      'box-border',
+    ])
+    // fixed 脱出零尺寸宿主；pointer-events 覆盖父级 none
+    const overlayStyle = mergeStyle(
+      `position:fixed;top:0;left:0;right:0;bottom:0;z-index:1000;pointer-events:auto;background:${bg}`,
+    )
+    const panelClasses = ctx.classRegistry.useMany([
+      'relative',
+      'w-full',
+      'h-full',
+      'min-h-0',
+      'overflow-hidden',
+      'box-border',
+    ])
+    // 与 vue @click.self 一致：点空白遮罩关闭；仅内容根节点 catchtap 拦截
+    const contentChildren = node.children.filter(
+      (c) => c.tag !== '#text' || Boolean((c.text || '').trim()),
+    )
+    const inner = contentChildren
+      .map((child, i) => {
+        const childPath = ctx.nodePath
+          ? `${ctx.nodePath}/${node.children.indexOf(child)}:${child.tag}`
+          : `0:${child.tag}`
+        const rendered = renderNode(child, {
+          ...ctx,
+          indent: ctx.indent + 2,
+          nodePath: childPath,
+          parentFlex: undefined,
+          parentIsRelative: true,
+          flexGapPx: undefined,
+          isLastFlexChild: i === contentChildren.length - 1,
+        })
+        if (!closeOnClick || !rendered.trim()) return rendered
+        return rendered.replace(
+          /^( *)<([\w-]+)/,
+          `$1<$2 catchtap="__modalNoop"`,
+        )
+      })
+      .filter(Boolean)
+      .join('\n')
+    // bindtap：空白区冒泡到遮罩关闭；内容 catchtap 不会冒泡
+    const overlayTap = closeOnClick ? `bindtap="${hideName}"` : ''
+    const open = openTag(
+      'view',
+      [
+        `wx:if="{{${dataKey}}}"`,
+        overlayTap,
+        ...classStyleAttrs(overlayClasses, overlayStyle),
+      ],
+      ctx.indent,
+    )
+    const panelOpen = openTag(
+      'view',
+      [...classStyleAttrs(panelClasses, '')],
+      ctx.indent + 1,
+    )
+    return `${open}\n${panelOpen}\n${inner}\n${pad(ctx.indent + 1)}</view>\n${pad(ctx.indent)}</view>`
   }
 
   if (node.tag === 'Component') {
@@ -1241,27 +1692,38 @@ export function renderNode(node: XmlNode, ctx: RenderCtx): string {
     const config = ctx.componentConfigs.get(id)
     const componentRoot = ctx.componentRoots.get(id)
     const outOfFlow = Boolean(componentRoot && isOutOfFlowTree(componentRoot))
-    const gapMargin = siblingGapMarginStyle(ctx, { everyItem: Boolean(repeat) })
-    const spacing = spacingStyleFromAttrs(attrs)
-    // virtualHost：padding/margin（含 gap 换算的兄弟边距）写在组件 style 上常不生效 → 外包一层 view
-    // Modal-only 组件脱离文档流：不外包、不吃 flex
-    const useSpacingWrap =
-      !outOfFlow && (Boolean(spacing) || Boolean(gapMargin))
-    // 外包时 wx:for 必须在 wrapper 上，否则边距只包一层、列表项之间仍无 gap
-    const propAttrs: string[] = useSpacingWrap ? [] : [...forAttrs]
+    const gapClasses = siblingGapClasses(ctx, { everyItem: Boolean(repeat) })
+    // 自定义组件上的 class/style 常不生效（virtualHost / 样式隔离）→ 一律外包 view
+    const layout = outOfFlow
+      ? {
+          classes: ctx.classRegistry.useMany([...OUT_OF_FLOW_HOST_CLASSES]),
+          style: '',
+        }
+      : layoutResult(attrs, ctx, { isComponent: true })
+    const wrapClasses = outOfFlow
+      ? layout.classes
+      : [...layout.classes, ...gapClasses, ctx.classRegistry.use('box-border')]
+
+    const propAttrs: string[] = []
+    const wrapExtraAttrs: string[] = []
+    const refName = ctx.nodePath
+      ? ctx.refPathMap?.get(ctx.nodePath)
+      : undefined
+    if (refName) {
+      propAttrs.push(`id="${escapeXml(refName)}"`)
+    }
     for (const [key, value] of Object.entries(attrs)) {
-      // ????? <slot> ???? slot ?? slot ????slot="default" ???????
       if (key === 'slot') {
         const slotName = String(value || '').trim()
         if (slotName && slotName !== 'default') {
-          propAttrs.push(`slot="${escapeXml(slotName)}"`)
+          // slot 必须在外包 view 上，否则包一层后插槽失效
+          wrapExtraAttrs.push(`slot="${escapeXml(slotName)}"`)
         }
         continue
       }
       if (shouldSkipComponentAttr(key, value, config)) continue
       const propDef = config?.props.find((p) => p.name === key)
 
-      // type=api????data??? wx.request ???? utils/voider-api.js??
       if (propDef?.type === 'api' || parseApiPropBinding(value)) {
         const binding = ctx.resolveApi(value)
         if (!binding) continue
@@ -1273,7 +1735,6 @@ export function renderNode(node: XmlNode, ctx: RenderCtx): string {
 
       if (isBinding(value)) {
         const trimmedVal = value.trim()
-        // ????`{field}` ??JSON ??/???????
         if (
           (trimmedVal.startsWith('{') || trimmedVal.startsWith('[')) &&
           !/^\{[A-Za-z_$][\w.$]*\}$/.test(trimmedVal)
@@ -1283,7 +1744,6 @@ export function renderNode(node: XmlNode, ctx: RenderCtx): string {
         const expr = trimmedVal.replace(/^\{|\}$/g, '').trim()
         if (!/^[\w.$\[\]]+$/.test(expr)) continue
         propAttrs.push(`${key}="{{${normalizeExpr(expr)}}}"`)
-        // ????
         if (
           ctx.kind === 'page' &&
           propDef?.twoWay &&
@@ -1303,25 +1763,6 @@ export function renderNode(node: XmlNode, ctx: RenderCtx): string {
         propAttrs.push(`${key}="${escapeXml(value)}"`)
       }
     }
-    const layoutStyle = outOfFlow
-      ? OUT_OF_FLOW_HOST_STYLE
-      : withSiblingGap(
-          mergeStyle(
-            layoutAttrStyle(attrs, ctx, { isComponent: true }),
-          ),
-          ctx,
-          { everyItem: Boolean(repeat) },
-        )
-    const hostStyle = outOfFlow
-      ? OUT_OF_FLOW_HOST_STYLE
-      : useSpacingWrap
-        ? layoutStyle.includes('flex:1') || /(?:^|;)height:0(?:;|$)/.test(layoutStyle)
-          ? 'width:100%;height:100%;min-height:0;box-sizing:border-box'
-          : 'width:100%;height:auto;box-sizing:border-box'
-        : layoutStyle
-    if (hostStyle) propAttrs.push(`style="${escapeXml(hostStyle)}"`)
-    propAttrs.push(...visibilityWxmlAttrs(attrs))
-    // 组件声明的自定义事件：select="[{emit...}]" → bind:select
     for (const evt of config?.events ?? []) {
       const evtName = evt.name?.trim()
       if (!evtName) continue
@@ -1329,7 +1770,8 @@ export function renderNode(node: XmlNode, ctx: RenderCtx): string {
         ...collectComponentCustomEventAttrs(evtName, attrs[evtName], ctx),
       )
     }
-    const tagIndent = ctx.indent + (useSpacingWrap ? 1 : 0)
+
+    const tagIndent = ctx.indent + 1
     const inner = renderChildren(node.children, {
       ...ctx,
       indent: tagIndent + 1,
@@ -1341,9 +1783,13 @@ export function renderNode(node: XmlNode, ctx: RenderCtx): string {
     const block = !inner.trim()
       ? openTag(tagName, propAttrs, tagIndent, true)
       : `${open}\n${inner}\n${pad(tagIndent)}</${tagName}>`
-    if (!useSpacingWrap) return block
-    const wrapStyle = mergeStyle(layoutStyle, 'box-sizing:border-box')
-    const wrapAttrs = [...forAttrs, `style="${escapeXml(wrapStyle)}"`]
+
+    const wrapAttrs = [
+      ...forAttrs,
+      ...wrapExtraAttrs,
+      ...visibilityWxmlAttrs(attrs),
+      ...classStyleAttrs(wrapClasses, layout.style),
+    ]
     const wrapOpen = openTag('view', wrapAttrs, ctx.indent)
     return `${wrapOpen}\n${block}\n${pad(ctx.indent)}</view>`
   }
@@ -1369,13 +1815,18 @@ function renderWidget(
   const vis = visibilityWxmlAttrs(attrs)
 
   if (node.tag === 'Swiper') {
-    const base = layoutAttrStyle(attrs, ctx)
-    const style = mergeStyle(
-      base,
-      base.includes('width:') ? null : 'width:100%',
-      base.includes('height:') ? null : 'height:100%',
-      'overflow:hidden',
-    )
+    const layout = layoutResult(attrs, ctx)
+    const classes = [...layout.classes, ...siblingGapClasses(ctx)]
+    // 已有明确宽高（含 w-arb-*）时不要再塞 w-full/h-full，否则样式表排序会盖掉尺寸
+    if (!hasWidthClass(classes)) {
+      classes.push(ctx.classRegistry.use('w-full'))
+    }
+    if (!hasHeightClass(classes)) {
+      classes.push(ctx.classRegistry.use('h-full'))
+    }
+    if (!classes.includes('overflow-hidden')) {
+      classes.push(ctx.classRegistry.use('overflow-hidden'))
+    }
     const indicator = parseBoolAttr(attrs.indicatorDots, true)
     const autoplay = parseBoolAttr(attrs.autoplay, false)
     const circular = parseBoolAttr(attrs.circular, true)
@@ -1392,7 +1843,6 @@ function renderWidget(
         const inner = renderNode(child, {
           ...ctx,
           indent: ctx.indent + 2,
-          // swiper-item 不是 flex 容器；勿继承外层 LinearLayout 的 parentFlex
           parentFlex: undefined,
           parentIsRelative: false,
         })
@@ -1414,7 +1864,7 @@ function renderWidget(
         `current="${escapeXml(current)}"`,
         `indicator-color="${escapeXml(indicatorColor)}"`,
         `indicator-active-color="${escapeXml(indicatorActiveColor)}"`,
-        styleAttr(style).trim(),
+        ...classStyleAttrs(classes, layout.style),
       ],
       ctx.indent,
     )
@@ -1423,38 +1873,36 @@ function renderWidget(
   }
 
   if (node.tag === 'MultiWindow') {
-    // ??active ?????? {currentNav}???? windowKey ????????
     const activeExpr = bindingToActiveExpr(attrs.active || '')
-    const overflow = (attrs.overflow || '').toLowerCase()
-    const style = mergeStyle(
-      layoutAttrStyle(attrs, ctx),
-      'position:relative',
-      'min-height:0',
-      'overflow:hidden',
+    const layout = layoutResult(attrs, ctx)
+    const classes = [
+      ...layout.classes,
+      ...ctx.classRegistry.useMany(['relative', 'min-h-0', 'overflow-hidden']),
+    ]
+    const paneClass = ctx.classRegistry.shell(
+      'voider-mw-pane',
+      'position:absolute;left:0;top:0;right:0;bottom:0;width:100%;height:100%;display:flex;flex-direction:column;overflow:hidden;box-sizing:border-box',
     )
     const panes = node.children
       .filter((c) => c.tag !== '#text')
       .map((child) => {
         const windowKey = (child.attrs.windowKey || '').trim()
-        // wx:if ????????????hidden ??display:flex ??
         const ifAttr = windowKey
           ? `wx:if="{{(${activeExpr} + '') === '${escapeWxmlStr(windowKey)}'}}"`
           : `wx:if="{{false}}"`
-        const paneStyle =
-          'position:absolute;left:0;top:0;right:0;bottom:0;width:100%;height:100%;display:flex;flex-direction:column;overflow:hidden;box-sizing:border-box'
         const childCtx: RenderCtx = {
           ...ctx,
           indent: ctx.indent + 2,
           parentFlex: 'column',
         }
         const inner = renderNode(child, childCtx)
-        return `${pad(ctx.indent + 1)}<view ${ifAttr} style="${paneStyle}">\n${inner}\n${pad(ctx.indent + 1)}</view>`
+        return `${pad(ctx.indent + 1)}<view ${ifAttr} class="${paneClass}">\n${inner}\n${pad(ctx.indent + 1)}</view>`
       })
       .filter(Boolean)
       .join('\n')
     const open = openTag(
       'view',
-      [...forAttrs, ...vis, styleAttr(style).trim()],
+      [...forAttrs, ...vis, ...classStyleAttrs(classes, layout.style)],
       ctx.indent,
     )
     if (!panes) return `${open}</view>`
@@ -1464,11 +1912,17 @@ function renderWidget(
   if (node.tag === 'Text') {
     const raw = attrs.text || node.text || ''
     const content = bindingAwareEscape(toWxmlText(raw))
-    const style = mergeStyle(layoutAttrStyle(attrs, ctx))
+    const layout = layoutResult(attrs, ctx)
+    const classes = [...layout.classes, ...siblingGapClasses(ctx)]
     const clickAttrs = collectClickEventAttrs(attrs, ctx)
     const open = openTag(
       'text',
-      [...forAttrs, ...vis, ...clickAttrs, styleAttr(style).trim()],
+      [
+        ...forAttrs,
+        ...vis,
+        ...clickAttrs,
+        ...classStyleAttrs(classes, layout.style),
+      ],
       ctx.indent,
     )
     return `${open}${content}</text>`
@@ -1477,12 +1931,52 @@ function renderWidget(
   if (node.tag === 'Button') {
     const raw = attrs.text || 'Button'
     const content = bindingAwareEscape(toWxmlText(raw))
-    const style = mergeStyle(
-      layoutAttrStyle(attrs, ctx),
-      'display:flex',
-      'align-items:center',
-      'justify-content:center',
-    )
+    const layout = layoutResult(attrs, ctx)
+    const classes = [
+      ...layout.classes,
+      ...siblingGapClasses(ctx),
+      ...ctx.classRegistry.useMany(['flex', 'items-center', 'justify-center']),
+    ]
+    // 默认蓝底白字仅在未配置时补上；勿写进 shell，否则会盖过 bg-*/text-* 工具类
+    const bgRaw = attrs.background?.trim()
+    const hasBg =
+      Boolean(bgRaw && bgRaw !== 'transparent' && bgRaw !== 'null') ||
+      layout.classes.some((c) => c.startsWith('bg-')) ||
+      /\bbackground\s*:/.test(layout.style)
+    const colorRaw = attrs.textColor?.trim() || attrs.color?.trim()
+    const hasColor =
+      Boolean(colorRaw && colorRaw !== 'null') ||
+      layout.classes.some((c) => c.startsWith('text-arb-')) ||
+      /(?:^|;)\s*color\s*:/.test(layout.style)
+    if (!hasBg) {
+      classes.push(ctx.classRegistry.arb('bg', 'background', '#409eff'))
+    }
+    if (!hasColor) {
+      classes.push(ctx.classRegistry.arb('text', 'color', '#ffffff'))
+    }
+    if (!attrs.borderRadius?.trim()) {
+      classes.push(
+        ctx.classRegistry.arb(
+          'rounded',
+          'border-radius',
+          pxToVw(4, ctx.designWidth),
+        ),
+      )
+    }
+    const hasPadding =
+      Boolean(attrs.padding?.trim()) ||
+      Boolean(attrs.paddingLeft?.trim()) ||
+      Boolean(attrs.paddingRight?.trim()) ||
+      Boolean(attrs.paddingTop?.trim()) ||
+      Boolean(attrs.paddingBottom?.trim())
+    if (!hasPadding) {
+      classes.push(
+        ctx.classRegistry.shell(
+          'voider-button',
+          `padding:${pxToVw(8, ctx.designWidth)} ${pxToVw(14, ctx.designWidth)}`,
+        ),
+      )
+    }
     const clickAttrs = collectClickEventAttrs(attrs, ctx)
     const open = openTag(
       'view',
@@ -1490,8 +1984,7 @@ function renderWidget(
         ...forAttrs,
         ...vis,
         ...clickAttrs,
-        styleAttr(style).trim(),
-        'class="voider-button"',
+        ...classStyleAttrs(classes, layout.style),
       ],
       ctx.indent,
     )
@@ -1501,7 +1994,8 @@ function renderWidget(
   if (node.tag === 'Input') {
     const value = attrs.value?.trim() || ''
     const placeholder = attrs.placeholder || ''
-    const style = mergeStyle(layoutAttrStyle(attrs, ctx))
+    const layout = layoutResult(attrs, ctx)
+    const classes = [...layout.classes, ...siblingGapClasses(ctx)]
     const valueAttr = isBinding(value)
       ? `value="{{${normalizeExpr(value.replace(/^\{|\}$/g, ''))}}}"`
       : `value="${escapeXml(value)}"`
@@ -1512,7 +2006,7 @@ function renderWidget(
         ...vis,
         valueAttr,
         `placeholder="${escapeXml(placeholder)}"`,
-        styleAttr(style).trim(),
+        ...classStyleAttrs(classes, layout.style),
       ],
       ctx.indent,
       true,
@@ -1521,7 +2015,8 @@ function renderWidget(
 
   if (node.tag === 'Image') {
     const src = attrs.src?.trim() || ''
-    const style = mergeStyle(layoutAttrStyle(attrs, ctx))
+    const layout = layoutResult(attrs, ctx)
+    const classes = [...layout.classes, ...siblingGapClasses(ctx)]
     const mode =
       attrs.objectFit === 'contain'
         ? 'aspectFit'
@@ -1531,7 +2026,6 @@ function renderWidget(
     const srcAttr = isBinding(src)
       ? `src="{{${normalizeExpr(src.replace(/^\{|\}$/g, ''))}}}"`
       : `src="${escapeXml(src)}"`
-    // swiper-item 内 bindtap 常被滑动手势吞掉，改用 catchtap
     const clickAttrs = collectClickEventAttrs(attrs, ctx).map((a) =>
       a.startsWith('bindtap=') ? a.replace(/^bindtap=/, 'catchtap=') : a,
     )
@@ -1543,7 +2037,7 @@ function renderWidget(
         ...clickAttrs,
         srcAttr,
         `mode="${mode}"`,
-        styleAttr(style).trim(),
+        ...classStyleAttrs(classes, layout.style),
       ],
       ctx.indent,
       true,
@@ -1554,46 +2048,22 @@ function renderWidget(
     const iconId = attrs.iconId?.trim() || ''
     const size = attrs.size?.trim()
     const sizeBind = styleBindingExpr(size)
-    // size 支持 {arrowSize} 等绑定；设计稿 px → rpx（×2）
-    const dimStyle = sizeBind
-      ? `width:{{(${sizeBind}) * 2}}rpx;height:{{(${sizeBind}) * 2}}rpx`
-      : (() => {
-          const n = size ? Number(size.replace(/px$/i, '')) : 24
-          const dim = Number.isFinite(n) ? pxToRpx(n) : '48rpx'
-          return `width:${dim};height:${dim}`
-        })()
-    // image 上 transform 真机常失效：旋转放到外层 view
+    const dimClasses: string[] = []
+    let dimStyle = ''
+    if (sizeBind) {
+      dimStyle = `width:${pxBindToVw(sizeBind, ctx.designWidth)};height:${pxBindToVw(sizeBind, ctx.designWidth)}`
+    } else {
+      const n = size ? Number(size.replace(/px$/i, '')) : 24
+      const dim = Number.isFinite(n)
+        ? pxToVw(n, ctx.designWidth)
+        : pxToVw(24, ctx.designWidth)
+      dimClasses.push(
+        ctx.classRegistry.arb('w', 'width', dim),
+        ctx.classRegistry.arb('h', 'height', dim),
+      )
+    }
     const rotateFns = buildTransformFunctions(attrs)
-    const attrsNoRotate = { ...attrs }
-    delete attrsNoRotate.rotateX
-    delete attrsNoRotate.rotateY
-    delete attrsNoRotate.rotateZ
-    const clickAttrs = collectClickEventAttrs(attrs, ctx).map((a) =>
-      a.startsWith('bindtap=') ? a.replace(/^bindtap=/, 'catchtap=') : a,
-    )
-    const imageStyle = mergeStyle(
-      layoutAttrStyle(attrsNoRotate, ctx),
-      rotateFns.length ? 'width:100%;height:100%' : dimStyle,
-    )
-    const srcAttr = isBinding(iconId)
-      ? `src="{{'/assets/icons/' + (${normalizeExpr(iconId.replace(/^\{|\}$/g, ''))}) + '.svg'}}"`
-      : `src="${escapeXml(iconId ? `/assets/icons/${iconId}.svg` : '')}"`
-    const imageOpen = openTag(
-      'image',
-      [
-        ...(rotateFns.length ? [] : forAttrs),
-        ...(rotateFns.length ? [] : vis),
-        ...(rotateFns.length ? [] : clickAttrs),
-        srcAttr,
-        'mode="aspectFit"',
-        styleAttr(imageStyle).trim(),
-      ],
-      rotateFns.length ? ctx.indent + 1 : ctx.indent,
-      true,
-    )
-    if (!rotateFns.length) return imageOpen
-    const t = rotateFns.join(' ')
-    // 定位/边距留在 attrStyle 里会丢：有旋转时布局属性挂到外包 view
+    // size/color/iconId 不参与布局；width/height=wrap_content 会生成 w-fit 盖掉尺寸
     const layoutOnly = { ...attrs }
     delete layoutOnly.rotateX
     delete layoutOnly.rotateY
@@ -1603,20 +2073,56 @@ function renderWidget(
     delete layoutOnly.color
     delete layoutOnly.width
     delete layoutOnly.height
+    delete layoutOnly.textSize
+    delete layoutOnly.dynamicStyles
+    const clickAttrs = collectClickEventAttrs(attrs, ctx).map((a) =>
+      a.startsWith('bindtap=') ? a.replace(/^bindtap=/, 'catchtap=') : a,
+    )
+    const wrapLayout = layoutResult(layoutOnly, ctx)
+    const wrapClasses = [
+      ...wrapLayout.classes,
+      ...siblingGapClasses(ctx),
+      ...dimClasses,
+      ...ctx.classRegistry.useMany(['inline-flex', 'shrink-0']),
+    ]
     const wrapStyle = mergeStyle(
-      layoutAttrStyle(layoutOnly, ctx),
+      wrapLayout.style,
       dimStyle,
-      'display:inline-flex',
-      'flex-shrink:0',
-      `-webkit-transform:${t}`,
-      `transform:${t}`,
+      rotateFns.length
+        ? `-webkit-transform:${rotateFns.join(' ')};transform:${rotateFns.join(' ')}`
+        : '',
+    )
+
+    ctx.usedComponents.set('voider-icon', '/components/voider-icon/index')
+    const nameAttr = isBinding(iconId)
+      ? `name="{{${normalizeExpr(iconId.replace(/^\{|\}$/g, ''))}}}"`
+      : `name="${escapeXml(iconId)}"`
+    const colorRes = resolveDynamicStyleExpr(
+      'color',
+      attrs.color?.trim() || undefined,
+      attrs,
+      '#333333',
+    )
+    const colorAttr = colorRes.static
+      ? `color="${escapeXml(colorRes.static)}"`
+      : `color="{{${colorRes.expr}}}"`
+    const iconOpen = openTag(
+      'voider-icon',
+      [nameAttr, colorAttr],
+      ctx.indent + 1,
+      true,
     )
     const open = openTag(
       'view',
-      [...forAttrs, ...vis, ...clickAttrs, styleAttr(wrapStyle).trim()],
+      [
+        ...forAttrs,
+        ...vis,
+        ...clickAttrs,
+        ...classStyleAttrs(wrapClasses, wrapStyle),
+      ],
       ctx.indent,
     )
-    return `${open}\n${imageOpen}\n${pad(ctx.indent)}</view>`
+    return `${open}\n${iconOpen}\n${pad(ctx.indent)}</view>`
   }
 
   const overflow = (attrs.overflow || '').toLowerCase()
@@ -1625,15 +2131,20 @@ function renderWidget(
   const isRelative = node.tag === 'RelativeLayout'
   const useNativeRefresher =
     isScroll && shouldUseNativeCustomRefresher(attrs, ctx)
-  const baseStyle = withSiblingGap(
-    mergeStyle(
-      layoutAttrStyle(attrs, ctx),
-      isLinear && !useNativeRefresher ? flexStyle(attrs) : null,
-      isRelative ? 'position:relative;box-sizing:border-box' : null,
-      isScroll && !isLinear ? 'height:100%' : null,
-    ),
-    ctx,
-  )
+  const layout = layoutResult(attrs, ctx)
+  const classes = [
+    ...layout.classes,
+    ...siblingGapClasses(ctx),
+    ...(isLinear && !useNativeRefresher
+      ? flexClasses(attrs, ctx.classRegistry)
+      : []),
+  ]
+  if (isRelative) {
+    classes.push(...ctx.classRegistry.useMany(['relative', 'box-border']))
+  }
+  if (isScroll && !isLinear) {
+    classes.push(ctx.classRegistry.use('h-full'))
+  }
 
   const tag = isScroll ? 'scroll-view' : 'view'
 
@@ -1733,16 +2244,19 @@ function renderWidget(
       ...scrollAttrs,
       ...clickAttrs,
       ...scrollTouchAttrs,
-      styleAttr(baseStyle).trim(),
+      ...classStyleAttrs(classes, layout.style),
     ],
     ctx.indent,
   )
-  // RelativeLayout：内层再开一层 relative，使 padding（如 statusBar）压缩内容区，
-  // absolute 子节点的 top:50% 相对内容区居中（与编辑器 / vue3 一致）
+  // RelativeLayout：内层再开一层 relative，使 padding（如 statusBar）压缩内容区
   let bodyInner = contentInner
   if (isRelative && contentInner.trim()) {
     const innerPad = pad(ctx.indent + 1)
-    bodyInner = `${innerPad}<view style="position:relative;width:100%;height:100%;min-height:0;box-sizing:border-box">\n${contentInner}\n${innerPad}</view>`
+    const innerClass = ctx.classRegistry.shell(
+      'voider-relative-inner',
+      'position:relative;width:100%;height:100%;min-height:0;box-sizing:border-box',
+    )
+    bodyInner = `${innerPad}<view class="${innerClass}">\n${contentInner}\n${innerPad}</view>`
   }
   const parts = [refresherSlot, bodyInner].filter((p) => p.trim())
   if (!parts.length) return `${open}</${tag}>`
@@ -1803,6 +2317,10 @@ export function generatePageFiles(options: {
   componentConfigs: Map<string, ComponentConfig>
   componentRoots?: Map<string, XmlNode>
   resolveApi: (raw: string) => MpApiBinding | null
+  /** 画布设计宽度（voider.json canvas.width） */
+  designWidth?: number
+  /** 全局工具类注册表（跨页面/组件共享） */
+  classRegistry?: ClassRegistry
   /** ?? statusBar ???????????? */
   statusBar?: {
     textStyle?: string
@@ -1811,10 +2329,25 @@ export function generatePageFiles(options: {
     navigationBar?: boolean | string
   } | null
 }): { wxml: string; wxss: string; js: string; json: string; usedComponents: Map<string, string> } {
+  const designWidth =
+    options.designWidth && options.designWidth > 0
+      ? options.designWidth
+      : DEFAULT_CANVAS_WIDTH
+  const classRegistry = options.classRegistry ?? new ClassRegistry()
   const usedComponents = new Map<string, string>()
   const apiData: Record<string, MpApiBinding> = {}
   const syncHandlers: SyncHandler[] = []
   const pageHandlers: PageHandler[] = []
+  const modalVisibleKeys = new Set<string>()
+  const refFields = collectMpRefFields(
+    options.data?.fields,
+    options.root,
+    options.componentConfigs,
+  )
+  const refPathMap = new Map(
+    refFields.map((f) => [f.nodePath, f.name] as const),
+  )
+  const rootPath = options.root ? `0:${options.root.tag}` : ''
   const ctx: RenderCtx = {
     indent: 0,
     usedComponents,
@@ -1831,14 +2364,23 @@ export function generatePageFiles(options: {
     dataFieldNames: (options.data?.fields ?? [])
       .map((f) => f.name.trim())
       .filter(Boolean),
+    designWidth,
+    classRegistry,
+    nodePath: rootPath || undefined,
+    refPathMap,
+    refFields,
+    modalVisibleKeys,
   }
   const body = options.root
     ? renderNode(options.root, ctx)
     : '<!-- empty page -->'
 
-  const dataObj = {
+  const dataObj: Record<string, unknown> = {
     ...pageDataObject(options.data),
     ...apiData,
+  }
+  for (const key of modalVisibleKeys) {
+    dataObj[key] = false
   }
   const using: Record<string, string> = {}
   for (const [id, path] of usedComponents) {
@@ -1926,7 +2468,7 @@ export function generatePageFiles(options: {
 
   return {
     wxml: `${body}\n`,
-    wxss: `/* pages/${options.pageId}/index.wxss */\n.voider-button {\n  background: #409eff;\n  color: #ffffff;\n  border-radius: 8rpx;\n  padding: 16rpx 28rpx;\n}\n`,
+    wxss: `/* pages/${options.pageId}/index.wxss — utilities live in app.wxss */\n`,
     js,
     json: `${JSON.stringify(json, null, 2)}\n`,
     usedComponents,
@@ -1942,7 +2484,15 @@ export function generateComponentFiles(options: {
   lifecycle?: LifecycleConfig
   componentConfigs?: Map<string, ComponentConfig>
   componentRoots?: Map<string, XmlNode>
+  /** 画布设计宽度（voider.json canvas.width） */
+  designWidth?: number
+  classRegistry?: ClassRegistry
 }): { wxml: string; wxss: string; js: string; json: string } {
+  const designWidth =
+    options.designWidth && options.designWidth > 0
+      ? options.designWidth
+      : DEFAULT_CANVAS_WIDTH
+  const classRegistry = options.classRegistry ?? new ClassRegistry()
   const usedComponents = new Map<string, string>()
   const customMethods = (options.methods ?? []).filter((m) => !m.builtin)
   const methodNames = customMethods.map((m) => m.name.trim()).filter(Boolean)
@@ -1951,6 +2501,16 @@ export function generateComponentFiles(options: {
     .filter(Boolean)
 
   const pageHandlers: PageHandler[] = []
+  const modalVisibleKeys = new Set<string>()
+  const refFields = collectMpRefFields(
+    options.data?.fields,
+    options.root,
+    options.componentConfigs ?? new Map(),
+  )
+  const refPathMap = new Map(
+    refFields.map((f) => [f.nodePath, f.name] as const),
+  )
+  const rootPath = options.root ? `0:${options.root.tag}` : ''
   const ctx: RenderCtx = {
     indent: 0,
     usedComponents,
@@ -1965,12 +2525,23 @@ export function generateComponentFiles(options: {
     handlerSeq: { n: 0 },
     siblingMethodNames: methodNames,
     dataFieldNames,
+    designWidth,
+    classRegistry,
+    nodePath: rootPath || undefined,
+    refPathMap,
+    refFields,
+    modalVisibleKeys,
   }
   const body = options.root
     ? renderNode(options.root, ctx)
     : '<!-- empty component -->'
 
-  const dataObj = pageDataObject(options.data)
+  const dataObj: Record<string, unknown> = {
+    ...pageDataObject(options.data),
+  }
+  for (const key of modalVisibleKeys) {
+    dataObj[key] = false
+  }
   const propDefs = options.config.props ?? []
   const propNames = propDefs.map((p) => p.name.trim()).filter(Boolean)
   const apiPropNames = propDefs
@@ -2029,6 +2600,7 @@ export function generateComponentFiles(options: {
         apiPropNames,
         arrayPropNames,
         siblingMethodNames: methodNames,
+        refFields,
       }),
     )
     .filter(Boolean)
@@ -2078,10 +2650,14 @@ export function generateComponentFiles(options: {
     })
     .join(',\n')
 
+  const hasExposed = (options.config.exposedMethods ?? []).some(Boolean)
   const js = `Component({
   options: {
     multipleSlots: true,
-    virtualHost: true,
+    // 有对外方法时不能 virtualHost，否则页面 selectComponent 取不到实例
+    virtualHost: ${hasExposed ? 'false' : 'true'},
+    // 允许使用 app.wxss / 页面工具类（默认 isolated 会导致 class 全部失效）
+    styleIsolation: 'apply-shared',
   },
   properties: {
 ${propLines}
@@ -2097,6 +2673,8 @@ ${attached}
   return {
     wxml: `${body}\n`,
     wxss: `/* components/${options.componentId}/index.wxss */
+@import "../../styles/utilities.wxss";
+
 :host {
   display: flex;
   flex-direction: column;
@@ -2109,6 +2687,7 @@ ${attached}
     json: `${JSON.stringify(
       {
         component: true,
+        styleIsolation: 'apply-shared',
         usingComponents: using,
       },
       null,

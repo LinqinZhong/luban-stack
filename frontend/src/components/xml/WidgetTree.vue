@@ -32,6 +32,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   select: [id: string]
   'open-repeat': [id: string]
+  'open-event': [id: string]
   move: [
     payload: {
       sourceId: string
@@ -101,6 +102,10 @@ function handleNodeClick(data: { id: string }) {
 
 function handleOpenRepeat(id: string) {
   emit('open-repeat', id)
+}
+
+function handleOpenEvent(id: string) {
+  emit('open-event', id)
 }
 
 function handleToggleHidden(event: MouseEvent, id: string) {
@@ -328,6 +333,8 @@ watch(
               v-if="((data as TreeNodeData).eventBindingCount ?? 0) > 0"
               :size="14"
               :count="(data as TreeNodeData).eventBindingCount"
+              clickable
+              @click="handleOpenEvent((data as TreeNodeData).id)"
             />
             <RepeatBadge
               v-if="(data as TreeNodeData).hasRepeat"

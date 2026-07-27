@@ -22,6 +22,15 @@ export function scaffoldMpWxFiles(options: {
   const apiBaseUrl =
     options.config.wechatApiBaseUrl?.trim() || DEFAULT_MP_API_BASE
   const projectPath = options.projectPath.replace(/\\/g, '/')
+  const designWidth =
+    options.config.canvas?.width > 0
+      ? options.config.canvas.width
+      : 375
+  const pageFontSize = (() => {
+    const vw = (14 / designWidth) * 100
+    const s = Number.isInteger(vw) ? String(vw) : String(Number(vw.toFixed(6)))
+    return `${s}vw`
+  })()
 
   const appJson = {
     pages: pagePaths,
@@ -75,7 +84,7 @@ export function scaffoldMpWxFiles(options: {
   width: 100%;
   background: #f5f7fa;
   color: #303133;
-  font-size: 28rpx;
+  font-size: ${pageFontSize};
   box-sizing: border-box;
 }
 

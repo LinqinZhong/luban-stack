@@ -8,5 +8,6 @@
   "exposedMethods": [
     "open",
     "close"
-  ]
+  ],
+  "debugProps": {}
 }

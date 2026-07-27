@@ -120,6 +120,7 @@ const emit = defineEmits<{
   select: [id: string]
   hover: [id: string]
   'open-repeat': [id: string]
+  'open-event': [id: string]
   interact: [payload: PreviewInteractPayload]
   'add-window': [parentId: string]
 }>()
@@ -1501,8 +1502,16 @@ function handleOpenRepeat() {
   emit('open-repeat', props.nodeId)
 }
 
+function handleOpenEvent() {
+  emit('open-event', props.nodeId)
+}
+
 function forwardOpenRepeat(id: string) {
   emit('open-repeat', id)
+}
+
+function forwardOpenEvent(id: string) {
+  emit('open-event', id)
 }
 
 function forwardAddWindow(parentId: string) {
@@ -1680,6 +1689,7 @@ onBeforeUnmount(() => {
       @select="emit('select', $event)"
       @hover="emit('hover', $event)"
       @open-repeat="emit('open-repeat', $event)"
+      @open-event="emit('open-event', $event)"
       @interact="emit('interact', $event)"
       @add-window="emit('add-window', $event)"
     />
@@ -1708,6 +1718,7 @@ onBeforeUnmount(() => {
     @pointerup="handlePointerUp"
     @pointerleave="handlePointerLeave"
     @open-repeat="handleOpenRepeat"
+    @open-event="handleOpenEvent"
   >
     <div class="widget text" :style="textStyle">
       {{ textContent }}
@@ -1737,6 +1748,7 @@ onBeforeUnmount(() => {
     @pointerup="handlePointerUp"
     @pointerleave="handlePointerLeave"
     @open-repeat="handleOpenRepeat"
+    @open-event="handleOpenEvent"
   >
     <button type="button" class="widget button" :style="buttonStyle">
       {{ textContent || 'Button' }}
@@ -1766,6 +1778,7 @@ onBeforeUnmount(() => {
     @pointerup="handlePointerUp"
     @pointerleave="handlePointerLeave"
     @open-repeat="handleOpenRepeat"
+    @open-event="handleOpenEvent"
   >
     <input
       type="text"
@@ -1804,6 +1817,7 @@ onBeforeUnmount(() => {
     @pointerup="handlePointerUp"
     @pointerleave="handlePointerLeave"
     @open-repeat="handleOpenRepeat"
+    @open-event="handleOpenEvent"
   >
     <img
       v-if="imageSrc"
@@ -1848,6 +1862,7 @@ onBeforeUnmount(() => {
     @pointerup="handlePointerUp"
     @pointerleave="handlePointerLeave"
     @open-repeat="handleOpenRepeat"
+    @open-event="handleOpenEvent"
   >
     <svg
       v-if="iconHref"
@@ -1916,6 +1931,7 @@ onBeforeUnmount(() => {
     @pointerup="handlePointerUp"
     @pointerleave="handlePointerLeave"
     @open-repeat="handleOpenRepeat"
+    @open-event="handleOpenEvent"
   >
     <div v-if="slotHasFill" class="widget slot-fill" :style="slotFillStyle">
       <XmlNodeView
@@ -1942,6 +1958,7 @@ onBeforeUnmount(() => {
         @select="forwardSelect"
         @hover="forwardHover"
         @open-repeat="forwardOpenRepeat"
+        @open-event="forwardOpenEvent"
         @interact="forwardInteract"
         @add-window="forwardAddWindow"
       />
@@ -1975,6 +1992,7 @@ onBeforeUnmount(() => {
         @select="forwardSelect"
         @hover="forwardHover"
         @open-repeat="forwardOpenRepeat"
+        @open-event="forwardOpenEvent"
         @interact="forwardInteract"
         @add-window="forwardAddWindow"
       />
@@ -2006,6 +2024,7 @@ onBeforeUnmount(() => {
     @pointerup="handlePointerUp"
     @pointerleave="handlePointerLeave"
     @open-repeat="handleOpenRepeat"
+    @open-event="handleOpenEvent"
   >
     <div class="widget component-host" :style="componentStyle">
       <XmlNodeView
@@ -2030,6 +2049,7 @@ onBeforeUnmount(() => {
         @select="forwardSelect"
         @hover="forwardHover"
         @open-repeat="forwardOpenRepeat"
+        @open-event="forwardOpenEvent"
         @interact="forwardComponentInteract"
         @add-window="forwardAddWindow"
       />
@@ -2063,6 +2083,7 @@ onBeforeUnmount(() => {
     @pointerup="handlePointerUp"
     @pointerleave="handlePointerLeave"
     @open-repeat="handleOpenRepeat"
+    @open-event="handleOpenEvent"
   >
     <div class="widget swiper" :style="swiperStyle">
       <SwiperPort
@@ -2102,6 +2123,7 @@ onBeforeUnmount(() => {
             @select="forwardSelect"
             @hover="forwardHover"
             @open-repeat="forwardOpenRepeat"
+          @open-event="forwardOpenEvent"
             @interact="forwardInteract"
             @add-window="forwardAddWindow"
           />
@@ -2133,6 +2155,7 @@ onBeforeUnmount(() => {
     @pointerup="handlePointerUp"
     @pointerleave="handlePointerLeave"
     @open-repeat="handleOpenRepeat"
+    @open-event="handleOpenEvent"
   >
     <div class="widget multi-window" :style="multiWindowStyle">
       <MultiWindowPort
@@ -2168,6 +2191,7 @@ onBeforeUnmount(() => {
             @select="forwardSelect"
             @hover="forwardHover"
             @open-repeat="forwardOpenRepeat"
+          @open-event="forwardOpenEvent"
             @interact="forwardInteract"
             @add-window="forwardAddWindow"
           />
@@ -2217,6 +2241,7 @@ onBeforeUnmount(() => {
             @select="forwardSelect"
             @hover="forwardHover"
             @open-repeat="forwardOpenRepeat"
+          @open-event="forwardOpenEvent"
             @interact="forwardInteract"
             @add-window="forwardAddWindow"
           />
@@ -2254,6 +2279,7 @@ onBeforeUnmount(() => {
     @pointerup="handlePointerUp"
     @pointerleave="handlePointerLeave"
     @open-repeat="handleOpenRepeat"
+    @open-event="handleOpenEvent"
   >
     <OverlayScrollPort
       :enabled="isScrollLayout"
@@ -2292,6 +2318,7 @@ onBeforeUnmount(() => {
         @select="forwardSelect"
         @hover="forwardHover"
         @open-repeat="forwardOpenRepeat"
+        @open-event="forwardOpenEvent"
         @interact="forwardInteract"
         @add-window="forwardAddWindow"
       />
@@ -2322,6 +2349,7 @@ onBeforeUnmount(() => {
     @pointerup="handlePointerUp"
     @pointerleave="handlePointerLeave"
     @open-repeat="handleOpenRepeat"
+    @open-event="handleOpenEvent"
   >
     <OverlayScrollPort
       :enabled="isScrollLayout"
@@ -2364,6 +2392,7 @@ onBeforeUnmount(() => {
           @select="forwardSelect"
           @hover="forwardHover"
           @open-repeat="forwardOpenRepeat"
+          @open-event="forwardOpenEvent"
           @interact="forwardInteract"
           @add-window="forwardAddWindow"
         />
