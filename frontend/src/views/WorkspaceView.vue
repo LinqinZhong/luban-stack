@@ -3479,6 +3479,8 @@ watch(
           :status-bar-background="resolvedPageStatusBar.backgroundColor"
           :status-bar-text-style="resolvedPageStatusBar.textStyle"
           :status-bar-cover="resolvedPageStatusBar.cover"
+          :status-bar-navigation-bar="resolvedPageStatusBar.navigationBar"
+          :navigation-bar-title="activePage?.config.title || activePage?.config.name || ''"
           @select="selectedNodeId = $event"
           @open-repeat="handleOpenRepeatConfig"
           @add-window="handleAddMultiWindow"

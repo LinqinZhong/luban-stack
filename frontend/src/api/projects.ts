@@ -423,3 +423,14 @@ export function exportProjectVue3(projectPath: string) {
     body: JSON.stringify({ projectPath }),
   })
 }
+
+export function exportProjectMpWx(projectPath: string) {
+  return request<{
+    outputPath: string
+    pages: number
+    components: number
+  }>('/api/projects/export/mp-wx', {
+    method: 'POST',
+    body: JSON.stringify({ projectPath }),
+  })
+}

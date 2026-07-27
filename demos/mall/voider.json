@@ -6,5 +6,6 @@
   "canvas": {
     "width": 375
   },
-  "entryPage": "home"
+  "entryPage": "home",
+  "wechatAppId": "wx063d4987d9089a28"
 }

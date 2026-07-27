@@ -1,0 +1,19 @@
+{
+  "description": "测试 微信小程序（Voider 导出）",
+  "packOptions": {
+    "ignore": [],
+    "include": []
+  },
+  "setting": {
+    "bundle": false,
+    "es6": true,
+    "postcss": true,
+    "minified": true,
+    "urlCheck": false
+  },
+  "compileType": "miniprogram",
+  "libVersion": "3.5.5",
+  "appid": "wx063d4987d9089a28",
+  "projectname": "测试",
+  "condition": {}
+}

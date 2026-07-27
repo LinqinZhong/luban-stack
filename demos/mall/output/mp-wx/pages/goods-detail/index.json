@@ -1,0 +1,9 @@
+{
+  "navigationBarTitleText": "商品详情",
+  "usingComponents": {
+    "title-bar": "/components/TitleBar/index",
+    "spec-selector": "/components/SpecSelector/index"
+  },
+  "navigationStyle": "custom",
+  "disableScroll": true
+}

@@ -1,0 +1,25 @@
+<scroll-view scroll-y="true" enhanced="true" show-scrollbar="false" lower-threshold="80" refresher-enabled="{{true}}" refresher-threshold="{{100}}" refresher-default-style="none" refresher-triggered="{{refreshing}}" bindrefresherpulling="__onRefresherPulling" bindrefresherrefresh="__onRefresherRefresh" bindrefresherrestore="__onRefresherRestore" bindrefresherabort="__onRefresherRestore" bindscroll="__onScroll_0" bindscrolltolower="__onScrollToLower_1" style="width:100%;height:100%">
+  <view slot="refresher" style="width:100%;height:{{pullHeight}}px;overflow:hidden;display:flex;flex-direction:row;align-items:center;justify-content:center;box-sizing:border-box">
+    <view wx:if="{{!refreshing}}" style="width:{{(arrowSize) * 2}}rpx;height:{{(arrowSize) * 2}}rpx;display:inline-flex;flex-shrink:0;-webkit-transform:perspective(800px) rotateX({{arrowRotate}}deg) rotateZ(90deg);transform:perspective(800px) rotateX({{arrowRotate}}deg) rotateZ(90deg)">
+      <image src="/assets/icons/arrow.svg" mode="aspectFit" style="width:auto;height:auto;color:#626262;width:100%;height:100%" />
+    </view>
+    <image wx:if="{{refreshing}}" src="/assets/icons/loading.svg" mode="aspectFit" style="width:auto;height:auto;color:#303133;font-size:40rpx;width:40rpx;height:40rpx" />
+    <text style="width:auto;height:auto;color:#303133;font-size:28rpx">{{pullText}}</text>
+  </view>
+  <slot name="header" />
+  <slot>
+    <view style="width:100%;height:auto;padding:16rpx;display:flex;flex-direction:column">
+      <view wx:for="{{data}}" wx:for-item="item" wx:for-index="index" wx:key="index" style="width:100%;height:auto;padding:20rpx;background:#ffffff;display:flex;flex-direction:column">
+        <text style="width:100%;height:auto;background:#ffffff;color:#303133;font-size:28rpx">{{item}}</text>
+      </view>
+    </view>
+  </slot>
+  <view style="width:100%;height:auto;display:flex;flex-direction:column;align-items:center;justify-content:center">
+    <text wx:if="{{(!hasNext && !loading)}}" style="width:auto;height:auto;margin-top:20rpx;margin-bottom:20rpx;color:#303133;font-size:28rpx">{{bottomText}}</text>
+    <view wx:if="{{(loading && !refreshing && hasNext)}}" style="width:100%;height:auto;padding:16rpx;display:flex;flex-direction:row;align-items:center;justify-content:center">
+      <image src="/assets/icons/loading.svg" mode="aspectFit" style="width:auto;height:auto;color:#303133;font-size:40rpx;width:40rpx;height:40rpx" />
+      <text style="width:auto;height:auto;color:#303133;font-size:28rpx">加载中...</text>
+    </view>
+  </view>
+  <slot name="footer" />
+</scroll-view>

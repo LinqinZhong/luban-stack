@@ -1152,10 +1152,21 @@ function childRelativeStyle(child: XmlNode): CSSProperties {
     }
   }
 
-  if (a.layout_marginLeft) style.left = `${parseNumber(a.layout_marginLeft)}px`
-  if (a.layout_marginTop) style.top = `${parseNumber(a.layout_marginTop)}px`
-  if (a.layout_marginRight) style.right = `${parseNumber(a.layout_marginRight)}px`
-  if (a.layout_marginBottom) style.bottom = `${parseNumber(a.layout_marginBottom)}px`
+  // layout_margin* 覆盖边缘；忽略空值与字面量 "null"（清空后偶发残留）
+  const marginPx = (raw: string | undefined): number | null => {
+    const t = raw?.trim()
+    if (!t || t === 'null') return null
+    const n = parseNumber(t, Number.NaN)
+    return Number.isFinite(n) ? n : null
+  }
+  const ml = marginPx(a.layout_marginLeft)
+  const mt = marginPx(a.layout_marginTop)
+  const mr = marginPx(a.layout_marginRight)
+  const mb = marginPx(a.layout_marginBottom)
+  if (ml != null) style.left = `${ml}px`
+  if (mt != null) style.top = `${mt}px`
+  if (mr != null) style.right = `${mr}px`
+  if (mb != null) style.bottom = `${mb}px`
 
   return style
 }

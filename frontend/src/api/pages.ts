@@ -11,6 +11,8 @@ export interface PageConfig {
     backgroundColor?: string
     /** 是否重叠；也可为 'true'/'false' 或 {字段} */
     cover?: boolean | string
+    /** 是否显示原生标题栏；false 时导出 navigationStyle: custom */
+    navigationBar?: boolean | string
   }
 }
 

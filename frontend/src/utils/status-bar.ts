@@ -21,6 +21,11 @@ export interface StatusBarConfig {
    * 布尔，或 `'true'` / `'false'`，或 `{字段}`。
    */
   cover: boolean | string
+  /**
+   * 是否显示微信原生标题栏（navigationBar）。
+   * 关闭后预览不占标题栏区域，导出为 navigationStyle: custom。
+   */
+  navigationBar: boolean | string
 }
 
 /** 解析绑定后用于画布渲染的结果 */
@@ -28,12 +33,14 @@ export interface ResolvedStatusBarConfig {
   textStyle: StatusBarTextStyle
   backgroundColor: string
   cover: boolean
+  navigationBar: boolean
 }
 
 export const DEFAULT_STATUS_BAR_CONFIG: StatusBarConfig = {
   textStyle: 'black',
   backgroundColor: '#ffffff',
   cover: false,
+  navigationBar: true,
 }
 
 function looksLikeBinding(raw: string): boolean {
@@ -72,7 +79,17 @@ export function normalizeStatusBarConfig(
     else cover = c === '1' || c.toLowerCase() === 'true'
   }
 
-  return { textStyle, backgroundColor, cover }
+  let navigationBar: boolean | string = DEFAULT_STATUS_BAR_CONFIG.navigationBar
+  if (typeof raw?.navigationBar === 'boolean') {
+    navigationBar = raw.navigationBar
+  } else if (typeof raw?.navigationBar === 'string') {
+    const n = raw.navigationBar.trim()
+    if (!n) navigationBar = true
+    else if (looksLikeBinding(n) || n === 'true' || n === 'false') navigationBar = n
+    else navigationBar = n === '1' || n.toLowerCase() === 'true'
+  }
+
+  return { textStyle, backgroundColor, cover, navigationBar }
 }
 
 function resolveBindingString(
@@ -114,6 +131,7 @@ export function resolveStatusBarConfig(
     textStyle: resolveTextStyle(cfg.textStyle, pageData),
     backgroundColor,
     cover: resolveCover(cfg.cover, pageData),
+    navigationBar: resolveCover(cfg.navigationBar, pageData),
   }
 }
 
@@ -126,4 +144,9 @@ export function statusBarCoverIsOn(cover: boolean | string): boolean {
   const c = cover.trim().toLowerCase()
   if (looksLikeBinding(cover)) return false
   return c === 'true' || c === '1'
+}
+
+/** 与 cover 相同的 true/false 解析（标题栏开关） */
+export function statusBarFlagIsOn(flag: boolean | string): boolean {
+  return statusBarCoverIsOn(flag)
 }

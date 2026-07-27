@@ -17,6 +17,8 @@ export interface VoiderProjectConfig {
   entryPage?: string
   /** 微信小程序 AppID */
   wechatAppId?: string
+  /** 微信小程序 API 基址（wx.request 前缀，如 https://api.example.com） */
+  wechatApiBaseUrl?: string
 }
 
 
@@ -70,6 +72,13 @@ export function isValidProjectConfig(value: unknown): value is VoiderProjectConf
   if (
     config.wechatAppId !== undefined &&
     typeof config.wechatAppId !== 'string'
+  ) {
+    return false
+  }
+
+  if (
+    config.wechatApiBaseUrl !== undefined &&
+    typeof config.wechatApiBaseUrl !== 'string'
   ) {
     return false
   }

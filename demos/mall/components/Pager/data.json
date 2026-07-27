@@ -5,7 +5,7 @@
       "type": "json",
       "remark": "",
       "value": {
-        "current": 1,
+        "current": 2,
         "pageSize": 10
       },
       "binding": "",
@@ -54,7 +54,7 @@
       "remark": "",
       "value": "",
       "binding": "computed",
-      "computeBody": "// 可直接使用同级数据池字段名作为变量（无需形参）\n// return 的值即为该字段的计算值\nreturn refreshing ? '刷新中...' : pullHeight > 100 ? '释放即可刷新' : '下拉刷新'\n"
+      "computeBody": "// 可直接使用同级数据池字段名作为变量（无需形参）\n// return 的值即为该字段的计算值\nreturn refreshing ? '刷新中...' : pullHeight > 100 ? '释放立即刷新' : '下拉即可刷新'\n"
     },
     {
       "name": "pullHeight",
@@ -79,6 +79,22 @@
       "value": false,
       "binding": "",
       "computeBody": ""
+    },
+    {
+      "name": "arrowSize",
+      "type": "number",
+      "remark": "",
+      "value": 0,
+      "binding": "computed",
+      "computeBody": "// 可直接使用同级数据池字段名作为变量（无需形参）\n// return 的值即为该字段的计算值\nreturn Math.min(pullHeight, 100)/100 *10 + 5\n"
+    },
+    {
+      "name": "arrowRotate",
+      "type": "number",
+      "remark": "",
+      "value": 0,
+      "binding": "computed",
+      "computeBody": "// 可直接使用同级数据池字段名作为变量（无需形参）\n// return 的值即为该字段的计算值\nreturn pullHeight > 100 ? 180 : 0\n"
     }
   ]
 }

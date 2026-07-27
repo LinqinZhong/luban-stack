@@ -39,6 +39,7 @@ import {
 } from '../services/backend-services.js'
 import { debugDataLayerMethod } from '../services/data-method-debug.js'
 import { exportVue3Project } from '../services/export-vue3.js'
+import { exportMpWxProject } from '../services/export-mp-wx.js'
 import { DEFAULT_CANVAS_WIDTH, ENGINE_VERSION } from '../types/voider-project.js'
 
 const router = Router()
@@ -169,6 +170,21 @@ router.post('/export/vue3', async (req, res) => {
       return
     }
     const result = await exportVue3Project(projectPath.trim())
+    res.json(result)
+  } catch (err) {
+    handleError(res, err)
+  }
+})
+
+router.post('/export/mp-wx', async (req, res) => {
+  try {
+    const projectPath =
+      typeof req.body?.projectPath === 'string' ? req.body.projectPath : ''
+    if (!projectPath.trim()) {
+      res.status(400).json({ message: '请提供 projectPath' })
+      return
+    }
+    const result = await exportMpWxProject(projectPath.trim())
     res.json(result)
   } catch (err) {
     handleError(res, err)

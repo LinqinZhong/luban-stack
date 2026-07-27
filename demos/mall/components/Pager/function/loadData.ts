@@ -20,8 +20,10 @@ $props.fetchApi({
     updateProps('data', res.records)
     showToast('刷新成功')
   }else{
-    updateProps('data', [...$props.data ,...res.records])
+    updateProps('data', [...$props.data ,...(res.records || [])])
   }
+}).catch((err) => {
+  console.error(err)
 }).finally(() => {
   setData('refreshing', false)
   setData('loading', false)

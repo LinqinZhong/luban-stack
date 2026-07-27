@@ -52,6 +52,7 @@ import {
   isStatusBarNodeId,
   normalizeStatusBarConfig,
   statusBarCoverIsOn,
+  statusBarFlagIsOn,
   type StatusBarConfig,
 } from '../../utils/status-bar'
 import {
@@ -103,6 +104,7 @@ const statusBarForm = reactive({
   textStyle: 'black',
   backgroundColor: '#ffffff',
   cover: 'false',
+  navigationBar: 'true',
 })
 
 watch(
@@ -113,6 +115,12 @@ watch(
     statusBarForm.backgroundColor = next.backgroundColor
     statusBarForm.cover =
       typeof next.cover === 'boolean' ? (next.cover ? 'true' : 'false') : String(next.cover)
+    statusBarForm.navigationBar =
+      typeof next.navigationBar === 'boolean'
+        ? next.navigationBar
+          ? 'true'
+          : 'false'
+        : String(next.navigationBar)
   },
   { immediate: true, deep: true },
 )
@@ -125,10 +133,19 @@ function commitStatusBar() {
   else if (coverRaw === 'false' || coverRaw === '0' || !coverRaw) cover = false
   else cover = coverRaw
 
+  const navRaw = statusBarForm.navigationBar.trim()
+  let navigationBar: boolean | string = true
+  if (looksLikeDataBinding(navRaw)) navigationBar = navRaw
+  else if (navRaw === 'true' || navRaw === '1') navigationBar = true
+  else if (navRaw === 'false' || navRaw === '0') navigationBar = false
+  else if (!navRaw) navigationBar = true
+  else navigationBar = navRaw
+
   emit('update:status-bar', {
     textStyle: statusBarForm.textStyle.trim() || 'black',
     backgroundColor: statusBarForm.backgroundColor.trim() || '#ffffff',
     cover,
+    navigationBar,
   })
 }
 
@@ -142,11 +159,19 @@ function commitStatusBarCoverSwitch(on: boolean) {
   commitStatusBar()
 }
 
+function commitStatusBarNavigationBarSwitch(on: boolean) {
+  statusBarForm.navigationBar = on ? 'true' : 'false'
+  commitStatusBar()
+}
+
 const statusBarTextStyleIsBinding = computed(() =>
   looksLikeDataBinding(statusBarForm.textStyle),
 )
 const statusBarCoverIsBinding = computed(() =>
   looksLikeDataBinding(statusBarForm.cover),
+)
+const statusBarNavigationBarIsBinding = computed(() =>
+  looksLikeDataBinding(statusBarForm.navigationBar),
 )
 
 const selectedNode = computed(() =>
@@ -1200,6 +1225,25 @@ function saveVisibilityConfig(config: VisibilityConditionConfig) {
               />
               <p class="hint">
                 开启后状态栏浮在页面之上（沉浸式）。可绑定：<code>{'{immersive}'}</code>
+              </p>
+            </el-form-item>
+            <el-form-item label="显示标题栏 navigationBar">
+              <div v-if="!statusBarNavigationBarIsBinding" class="bool-prop-row">
+                <el-switch
+                  :model-value="statusBarFlagIsOn(statusBarForm.navigationBar)"
+                  @update:model-value="commitStatusBarNavigationBarSwitch"
+                />
+              </div>
+              <el-input
+                v-model="statusBarForm.navigationBar"
+                clearable
+                placeholder="true / false，或 {数据池字段}"
+                :style="statusBarNavigationBarIsBinding ? undefined : { marginTop: '8px' }"
+                @change="commitStatusBar"
+              />
+              <p class="hint">
+                开启后预览显示微信原生标题栏区域；关闭则隐藏，导出为
+                <code>navigationStyle: custom</code>（适合自绘标题栏）。
               </p>
             </el-form-item>
           </el-form>

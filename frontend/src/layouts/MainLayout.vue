@@ -2,14 +2,15 @@
 import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { Download, SwitchButton } from '@element-plus/icons-vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { useProjectStore } from '../stores/project'
-import { exportProjectVue3 } from '../api/projects'
+import { exportProjectMpWx, exportProjectVue3 } from '../api/projects'
 import WorkspaceSettingsButton from '../components/editor/WorkspaceSettingsButton.vue'
 
 const router = useRouter()
 const projectStore = useProjectStore()
 const exporting = ref(false)
+const settingsButtonRef = ref<{ open: (tab?: string) => void } | null>(null)
 
 const pageTitle = computed(() => {
   const name = projectStore.config?.name
@@ -21,17 +22,51 @@ function closeProject() {
   void router.push('/')
 }
 
+async function ensureWechatAppIdConfigured(): Promise<boolean> {
+  if (projectStore.config?.wechatAppId?.trim()) return true
+  try {
+    await ElMessageBox.confirm(
+      '未配置微信小程序 AppID，请先在设置中填写后再导出。',
+      '无法导出',
+      {
+        confirmButtonText: '去配置',
+        cancelButtonText: '取消',
+        type: 'warning',
+        distinguishCancelAndClose: true,
+      },
+    )
+    settingsButtonRef.value?.open('project')
+  } catch {
+    // 取消 / 关闭
+  }
+  return false
+}
+
 async function handleExportCommand(command: string) {
-  if (command !== 'vue3') return
   if (!projectStore.path) {
     ElMessage.warning('请先打开项目')
     return
   }
+
+  if (command === 'mp-wx') {
+    const ok = await ensureWechatAppIdConfigured()
+    if (!ok) return
+  } else if (command !== 'vue3') {
+    return
+  }
+
   exporting.value = true
   try {
-    const result = await exportProjectVue3(projectStore.path)
+    if (command === 'vue3') {
+      const result = await exportProjectVue3(projectStore.path)
+      ElMessage.success(
+        `已导出 Vue3 工程（${result.pages} 页 / ${result.components} 组件）到 ${result.outputPath}`,
+      )
+      return
+    }
+    const result = await exportProjectMpWx(projectStore.path)
     ElMessage.success(
-      `已导出 Vue3 工程（${result.pages} 页 / ${result.components} 组件）到 ${result.outputPath}`,
+      `已导出微信小程序（${result.pages} 页 / ${result.components} 组件）到 ${result.outputPath}`,
     )
   } catch (err) {
     ElMessage.error(err instanceof Error ? err.message : '导出失败')
@@ -49,7 +84,7 @@ async function handleExportCommand(command: string) {
         <span class="title">{{ pageTitle }}</span>
       </div>
       <div class="header-actions">
-        <WorkspaceSettingsButton />
+        <WorkspaceSettingsButton ref="settingsButtonRef" />
         <el-dropdown
           trigger="click"
           :disabled="exporting || !projectStore.path"
@@ -62,6 +97,9 @@ async function handleExportCommand(command: string) {
             <el-dropdown-menu>
               <el-dropdown-item command="vue3">
                 导出为 vue3 工程
+              </el-dropdown-item>
+              <el-dropdown-item command="mp-wx">
+                导出为微信小程序
               </el-dropdown-item>
             </el-dropdown-menu>
           </template>

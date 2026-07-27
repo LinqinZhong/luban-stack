@@ -1,4 +1,10 @@
 {
   "name": "聊天",
-  "title": "聊天"
+  "title": "聊天",
+  "statusBar": {
+    "textStyle": "black",
+    "backgroundColor": "#ffffff",
+    "cover": false,
+    "navigationBar": false
+  }
 }

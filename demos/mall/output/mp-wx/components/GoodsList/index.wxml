@@ -1,0 +1,12 @@
+<view style="width:100%;height:auto;display:flex;flex-direction:row">
+  <view style="flex:1;min-width:0;width:0;height:auto;display:flex;flex-direction:column;margin-right:16rpx">
+    <view wx:for="{{list1}}" wx:for-item="item" wx:for-index="index" wx:key="index" style="width:100%;height:auto;margin-bottom:16rpx;box-sizing:border-box">
+      <goods-card title="{{item.name}}" price="{{item.price}}" img="{{item.img}}" id="{{item.id}}" data="{{item}}" style="width:100%;height:auto;box-sizing:border-box" />
+    </view>
+  </view>
+  <view style="flex:1;min-width:0;width:0;height:auto;display:flex;flex-direction:column">
+    <view wx:for="{{list2}}" wx:for-item="item" wx:for-index="index" wx:key="index" style="width:100%;height:auto;margin-bottom:16rpx;box-sizing:border-box">
+      <goods-card title="{{item.name}}" price="{{item.price}}" img="{{item.img}}" id="{{item.id}}" data="{{item}}" style="width:100%;height:auto;box-sizing:border-box" />
+    </view>
+  </view>
+</view>

@@ -1,0 +1,8 @@
+/* components/GoodsCard/index.wxss */
+:host {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-height: 0;
+  box-sizing: border-box;
+}

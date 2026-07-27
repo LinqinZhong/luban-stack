@@ -61,6 +61,10 @@ const props = defineProps<{
   statusBarTextStyle?: 'black' | 'white'
   /** 状态栏与页面重叠（沉浸式） */
   statusBarCover?: boolean
+  /** 是否显示微信原生标题栏 */
+  statusBarNavigationBar?: boolean
+  /** 标题栏文案（页面 title） */
+  navigationBarTitle?: string
 }>()
 
 const emit = defineEmits<{
@@ -184,19 +188,21 @@ const statusBarSelected = computed(
     props.selectedId === STATUS_BAR_NODE_ID,
 )
 
-/** H5 场景固定白底黑字、无沉浸；小程序场景用页面配置 */
+/** H5 场景固定白底黑字、无沉浸、无标题栏；小程序场景用页面配置 */
 const effectiveStatusBar = computed(() => {
   if (scene.value !== 'miniprogram') {
     return {
       background: '#ffffff',
       textStyle: 'black' as const,
       cover: false,
+      navigationBar: false,
     }
   }
   return {
     background: props.statusBarBackground?.trim() || '#ffffff',
     textStyle: props.statusBarTextStyle === 'white' ? ('white' as const) : ('black' as const),
     cover: Boolean(props.statusBarCover),
+    navigationBar: props.statusBarNavigationBar !== false,
   }
 })
 
@@ -209,6 +215,27 @@ const statusBarStyle = computed(() => {
 })
 
 const statusBarCover = computed(() => effectiveStatusBar.value.cover)
+const showNavigationBar = computed(
+  () =>
+    Boolean(props.showDeviceChrome) &&
+    scene.value === 'miniprogram' &&
+    effectiveStatusBar.value.navigationBar,
+)
+
+const navigationBarTitleText = computed(() => {
+  const t = props.navigationBarTitle?.trim()
+  return t || '页面'
+})
+
+const navBarStyle = computed(() => {
+  const light = effectiveStatusBar.value.textStyle === 'white'
+  return {
+    background: effectiveStatusBar.value.background,
+    color: light ? '#ffffff' : '#111111',
+  }
+})
+
+const capsuleLight = computed(() => effectiveStatusBar.value.textStyle === 'white')
 
 function handleStatusBarSelect(event: MouseEvent) {
   if (!props.statusBarSelectable) return
@@ -463,6 +490,7 @@ onBeforeUnmount(() => {
           'is-preview': showTouchCursor,
           'is-miniprogram': showDeviceChrome && scene === 'miniprogram',
           'has-status-bar': showDeviceChrome,
+          'has-navigation-bar': showNavigationBar,
           'status-bar-cover': showDeviceChrome && statusBarCover,
         }"
         :style="phoneFrameStyle"
@@ -531,8 +559,23 @@ onBeforeUnmount(() => {
           </div>
         </div>
         <div
+          v-if="showNavigationBar"
+          class="device-navigation-bar color-pick-ignore"
+          :class="{
+            selectable: statusBarSelectable,
+            selected: statusBarSelected,
+            cover: statusBarCover,
+          }"
+          :style="navBarStyle"
+          aria-hidden="true"
+          @click="handleStatusBarSelect"
+        >
+          <span class="nav-title">{{ navigationBarTitleText }}</span>
+        </div>
+        <div
           v-if="showDeviceChrome && scene === 'miniprogram'"
           class="mp-capsule color-pick-ignore"
+          :class="{ light: capsuleLight, 'in-nav-bar': showNavigationBar }"
           aria-hidden="true"
         >
           <span class="mp-capsule-more" />
@@ -830,8 +873,64 @@ onBeforeUnmount(() => {
   min-height: 0;
 }
 
+/* 微信原生标题栏（navigationBar） */
+.device-navigation-bar {
+  flex-shrink: 0;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 96px 0 16px;
+  box-sizing: border-box;
+  pointer-events: none;
+  z-index: 6;
+  outline: 2px solid transparent;
+  outline-offset: -2px;
+  transition: outline-color 0.12s ease;
+}
+
+.device-navigation-bar.selectable {
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+.device-navigation-bar.selectable:hover {
+  outline-color: rgba(64, 158, 255, 0.55);
+}
+
+.device-navigation-bar.selected {
+  outline-color: #409eff;
+}
+
+.device-navigation-bar.cover {
+  position: absolute;
+  top: 22px;
+  left: 0;
+  right: 0;
+}
+
+.nav-title {
+  font-size: 16px;
+  font-weight: 500;
+  line-height: 1.2;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: center;
+}
+
 /* 小程序标题栏胶囊：需避开状态栏高度 */
 .phone.status-bar-cover .mp-capsule {
+  top: 30px;
+}
+
+.phone.has-navigation-bar .mp-capsule,
+.phone.has-navigation-bar.status-bar-cover .mp-capsule {
+  top: 28px;
+}
+
+.phone.has-navigation-bar .mp-capsule.in-nav-bar {
   top: 30px;
 }
 
@@ -882,9 +981,38 @@ onBeforeUnmount(() => {
   padding: 0 2px;
   border-radius: 14px;
   border: 1px solid rgba(0, 0, 0, 0.1);
-  background: #fff;
+  background: rgba(255, 255, 255, 0.6);
   box-sizing: border-box;
   pointer-events: none;
+}
+
+.mp-capsule.in-nav-bar {
+  /* 状态栏 22 + 标题栏垂直居中：(44-28)/2 = 8 → top 22+8 */
+  top: 30px;
+}
+
+.mp-capsule.light {
+  border-color: rgba(255, 255, 255, 0.25);
+  background: rgba(0, 0, 0, 0.15);
+}
+
+.mp-capsule.light .mp-capsule-more::before {
+  background: #fff;
+  box-shadow:
+    -6px 0 0 -0.5px #fff,
+    6px 0 0 -0.5px #fff;
+}
+
+.mp-capsule.light .mp-capsule-divider {
+  background: rgba(255, 255, 255, 0.35);
+}
+
+.mp-capsule.light .mp-capsule-close::before {
+  border-color: #fff;
+}
+
+.mp-capsule.light .mp-capsule-close::after {
+  background: #fff;
 }
 
 .mp-capsule-more,

@@ -25,6 +25,8 @@ export interface PageConfig {
     textStyle?: string
     backgroundColor?: string
     cover?: boolean | string
+    /** 是否显示原生标题栏；关闭则导出 navigationStyle: custom */
+    navigationBar?: boolean | string
   }
 }
 
@@ -212,7 +214,17 @@ function normalizePageStatusBar(
     else cover = c === '1' || c.toLowerCase() === 'true'
   }
 
-  return { textStyle, backgroundColor, cover }
+  let navigationBar: boolean | string = true
+  if (typeof raw.navigationBar === 'boolean') {
+    navigationBar = raw.navigationBar
+  } else if (typeof raw.navigationBar === 'string') {
+    const n = raw.navigationBar.trim()
+    if (!n) navigationBar = true
+    else if (looksLikeBinding(n) || n === 'true' || n === 'false') navigationBar = n
+    else navigationBar = n === '1' || n.toLowerCase() === 'true'
+  }
+
+  return { textStyle, backgroundColor, cover, navigationBar }
 }
 
 function defaultValue(type: DataField['type']) {

@@ -1,0 +1,12 @@
+page {
+  height: 100%;
+  width: 100%;
+  background: #f5f7fa;
+  color: #303133;
+  font-size: 28rpx;
+  box-sizing: border-box;
+}
+
+view, text, image, button, scroll-view {
+  box-sizing: border-box;
+}

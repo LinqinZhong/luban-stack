@@ -1,0 +1,65 @@
+<view style="width:100%;height:100%;padding:0rpx;margin:0rpx;background:#ededed;display:flex;flex-direction:column">
+  <view style="width:100%;flex:1;min-height:0;height:0;padding:0rpx;position:relative">
+    <view style="width:100%;height:100%;padding:0rpx;display:flex;flex-direction:column">
+      <title-bar title="商城" showBack="{{false}}" background="#409EFF" color="#ffffff" isFillScreen="{{false}}" style="width:100%;height:auto;background:#409EFF;color:#ffffff" />
+      <view style="width:100%;flex:1;min-height:0;height:0;margin-bottom:130rpx;position:relative;min-height:0;overflow:hidden">
+        <view wx:if="{{(currentNav + '') === 'home'}}" style="position:absolute;left:0;top:0;right:0;bottom:0;width:100%;height:100%;display:flex;flex-direction:column;overflow:hidden;box-sizing:border-box">
+          <view style="width:100%;flex:1;min-height:0;height:0;display:flex;flex-direction:column">
+            <view wx:if="{{((currentNav + '') === 'home')}}" style="width:100%;flex:1;min-height:0;height:0;overflow:hidden;display:flex;flex-direction:column">
+              <c-pager fetchApi="{{__api_fetchApi_0}}" data="{{goodsList}}" bind:update:data="__sync_data_goodsList" style="width:100%;flex:1;min-height:0;height:0">
+                <view style="width:100%;height:auto;padding-left:20rpx;padding-right:20rpx;padding-top:20rpx;display:flex;flex-direction:column">
+                  <swiper indicator-dots="true" autoplay="false" circular="true" interval="3000" duration="280" current="0" indicator-color="rgba(0,0,0,.3)" indicator-active-color="#409eff" style="width:100%;height:280rpx;overflow:hidden;background:#ffffff;overflow:hidden">
+                    <swiper-item>
+                      <image src="https://placebeard.it/370x200" mode="aspectFill" style="width:100%;height:280rpx;border-radius:0rpx" />
+                    </swiper-item>
+                    <swiper-item>
+                      <image src="" mode="aspectFill" style="width:100%;height:280rpx" />
+                    </swiper-item>
+                  </swiper>
+                </view>
+                <view style="width:100%;height:auto;padding-left:20rpx;padding-right:20rpx;padding-top:20rpx;box-sizing:border-box">
+                  <goods-list data="{{goodsList}}" style="width:100%;height:auto;box-sizing:border-box" />
+                </view>
+              </c-pager>
+            </view>
+          </view>
+        </view>
+        <view wx:if="{{(currentNav + '') === 'message'}}" style="position:absolute;left:0;top:0;right:0;bottom:0;width:100%;height:100%;display:flex;flex-direction:column;overflow:hidden;box-sizing:border-box">
+          <view style="width:100%;flex:1;min-height:0;height:0;display:flex;flex-direction:column">
+            <view wx:if="{{((currentNav + '') === 'message')}}" style="width:100%;flex:1;min-height:0;height:0;padding:24rpx;display:flex;flex-direction:column">
+              <view style="width:100%;height:auto;padding:0rpx;display:flex;flex-direction:column;align-items:center;justify-content:center">
+                <view wx:for="{{messagList}}" wx:for-item="item" wx:for-index="index" wx:key="index" bindtap="__onTap_0" style="width:100%;height:auto;padding:16rpx;padding-left:16rpx;padding-right:16rpx;padding-top:16rpx;padding-bottom:16rpx;margin:0rpx;margin-left:0rpx;margin-right:0rpx;margin-top:0rpx;margin-bottom:0rpx;background:#ffffff;display:flex;flex-direction:row;align-items:center;justify-content:center">
+                  <view style="width:auto;height:auto;padding:0rpx;background:#446ecf;border-radius:88rpx;display:flex;flex-direction:column;align-items:center;justify-content:center">
+                    <image src="{{item.avatar}}" mode="aspectFill" style="width:80rpx;height:80rpx;border-radius:80rpx" />
+                  </view>
+                  <view style="flex:1;min-width:0;width:0;height:auto;padding:16rpx;margin-left:22rpx;display:flex;flex-direction:column">
+                    <text style="width:auto;height:auto;color:#303133;font-size:32rpx">{{item.name}}</text>
+                    <text style="width:auto;height:auto;color:#8a8a8a;font-size:24rpx">{{item.content}}</text>
+                  </view>
+                  <text style="width:auto;height:auto;color:#303133;font-size:20rpx">{{item.time}}</text>
+                </view>
+              </view>
+            </view>
+          </view>
+        </view>
+        <view wx:if="{{(currentNav + '') === 'me'}}" style="position:absolute;left:0;top:0;right:0;bottom:0;width:100%;height:100%;display:flex;flex-direction:column;overflow:hidden;box-sizing:border-box">
+          <view style="width:100%;height:auto;padding:16rpx;display:flex;flex-direction:column"></view>
+        </view>
+      </view>
+    </view>
+    <view style="width:100%;height:130rpx;padding:0rpx;background:#ffffff;position:absolute;bottom:0;display:flex;flex-direction:row">
+      <view wx:for="{{navs}}" wx:for-item="item" wx:for-index="index" wx:key="index" bindtap="__onTap_1" data-voider-v0="{{item.key}}" style="flex:1;min-width:0;width:0;height:100%;padding:16rpx;display:flex;flex-direction:column;align-items:center;justify-content:center">
+        <image src="{{'/assets/icons/' + (item.icon) + '.svg'}}" mode="aspectFit" style="width:auto;height:auto;color:#555;font-size:40rpx;width:40rpx;height:40rpx" />
+        <text style="width:auto;height:auto;padding-top:10rpx;color:#555">{{item.label}}</text>
+      </view>
+    </view>
+    <swiper indicator-dots="true" autoplay="false" circular="true" interval="3000" duration="280" current="0" indicator-color="#ffffff" indicator-active-color="#ff0000" style="width:120rpx;height:120rpx;overflow:hidden;position:absolute;left:20rpx;bottom:200rpx;overflow:hidden">
+      <swiper-item>
+        <image catchtap="__onTap_2" src="https://ts3.tc.mm.bing.net/th/id/OIP-C.BaTVG1gAGyDZczd-kwb5kgAAAA?w=108&amp;h=108&amp;c=1&amp;bgcl=f66a1b&amp;r=0&amp;o=7&amp;pid=ImgRC&amp;rm=3" mode="aspectFill" style="width:120rpx;height:120rpx" />
+      </swiper-item>
+      <swiper-item>
+        <image src="https://ts3.tc.mm.bing.net/th/id/OIP-C.trK-7XBjUo2GwvRAHp3kgwAAAA?w=108&amp;h=108&amp;c=1&amp;bgcl=b0a5d8&amp;r=0&amp;o=7&amp;pid=ImgRC&amp;rm=3" mode="aspectFill" style="width:120rpx;height:120rpx" />
+      </swiper-item>
+    </swiper>
+  </view>
+</view>

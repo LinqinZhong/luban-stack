@@ -1,0 +1,12 @@
+{
+  "navigationBarTitleText": "首页",
+  "usingComponents": {
+    "title-bar": "/components/TitleBar/index",
+    "c-pager": "/components/Pager/index",
+    "goods-list": "/components/GoodsList/index"
+  },
+  "navigationBarBackgroundColor": "#409eff",
+  "navigationBarTextStyle": "white",
+  "navigationStyle": "custom",
+  "disableScroll": true
+}

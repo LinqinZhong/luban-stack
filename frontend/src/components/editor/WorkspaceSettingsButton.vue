@@ -13,10 +13,16 @@ const projectStore = useProjectStore()
 
 const wechatAppIdDraft = ref('')
 const savingWechatAppId = ref(false)
+const pendingTab = ref('')
 
 watch(visible, (open) => {
   if (open) {
-    activeTab.value = 'network'
+    // 外部 open('project') 已指定 tab 时不覆盖
+    if (!pendingTab.value) activeTab.value = 'network'
+    else {
+      activeTab.value = pendingTab.value
+      pendingTab.value = ''
+    }
     wechatAppIdDraft.value = projectStore.config?.wechatAppId ?? ''
   }
 })
@@ -37,9 +43,15 @@ const latencyDescription = computed(() => {
 
 const hasProject = computed(() => projectStore.hasProject)
 
-function open() {
+function open(tab?: string) {
+  if (tab) {
+    pendingTab.value = tab
+    activeTab.value = tab
+  }
   visible.value = true
 }
+
+defineExpose({ open })
 
 async function saveWechatAppId() {
   if (!projectStore.path || !projectStore.config) {
@@ -74,7 +86,7 @@ async function saveWechatAppId() {
     class="settings-trigger"
     title="设置"
     aria-label="设置"
-    @click="open"
+    @click="open()"
   />
   <el-dialog
     v-model="visible"
