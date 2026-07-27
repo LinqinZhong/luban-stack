@@ -98,6 +98,9 @@ async function readConfigFile(projectPath: string): Promise<VoiderProjectConfig>
   if (parsed.entryPage?.trim()) {
     config.entryPage = parsed.entryPage.trim()
   }
+  if (typeof parsed.wechatAppId === 'string' && parsed.wechatAppId.trim()) {
+    config.wechatAppId = parsed.wechatAppId.trim()
+  }
   return config
 }
 
@@ -153,6 +156,28 @@ export async function getProjectEntryPage(
   await assertDirectory(projectPath)
   const config = await readConfigFile(projectPath)
   return config.entryPage
+}
+
+/** 更新项目配置中的可编辑字段（写入 voider.json） */
+export async function patchProjectConfig(
+  projectPathInput: string,
+  patch: { wechatAppId?: string | null },
+): Promise<ProjectResult> {
+  const projectPath = normalizeProjectPath(projectPathInput)
+  await assertDirectory(projectPath)
+  const config = await readConfigFile(projectPath)
+
+  if ('wechatAppId' in patch) {
+    const raw = patch.wechatAppId
+    if (raw == null || !String(raw).trim()) {
+      delete config.wechatAppId
+    } else {
+      config.wechatAppId = String(raw).trim()
+    }
+  }
+
+  await writeConfigFile(projectPath, config)
+  return { path: projectPath, config }
 }
 
 export async function openProject(inputPath: string): Promise<ProjectResult> {

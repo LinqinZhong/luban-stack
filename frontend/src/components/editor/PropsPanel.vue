@@ -358,6 +358,9 @@ const layoutForm = reactive({
   iconId: '',
   size: '',
   color: '',
+  rotateX: '',
+  rotateY: '',
+  rotateZ: '',
   autoplay: false,
   circular: true,
   indicatorDots: true,
@@ -453,6 +456,9 @@ function syncLayoutForm() {
   layoutForm.iconId = node.attrs.iconId ?? ''
   layoutForm.size = node.attrs.size ?? ''
   layoutForm.color = node.attrs.color ?? ''
+  layoutForm.rotateX = node.attrs.rotateX ?? ''
+  layoutForm.rotateY = node.attrs.rotateY ?? ''
+  layoutForm.rotateZ = node.attrs.rotateZ ?? ''
   layoutForm.autoplay = node.attrs.autoplay === 'true'
   layoutForm.circular =
     node.attrs.circular == null ||
@@ -571,6 +577,12 @@ const showInputProps = computed(() => selectedNode.value?.tag === 'Input')
 const showImageProps = computed(() => selectedNode.value?.tag === 'Image')
 
 const showIconProps = computed(() => selectedNode.value?.tag === 'Icon')
+
+/** 文字 / 图片 / 图标：3D 旋转（度） */
+const showRotateProps = computed(() => {
+  const tag = selectedNode.value?.tag
+  return tag === 'Text' || tag === 'Image' || tag === 'Icon'
+})
 
 const showSwiperProps = computed(() => selectedNode.value?.tag === 'Swiper')
 const showMultiWindowProps = computed(() => selectedNode.value?.tag === 'MultiWindow')
@@ -1663,6 +1675,39 @@ function saveVisibilityConfig(config: VisibilityConditionConfig) {
                   v-model="layoutForm.color"
                   placeholder="#303133"
                   @change="commitAttr('color', layoutForm.color)"
+                />
+              </el-form-item>
+            </el-form>
+          </template>
+
+          <template v-if="showRotateProps">
+            <div class="section-title">旋转</div>
+            <el-form label-position="top" size="small">
+              <el-form-item label="rotateX（度）">
+                <NumericInput
+                  v-model="layoutForm.rotateX"
+                  placeholder="0"
+                  :min="-360"
+                  :max="360"
+                  @change="commitAttr('rotateX', layoutForm.rotateX)"
+                />
+              </el-form-item>
+              <el-form-item label="rotateY（度）">
+                <NumericInput
+                  v-model="layoutForm.rotateY"
+                  placeholder="0"
+                  :min="-360"
+                  :max="360"
+                  @change="commitAttr('rotateY', layoutForm.rotateY)"
+                />
+              </el-form-item>
+              <el-form-item label="rotateZ（度）">
+                <NumericInput
+                  v-model="layoutForm.rotateZ"
+                  placeholder="0"
+                  :min="-360"
+                  :max="360"
+                  @change="commitAttr('rotateZ', layoutForm.rotateZ)"
                 />
               </el-form-item>
             </el-form>

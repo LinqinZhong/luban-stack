@@ -37,6 +37,8 @@ export interface VoiderProjectConfig {
   }
   /** 入口页面 id */
   entryPage?: string
+  /** 微信小程序 AppID */
+  wechatAppId?: string
 }
 
 export interface ProjectResult {
@@ -396,6 +398,16 @@ export function setProjectEntryPage(payload: {
   pageId: string | null
 }) {
   return request<ProjectResult>('/api/projects/entry', {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  })
+}
+
+export function patchProjectConfig(payload: {
+  projectPath: string
+  wechatAppId?: string | null
+}) {
+  return request<ProjectResult>('/api/projects/config', {
     method: 'PUT',
     body: JSON.stringify(payload),
   })

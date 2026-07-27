@@ -52,6 +52,9 @@ const form = reactive({
   value: '',
   placeholder: '',
   color: '',
+  rotateX: '',
+  rotateY: '',
+  rotateZ: '',
 })
 
 const showTextProps = computed(
@@ -59,6 +62,9 @@ const showTextProps = computed(
 )
 const showInputProps = computed(() => props.tag === 'Input')
 const showIconColor = computed(() => props.tag === 'Icon')
+const showRotateProps = computed(
+  () => props.tag === 'Text' || props.tag === 'Image' || props.tag === 'Icon',
+)
 /** Modal 始终全屏，无宽高 / margin */
 const showSizeProps = computed(() => props.tag !== 'Modal')
 const showMarginProps = computed(() => props.tag !== 'Modal')
@@ -144,6 +150,9 @@ function syncFromModel(styles: StyleOverrides) {
   form.value = styles.value ?? ''
   form.placeholder = styles.placeholder ?? ''
   form.color = styles.color ?? ''
+  form.rotateX = styles.rotateX ?? ''
+  form.rotateY = styles.rotateY ?? ''
+  form.rotateZ = styles.rotateZ ?? ''
 }
 
 function emitStyles() {
@@ -191,6 +200,11 @@ function emitStyles() {
   set('value', form.value)
   set('placeholder', form.placeholder)
   set('color', form.color)
+  if (showRotateProps.value) {
+    set('rotateX', form.rotateX)
+    set('rotateY', form.rotateY)
+    set('rotateZ', form.rotateZ)
+  }
 
   emit('update:modelValue', next)
 }
@@ -427,6 +441,39 @@ function onFieldChange() {
       <el-form label-position="top" size="small">
         <el-form-item label="color">
           <ColorPicker v-model="form.color" @change="onFieldChange" />
+        </el-form-item>
+      </el-form>
+    </template>
+
+    <template v-if="showRotateProps">
+      <div class="section-title">旋转</div>
+      <el-form label-position="top" size="small">
+        <el-form-item label="rotateX（度）">
+          <NumericInput
+            v-model="form.rotateX"
+            :min="-360"
+            :max="360"
+            placeholder="0"
+            @change="onFieldChange"
+          />
+        </el-form-item>
+        <el-form-item label="rotateY（度）">
+          <NumericInput
+            v-model="form.rotateY"
+            :min="-360"
+            :max="360"
+            placeholder="0"
+            @change="onFieldChange"
+          />
+        </el-form-item>
+        <el-form-item label="rotateZ（度）">
+          <NumericInput
+            v-model="form.rotateZ"
+            :min="-360"
+            :max="360"
+            placeholder="0"
+            @change="onFieldChange"
+          />
         </el-form-item>
       </el-form>
     </template>

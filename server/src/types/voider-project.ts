@@ -15,6 +15,8 @@ export interface VoiderProjectConfig {
   }
   /** 入口页面 id（pages/ 下目录名） */
   entryPage?: string
+  /** 微信小程序 AppID */
+  wechatAppId?: string
 }
 
 
@@ -61,6 +63,13 @@ export function isValidProjectConfig(value: unknown): value is VoiderProjectConf
   if (
     config.entryPage !== undefined &&
     (typeof config.entryPage !== 'string' || !config.entryPage.trim())
+  ) {
+    return false
+  }
+
+  if (
+    config.wechatAppId !== undefined &&
+    typeof config.wechatAppId !== 'string'
   ) {
     return false
   }

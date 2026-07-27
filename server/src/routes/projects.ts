@@ -5,6 +5,7 @@ import {
   openProject,
   ProjectError,
   setEntryPage,
+  patchProjectConfig,
 } from '../services/project.js'
 import { readIconLibrary, saveIconLibrary } from '../services/icons.js'
 import {
@@ -118,6 +119,27 @@ router.put('/entry', async (req, res) => {
       return
     }
     const result = await setEntryPage(projectPath.trim(), pageId)
+    res.json(result)
+  } catch (err) {
+    handleError(res, err)
+  }
+})
+
+router.put('/config', async (req, res) => {
+  try {
+    const projectPath =
+      typeof req.body?.projectPath === 'string' ? req.body.projectPath : ''
+    if (!projectPath.trim()) {
+      res.status(400).json({ message: '请提供 projectPath' })
+      return
+    }
+    const patch: { wechatAppId?: string | null } = {}
+    if ('wechatAppId' in (req.body ?? {})) {
+      const raw = req.body.wechatAppId
+      patch.wechatAppId =
+        raw === null || raw === undefined ? null : String(raw)
+    }
+    const result = await patchProjectConfig(projectPath.trim(), patch)
     res.json(result)
   } catch (err) {
     handleError(res, err)

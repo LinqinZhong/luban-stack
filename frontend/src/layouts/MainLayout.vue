@@ -5,6 +5,7 @@ import { Download, SwitchButton } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { useProjectStore } from '../stores/project'
 import { exportProjectVue3 } from '../api/projects'
+import WorkspaceSettingsButton from '../components/editor/WorkspaceSettingsButton.vue'
 
 const router = useRouter()
 const projectStore = useProjectStore()
@@ -48,6 +49,7 @@ async function handleExportCommand(command: string) {
         <span class="title">{{ pageTitle }}</span>
       </div>
       <div class="header-actions">
+        <WorkspaceSettingsButton />
         <el-dropdown
           trigger="click"
           :disabled="exporting || !projectStore.path"

@@ -99,6 +99,30 @@ export function parseNumber(value: string | undefined, fallback = 0): number {
   return Number.isFinite(num) ? num : fallback
 }
 
+/**
+ * 3D 旋转（度）：rotateX / rotateY / rotateZ。
+ * 任一轴非 0 时附加 perspective，便于 X/Y 轴可见。
+ */
+export function rotateStyle(
+  attrs: Record<string, string | undefined>,
+): Record<string, string> {
+  const has =
+    Boolean(attrs.rotateX?.trim()) ||
+    Boolean(attrs.rotateY?.trim()) ||
+    Boolean(attrs.rotateZ?.trim())
+  if (!has) return {}
+  const x = parseNumber(attrs.rotateX, 0)
+  const y = parseNumber(attrs.rotateY, 0)
+  const z = parseNumber(attrs.rotateZ, 0)
+  if (!x && !y && !z) return {}
+  const parts: string[] = []
+  if (x || y) parts.push('perspective(800px)')
+  if (x) parts.push(`rotateX(${x}deg)`)
+  if (y) parts.push(`rotateY(${y}deg)`)
+  if (z) parts.push(`rotateZ(${z}deg)`)
+  return { transform: parts.join(' ') }
+}
+
 export function parseBool(value: string | undefined): boolean {
   return value === 'true'
 }

@@ -19,6 +19,7 @@ import {
   runFlowToEnd,
 } from '../components/editor/method-flow/method-flow-debug'
 import { runComputeBody } from './compute-runtime'
+import { useWorkspaceSettingsStore } from '../stores/workspace-settings'
 
 type ServiceBundle = {
   controllers: ServiceController[]
@@ -198,7 +199,21 @@ async function fetchApiData(
     },
     initialScope,
   )
-  return extractFlowReturnValue(flow, snap)
+  const value = extractFlowReturnValue(flow, snap)
+  await applyPreviewApiLatency()
+  return value
+}
+
+/** 工作区「模拟 API 延迟」：预览返回前再等一段时间 */
+async function applyPreviewApiLatency() {
+  try {
+    const ms = useWorkspaceSettingsStore().apiLatencyMs
+    if (typeof ms === 'number' && ms > 0) {
+      await new Promise((resolve) => setTimeout(resolve, ms))
+    }
+  } catch {
+    // pinia 未就绪时忽略
+  }
 }
 
 async function loadOneField(

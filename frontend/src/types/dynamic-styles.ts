@@ -262,6 +262,9 @@ export const STYLE_OVERRIDE_KEYS = [
   'value',
   'placeholder',
   'color',
+  'rotateX',
+  'rotateY',
+  'rotateZ',
 ] as const
 
 export type StyleOverrideKey = (typeof STYLE_OVERRIDE_KEYS)[number]

@@ -817,6 +817,47 @@ function styleAttr(styleEntries: string[]): string {
   return `:style="{ ${filtered.join(', ')} }"`
 }
 
+/** rotateX/Y/Z（度）→ transform 样式片段，支持静态数字与数据池绑定 */
+function rotateStyleEntries(
+  attrs: Record<string, string>,
+  ctx: CodegenContext,
+  inRepeat: boolean,
+): string[] {
+  const xRaw = attrs.rotateX?.trim() ?? ''
+  const yRaw = attrs.rotateY?.trim() ?? ''
+  const zRaw = attrs.rotateZ?.trim() ?? ''
+  if (!xRaw && !yRaw && !zRaw) return []
+
+  const dynamic = [xRaw, yRaw, zRaw].some((raw) => raw.includes('{'))
+  if (!dynamic) {
+    const x = parseNumber(xRaw) ?? 0
+    const y = parseNumber(yRaw) ?? 0
+    const z = parseNumber(zRaw) ?? 0
+    if (!x && !y && !z) return []
+    const parts: string[] = []
+    if (x || y) parts.push('perspective(800px)')
+    if (x) parts.push(`rotateX(${x}deg)`)
+    if (y) parts.push(`rotateY(${y}deg)`)
+    if (z) parts.push(`rotateZ(${z}deg)`)
+    return [`transform: '${parts.join(' ')}'`]
+  }
+
+  const degExpr = (raw: string): string => {
+    if (!raw) return `'0deg'`
+    if (raw.includes('{')) {
+      return `(Number(${bindingToExpr(raw, ctx, inRepeat)}) || 0) + 'deg'`
+    }
+    return `'${parseNumber(raw) ?? 0}deg'`
+  }
+
+  const parts: string[] = []
+  if (xRaw || yRaw) parts.push(`'perspective(800px)'`)
+  if (xRaw) parts.push(`'rotateX(' + ${degExpr(xRaw)} + ')'`)
+  if (yRaw) parts.push(`'rotateY(' + ${degExpr(yRaw)} + ')'`)
+  if (zRaw) parts.push(`'rotateZ(' + ${degExpr(zRaw)} + ')'`)
+  return [`transform: [${parts.join(', ')}].join(' ')`]
+}
+
 /** 宽高/间距绑定变量 → :style（静态数字仍走 Tailwind class） */
 function dynamicPxStyleEntries(
   attrs: Record<string, string>,
@@ -2024,9 +2065,10 @@ ${pad}</template>`
     }
     const tw = twWithRelative(attrs, parentTag, textExtra, twOpts)
     const events = collectInteractionEventAttrs(attrs, inRepeat, ctx)
-    const style = colorRes.static
-      ? ''
-      : styleAttr([`color: ${colorRes.expr}`])
+    const styleParts: string[] = []
+    if (!colorRes.static) styleParts.push(`color: ${colorRes.expr}`)
+    styleParts.push(...rotateStyleEntries(attrs, ctx, inRepeat))
+    const style = styleAttr(styleParts)
     return formatVueElement({
       pad,
       tag: 'span',
@@ -2194,6 +2236,7 @@ ${pad}</template>`
       ].filter(Boolean),
       twOpts,
     )
+    const rotateStyle = styleAttr(rotateStyleEntries(attrs, ctx, inRepeat))
     // 空 src：与编辑器一致用占位，避免浏览器破碎图
     if (!srcTrimmed) {
       return formatVueElement({
@@ -2201,6 +2244,7 @@ ${pad}</template>`
         tag: 'div',
         attrs: [
           classAttr(phTw),
+          rotateStyle,
           ...visibilityAttrs(attrs, ctx, inRepeat),
           ...events,
         ],
@@ -2212,7 +2256,14 @@ ${pad}</template>`
     const img = formatVueElement({
       pad: isStaticBinding(srcTrimmed) ? pad : `${pad}  `,
       tag: 'img',
-      attrs: [srcAttr, alt, classAttr(tw), ...visibilityAttrs(attrs, ctx, inRepeat), ...events],
+      attrs: [
+        srcAttr,
+        alt,
+        classAttr(tw),
+        rotateStyle,
+        ...visibilityAttrs(attrs, ctx, inRepeat),
+        ...events,
+      ],
       selfClosing: true,
     })
     if (isStaticBinding(srcTrimmed)) return img
@@ -2223,6 +2274,7 @@ ${pad}</template>`
       tag: 'div',
       attrs: [
         classAttr(phTw),
+        rotateStyle,
         ...visibilityAttrs(attrs, ctx, inRepeat),
         ...events,
       ],
@@ -2257,6 +2309,7 @@ ${pad}</template>`
         `:size="${size}"`,
         colorAttr,
         classAttr(tw),
+        styleAttr(rotateStyleEntries(attrs, ctx, inRepeat)),
         ...visibilityAttrs(attrs, ctx, inRepeat),
         ...events,
       ],

@@ -19,6 +19,7 @@ import {
   hasBorderRadius,
   overflowStyle,
   paddingStyle,
+  rotateStyle,
 } from '../../utils/xml'
 import { resolveMatchingStyleOverrides, evaluateScenarios, interpolateDataBindings, resolveAttrBindingValue } from '../../utils/dynamic-style-runtime'
 import {
@@ -390,6 +391,7 @@ const textStyle = computed(() => ({
       : 'left') as 'left' | 'center' | 'right',
   whiteSpace: 'pre-wrap' as const,
   wordBreak: 'break-word' as const,
+  ...rotateStyle(attrs.value),
 }))
 
 const instanceDollarProps = computed(() => {
@@ -712,6 +714,7 @@ const imageStyle = computed(() => ({
     : {}),
   // 图片自身圆角仍需裁切，不受布局 overflow 属性控制
   ...(hasBorderRadius(attrs.value) ? { overflow: 'hidden' as const } : {}),
+  ...rotateStyle(attrs.value),
 }))
 
 const imagePlaceholderStyle = computed(() => ({
@@ -728,6 +731,7 @@ const imagePlaceholderStyle = computed(() => ({
     ? { width: '100%', height: '100%', minHeight: 0, flex: '1 1 auto' }
     : {}),
   ...(hasBorderRadius(attrs.value) ? { overflow: 'hidden' as const } : {}),
+  ...rotateStyle(attrs.value),
 }))
 
 /** 编辑态未展开的 {item.xxx} 等变量，不解析图标 */
@@ -757,6 +761,7 @@ const iconStyle = computed(() => {
     height: hasFixedH ? undefined : `${size}px`,
     flexShrink: 0,
     lineHeight: 0,
+    ...rotateStyle(attrs.value),
   }
 })
 
