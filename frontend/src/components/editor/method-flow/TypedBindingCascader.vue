@@ -17,6 +17,8 @@ const props = defineProps<{
   targetType: ProcessorTypeExpr | null | undefined
   typeLibrary?: DataTypeLibrary | null
   placeholder?: string
+  /** 额外根节点（如 $query） */
+  extraRoots?: import('../../../utils/typed-binding-paths').TypedBindingCascaderOption[]
 }>()
 
 const emit = defineEmits<{
@@ -28,6 +30,7 @@ const rawOptions = computed(() =>
     props.ambientVars,
     props.targetType,
     props.typeLibrary,
+    props.extraRoots,
   ),
 )
 

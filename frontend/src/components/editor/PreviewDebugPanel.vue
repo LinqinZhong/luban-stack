@@ -11,7 +11,7 @@ import {
   buildDollarProps,
   normalizePropDefaultValue,
 } from '../../utils/component-props'
-import { findDataTypeDef, typeExprToDataFieldType } from '../../utils/named-type-fields'
+import { findDataTypeDef, typeExprToDataFieldType, fillNamedInterfaceDefaults } from '../../utils/named-type-fields'
 import ColorPicker from './ColorPicker.vue'
 import ApiPropBindField from './ApiPropBindField.vue'
 
@@ -281,6 +281,37 @@ function resolveDataFieldForm(field: DataField): DataFieldFormModel {
 
 const dataFieldForms = computed(() =>
   dataFields.value.map(resolveDataFieldForm),
+)
+
+/** 具名对象缺字段时写入类型默认值，使画布插值与调试面板数字框一致（如 deliveryFee → 0） */
+watch(
+  () =>
+    dataFields.value.map((f) => ({
+      name: f.name,
+      type: f.type,
+      typeRef: f.typeRef,
+      value: f.value,
+    })),
+  () => {
+    if (!props.typeLibrary) return
+    for (const field of dataFields.value) {
+      if (field.type !== 'json' || !field.typeRef?.trim()) continue
+      if (isReadonlyDataField(field)) continue
+      const filled = fillNamedInterfaceDefaults(
+        field.value,
+        field.typeRef,
+        props.typeLibrary,
+      )
+      if (filled === field.value) continue
+      try {
+        if (JSON.stringify(filled) === JSON.stringify(field.value)) continue
+      } catch {
+        // fall through
+      }
+      onDataFieldInput(field, filled as DataFieldValue)
+    }
+  },
+  { deep: true, flush: 'post' },
 )
 
 function getDataArrayItems(field: DataField): unknown[] {

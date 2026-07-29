@@ -3,6 +3,12 @@ import type { PageData } from '../../types/page-data.js'
 import type { XmlNode } from './xml-parser.js'
 import { escapeHtmlAttr, escapeHtmlText, escapeTsString, escapeVueExprAttr } from './escape.js'
 import {
+  isSimpleBindingPath,
+  normalizeBindingOperators,
+  scanBindingSpans,
+  unwrapWholeBinding,
+} from './binding-expr.js'
+import {
   componentIdToFileName,
   componentIdToVarName,
   pageIdToStoreFile,
@@ -10,8 +16,10 @@ import {
   pageIdToViewName,
 } from './naming.js'
 import {
+  generateControllerBoundPageMounted,
   generatePageDataSource,
   generatePageStoreAdapter,
+  type VueApiBinding,
 } from './page-data-codegen.js'
 
 const LAYOUT_ATTRS = new Set([
@@ -287,8 +295,9 @@ function bindingToExpr(
     return `'${escapeTsString(trimmed)}'`
   }
 
-  if (/\{[^{}]+\}/.test(trimmed) && trimmed.startsWith('{') && trimmed.endsWith('}')) {
-    const inner = trimmed.slice(1, -1).trim()
+  const whole = unwrapWholeBinding(trimmed)
+  if (whole != null) {
+    const inner = normalizeBindingOperators(whole)
     if (inner.startsWith('$props.') || inner === '$props') {
       const path = inner === '$props' ? '' : inner.slice(7)
       return path ? `props.${path}` : 'props'
@@ -297,23 +306,42 @@ function bindingToExpr(
       const path = inner === '$route' ? '' : inner.slice(7)
       return path ? `route.params.${path}` : 'route.params'
     }
+    if (inner.startsWith('$query.') || inner === '$query') {
+      const path = inner === '$query' ? '' : inner.slice(7)
+      return path ? `(route.query.${path} as string)` : 'route.query'
+    }
     if (inner === 'index' && inRepeat) return 'index'
     if (inner === 'item' && inRepeat) return 'item'
     if (inner.startsWith('item.') && inRepeat) return `item.${inner.slice(5)}`
     if (inner.startsWith('item.') && !inRepeat) return 'undefined'
-    if (/^[A-Za-z_][\w]*$/.test(inner)) {
-      // 模板中 ref/computed 自动解包（页面与组件本地数据池）
-      if (ctx.kind === 'page' || ctx.dataFieldNames.includes(inner)) return inner
+    // 简单字段或嵌套路径：goodsInfo / goodsInfo.deliveryFee
+    if (isSimpleBindingPath(inner)) {
+      const root = inner.split(/[.\[]/)[0]!
+      if (ctx.kind === 'page' || ctx.dataFieldNames.includes(root)) return inner
       return `store.${inner}`
     }
+    // 复杂表达式（三元 / 模板字符串等）→ 直接写入模板
+    return `(${rewriteBindingExprForVue(inner)})`
+  }
+
+  // 混合文案（含嵌套 {} 的表达式）→ runtime interpolate
+  if (scanBindingSpans(trimmed).length) {
     const scopeExpr = inRepeat ? '{ item, index }' : 'undefined'
     const propsExpr =
       ctx.kind === 'component' ? 'props as Record<string, any>' : 'undefined'
     const storeExpr = ctx.kind === 'page' ? 'pageStore' : 'store'
-    return `interpolate('${escapeTsString(trimmed)}', { store: ${storeExpr}, scope: ${scopeExpr}, props: ${propsExpr}, route: route.params as Record<string, any> })`
+    return `interpolate('${escapeTsString(trimmed)}', { store: ${storeExpr}, scope: ${scopeExpr}, props: ${propsExpr}, route: { ...route.params, ...route.query } as Record<string, any> })`
   }
 
   return `'${escapeTsString(trimmed)}'`
+}
+
+/** 模板内表达式：规范化 $query / $route / $props */
+function rewriteBindingExprForVue(expr: string): string {
+  return normalizeBindingOperators(expr)
+    .replace(/\b\$query\b/g, 'route.query')
+    .replace(/\b\$route\b/g, 'route.params')
+    .replace(/\b\$props\b/g, 'props')
 }
 
 /** v-for 列表表达式：数据池字段或 $props.xxx */
@@ -644,6 +672,10 @@ function visibilityFieldExpr(
     const path = raw.replace(/^\$?route\./, '')
     return `route.params.${path}`
   }
+  if (raw.startsWith('$query.') || raw.startsWith('query.')) {
+    const path = raw.replace(/^\$?query\./, '')
+    return `route.query.${path}`
+  }
   if (ctx.kind === 'page' || ctx.dataFieldNames.includes(raw)) return raw
   return `store.${raw}`
 }
@@ -936,6 +968,7 @@ function templateToExpr(raw: string, inRepeat: boolean, hasPayload: boolean, ctx
     }
     if (inner.startsWith('$props.')) return `props.${inner.slice(7)}`
     if (inner.startsWith('$route.')) return `String(route.params.${inner.slice(7)} ?? '')`
+    if (inner.startsWith('$query.')) return `String(route.query.${inner.slice(7)} ?? '')`
     if (/^[A-Za-z_][\w.]*$/.test(inner)) {
       const root = inner.split('.')[0]!
       const parts: string[] = []
@@ -956,13 +989,13 @@ function templateToExpr(raw: string, inRepeat: boolean, hasPayload: boolean, ctx
     }
   }
 
-  // 整段插值字符串，退回 runtime interpolate
+  // 混合文案 / 复杂插值，退回 runtime interpolate
   const storeExpr = ctx.kind === 'page' ? 'pageStore' : 'store'
   return `interpolate('${escapeTsString(trimmed)}', {
     store: ${storeExpr},
     scope: ${inRepeat ? '{ item, index }' : 'undefined'},
     props: typeof props !== 'undefined' ? (props as Record<string, any>) : undefined,
-    route: route.params as Record<string, any>,
+    route: { ...route.params, ...route.query } as Record<string, any>,
   })`
 }
 
@@ -2011,12 +2044,15 @@ ${pad}</template>`
     )
     const panes = node.children
       .filter((c) => c.tag !== '#text')
-      .map((child) => {
+      .map((child, paneIndex) => {
         const childIndex = node.children.indexOf(child)
         const childPath = `${nodePath}/${childIndex}:${child.tag}`
         const windowKey = (child.attrs.windowKey || '').trim()
+        // active 计算字段首帧可能为空：先显示第一窗，避免白屏
         const showAttr = windowKey
-          ? `v-show="${activeExpr} === '${escapeTsString(windowKey)}'"`
+          ? paneIndex === 0
+            ? `v-show="${activeExpr} === '${escapeTsString(windowKey)}' || !${activeExpr}"`
+            : `v-show="${activeExpr} === '${escapeTsString(windowKey)}'"`
           : 'v-show="false"'
         const pane = renderNode(
           child,
@@ -2391,9 +2427,14 @@ export function generateViewSfc(options: {
   componentRoots?: Map<string, XmlNode>
   pageRefFields: PageRefField[]
   rootNodes: XmlNode[]
+  resolveApi?: (raw: string) => VueApiBinding | null
 }): string {
   const storeName = pageIdToStoreName(options.pageId)
   const pageData = generatePageDataSource(options.data.fields)
+  const controllerMounted = generateControllerBoundPageMounted({
+    fields: options.data.fields,
+    resolveApi: options.resolveApi ?? (() => null),
+  })
   const refPathMap = new Map(
     options.pageRefFields
       .filter((f) => f.kind === 'component')
@@ -2445,7 +2486,7 @@ export function generateViewSfc(options: {
     .join('\n')
 
   const methodsSource = `${renderExtraScript(ctx.extraScript)}${renderGeneratedMethods(ctx.methods)}`
-  const scriptAndTemplate = `${methodsSource}\n${templateBody}\n${pageData.source}`
+  const scriptAndTemplate = `${methodsSource}\n${templateBody}\n${pageData.source}\n${controllerMounted.source}`
   const needsInterpolate = scriptAndTemplate.includes('interpolate(')
   const needsEvalVShow = templateBody.includes('evalVShow(')
   const needsEvalVIf = templateBody.includes('evalVIf(')
@@ -2456,8 +2497,9 @@ export function generateViewSfc(options: {
   const needsGetDeviceInfo = /\bgetDeviceInfo\s*\(/.test(scriptAndTemplate)
   const needsNavigation = needsNavigateTo || needsNavigateBack
   const needsRoute =
+    controllerMounted.needsRoute ||
     /\broute\./.test(scriptAndTemplate) ||
-    (needsAppRuntime && /\$route/.test(options.xml))
+    (needsAppRuntime && (/\$route/.test(options.xml) || /\$query/.test(options.xml)))
   const hasPageRefs = options.pageRefFields.length > 0
   const needsRef = pageData.needsRef || hasPageRefs
   const needsModal = ctx.modalNames.size > 0
@@ -2466,6 +2508,7 @@ export function generateViewSfc(options: {
     needsReactive ? 'reactive' : '',
     needsRef ? 'ref' : '',
     pageData.needsComputed ? 'computed' : '',
+    controllerMounted.needsOnMounted ? 'onMounted' : '',
   ]
     .filter(Boolean)
     .join(', ')
@@ -2474,6 +2517,7 @@ export function generateViewSfc(options: {
     needsNavigation ? 'useNavigation' : '',
     needsShowToast ? 'showToast' : '',
     needsGetDeviceInfo ? 'getDeviceInfo' : '',
+    controllerMounted.needsInvoke ? 'invoke' : '',
   ]
     .filter(Boolean)
     .join(', ')
@@ -2526,6 +2570,7 @@ export function generateViewSfc(options: {
 }`
       : '',
     methodsSource.trimEnd(),
+    controllerMounted.source.trimEnd(),
   ]
     .filter(Boolean)
     .join('\n\n')

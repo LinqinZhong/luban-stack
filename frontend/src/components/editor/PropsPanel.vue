@@ -53,6 +53,8 @@ import DataFieldTypeTreeSelect, {
 } from './DataFieldTypeTreeSelect.vue'
 import type { ComponentRenderMap } from '../../types/component-render'
 import type { ComponentPropDef } from '../../types/component'
+import type { PageQueryParamDef } from '../../types/page-query'
+import PageQueryParamsPanel from './PageQueryParamsPanel.vue'
 import { DATA_FIELD_TYPE_OPTIONS, type DataFieldType } from '../../types/page-data'
 import {
   isStatusBarNodeId,
@@ -92,6 +94,12 @@ const props = defineProps<{
   openRepeatRequest?: number
   /** 页面状态栏配置 */
   statusBarConfig?: Partial<StatusBarConfig> | null
+  /** 页面 Query 入参定义（仅页面资源） */
+  pageQueryParams?: PageQueryParamDef[] | null
+  /** 页面 Query 调试值 */
+  pageDebugQuery?: Record<string, unknown> | null
+  /** 是否为页面资源（未选中节点时可配 Query） */
+  isPageResource?: boolean
   /** 画布场景：H5 下提示状态栏不可控 */
   canvasScene?: 'h5' | 'miniprogram'
   /** 有值时在标题位显示返回，替代「属性」文案 */
@@ -102,6 +110,8 @@ const emit = defineEmits<{
   'update:xml': [xml: string]
   'update:tab': [tab: PropsTab]
   'update:status-bar': [config: StatusBarConfig]
+  'update:page-query-params': [value: PageQueryParamDef[]]
+  'update:page-debug-query': [value: Record<string, unknown>]
   back: []
 }>()
 
@@ -870,26 +880,48 @@ const stringFieldOptions = computed(() =>
     }),
 )
 
-/** MultiWindow 激活项：string / number 顶层字段 */
-const activeFieldOptions = computed(() =>
-  (props.dataFields ?? [])
-    .filter(
-      (field) =>
-        (field.type === 'string' || field.type === 'number') && field.name.trim(),
-    )
-    .map((field) => {
-      const name = field.name.trim()
-      const remark = field.remark?.trim()
-      const typeLabel = field.type === 'number' ? '数字' : '字符串'
-      return {
-        value: name,
-        label: remark ? `${name} · ${remark}（${typeLabel}）` : `${name}（${typeLabel}）`,
-      }
-    }),
-)
+/** MultiWindow 激活项：数据池或 $props 的 string / number 字段 */
+const activeFieldOptions = computed(() => {
+  const options: Array<{ value: string; label: string }> = []
+  for (const field of props.dataFields ?? []) {
+    if (
+      (field.type !== 'string' && field.type !== 'number') ||
+      !field.name.trim()
+    ) {
+      continue
+    }
+    const name = field.name.trim()
+    const remark = field.remark?.trim()
+    const typeLabel = field.type === 'number' ? '数字' : '字符串'
+    options.push({
+      value: name,
+      label: remark
+        ? `数据池 · ${name} · ${remark}（${typeLabel}）`
+        : `数据池 · ${name}（${typeLabel}）`,
+    })
+  }
+  for (const def of props.componentProps ?? []) {
+    if (
+      (def.type !== 'string' && def.type !== 'number') ||
+      !def.name.trim()
+    ) {
+      continue
+    }
+    const name = def.name.trim()
+    const remark = def.remark?.trim()
+    const typeLabel = def.type === 'number' ? '数字' : '字符串'
+    options.push({
+      value: `$props.${name}`,
+      label: remark
+        ? `$props · ${name} · ${remark}（${typeLabel}）`
+        : `$props · ${name}（${typeLabel}）`,
+    })
+  }
+  return options
+})
 
 function parseInputValueBinding(raw: string | undefined): string {
-  const m = (raw ?? '').trim().match(/^\{([A-Za-z_][\w]*)\}$/)
+  const m = (raw ?? '').trim().match(/^\{([A-Za-z_$][\w.$]*)\}$/)
   return m?.[1] ?? ''
 }
 
@@ -1320,6 +1352,17 @@ function saveVisibilityConfig(config: VisibilityConditionConfig) {
               </p>
             </el-form-item>
           </el-form>
+        </div>
+        <div
+          v-else-if="!selectedNode && isPageResource"
+          class="layout-form"
+        >
+          <PageQueryParamsPanel
+            :query-params="pageQueryParams ?? []"
+            :debug-query="pageDebugQuery ?? {}"
+            @update:query-params="emit('update:page-query-params', $event)"
+            @update:debug-query="emit('update:page-debug-query', $event)"
+          />
         </div>
         <el-empty
           v-else-if="!selectedNode"
@@ -2274,8 +2317,12 @@ function saveVisibilityConfig(config: VisibilityConditionConfig) {
               </el-button>
             </div>
             <p class="hint">
-              从数据池选择字符串或数字字段，写入
+              从数据池或
+              <code>$props</code>
+              选择字符串或数字字段，写入
               <code>{'{字段名}'}</code>
+              /
+              <code>{'{$props.字段名}'}</code>
               。预览时显示
               <code>windowKey</code>
               与激活值匹配的窗口。
@@ -2414,12 +2461,12 @@ function saveVisibilityConfig(config: VisibilityConditionConfig) {
       append-to-body
     >
       <el-form label-position="top" size="default">
-        <el-form-item label="数据池字段">
+        <el-form-item label="激活字段">
           <el-select
             v-model="activeForm.field"
             clearable
             filterable
-            placeholder="选择字符串或数字类型字段"
+            placeholder="选择数据池或 $props 字符串/数字字段"
             style="width: 100%"
           >
             <el-option
@@ -2434,6 +2481,8 @@ function saveVisibilityConfig(config: VisibilityConditionConfig) {
       <p class="hint" style="margin-top: 0">
         将写入属性
         <code>active="{'{字段名}'}"</code>
+        或
+        <code>active="{'{$props.字段名}'}"</code>
         。窗口的
         <code>windowKey</code>
         与该字段值相等时显示。

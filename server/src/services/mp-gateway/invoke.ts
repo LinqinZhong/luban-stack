@@ -396,8 +396,18 @@ export function assembleApiScope(
       scope[name] = parseMaybeJson(body[name])
     } else if (Object.prototype.hasOwnProperty.call(query, name)) {
       scope[name] = parseMaybeJson(query[name])
-    } else if (inp.required && !(name in scope)) {
-      throw new ProjectError(`缺少必填入参「${name}」`, 400)
+    }
+
+    if (inp.required) {
+      const value = scope[name]
+      const jsonLike = inp.type === 'json' || Boolean(inp.typeRef)
+      const missing =
+        value === undefined ||
+        value === null ||
+        (!jsonLike && value === '')
+      if (missing) {
+        throw new ProjectError(`${name}不能为空`, 400)
+      }
     }
   }
   // 也合并未声明的 body/query，方便调试

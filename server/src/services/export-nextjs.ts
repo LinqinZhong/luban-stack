@@ -1,7 +1,5 @@
 import {
   mkdir,
-  readdir,
-  rm,
   writeFile,
 } from 'node:fs/promises'
 import path from 'node:path'
@@ -17,6 +15,7 @@ import {
   formatNestEnvFile,
   pickOssForEnv,
 } from './export-nextjs/env.js'
+import { emptyDirPreserveDeps } from './clean-output.js'
 
 export interface ExportNestJsOptions {
   /** 绝对或相对项目的输出目录；默认 output/nestjs */
@@ -26,6 +25,8 @@ export interface ExportNestJsOptions {
   /** 写入 .env 的 PORT */
   port?: number
   projectName?: string
+  /** 是否挂载 OSS 模块（POST /oss/sign）；默认 true 兼容旧单服务导出 */
+  includeOss?: boolean
 }
 
 export interface ExportNestJsResult {
@@ -59,33 +60,13 @@ async function writeMany(
 }
 
 export async function cleanExportOutput(outputPath: string): Promise<void> {
-  const keep = new Set([
-    'node_modules',
-    'dist',
-    '.git',
-    'pnpm-lock.yaml',
-    'package-lock.json',
-  ])
-  await mkdir(outputPath, { recursive: true })
-  let entries
   try {
-    entries = await readdir(outputPath, { withFileTypes: true })
+    await emptyDirPreserveDeps(outputPath)
   } catch (err) {
     throw new ProjectError(
-      `无法读取导出目录：${err instanceof Error ? err.message : String(err)}`,
+      `无法清理导出目录：${err instanceof Error ? err.message : String(err)}`,
       500,
     )
-  }
-  for (const ent of entries) {
-    if (keep.has(ent.name)) continue
-    try {
-      await rm(path.join(outputPath, ent.name), { recursive: true, force: true })
-    } catch (err) {
-      throw new ProjectError(
-        `无法清理导出目录项「${ent.name}」：${err instanceof Error ? err.message : String(err)}`,
-        500,
-      )
-    }
   }
 }
 
@@ -165,6 +146,7 @@ export async function exportNestJsProject(
     routes: generated.routes,
     rootModuleImports: generated.rootModuleImports,
     envFiles,
+    includeOss: options.includeOss !== false,
   })
 
   await writeMany(outputPath, scaffold)

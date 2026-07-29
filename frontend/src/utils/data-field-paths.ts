@@ -254,7 +254,7 @@ function buildPropsTree(
   }
 }
 
-/** 路由参数树：$route / $route.xxx */
+/** 路由 / Query 参数树：$query（与 $route 同值） */
 function buildRouteTree(
   routeParams: Record<string, unknown> | null | undefined,
 ): FieldPathTreeNode | null {
@@ -262,18 +262,17 @@ function buildRouteTree(
 
   const entries = Object.entries(routeParams)
   return {
-    id: '$route',
-    label: '$route（路由参数）',
-    value: '$route',
+    id: '$query',
+    label: '$query（页面 Query）',
+    value: '$query',
     type: 'json',
     selectable: true,
     children: entries.length
       ? entries.map(([key, value]) =>
-          buildFromUnknown(`$route.${key}`, key, value),
+          buildFromUnknown(`$query.${key}`, key, value),
         )
       : [
-          // 编辑态尚无跳转参数时，仍提供常用 id 供选择
-          buildFromUnknown('$route.id', 'id', ''),
+          buildFromUnknown('$query.id', 'id', ''),
         ],
   }
 }
@@ -304,7 +303,7 @@ export function buildConditionFieldTree(
 
   for (const field of fields) {
     const name = field.name.trim()
-    if (!name || name === '$props' || name === '$route') continue
+    if (!name || name === '$props' || name === '$route' || name === '$query') continue
     roots.push(buildFromUnknown(name, name, field.value))
   }
 

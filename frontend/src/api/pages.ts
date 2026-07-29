@@ -1,5 +1,6 @@
 import { request } from './index'
 import type { PageData } from '../types/page-data'
+import type { PageQueryParamDef } from '../types/page-query'
 
 export interface PageConfig {
   name: string
@@ -14,6 +15,10 @@ export interface PageConfig {
     /** 是否显示原生标题栏；false 时导出 navigationStyle: custom */
     navigationBar?: boolean | string
   }
+  /** 页面 Query 入参定义（?key= / 跳转 params） */
+  queryParams?: PageQueryParamDef[]
+  /** 调试用 Query 值（编辑态 / 预览未跳转时） */
+  debugQuery?: Record<string, unknown>
 }
 
 export interface PageSummary {
@@ -62,6 +67,8 @@ export function savePageConfig(payload: {
   name: string
   title?: string
   statusBar?: PageConfig['statusBar']
+  queryParams?: PageConfig['queryParams']
+  debugQuery?: PageConfig['debugQuery']
 }) {
   return request<PageDetail>(
     `/api/pages/${encodeURIComponent(payload.pageId)}/config`,
@@ -72,6 +79,8 @@ export function savePageConfig(payload: {
         name: payload.name,
         title: payload.title,
         statusBar: payload.statusBar,
+        queryParams: payload.queryParams,
+        debugQuery: payload.debugQuery,
       }),
     },
   )

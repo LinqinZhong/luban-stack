@@ -21,6 +21,8 @@ export type FlowDebugSnapshot = {
   visitedNodeIds: string[]
   /** 各已执行节点的打印文案 */
   printByNode?: Record<string, string>
+  /** 停在「业务异常」节点时的错误（不再向上抛，便于调试定位） */
+  businessError?: { message: string; code: number }
 }
 
 export type FlowAmbientVar = MethodParam & {
@@ -28,6 +30,31 @@ export type FlowAmbientVar = MethodParam & {
   value?: unknown
   /** 是否已有运行时值 */
   hasValue: boolean
+}
+
+/** 流程「业务异常」节点抛出；调试 Result.code 为 400 */
+export class BusinessException extends Error {
+  readonly code = 400
+  constructor(message: string) {
+    super(message)
+    this.name = 'BusinessException'
+  }
+}
+
+function snapshotFromBusinessError(
+  nodeId: string,
+  scope: Record<string, unknown>,
+  visitedNodeIds: string[],
+  printByNode: Record<string, string> | undefined,
+  err: BusinessException,
+): FlowDebugSnapshot {
+  return {
+    cursorNodeId: nodeId,
+    scope,
+    visitedNodeIds,
+    printByNode,
+    businessError: { message: err.message, code: err.code },
+  }
 }
 
 function asRecord(data: unknown): Record<string, unknown> {
@@ -479,6 +506,9 @@ async function debugRunBusinessMethod(
     },
     params,
   )
+  if (snap.businessError) {
+    throw new BusinessException(snap.businessError.message)
+  }
   return extractFlowReturnValue(flow, snap)
 }
 
@@ -694,6 +724,21 @@ export async function executeFlowNode(
   } else if (node.kind === 'end') {
     const next = pickNext(ctx.flow, node, scope)
     result = { scope, nextNodeId: next.nextId, log: next.log }
+  } else if (node.kind === 'throw') {
+    const messageExpr = str(data, 'messageExpr').trim()
+    let message = '业务异常'
+    if (messageExpr) {
+      try {
+        message = String(evalInScope(messageExpr, scope) ?? '业务异常')
+      } catch (err) {
+        throw new Error(
+          `业务异常节点求值失败：${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        )
+      }
+    }
+    throw new BusinessException(message)
   } else {
     const next = pickNext(ctx.flow, node, scope)
     result = { scope, nextNodeId: next.nextId, log: next.log }
@@ -750,7 +795,7 @@ function findPathToNode(flow: MethodFlow, targetNodeId: string): string[] | null
   return null
 }
 
-/** 从 start 执行到 target（含），沿通往目标的路径执行 */
+/** 从 start 按实际分支执行到 target（含）；走不到则报错 */
 export async function runFlowToNode(
   ctx: FlowStepContext,
   targetNodeId: string,
@@ -759,28 +804,37 @@ export async function runFlowToNode(
   if (!findNode(ctx.flow, targetNodeId)) {
     throw new Error('目标节点不存在')
   }
-  const path = findPathToNode(ctx.flow, targetNodeId)
-  if (!path?.length) {
+  // 先确认图上连通，再按运行时分支推进
+  if (!findPathToNode(ctx.flow, targetNodeId)?.length) {
     throw new Error('无法从开始节点到达当前节点')
   }
 
-  let scope = cloneScope(initialScope)
-  const visited: string[] = []
-  let printByNode: Record<string, string> = {}
+  const start = findStartNode(ctx.flow)
+  if (!start) throw new Error('工作流缺少开始节点')
 
-  for (const nodeId of path) {
-    const step = await executeFlowNode(ctx, nodeId, scope)
-    scope = step.scope
-    visited.push(nodeId)
-    printByNode = mergePrint(printByNode, nodeId, step.printText)
+  let snap: FlowDebugSnapshot = {
+    cursorNodeId: start.id,
+    scope: cloneScope(initialScope),
+    visitedNodeIds: [],
+    printByNode: {},
   }
 
-  return {
-    cursorNodeId: targetNodeId,
-    scope,
-    visitedNodeIds: visited,
-    printByNode,
+  const maxSteps = Math.max(64, ctx.flow.nodes.length * 4)
+  for (let i = 0; i < maxSteps; i++) {
+    snap = await runFlowNext(ctx, snap)
+    if (snap.cursorNodeId === targetNodeId) return snap
+    if (snap.businessError) {
+      throw new Error('无法从开始节点到达当前节点（按当前数据走不到该分支）')
+    }
+    const done = snap.visitedNodeIds.includes(snap.cursorNodeId)
+    if (done) {
+      const nextId = peekNextNodeId(ctx.flow, snap.cursorNodeId, snap.scope)
+      if (!nextId) {
+        throw new Error('无法从开始节点到达当前节点（按当前数据走不到该分支）')
+      }
+    }
   }
+  throw new Error('执行步数过多，请检查工作流是否存在环')
 }
 
 /** 在已执行完 cursor 的前提下，根据当前 scope 推断下一节点 */
@@ -802,19 +856,36 @@ export async function runFlowNext(
   ctx: FlowStepContext,
   snapshot: FlowDebugSnapshot,
 ): Promise<FlowDebugSnapshot> {
+  if (snapshot.businessError) {
+    throw new Error('流程已因业务异常终止')
+  }
+
   const alreadyDone = snapshot.visitedNodeIds.includes(snapshot.cursorNodeId)
 
   if (!alreadyDone) {
-    const step = await executeFlowNode(ctx, snapshot.cursorNodeId, snapshot.scope)
-    return {
-      cursorNodeId: snapshot.cursorNodeId,
-      scope: step.scope,
-      visitedNodeIds: [...snapshot.visitedNodeIds, snapshot.cursorNodeId],
-      printByNode: mergePrint(
-        snapshot.printByNode,
-        snapshot.cursorNodeId,
-        step.printText,
-      ),
+    try {
+      const step = await executeFlowNode(ctx, snapshot.cursorNodeId, snapshot.scope)
+      return {
+        cursorNodeId: snapshot.cursorNodeId,
+        scope: step.scope,
+        visitedNodeIds: [...snapshot.visitedNodeIds, snapshot.cursorNodeId],
+        printByNode: mergePrint(
+          snapshot.printByNode,
+          snapshot.cursorNodeId,
+          step.printText,
+        ),
+      }
+    } catch (err) {
+      if (err instanceof BusinessException) {
+        return snapshotFromBusinessError(
+          snapshot.cursorNodeId,
+          snapshot.scope,
+          [...snapshot.visitedNodeIds, snapshot.cursorNodeId],
+          snapshot.printByNode,
+          err,
+        )
+      }
+      throw err
     }
   }
 
@@ -822,12 +893,25 @@ export async function runFlowNext(
   if (!nextId) {
     throw new Error('已经没有下一个节点')
   }
-  const step = await executeFlowNode(ctx, nextId, snapshot.scope)
-  return {
-    cursorNodeId: nextId,
-    scope: step.scope,
-    visitedNodeIds: [...snapshot.visitedNodeIds, nextId],
-    printByNode: mergePrint(snapshot.printByNode, nextId, step.printText),
+  try {
+    const step = await executeFlowNode(ctx, nextId, snapshot.scope)
+    return {
+      cursorNodeId: nextId,
+      scope: step.scope,
+      visitedNodeIds: [...snapshot.visitedNodeIds, nextId],
+      printByNode: mergePrint(snapshot.printByNode, nextId, step.printText),
+    }
+  } catch (err) {
+    if (err instanceof BusinessException) {
+      return snapshotFromBusinessError(
+        nextId,
+        snapshot.scope,
+        [...snapshot.visitedNodeIds, nextId],
+        snapshot.printByNode,
+        err,
+      )
+    }
+    throw err
   }
 }
 
@@ -848,6 +932,7 @@ export async function runFlowToEnd(
 
   const maxSteps = Math.max(64, ctx.flow.nodes.length * 4)
   for (let i = 0; i < maxSteps; i++) {
+    if (snap.businessError) return snap
     const done = snap.visitedNodeIds.includes(snap.cursorNodeId)
     if (done) {
       const nextId = peekNextNodeId(ctx.flow, snap.cursorNodeId, snap.scope)

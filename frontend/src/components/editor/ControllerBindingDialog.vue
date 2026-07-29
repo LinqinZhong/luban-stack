@@ -48,6 +48,8 @@ import { resolveFlowReturnMethodParam } from './method-flow/method-flow-debug'
 import TypedBindingCascader from './method-flow/TypedBindingCascader.vue'
 import TsCodeEditor from './TsCodeEditor.vue'
 import EventBindDialog from './EventBindDialog.vue'
+import type { PageQueryParamDef } from '../../types/page-query'
+import { buildQueryBindingRoot } from '../../utils/typed-binding-paths'
 
 type EventKind = 'onLoading' | 'onSuccess' | 'onError'
 type LiteralMode = 'scalar' | 'object' | 'json'
@@ -73,6 +75,8 @@ const props = defineProps<{
   componentProps?: ComponentPropDef[] | null
   emitEvents?: ComponentEventDef[]
   typeLibrary?: DataTypeLibrary | null
+  /** 页面 Query 入参定义（绑定可选 $query.xxx） */
+  pageQueryParams?: PageQueryParamDef[] | null
 }>()
 
 const emit = defineEmits<{
@@ -156,6 +160,15 @@ const bindingAmbientVars = computed(() =>
     props.typeLibrary,
   ),
 )
+
+function queryExtraRoots(targetType: ProcessorTypeExpr | null | undefined) {
+  const root = buildQueryBindingRoot(
+    props.pageQueryParams,
+    targetType,
+    props.typeLibrary,
+  )
+  return root ? [root] : []
+}
 
 const eventRows = computed(() => [
   {
@@ -801,7 +814,8 @@ function handleSave() {
                 :ambient-vars="bindingAmbientVars"
                 :target-type="apiParamToTypeExpr(inp)"
                 :type-library="typeLibrary"
-                placeholder="选择数据池字段"
+                :extra-roots="queryExtraRoots(apiParamToTypeExpr(inp))"
+                placeholder="选择数据池或 $query"
                 @update:model-value="setInputBinding(inp.varName, $event)"
               />
             </div>
@@ -967,6 +981,9 @@ function handleSave() {
 
       <el-form-item label="加载事件">
         <div class="event-list">
+          <p class="event-hint">
+            页面进入时会自动请求本接口；以下为加载过程中的可选钩子，未配置不影响拉数。
+          </p>
           <div v-for="row in eventRows" :key="row.kind" class="event-row">
             <div class="event-meta">
               <span class="event-label">{{ row.label }}</span>
@@ -1153,6 +1170,13 @@ function handleSave() {
   width: 100%;
 }
 
+.event-hint {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #909399;
+}
+
 .event-row {
   display: flex;
   align-items: center;
@@ -1179,5 +1203,12 @@ function handleSave() {
 .event-summary {
   font-size: 12px;
   color: #909399;
+}
+</style>
+
+<style>
+/* 避免对话框裁切 Monaco hover / suggest */
+.controller-binding-dialog .el-dialog__body {
+  overflow: visible;
 }
 </style>

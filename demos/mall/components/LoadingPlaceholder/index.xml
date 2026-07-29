@@ -1,0 +1,3 @@
+<?xml version="1.0" encoding="utf-8"?><Fragment>
+  
+<MultiWindow width="match_parent" height="match_parent" active="{tab}"><LinearLayout orientation="vertical" width="match_parent" height="match_parent" windowKey="loading" gap="10" gravity="center"><Icon iconId="loading" size="30" color="#303133" width="wrap_content" height="wrap_content"/><Text text="加载中..." textSize="14" textColor="#303133" width="wrap_content" height="wrap_content"/></LinearLayout><LinearLayout orientation="vertical" width="match_parent" height="match_parent" windowKey="data"><Slot name="default" params="[]" width="match_parent" height="match_parent"/></LinearLayout></MultiWindow></Fragment>

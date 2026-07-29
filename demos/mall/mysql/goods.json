@@ -47,7 +47,16 @@
       "defaultValue": "",
       "comment": "",
       "resource": true
+    },
+    {
+      "name": "delivery_fee",
+      "type": "decimal(10,2)",
+      "nullable": true,
+      "primaryKey": false,
+      "autoIncrement": false,
+      "defaultValue": "",
+      "comment": ""
     }
   ],
-  "syncedAt": 1785181788399
+  "syncedAt": 1785234924666
 }

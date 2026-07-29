@@ -16,6 +16,10 @@ export const DM = {
   queryFieldsEmpty:
     '\u51fa\u53c2\u6682\u65e0\u53ef\u9009\u5b57\u6bb5\uff0c\u8bf7\u5148\u914d\u7f6e\u51fa\u53c2\u7c7b\u578b',
   outputFieldsHint: '\u51fa\u53c2\u5b57\u6bb5',
+  pageParam: '\u5206\u9875\u53c2\u6570',
+  pageParamPh: '\u9009\u62e9\u5165\u53c2\uff08\u5982 pageDto\uff09\uff0c\u672a\u7ed1\u5b9a\u5219\u4e0d\u5206\u9875',
+  pageParamHint:
+    '\u4ec5\u5728\u7ed1\u5b9a\u540e\u6309 current / pageSize \u505a LIMIT\uff1b\u5efa\u8bae\u4f7f\u7528 QueryPageDto',
   conditions: '\u67e5\u8be2\u6761\u4ef6',
   group: '\u5206\u7ec4',
   groupHint: '\u7ec4\u5185 AND\uff0c\u7ec4\u95f4 OR',

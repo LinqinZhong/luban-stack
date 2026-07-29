@@ -44,6 +44,10 @@ const props = defineProps<{
   /** 预览态滚动容器：壳层需要压住高度，否则子内容撑开后无法滚 */
   scrollPort?: boolean
   /**
+   * 编辑态允许横向溢出（Swiper/多窗体平铺），即使 scrollPort 也不裁切。
+   */
+  overflowVisible?: boolean
+  /**
    * 位于纵向滚动列内部：未声明「占满剩余」时按内容堆叠，
    * 不要 flex:1/height:0，否则兄弟会叠在同一视口。
    */
@@ -65,6 +69,10 @@ const emit = defineEmits<{
 const matchParentWidth = computed(() => props.width === 'match_parent')
 const matchParentHeight = computed(() => props.height === 'match_parent')
 const isAbsolute = computed(() => props.extraStyle?.position === 'absolute')
+/** scrollPort 默认裁切；编辑态 overflowVisible 时放开，露出平铺页 */
+const scrollPortClip = computed(
+  () => Boolean(props.scrollPort) && !props.overflowVisible,
+)
 /** 仅 width=match_parent 时，left+right 才拉伸；wrap_content 不跟对边拉满 */
 const absoluteStretchedX = computed(() => {
   if (!isAbsolute.value || !props.extraStyle || !matchParentWidth.value) return false
@@ -125,13 +133,15 @@ const shellStyle = computed<CSSProperties>(() => {
       style.height = undefined
       if (props.scrollPort) {
         style.minHeight = 0
-        style.overflow = 'hidden'
+        if (scrollPortClip.value) style.overflow = 'hidden'
+        else style.overflow = 'visible'
       }
     } else if (matchParentHeight.value) {
       style.height = matchParentAxisSize('height', props.marginAttrs)
       if (props.scrollPort) {
         style.minHeight = 0
-        style.overflow = 'hidden'
+        if (scrollPortClip.value) style.overflow = 'hidden'
+        else style.overflow = 'visible'
       }
     } else if (typeof props.height === 'number') {
       style.height = `${props.height}px`
@@ -157,7 +167,8 @@ const shellStyle = computed<CSSProperties>(() => {
     } else if (typeof props.height === 'number') {
       style.height = `${props.height}px`
     }
-    if (props.scrollPort) style.overflow = 'hidden'
+    if (scrollPortClip.value) style.overflow = 'hidden'
+    else if (props.scrollPort) style.overflow = 'visible'
     return style
   }
 
@@ -181,7 +192,8 @@ const shellStyle = computed<CSSProperties>(() => {
       style.flex = '1 1 0%'
       style.minHeight = 0
       style.height = '0'
-      style.overflow = 'hidden'
+      if (scrollPortClip.value) style.overflow = 'hidden'
+      else style.overflow = 'visible'
     } else if (props.parentVertical && props.fillRemainingHeight) {
       // RelativeLayout 等内容区：占满剩余高度
       style.flex = '1 1 0%'
@@ -200,7 +212,8 @@ const shellStyle = computed<CSSProperties>(() => {
   } else if (typeof props.height === 'number') {
     style.height = `${props.height}px`
     style.flexShrink = 0
-    if (props.scrollPort) style.overflow = 'hidden'
+    if (scrollPortClip.value) style.overflow = 'hidden'
+    else if (props.scrollPort) style.overflow = 'visible'
   }
 
   return style
@@ -235,7 +248,10 @@ const marginBoxStyle = computed(() => ({
   minWidth: allowShrinkBelowContent.value || props.parentHorizontal ? 0 : undefined,
   width: fillWidth.value ? '100%' : undefined,
   height: stackByContent.value ? 'auto' : fillHeight.value ? '100%' : undefined,
-  ...(props.scrollPort ? { overflow: 'hidden' as const } : {}),
+  ...(scrollPortClip.value ? { overflow: 'hidden' as const } : {}),
+  ...(props.scrollPort && props.overflowVisible
+    ? { overflow: 'visible' as const }
+    : {}),
 }))
 
 const contentBoxStyle = computed<CSSProperties>(() => ({
@@ -247,7 +263,10 @@ const contentBoxStyle = computed<CSSProperties>(() => ({
   minWidth: allowShrinkBelowContent.value || props.parentHorizontal ? 0 : undefined,
   width: fillWidth.value ? '100%' : undefined,
   height: stackByContent.value ? 'auto' : fillHeight.value ? '100%' : undefined,
-  ...(props.scrollPort ? { overflow: 'hidden' as const } : {}),
+  ...(scrollPortClip.value ? { overflow: 'hidden' as const } : {}),
+  ...(props.scrollPort && props.overflowVisible
+    ? { overflow: 'visible' as const }
+    : {}),
 }))
 
 const showMarginFrame = computed(

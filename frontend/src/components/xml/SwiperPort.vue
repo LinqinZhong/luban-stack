@@ -36,6 +36,8 @@ const props = withDefaults(
 const index = ref(0)
 const viewportRef = ref<HTMLElement | null>(null)
 const slideWidthPx = ref(0)
+/** 编辑态锁定单页宽（避免自身撑开后 clientWidth 循环变大） */
+const lockedEditSlideW = ref(0)
 const dragging = ref(false)
 const dragOffset = ref(0)
 let startX = 0
@@ -49,16 +51,48 @@ let pointerCaptured = false
 
 const count = computed(() => Math.max(0, props.slideCount))
 
+const EDIT_GAP_PX = 8
+
+/**
+ * Swiper 窗口宽 = 宿主 .widget.swiper 的布局宽（match_parent）。
+ * 不要用 --pane-w：多窗体页宽可能略大于 Banner 内 Swiper，会导致第 1 窗「多出一截」、
+ * 后面窗口与手机右缘之间空出约一整窗宽。
+ */
+function measureSwiperWindowWidth(el: HTMLElement): number {
+  const host = el.parentElement
+  if (!host) return Math.max(0, Math.round(el.clientWidth))
+  // track 已绝对定位，不再撑开宿主；直接读 host 布局宽
+  let w = Math.round(host.clientWidth)
+  if (!(w > 0)) {
+    const outer = host.parentElement
+    if (outer) w = Math.round(outer.clientWidth)
+  }
+  return Math.max(0, w)
+}
+
 const viewportStyle = computed(() => {
   const style: Record<string, string> = {}
-  if (props.editable && slideWidthPx.value) {
+  if (props.editable && slideWidthPx.value > 0) {
     style['--slide-w'] = `${slideWidthPx.value}px`
+    // 布局宽始终 = 窗口宽；多页由绝对定位 track 画出，不参与撑宽
+    style.width = '100%'
+    style.maxWidth = '100%'
+    style.minWidth = '0'
   }
-  // 预览态才应用 overflow；编辑态始终 visible（见 CSS）
-  if (!props.editable) {
-    style.overflow = props.overflow === 'visible' ? 'visible' : 'hidden'
-  }
+  // 预览态不写 overflow：沿用 CSS `.swiper-viewport { overflow: hidden }` 裁切翻页
+  // 编辑态由 `.swiper-viewport.editable { overflow: visible }` 露出平铺页
   return Object.keys(style).length ? style : undefined
+})
+
+const slideEditStyle = computed(() => {
+  if (!props.editable || !(slideWidthPx.value > 0)) return undefined
+  const w = `${slideWidthPx.value}px`
+  return {
+    flex: `0 0 ${w}`,
+    width: w,
+    minWidth: w,
+    maxWidth: w,
+  }
 })
 
 const clampedIndex = computed(() => {
@@ -66,17 +100,13 @@ const clampedIndex = computed(() => {
   return ((index.value % count.value) + count.value) % count.value
 })
 
-const EDIT_GAP_PX = 8
-
 const trackStyle = computed(() => {
   if (props.editable) {
-    // 编辑态：按 current 对齐当前页，两侧页溢出可见便于点选
-    const w = slideWidthPx.value
-    const offset =
-      w > 0 && count.value > 0
-        ? -(clampedIndex.value * (w + EDIT_GAP_PX))
-        : 0
+    // 编辑态：绝对定位平铺，不进入文档流，避免 max-content 把祖先 flex 撑超宽
     return {
+      position: 'absolute' as const,
+      left: '0',
+      top: '0',
       display: 'flex',
       flexDirection: 'row' as const,
       alignItems: 'stretch' as const,
@@ -86,12 +116,14 @@ const trackStyle = computed(() => {
       gap: `${EDIT_GAP_PX}px`,
       padding: '0',
       boxSizing: 'border-box' as const,
-      transform: `translate3d(${offset}px, 0, 0)`,
+      transform: 'none',
     }
   }
+  // 预览态：与改平铺前一致（相对定位 + 百分比位移），不带编辑态绝对定位残留
   const percent = count.value > 0 ? -clampedIndex.value * 100 : 0
   const offsetPx = dragOffset.value
   return {
+    position: 'relative' as const,
     display: 'flex',
     flexDirection: 'row' as const,
     height: '100%',
@@ -259,22 +291,41 @@ watch(
 function syncSlideWidth() {
   const el = viewportRef.value
   if (!el) return
+  if (props.editable) {
+    const w = measureSwiperWindowWidth(el)
+    if (!(w > 0)) return
+    // 只跟 Swiper 窗口宽（match_parent），锁定后仅在窗口宽真实变化时更新
+    if (
+      lockedEditSlideW.value <= 0 ||
+      Math.abs(lockedEditSlideW.value - w) > 2
+    ) {
+      lockedEditSlideW.value = w
+    }
+    slideWidthPx.value = lockedEditSlideW.value
+    return
+  }
+  lockedEditSlideW.value = 0
   slideWidthPx.value = Math.max(0, Math.round(el.clientWidth))
 }
 
 watch(
   () => props.editable,
-  (editable) => {
-    if (editable) void nextTick(() => syncSlideWidth())
+  () => {
+    lockedEditSlideW.value = 0
+    void nextTick(() => syncSlideWidth())
   },
 )
 
 onMounted(() => {
   restartTimer()
-  syncSlideWidth()
+  void nextTick(() => syncSlideWidth())
   if (typeof ResizeObserver !== 'undefined') {
     resizeObserver = new ResizeObserver(() => syncSlideWidth())
-    if (viewportRef.value) resizeObserver.observe(viewportRef.value)
+    const el = viewportRef.value
+    // 观察宿主，避免观察已撑开的 viewport 把单页宽量成总宽
+    const host = el?.parentElement
+    if (host) resizeObserver.observe(host)
+    else if (el) resizeObserver.observe(el)
   }
 })
 onBeforeUnmount(() => {
@@ -302,6 +353,7 @@ onBeforeUnmount(() => {
         :key="i - 1"
         class="swiper-slide"
         :class="{ editable }"
+        :style="slideEditStyle"
       >
         <slot :index="i - 1" />
       </div>
@@ -345,8 +397,12 @@ onBeforeUnmount(() => {
 }
 
 .swiper-viewport.editable {
-  /* 编辑态：始终露出相邻页，便于点选 */
   overflow: visible;
+  position: relative;
+  /* 禁止被平铺 track 的 min-content 撑开 */
+  min-width: 0;
+  max-width: 100%;
+  width: 100%;
   touch-action: none;
   user-select: auto;
 }
@@ -375,14 +431,13 @@ onBeforeUnmount(() => {
 }
 
 .swiper-slide.editable {
-  /* 每页与窗口同宽；由 --slide-w 锁定，后续页溢出仍可见 */
-  flex: 0 0 var(--slide-w, 100%);
-  width: var(--slide-w, 100%);
-  min-width: var(--slide-w, 100%);
+  /* 每页 = Swiper 窗口宽（match_parent）；具体像素由 slideEditStyle 写入 */
+  flex-shrink: 0;
   overflow: visible;
   border: 1px dashed #c0c4cc;
   border-radius: 6px;
   background: rgba(64, 158, 255, 0.04);
+  box-sizing: border-box;
 }
 
 .swiper-dots {

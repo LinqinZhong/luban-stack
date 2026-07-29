@@ -29,6 +29,7 @@ import {
   savePageLifecycle,
   savePageMethod,
   savePageXml,
+  type PageConfig,
   type PageDetail,
   type PageSummary,
 } from '../api/pages'
@@ -107,6 +108,10 @@ import { runEventBindings } from '../utils/event-runtime'
 import { createComponentEmit } from '../utils/component-emit'
 import type { PreviewInteractPayload } from '../utils/event-runtime'
 import { resolveComputedPageData, sameJson } from '../utils/compute-runtime'
+import {
+  buildQueryObject,
+  type PageQueryParamDef,
+} from '../types/page-query'
 import {
   hasControllerBoundFields,
   loadControllerBoundPageData,
@@ -1350,7 +1355,8 @@ async function openPage(
     pageHistory.value = []
   }
 
-  if (options?.params !== undefined) {
+  const useNavParams = options?.params !== undefined
+  if (useNavParams) {
     routeParams.value =
       options.params && typeof options.params === 'object' && !Array.isArray(options.params)
         ? { ...options.params }
@@ -1377,7 +1383,7 @@ async function openPage(
       ? { ...detail, xml: migrated.xml }
       : detail
 
-    // 预览：先关生命周期闸门 → 备好数据 → 再换文档 → 再 commit / 放行
+    // 预览：先切页（初始数据）→ 生命周期 → 再拉控制器，避免跳转卡在旧页
     const inPreview = workspaceMode.value === 'preview'
     let nextPreview: import('../types/page-data').PageData | null = null
     let nextCompMap: ComponentRenderMap | null = null
@@ -1385,10 +1391,8 @@ async function openPage(
       previewLifecycleGate.value = 0
       await nextTick()
       if (!isPreviewNavCurrent(nav)) return
-      const prepared = await buildPreviewRuntimeSnapshot(nextPage.data)
-      if (!isPreviewNavCurrent(nav)) return
-      nextPreview = prepared.data
-      nextCompMap = prepared.componentMap
+      nextPreview = clonePageData(nextPage.data ?? { fields: [] })
+      nextCompMap = cloneComponentRenderMap(componentMap.value)
     } else {
       clearPreviewRuntime()
     }
@@ -1397,6 +1401,9 @@ async function openPage(
     activeComponentId.value = ''
     activeComponent.value = null
     activePage.value = nextPage
+    if (!useNavParams && !options?.keepHistory) {
+      syncRouteParamsFromPageConfig(nextPage.config)
+    }
     await Promise.all([loadPageMethods(pageId), loadLifecycle(pageId)])
     if (!isPreviewNavCurrent(nav)) return
     if (migrated.changed) {
@@ -1410,10 +1417,12 @@ async function openPage(
       previewLifecycleGate.value += 1
       await nextTick()
       if (!isPreviewNavCurrent(nav)) return
-      await fireControllerBindingEvents(nextPreview)
+      await syncLifecycleSession()
       if (!isPreviewNavCurrent(nav)) return
+      await hydratePreviewControllerBindings()
+    } else {
+      await syncLifecycleSession()
     }
-    await syncLifecycleSession()
   } catch (err) {
     if (!isPreviewNavCurrent(nav)) return
     activePage.value = null
@@ -1455,10 +1464,8 @@ async function openComponent(componentId: string) {
       previewLifecycleGate.value = 0
       await nextTick()
       if (!isPreviewNavCurrent(nav)) return
-      const prepared = await buildPreviewRuntimeSnapshot(nextComponent.data)
-      if (!isPreviewNavCurrent(nav)) return
-      nextPreview = prepared.data
-      nextCompMap = prepared.componentMap
+      nextPreview = clonePageData(nextComponent.data ?? { fields: [] })
+      nextCompMap = cloneComponentRenderMap(componentMap.value)
     } else {
       clearPreviewRuntime()
     }
@@ -1481,10 +1488,12 @@ async function openComponent(componentId: string) {
       previewLifecycleGate.value += 1
       await nextTick()
       if (!isPreviewNavCurrent(nav)) return
-      await fireControllerBindingEvents(nextPreview)
+      await syncLifecycleSession()
       if (!isPreviewNavCurrent(nav)) return
+      await hydratePreviewControllerBindings()
+    } else {
+      await syncLifecycleSession()
     }
-    await syncLifecycleSession()
   } catch (err) {
     if (!isPreviewNavCurrent(nav)) return
     activeComponent.value = null
@@ -1877,6 +1886,8 @@ async function handleStatusBarUpdate(config: StatusBarConfig) {
       name: activePage.value.config.name,
       title: activePage.value.config.title,
       statusBar: next,
+      queryParams: activePage.value.config.queryParams,
+      debugQuery: activePage.value.config.debugQuery,
     })
     activePage.value = {
       ...activePage.value,
@@ -1885,6 +1896,76 @@ async function handleStatusBarUpdate(config: StatusBarConfig) {
   } catch (err) {
     ElMessage.error(err instanceof Error ? err.message : '保存状态栏失败')
   }
+}
+
+const pageQueryParams = computed(
+  (): PageQueryParamDef[] =>
+    isPageResource.value ? activePage.value?.config.queryParams ?? [] : [],
+)
+
+const pageDebugQuery = computed(
+  (): Record<string, unknown> =>
+    isPageResource.value ? activePage.value?.config.debugQuery ?? {} : {},
+)
+
+function syncRouteParamsFromPageConfig(config?: PageConfig | null) {
+  if (!config) {
+    routeParams.value = {}
+    return
+  }
+  routeParams.value = buildQueryObject(config.queryParams, config.debugQuery)
+}
+
+let pageQuerySaveTimer: ReturnType<typeof setTimeout> | null = null
+
+async function persistPageQueryConfig(partial: {
+  queryParams?: PageQueryParamDef[]
+  debugQuery?: Record<string, unknown>
+}) {
+  if (!projectStore.path || !activePage.value || isComponentResource.value) return
+  const nextConfig: PageConfig = {
+    ...activePage.value.config,
+    ...(partial.queryParams !== undefined
+      ? { queryParams: partial.queryParams }
+      : {}),
+    ...(partial.debugQuery !== undefined
+      ? { debugQuery: partial.debugQuery }
+      : {}),
+  }
+  activePage.value = {
+    ...activePage.value,
+    config: nextConfig,
+  }
+  syncRouteParamsFromPageConfig(nextConfig)
+  if (pageQuerySaveTimer) clearTimeout(pageQuerySaveTimer)
+  pageQuerySaveTimer = setTimeout(async () => {
+    if (!projectStore.path || !activePage.value) return
+    try {
+      const saved = await savePageConfig({
+        projectPath: projectStore.path,
+        pageId: activePage.value.id,
+        name: activePage.value.config.name,
+        title: activePage.value.config.title,
+        statusBar: activePage.value.config.statusBar,
+        queryParams: activePage.value.config.queryParams ?? [],
+        debugQuery: activePage.value.config.debugQuery ?? {},
+      })
+      activePage.value = {
+        ...activePage.value,
+        config: saved.config,
+      }
+    } catch (err) {
+      ElMessage.error(err instanceof Error ? err.message : '保存 Query 入参失败')
+    }
+  }, 280)
+}
+
+function handlePageQueryParamsUpdate(value: PageQueryParamDef[]) {
+  void persistPageQueryConfig({ queryParams: value })
+}
+
+function handlePageDebugQueryUpdate(value: Record<string, unknown>) {
+  void persistPageQueryConfig({ debugQuery: value })
 }
 
 const pageStatusBarConfig = computed(() =>
@@ -2271,35 +2352,6 @@ async function runPreviewBindings(
 /** 预览进入时拉取控制器绑定字段（与数据池编辑态隔离） */
 let previewControllerHydrateSeq = 0
 
-async function buildPreviewRuntimeSnapshot(
-  pageData: import('../types/page-data').PageData | undefined | null,
-): Promise<{
-  data: import('../types/page-data').PageData
-  componentMap: ComponentRenderMap
-}> {
-  const data = clonePageData(pageData ?? { fields: [] })
-  const map = cloneComponentRenderMap(componentMap.value)
-  const path = projectStore.path
-  if (!path || !hasControllerBoundFields(data)) {
-    return { data, componentMap: map }
-  }
-  const seq = ++previewControllerHydrateSeq
-  try {
-    // 离屏加载：先不触发事件，避免 toast 打在旧页面上
-    const next = await loadControllerBoundPageData(data, {
-      projectPath: path,
-      dryRun: true,
-    })
-    if (seq !== previewControllerHydrateSeq) {
-      return { data, componentMap: map }
-    }
-    return { data: next, componentMap: map }
-  } catch (err) {
-    console.warn('[voider] 预览控制器数据加载失败:', err)
-    return { data, componentMap: map }
-  }
-}
-
 function commitPreviewRuntime(
   data: import('../types/page-data').PageData,
   map: ComponentRenderMap,
@@ -2312,21 +2364,7 @@ function commitPreviewRuntime(
   previewEmitLogs.value = []
 }
 
-/** 页面已切换后再播控制器成功事件（加载过程已在离屏完成） */
-async function fireControllerBindingEvents(
-  data: import('../types/page-data').PageData,
-) {
-  const sessionGen = previewSessionGen
-  for (const field of data.fields) {
-    if (!isPreviewSessionLive(sessionGen)) return
-    if (field.binding !== 'controller') continue
-    const raw = field.controllerBinding?.onSuccess?.trim()
-    if (raw) {
-      await runPreviewBindings(raw, { eventArgs: { res: field.value } })
-    }
-  }
-}
-
+/** 页面已展示后拉取控制器绑定并触发 onLoading / onSuccess / onError */
 async function hydratePreviewControllerBindings() {
   const path = projectStore.path
   const runtime = previewRuntimeData.value
@@ -2339,6 +2377,14 @@ async function hydratePreviewControllerBindings() {
     const next = await loadControllerBoundPageData(runtime, {
       projectPath: path,
       dryRun: true,
+      typeLibrary: dataTypeLibrary.value,
+      pageScope: {
+        ...Object.fromEntries(
+          (runtime.fields ?? []).map((f) => [f.name.trim(), f.value]),
+        ),
+        $query: { ...routeParams.value },
+        $route: { ...routeParams.value },
+      },
       runEvents: (raw, eventArgs) =>
         runPreviewBindings(raw, { eventArgs }),
     })
@@ -2383,11 +2429,13 @@ async function preparePreviewRuntime() {
     }
   }
   if (!isPreviewSessionLive(sessionGen) || !activeDoc.value) return
-  const snap = await buildPreviewRuntimeSnapshot(activeDoc.value.data)
-  if (!isPreviewSessionLive(sessionGen)) return
   if (workspaceMode.value !== 'preview') return
-  commitPreviewRuntime(snap.data, snap.componentMap)
-  await fireControllerBindingEvents(snap.data)
+  // 先挂初始数据，再异步拉控制器，避免进入预览时卡在旧态
+  commitPreviewRuntime(
+    clonePageData(activeDoc.value.data ?? { fields: [] }),
+    cloneComponentRenderMap(componentMap.value),
+  )
+  await hydratePreviewControllerBindings()
 }
 
 async function runLifecycleHook(key: LifecycleHookKey) {
@@ -3725,6 +3773,7 @@ watch(
           :emit-events="
             isComponentResource ? activeComponent?.config.events : undefined
           "
+          :page-query-params="isPageResource ? pageQueryParams : null"
           @update:data="handleDataUpdate"
         />
         <MethodsPanel
@@ -3853,9 +3902,14 @@ watch(
       :type-library="dataTypeLibrary"
       :open-repeat-request="openRepeatRequest"
       :status-bar-config="isPageResource ? pageStatusBarConfig : null"
+      :is-page-resource="isPageResource"
+      :page-query-params="isPageResource ? pageQueryParams : null"
+      :page-debug-query="isPageResource ? pageDebugQuery : null"
       :canvas-scene="canvasScene"
       @update:xml="handleXmlUpdate"
       @update:status-bar="handleStatusBarUpdate"
+      @update:page-query-params="handlePageQueryParamsUpdate"
+      @update:page-debug-query="handlePageDebugQueryUpdate"
     />
     <PreviewDebugPanel
       v-else-if="isFrontendNav && workspaceMode === 'preview' && activeDoc"

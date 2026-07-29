@@ -19,6 +19,7 @@ export type DataFieldValue =
   | string
   | number
   | boolean
+  | null
   | Record<string, unknown>
   | unknown[]
 
@@ -137,18 +138,8 @@ export function normalizeOssBinding(input: unknown): OssBindingConfig | undefine
   return { connectionId, bucketName, objectKey, url }
 }
 
-function defaultControllerParseBody(type: DataField['type']): string {
-  const sample =
-    type === 'number'
-      ? '0'
-      : type === 'boolean'
-        ? 'false'
-        : type === 'array'
-          ? '[]'
-          : type === 'json'
-            ? '{}'
-            : "''"
-  return `// data 为接口 Result.data\n// return 的值写入本数据池字段\nreturn data ?? ${sample}\n`
+function defaultControllerParseBody(_type: DataField['type']): string {
+  return `// data 为接口 Result.data\n// return 的值写入本数据池字段\nreturn data\n`
 }
 
 function normalizeControllerInputParam(

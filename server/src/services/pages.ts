@@ -29,6 +29,16 @@ export interface PageConfig {
     /** 是否显示原生标题栏；关闭则导出 navigationStyle: custom */
     navigationBar?: boolean | string
   }
+  /** 页面 Query 入参定义 */
+  queryParams?: Array<{
+    name: string
+    type: 'string' | 'number' | 'boolean'
+    remark: string
+    required?: boolean
+    defaultValue?: string | number | boolean
+  }>
+  /** 调试用 Query 值 */
+  debugQuery?: Record<string, unknown>
 }
 
 export interface PageSummary {
@@ -134,10 +144,14 @@ async function readPageConfig(dir: string): Promise<PageConfig> {
     const statusBar = normalizePageStatusBar(
       (parsed as Partial<PageConfig>).statusBar,
     )
+    const queryParams = normalizePageQueryParams(parsed.queryParams)
+    const debugQuery = normalizeDebugQuery(parsed.debugQuery)
     return {
       name: parsed.name,
       title: typeof parsed.title === 'string' ? parsed.title : parsed.name,
       ...(statusBar ? { statusBar } : {}),
+      ...(queryParams.length ? { queryParams } : {}),
+      ...(debugQuery ? { debugQuery } : {}),
     }
   } catch (err) {
     if (err instanceof ProjectError) throw err
@@ -184,6 +198,60 @@ function optionalItemType(raw: unknown): DataField['itemType'] | undefined {
 
 function looksLikeBinding(raw: string): boolean {
   return /\{[^{}]+\}/.test(raw)
+}
+
+function normalizePageQueryParams(
+  input: unknown,
+): NonNullable<PageConfig['queryParams']> {
+  if (!Array.isArray(input)) return []
+  const out: NonNullable<PageConfig['queryParams']> = []
+  const seen = new Set<string>()
+  for (const item of input) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) continue
+    const raw = item as Record<string, unknown>
+    const name = typeof raw.name === 'string' ? raw.name.trim() : ''
+    if (!name || !/^[A-Za-z_][\w]*$/.test(name) || seen.has(name)) continue
+    seen.add(name)
+    const type =
+      raw.type === 'number' || raw.type === 'boolean' ? raw.type : 'string'
+    let defaultValue: string | number | boolean = ''
+    if (type === 'number') {
+      defaultValue =
+        typeof raw.defaultValue === 'number' && Number.isFinite(raw.defaultValue)
+          ? raw.defaultValue
+          : 0
+    } else if (type === 'boolean') {
+      defaultValue = Boolean(raw.defaultValue)
+    } else {
+      defaultValue =
+        raw.defaultValue == null
+          ? ''
+          : typeof raw.defaultValue === 'string'
+            ? raw.defaultValue
+            : String(raw.defaultValue)
+    }
+    out.push({
+      name,
+      type,
+      remark: typeof raw.remark === 'string' ? raw.remark : '',
+      required: Boolean(raw.required),
+      defaultValue,
+    })
+  }
+  return out
+}
+
+function normalizeDebugQuery(
+  input: unknown,
+): Record<string, unknown> | undefined {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return undefined
+  const out: Record<string, unknown> = {}
+  for (const [k, v] of Object.entries(input as Record<string, unknown>)) {
+    const key = k.trim()
+    if (!key || !/^[A-Za-z_][\w]*$/.test(key)) continue
+    out[key] = v
+  }
+  return Object.keys(out).length ? out : undefined
 }
 
 function normalizePageStatusBar(
@@ -748,6 +816,8 @@ export async function savePageConfig(options: {
   name: string
   title?: string
   statusBar?: PageConfig['statusBar']
+  queryParams?: PageConfig['queryParams']
+  debugQuery?: PageConfig['debugQuery']
 }): Promise<PageDetail> {
   const projectPath = await assertProjectDir(options.projectPath)
   const pageId = assertSafePageId(options.pageId)
@@ -780,6 +850,20 @@ export async function savePageConfig(options: {
   const normalizedStatusBar = normalizePageStatusBar(statusBarSource)
   if (normalizedStatusBar) {
     config.statusBar = normalizedStatusBar
+  }
+
+  const queryParamsSource =
+    options.queryParams !== undefined ? options.queryParams : prev.queryParams
+  const normalizedQueryParams = normalizePageQueryParams(queryParamsSource)
+  if (normalizedQueryParams.length) {
+    config.queryParams = normalizedQueryParams
+  }
+
+  const debugQuerySource =
+    options.debugQuery !== undefined ? options.debugQuery : prev.debugQuery
+  const normalizedDebugQuery = normalizeDebugQuery(debugQuerySource)
+  if (normalizedDebugQuery) {
+    config.debugQuery = normalizedDebugQuery
   }
 
   try {

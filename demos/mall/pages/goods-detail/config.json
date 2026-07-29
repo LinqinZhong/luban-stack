@@ -6,5 +6,17 @@
     "backgroundColor": "transparent",
     "cover": true,
     "navigationBar": false
+  },
+  "queryParams": [
+    {
+      "name": "id",
+      "type": "string",
+      "remark": "商品 ID",
+      "required": true,
+      "defaultValue": "1"
+    }
+  ],
+  "debugQuery": {
+    "id": "1"
   }
 }

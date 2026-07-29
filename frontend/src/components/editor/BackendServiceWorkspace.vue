@@ -481,6 +481,7 @@ function buildApiMethodParams(api: ServiceApi): ProcessorMethodParam[] {
         ...createEmptyProcessorTypeExpr(type),
         typeRef: p.typeRef || '',
       },
+      required: Boolean(p.required),
     }
   })
 }

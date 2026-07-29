@@ -1,6 +1,7 @@
 ﻿import type { PageMethod } from '../../types/page-method.js'
 import type { LifecycleConfig } from '../../types/lifecycle.js'
 import type { DataField } from '../../types/page-data.js'
+import type { MpApiBinding } from './api-runtime.js'
 
 function isValidIdent(name: string): boolean {
   return /^[A-Za-z_$][\w$]*$/.test(name)
@@ -462,4 +463,131 @@ export function generatePageSyncHandlers(
   }`,
     )
     .join(',\n')
+}
+
+function indentBlock(src: string, pad: string): string {
+  return src
+    .split('\n')
+    .map((line) => (line.trim() ? pad + line : line))
+    .join('\n')
+}
+
+/**
+ * 页面 onLoad：自动拉取 binding===controller 的数据池字段。
+ * 「加载事件」onLoading/onSuccess/onError 是可选钩子，空配置仍会请求。
+ */
+export function generateControllerBoundPageLoad(options: {
+  fields: DataField[]
+  resolveApi: (raw: string) => MpApiBinding | null
+}): {
+  methods: string
+  apiData: Record<string, MpApiBinding>
+  hasLoader: boolean
+} {
+  const apiData: Record<string, MpApiBinding> = {}
+  const loadBlocks: string[] = []
+
+  for (const field of options.fields ?? []) {
+    if (field.binding !== 'controller') continue
+    const cfg = field.controllerBinding
+    const name = field.name.trim()
+    if (!cfg || !name || !isValidIdent(name)) continue
+    const serviceId = cfg.serviceId?.trim() ?? ''
+    const controllerId = cfg.controllerId?.trim() ?? ''
+    const apiId = cfg.apiId?.trim() ?? ''
+    if (!serviceId || !controllerId || !apiId) continue
+
+    const bindingKey = `__ctrl_${name}`
+    const resolved = options.resolveApi(
+      JSON.stringify({ serviceId, controllerId, apiId }),
+    )
+    if (!resolved || !resolved.path) continue
+    apiData[bindingKey] = resolved
+
+    const argLines: string[] = [`          var args = {}`]
+    for (const [varName, inp] of Object.entries(cfg.inputs ?? {})) {
+      const key = varName.trim()
+      if (!key || !isValidIdent(key)) continue
+      if (!inp || inp.source !== 'binding') {
+        const lit =
+          inp && 'literal' in inp ? JSON.stringify(inp.literal ?? null) : 'undefined'
+        argLines.push(`          args[${JSON.stringify(key)}] = ${lit}`)
+        continue
+      }
+      const path = (inp.binding ?? '').trim()
+      argLines.push(
+        `          args[${JSON.stringify(key)}] = that.__resolveCtrlBinding(${JSON.stringify(path)}, query)`,
+      )
+    }
+
+    const parseBody = (cfg.parseBody ?? '').trim()
+    const parseCall = parseBody
+      ? `(function (data) {\n${indentBlock(parseBody, '            ')}\n          })(data)`
+      : 'data'
+
+    loadBlocks.push(`    tasks.push(
+      Promise.resolve()
+        .then(function () {
+${argLines.join('\n')}
+          return api.invoke(that.data[${JSON.stringify(bindingKey)}], args)
+        })
+        .then(function (data) {
+          var parsed = ${parseCall}
+          var patch = {}
+          patch[${JSON.stringify(name)}] = parsed
+          that.setData(patch)
+        })
+        .catch(function (err) {
+          console.error(${JSON.stringify(`[voider] controller ${name}`)}, err)
+        })
+    )`)
+  }
+
+  if (!loadBlocks.length) {
+    return { methods: '', apiData: {}, hasLoader: false }
+  }
+
+  const methods = `  __resolveCtrlBinding(path, query) {
+    var p = String(path == null ? '' : path).trim()
+    if (!p) return undefined
+    var root = null
+    var rest = ''
+    if (p === '$query' || p === 'query' || p === '$route' || p === 'route') {
+      return query || {}
+    }
+    if (p.indexOf('$query.') === 0) {
+      root = query || {}
+      rest = p.slice(7)
+    } else if (p.indexOf('query.') === 0) {
+      root = query || {}
+      rest = p.slice(6)
+    } else if (p.indexOf('$route.') === 0) {
+      root = query || {}
+      rest = p.slice(7)
+    } else if (p.indexOf('route.') === 0) {
+      root = query || {}
+      rest = p.slice(6)
+    } else {
+      root = this.data
+      rest = p
+    }
+    if (!rest) return root
+    var parts = rest.split('.')
+    var cur = root
+    for (var i = 0; i < parts.length; i++) {
+      if (cur == null || typeof cur !== 'object') return undefined
+      cur = cur[parts[i]]
+    }
+    return cur
+  },
+  __loadControllerBoundData(options) {
+    var that = this
+    var api = require('../../utils/api.js')
+    var query = options || {}
+    var tasks = []
+${loadBlocks.join('\n')}
+    return Promise.all(tasks)
+  }`
+
+  return { methods, apiData, hasLoader: true }
 }

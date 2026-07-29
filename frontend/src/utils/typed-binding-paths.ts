@@ -399,6 +399,7 @@ export function buildTypedBindingCascaderOptions(
   ambientVars: MethodParam[],
   target: ProcessorTypeExpr | null | undefined,
   library?: DataTypeLibrary | null,
+  extraRoots?: TypedBindingCascaderOption[],
 ): TypedBindingCascaderOption[] {
   const targetExpr = target ? cloneExpr(target) : createEmptyProcessorTypeExpr('any')
   const options: TypedBindingCascaderOption[] = []
@@ -408,7 +409,49 @@ export function buildTypedBindingCascaderOptions(
     const opt = buildVarOption(v, targetExpr, library)
     if (opt) options.push(opt)
   }
+  if (extraRoots?.length) {
+    for (const root of extraRoots) {
+      if (!root.value) continue
+      options.push(root)
+    }
+  }
   return options
+}
+
+/** 页面 $query 入参级联根（字段为字符串/数字/布尔） */
+export function buildQueryBindingRoot(
+  defs: Array<{ name: string; type?: string; remark?: string }> | null | undefined,
+  target: ProcessorTypeExpr | null | undefined,
+  library?: DataTypeLibrary | null,
+): TypedBindingCascaderOption | null {
+  if (!defs?.length) return null
+  const targetExpr = target ? cloneExpr(target) : createEmptyProcessorTypeExpr('any')
+  const children: TypedBindingCascaderOption[] = []
+  for (const def of defs) {
+    const name = def.name.trim()
+    if (!name) continue
+    const ty =
+      def.type === 'number'
+        ? 'number'
+        : def.type === 'boolean'
+          ? 'boolean'
+          : 'string'
+    const source = createEmptyProcessorTypeExpr(ty)
+    const selectable = isTypeExprCompatible(source, targetExpr, library)
+    if (!selectable) continue
+    children.push({
+      value: name,
+      label: def.remark?.trim() ? `${name} · ${def.remark.trim()}` : name,
+      selectable: true,
+    })
+  }
+  if (!children.length) return null
+  return {
+    value: '$query',
+    label: '$query（页面 Query）',
+    selectable: false,
+    children,
+  }
 }
 
 /** 表达式 → cascader 路径段 */
@@ -416,7 +459,7 @@ export function splitBindingPath(expr: string): string[] {
   const s = expr.trim()
   if (!s) return []
   const parts: string[] = []
-  const re = /([A-Za-z_][\w]*)|(\[\d+\])/g
+  const re = /([A-Za-z_$][\w$]*)|(\[\d+\])/g
   let m: RegExpExecArray | null
   let last = 0
   while ((m = re.exec(s))) {

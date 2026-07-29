@@ -1223,7 +1223,101 @@ function formatValue(value: any): string {
   return String(value)
 }
 
-/** Interpolate {name}, {item.x}, {$props.x}, {$route.x}, {index} */
+function isSimpleBindingPath(expr: string): boolean {
+  return /^[A-Za-z_$][\\w$]*(?:\\.[A-Za-z_$][\\w$]*|\\[\\d+\\])*$/.test(expr.trim())
+}
+
+function normalizeBindingOperators(expr: string): string {
+  let out = ''
+  let inSingle = false
+  let inDouble = false
+  let inTick = false
+  let escape = false
+  for (let i = 0; i < expr.length; i++) {
+    const c = expr[i]!
+    if (escape) { out += c; escape = false; continue }
+    if ((inSingle || inDouble || inTick) && c === '\\\\') { out += c; escape = true; continue }
+    if (inSingle) { if (c === "'") inSingle = false; out += c; continue }
+    if (inDouble) { if (c === '"') inDouble = false; out += c; continue }
+    if (inTick) { if (c === '\`') inTick = false; out += c; continue }
+    if (c === "'") { inSingle = true; out += c; continue }
+    if (c === '"') { inDouble = true; out += c; continue }
+    if (c === '\`') { inTick = true; out += c; continue }
+    if (c === '？') { out += '?'; continue }
+    if (c === '：') { out += ':'; continue }
+    out += c
+  }
+  return out
+}
+
+function findBalancedBindingEnd(template: string, openIndex: number): number {
+  if (template[openIndex] !== '{') return -1
+  let depth = 0
+  let inSingle = false
+  let inDouble = false
+  let inTick = false
+  let escape = false
+  for (let j = openIndex; j < template.length; j++) {
+    const c = template[j]!
+    if (escape) { escape = false; continue }
+    if ((inSingle || inDouble || inTick) && c === '\\\\') { escape = true; continue }
+    if (inSingle) { if (c === "'") inSingle = false; continue }
+    if (inDouble) { if (c === '"') inDouble = false; continue }
+    if (inTick) { if (c === '\`') inTick = false; continue }
+    if (c === "'") { inSingle = true; continue }
+    if (c === '"') { inDouble = true; continue }
+    if (c === '\`') { inTick = true; continue }
+    if (c === '{') depth++
+    else if (c === '}') {
+      depth--
+      if (depth === 0) return j
+    }
+  }
+  return -1
+}
+
+function scanBindingSpans(template: string): Array<{ start: number; end: number; expr: string }> {
+  const spans: Array<{ start: number; end: number; expr: string }> = []
+  let i = 0
+  while (i < template.length) {
+    if (template[i] !== '{') { i++; continue }
+    let start = i
+    let doubleWrap = false
+    if (template[i + 1] === '{') { doubleWrap = true; start = i + 1 }
+    const end = findBalancedBindingEnd(template, start)
+    if (end < 0) { i++; continue }
+    let close = end
+    if (doubleWrap) {
+      if (template[end + 1] !== '}') { i++; continue }
+      close = end + 1
+    }
+    spans.push({
+      start: doubleWrap ? i : start,
+      end: close + 1,
+      expr: template.slice(start + 1, end).trim(),
+    })
+    i = close + 1
+  }
+  return spans
+}
+
+function evaluateBindingExpression(
+  expr: string,
+  scope: Record<string, any>,
+): { ok: true; value: any } | { ok: false } {
+  const normalized = normalizeBindingOperators(expr.trim())
+  if (!normalized) return { ok: false }
+  try {
+    const names = Object.keys(scope).filter((n) => /^[A-Za-z_$][\\w$]*$/.test(n))
+    const values = names.map((n) => scope[n])
+    const fn = new Function(...names, '"use strict"; return (' + normalized + ');')
+    return { ok: true, value: fn(...values) }
+  } catch {
+    return { ok: false }
+  }
+}
+
+/** Interpolate {name}, {item.x}, {$props.x}, 以及三元/模板字符串等表达式 */
 export function interpolate(
   template: string,
   ctx: {
@@ -1234,34 +1328,97 @@ export function interpolate(
   },
 ): string {
   if (!template || !template.includes('{')) return template
-  return template.replace(/\\{([^{}]+)\\}/g, (match, rawExpr: string) => {
-    const expr = rawExpr.trim()
-    if (!expr) return match
-    if (expr === 'index') return String(ctx.scope?.index ?? 0)
-    if (expr === 'item') return formatValue(ctx.scope?.item)
-    if (expr.startsWith('item.')) {
-      const value = getByPath(ctx.scope?.item, expr.slice(5))
-      return value == null ? '' : formatValue(value)
+  const spans = scanBindingSpans(template)
+  if (!spans.length) return template
+
+  const evalScope: Record<string, any> = {
+    ...(ctx.store?.$state ?? {}),
+  }
+  if (ctx.scope?.item !== undefined) evalScope.item = ctx.scope.item
+  if (ctx.scope?.index !== undefined) evalScope.index = ctx.scope.index
+  if (ctx.props !== undefined) {
+    evalScope.$props = ctx.props
+    evalScope.props = ctx.props
+  }
+  if (ctx.route !== undefined) {
+    evalScope.$route = ctx.route
+    evalScope.route = ctx.route
+    evalScope.$query = ctx.route
+    evalScope.query = ctx.route
+  }
+
+  let out = ''
+  let cursor = 0
+  for (const span of spans) {
+    out += template.slice(cursor, span.start)
+    cursor = span.end
+    const expr = span.expr
+    if (!expr) {
+      out += template.slice(span.start, span.end)
+      continue
     }
-    if (expr === '$props' || expr === 'props') return formatValue(ctx.props)
-    if (expr.startsWith('$props.') || expr.startsWith('props.')) {
-      const path = expr.replace(/^\\$?props\\./, '')
-      const value = getByPath(ctx.props, path)
-      return value == null ? '' : formatValue(value)
+
+    if (isSimpleBindingPath(expr)) {
+      if (expr === 'index') {
+        out += String(ctx.scope?.index ?? 0)
+        continue
+      }
+      if (expr === 'item') {
+        out += formatValue(ctx.scope?.item)
+        continue
+      }
+      if (expr.startsWith('item.')) {
+        const value = getByPath(ctx.scope?.item, expr.slice(5))
+        out += value == null ? '' : formatValue(value)
+        continue
+      }
+      if (expr === '$props' || expr === 'props') {
+        out += formatValue(ctx.props)
+        continue
+      }
+      if (expr.startsWith('$props.') || expr.startsWith('props.')) {
+        const path = expr.replace(/^\\$?props\\./, '')
+        const value = getByPath(ctx.props, path)
+        out += value == null ? '' : formatValue(value)
+        continue
+      }
+      if (expr === '$route' || expr === 'route' || expr === '$query' || expr === 'query') {
+        out += formatValue(ctx.route)
+        continue
+      }
+      if (
+        expr.startsWith('$route.') ||
+        expr.startsWith('route.') ||
+        expr.startsWith('$query.') ||
+        expr.startsWith('query.')
+      ) {
+        const path = expr.replace(/^\\$?(?:route|query)\\./, '')
+        const value = getByPath(ctx.route, path)
+        out += value == null ? '' : formatValue(value)
+        continue
+      }
+      if (ctx.store && expr in ctx.store.$state) {
+        out += formatValue(ctx.store.$state[expr])
+        continue
+      }
+      const nested = getByPath(ctx.store?.$state, expr)
+      if (nested !== undefined) {
+        out += formatValue(nested)
+        continue
+      }
+      out += template.slice(span.start, span.end)
+      continue
     }
-    if (expr === '$route' || expr === 'route') return formatValue(ctx.route)
-    if (expr.startsWith('$route.') || expr.startsWith('route.')) {
-      const path = expr.replace(/^\\$?route\\./, '')
-      const value = getByPath(ctx.route, path)
-      return value == null ? '' : formatValue(value)
+
+    const evaluated = evaluateBindingExpression(expr, evalScope)
+    if (!evaluated.ok) {
+      out += template.slice(span.start, span.end)
+      continue
     }
-    if (ctx.store && expr in ctx.store.$state) {
-      return formatValue(ctx.store.$state[expr])
-    }
-    const nested = getByPath(ctx.store?.$state, expr)
-    if (nested !== undefined) return formatValue(nested)
-    return match
-  })
+    out += formatValue(evaluated.value)
+  }
+  out += template.slice(cursor)
+  return out
 }
 
 function resolveConditionValue(
@@ -1280,6 +1437,7 @@ function resolveConditionValue(
   if (raw.startsWith('item.')) return getByPath(ctx.scope?.item, raw.slice(5))
   if (raw.startsWith('$props.')) return getByPath(ctx.props, raw.slice(7))
   if (raw.startsWith('$route.')) return getByPath(ctx.route, raw.slice(7))
+  if (raw.startsWith('$query.')) return getByPath(ctx.route, raw.slice(7))
   if (ctx.store && raw in ctx.store.$state) return ctx.store.$state[raw]
   return getByPath(ctx.store?.$state, raw)
 }

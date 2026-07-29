@@ -204,6 +204,7 @@ function emitControllerFile(options: {
     }
   }
   nestImports.add('BadRequestException')
+  nestImports.add('HttpException')
 
   const ctor = business
     ? `  constructor(private readonly ${camel}Service: ${pascal}Service) {}\n`
@@ -239,29 +240,29 @@ function emitControllerFile(options: {
         paramDecls.push(`${decorator} ${rawName}?: string`)
 
         if (inp.type === 'number') {
-          prepLines.push(`    const ${n} = Number(${rawName})`)
+          prepLines.push(`      const ${n} = Number(${rawName})`)
         } else if (inp.type === 'boolean') {
           prepLines.push(
-            `    const ${n} = String(${rawName}) === 'true' || ${rawName} === '1'`,
+            `      const ${n} = String(${rawName}) === 'true' || ${rawName} === '1'`,
           )
         } else if (inp.type === 'json' || inp.typeRef) {
-          prepLines.push(`    const ${n} = parseMaybeJson(${rawName}) as ${ty}`)
+          prepLines.push(`      const ${n} = parseMaybeJson(${rawName}) as ${ty}`)
         } else {
           prepLines.push(
             inp.required
-              ? `    const ${n} = (parseMaybeJson(${rawName}) as string)`
-              : `    const ${n} = ((parseMaybeJson(${rawName}) as string | undefined) ?? '')`,
+              ? `      const ${n} = (parseMaybeJson(${rawName}) as string)`
+              : `      const ${n} = ((parseMaybeJson(${rawName}) as string | undefined) ?? '')`,
           )
         }
 
         if (inp.required) {
           if (inp.type === 'json' || inp.typeRef) {
             prepLines.push(
-              `    if (${n} === undefined || ${n} === null) {\n      throw new BadRequestException(${JSON.stringify(`缺少必填入参「${inp.varName}」`)})\n    }`,
+              `      if (${n} === undefined || ${n} === null) {\n        throw new BadRequestException(${JSON.stringify(`${inp.varName}不能为空`)})\n      }`,
             )
           } else {
             prepLines.push(
-              `    if (${n} === undefined || ${n} === null || ${n} === '') {\n      throw new BadRequestException(${JSON.stringify(`缺少必填入参「${inp.varName}」`)})\n    }`,
+              `      if (${n} === undefined || ${n} === null || ${n} === '') {\n        throw new BadRequestException(${JSON.stringify(`${inp.varName}不能为空`)})\n      }`,
             )
           }
         }
@@ -272,7 +273,7 @@ function emitControllerFile(options: {
         : api.requireAuth
           ? `  /** TODO: requireAuth */\n`
           : ''
-      const flowBody = emitFlowMethodBody(api.flow, flowCtx, 4)
+      const flowBody = emitFlowMethodBody(api.flow, flowCtx, 6)
       const decoLine = routeArg
         ? `  @${httpDec}(${routeArg})`
         : `  @${httpDec}()`
@@ -281,10 +282,21 @@ function emitControllerFile(options: {
   async ${name}(
 ${paramDecls.map((p) => `    ${p}`).join(',\n')}
   ): Promise<Result> {
+    try {
 ${prepLines.join('\n')}
-    const data = await (async () => {
-${flowBody}    })()
-    return success(data)
+      const data = await (async () => {
+${flowBody}      })()
+      return success(data)
+    } catch (err) {
+      const message = err instanceof Error ? err.message : '内部错误'
+      const code =
+        err instanceof HttpException
+          ? err.getStatus()
+          : typeof (err as { statusCode?: unknown })?.statusCode === 'number'
+            ? (err as { statusCode: number }).statusCode
+            : 500
+      return fail(message, code)
+    }
   }`
     })
     .join('\n\n')
@@ -293,7 +305,7 @@ ${flowBody}    })()
 import {
   ${[...nestImports].sort().join(',\n  ')},
 } from '@nestjs/common'
-${serviceImport}import { success, type Result } from '../../../common/result'
+${serviceImport}import { success, fail, type Result } from '../../../common/result'
 import { parseMaybeJson } from '../../../common/http'
 ${imports ? imports + '\n' : ''}
 @Controller('${controllerPath}')

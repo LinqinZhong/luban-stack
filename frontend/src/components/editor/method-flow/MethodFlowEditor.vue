@@ -6,6 +6,7 @@ import BranchNode from './nodes/BranchNode.vue'
 import ActionNode from './nodes/ActionNode.vue'
 import OutputNode from './nodes/OutputNode.vue'
 import DefineNode from './nodes/DefineNode.vue'
+import ThrowNode from './nodes/ThrowNode.vue'
 import EndNode from './nodes/EndNode.vue'
 
 /** 模块级注册，避免 setup 重跑时自定义节点类型失效 */
@@ -16,6 +17,7 @@ const methodFlowNodeTypes = markRaw({
   action: markRaw(ActionNode),
   output: markRaw(OutputNode),
   define: markRaw(DefineNode),
+  throw: markRaw(ThrowNode),
   end: markRaw(EndNode),
 })
 </script>
@@ -80,9 +82,11 @@ import OutputNodeDialog, {
 import DefineNodeDialog, {
   type DefineNodeForm,
 } from './dialogs/DefineNodeDialog.vue'
-import EndNodeDialog, {
-  type EndNodeForm,
-} from './dialogs/EndNodeDialog.vue'
+import EndNodeDialog, { type EndNodeForm } from './dialogs/EndNodeDialog.vue'
+import ThrowNodeDialog, {
+  type ThrowNodeForm,
+} from './dialogs/ThrowNodeDialog.vue'
+import AddFlowNodeDialog from './dialogs/AddFlowNodeDialog.vue'
 import StartNodeDialog from './dialogs/StartNodeDialog.vue'
 import { FLOW_DEBUG_KEY } from './flow-debug-inject'
 import FlowHelperLines from './FlowHelperLines.vue'
@@ -574,6 +578,11 @@ function defaultDataForKind(kind: Exclude<FlowNodeKind, 'start'>): Record<string
         description: '',
         printExpr: '',
       }
+    case 'throw':
+      return {
+        messageExpr: '',
+        printExpr: '',
+      }
     case 'end':
       return {
         returnExpr: '',
@@ -596,8 +605,8 @@ function addFlowNode(kind: Exclude<FlowNodeKind, 'start'>) {
   const fromId = from?.id
   const fromType = from?.type
 
-  // 终止节点不应作为连线起点自动接后续
-  const skipAutoEdge = fromType === 'end'
+  // 终止 / 业务异常节点不应作为连线起点自动接后续
+  const skipAutoEdge = fromType === 'end' || fromType === 'throw'
 
   nodes.value = [
     ...nodes.value,
@@ -625,11 +634,13 @@ function addFlowNode(kind: Exclude<FlowNodeKind, 'start'>) {
   }
 }
 
+const addNodeDialogVisible = ref(false)
 const inputDialogVisible = ref(false)
 const branchDialogVisible = ref(false)
 const actionDialogVisible = ref(false)
 const outputDialogVisible = ref(false)
 const defineDialogVisible = ref(false)
+const throwDialogVisible = ref(false)
 const endDialogVisible = ref(false)
 const startDialogVisible = ref(false)
 const editingNodeId = ref('')
@@ -684,6 +695,10 @@ const editingDefineForm = ref<DefineNodeForm>({
 })
 const editingEndForm = ref<EndNodeForm>({
   returnExpr: '',
+  printExpr: '',
+})
+const editingThrowForm = ref<ThrowNodeForm>({
+  messageExpr: '',
   printExpr: '',
 })
 
@@ -967,6 +982,17 @@ function openNodeEditor(node: Node) {
     endDialogVisible.value = true
     return
   }
+  if (node.type === 'throw') {
+    editingNodeId.value = node.id
+    const data = (node.data ?? {}) as Record<string, unknown>
+    editingThrowForm.value = {
+      messageExpr:
+        typeof data.messageExpr === 'string' ? data.messageExpr : '',
+      printExpr: typeof data.printExpr === 'string' ? data.printExpr : '',
+    }
+    throwDialogVisible.value = true
+    return
+  }
   editingNodeId.value = node.id
   const data = (node.data ?? {}) as Record<string, unknown>
   if (node.type === 'input') {
@@ -1136,6 +1162,14 @@ function saveEndNode(form: EndNodeForm) {
   })
 }
 
+function saveThrowNode(form: ThrowNodeForm) {
+  if (!editingNodeId.value) return
+  patchNodeData(editingNodeId.value, {
+    messageExpr: form.messageExpr,
+    printExpr: form.printExpr,
+  })
+}
+
 watch(methodHasReturn, (needs) => {
   for (const n of nodes.value) {
     if (n.type !== 'end') continue
@@ -1200,22 +1234,19 @@ onUnmounted(() => {
           >{{ titleKind || '方法' }} {{ methodName || '未命名' }}</span
         >
       </div>
-      <el-dropdown trigger="click" @command="addFlowNode">
-        <el-button type="primary" :icon="Plus">添加节点</el-button>
-        <template #dropdown>
-          <el-dropdown-menu>
-            <el-dropdown-item command="input">输入</el-dropdown-item>
-            <el-dropdown-item command="define">定义数据</el-dropdown-item>
-            <el-dropdown-item command="branch">判断</el-dropdown-item>
-            <el-dropdown-item command="action">操作</el-dropdown-item>
-            <el-dropdown-item command="output">输出</el-dropdown-item>
-            <el-dropdown-item command="end">终止</el-dropdown-item>
-          </el-dropdown-menu>
-        </template>
-      </el-dropdown>
     </header>
 
     <div class="flow-canvas">
+      <div class="flow-stage-toolbar">
+        <el-tooltip content="添加节点" placement="left" :enterable="false">
+          <el-button
+            type="primary"
+            circle
+            :icon="Plus"
+            @click="addNodeDialogVisible = true"
+          />
+        </el-tooltip>
+      </div>
       <VueFlow
         :id="FLOW_ID"
         :nodes="nodes"
@@ -1239,6 +1270,10 @@ onUnmounted(() => {
       </VueFlow>
     </div>
 
+    <AddFlowNodeDialog
+      v-model="addNodeDialogVisible"
+      @select="addFlowNode"
+    />
     <InputNodeDialog
       v-model="inputDialogVisible"
       :form="editingInputForm"
@@ -1291,6 +1326,12 @@ onUnmounted(() => {
       :reserved-names="reservedNames"
       @save="saveDefineNode"
     />
+    <ThrowNodeDialog
+      v-model="throwDialogVisible"
+      :form="editingThrowForm"
+      :ambient-hint="ambientHint"
+      @save="saveThrowNode"
+    />
     <EndNodeDialog
       v-model="endDialogVisible"
       :form="editingEndForm"
@@ -1342,8 +1383,23 @@ onUnmounted(() => {
 }
 
 .flow-canvas {
+  position: relative;
   flex: 1;
   min-height: 0;
+}
+
+.flow-stage-toolbar {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  z-index: 5;
+  display: flex;
+  gap: 8px;
+  pointer-events: none;
+}
+
+.flow-stage-toolbar > * {
+  pointer-events: auto;
 }
 
 .flow-canvas :deep(.vue-flow) {

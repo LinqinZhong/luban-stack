@@ -58,6 +58,7 @@
         "sql": "",
         "fieldMappings": [],
         "batchSourceParam": "",
+        "pageParam": "",
         "conditionGroups": []
       },
       "debugParams": {
@@ -218,6 +219,145 @@
             "id": "e_action_mrqscowl_z99a_default_end_mrqruu4u_yw0t_mrri5gj6",
             "source": "action_mrqscowl_z99a",
             "target": "end_mrqruu4u_yw0t"
+          }
+        ]
+      }
+    },
+    {
+      "id": "method_ms4esv8l_wj4x9p",
+      "name": "one",
+      "remark": "获取当个商品信息",
+      "scope": "public",
+      "params": [
+        {
+          "id": "param_ms4etbau_95i9zp",
+          "name": "id",
+          "remark": "",
+          "typeExpr": {
+            "type": "string",
+            "typeRef": "",
+            "itemType": "",
+            "itemTypeRef": "",
+            "itemItemType": "",
+            "itemItemTypeRef": "",
+            "genericArgs": {}
+          }
+        }
+      ],
+      "output": {
+        "type": "json",
+        "typeRef": "type_mrnx6ke8_4d7vry",
+        "itemType": "",
+        "itemTypeRef": "",
+        "itemItemType": "",
+        "itemItemTypeRef": "",
+        "genericArgs": {}
+      },
+      "dataConfig": {
+        "source": "mysql",
+        "operation": "query",
+        "queryFields": [],
+        "sql": "",
+        "fieldMappings": [],
+        "batchSourceParam": "",
+        "pageParam": "",
+        "conditionGroups": []
+      },
+      "debugParams": {
+        "id": "1"
+      },
+      "flow": {
+        "nodes": [
+          {
+            "id": "start",
+            "kind": "start",
+            "position": {
+              "x": 286.5,
+              "y": -67.5
+            },
+            "data": {}
+          },
+          {
+            "id": "input_ms4ettf2_lz8m",
+            "kind": "input",
+            "position": {
+              "x": 252,
+              "y": 62
+            },
+            "data": {
+              "dataSource": "current_data",
+              "dataProcessorId": "pmrqfm9hxqct4",
+              "dataMethodId": "method_ms4e472m_lzxbxy",
+              "headerField": "",
+              "varName": "goodsInfo",
+              "methodLabel": "goods.one",
+              "paramBindings": {
+                "id": "id"
+              },
+              "printExpr": ""
+            }
+          },
+          {
+            "id": "branch_ms4eu9hp_bghn",
+            "kind": "branch",
+            "position": {
+              "x": 256.5,
+              "y": 188.09385394307287
+            },
+            "data": {
+              "expression": "goodsInfo === null",
+              "printExpr": ""
+            }
+          },
+          {
+            "id": "end_ms4ex7wf_e4ny",
+            "kind": "end",
+            "position": {
+              "x": 172.6152896517472,
+              "y": 416.29350262645016
+            },
+            "data": {
+              "returnExpr": "goodsInfo",
+              "printExpr": ""
+            }
+          },
+          {
+            "id": "throw_ms4gr1zx_1976",
+            "kind": "throw",
+            "position": {
+              "x": 526.3579503101038,
+              "y": 416.29350262645016
+            },
+            "data": {
+              "messageExpr": "\"商品不存在\"",
+              "printExpr": ""
+            }
+          }
+        ],
+        "edges": [
+          {
+            "id": "edge_ms4ettf2_idr6",
+            "source": "start",
+            "target": "input_ms4ettf2_lz8m"
+          },
+          {
+            "id": "edge_ms4eu9hp_03qc",
+            "source": "input_ms4ettf2_lz8m",
+            "target": "branch_ms4eu9hp_bghn"
+          },
+          {
+            "id": "e_branch_ms4eu9hp_bghn_false_end_ms4ex7wf_e4ny_ms4exhr3",
+            "source": "branch_ms4eu9hp_bghn",
+            "target": "end_ms4ex7wf_e4ny",
+            "sourceHandle": "false",
+            "label": "否"
+          },
+          {
+            "id": "e_branch_ms4eu9hp_bghn_true_throw_ms4gr1zx_1976_ms4gr7no",
+            "source": "branch_ms4eu9hp_bghn",
+            "target": "throw_ms4gr1zx_1976",
+            "sourceHandle": "true",
+            "label": "是"
           }
         ]
       }

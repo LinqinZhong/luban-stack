@@ -18,6 +18,7 @@ import type { DataTypeDef, InterfaceField, TypeExpr } from '../../types/data-typ
 import {
   ambientTypeLabel,
   ambientVarsAtNode,
+  BusinessException,
   findStartNode,
   formatAmbientValue,
   extractFlowReturnValue,
@@ -425,6 +426,7 @@ const kindMap: Record<string, string> = {
   action: '操作',
   output: '输出',
   end: '终止',
+  throw: '业务异常',
 }
 
 function nodeKindLabel(kind: string): string {
@@ -468,6 +470,9 @@ function nodeSummaryText(node: {
   }
   if (node.kind === 'end') {
     return typeof data.returnExpr === 'string' ? data.returnExpr.trim() : ''
+  }
+  if (node.kind === 'throw') {
+    return typeof data.messageExpr === 'string' ? data.messageExpr.trim() : ''
   }
   return ''
 }
@@ -563,6 +568,33 @@ function initialScope(): Record<string, unknown> {
   return { ...draft, ...localScope.value }
 }
 
+/** 必传入参为空时抛业务异常（400 · xxx不能为空） */
+function assertRequiredParams(scope: Record<string, unknown>) {
+  for (const form of paramForms.value) {
+    const name = form.param.name.trim()
+    if (!name || !form.param.required) continue
+    if (!isParamEnabled(form)) {
+      throw new BusinessException(`${name}不能为空`)
+    }
+    const value = scope[name]
+    const jsonLike = form.mode === 'object' || form.mode === 'json'
+    const missing =
+      value === undefined ||
+      value === null ||
+      (!jsonLike && value === '')
+    if (missing) {
+      throw new BusinessException(`${name}不能为空`)
+    }
+  }
+}
+
+function applyBusinessFail(err: BusinessException) {
+  listResult.value = resultFail(err.message, err.code)
+  listResultReady.value = true
+  listResultFoldOpen.value = false
+  listResultError.value = ''
+}
+
 function previewValue(value: unknown): string {
   if (value === undefined) return '—'
   if (value === null) return 'null'
@@ -635,6 +667,15 @@ function onNestedJsonBlur(
 
 const listResultText = computed(() => formatJson(listResult.value) || '—')
 
+/** 与系统类型 Result / ResultCode 对齐 */
+function resultOk<T>(data: T) {
+  return { code: 200, message: 'ok', error: '', data }
+}
+
+function resultFail(message: string, code = 500) {
+  return { code, message, error: message, data: null }
+}
+
 async function handleRunAll() {
   const t = props.target
   if (!t) return
@@ -644,17 +685,35 @@ async function handleRunAll() {
   listResultReady.value = false
   errorText.value = ''
   try {
-    const snap = await runFlowToEnd(stepContext(), initialScope())
+    const scope = initialScope()
+    assertRequiredParams(scope)
+    const snap = await runFlowToEnd(stepContext(), scope)
     snapshot.value = snap
     history.value = []
     localScope.value = {}
-    listResult.value = extractFlowReturnValue(t.flow, snap)
+    if (snap.businessError) {
+      listResult.value = resultFail(
+        snap.businessError.message,
+        snap.businessError.code,
+      )
+    } else {
+      listResult.value = resultOk(extractFlowReturnValue(t.flow, snap))
+    }
     listResultReady.value = true
     listResultFoldOpen.value = false
     emitCursor(snap)
   } catch (err) {
-    listResultError.value = err instanceof Error ? err.message : String(err)
-    ElMessage.error(listResultError.value)
+    if (err instanceof BusinessException) {
+      applyBusinessFail(err)
+      emitCursor(null)
+      return
+    }
+    const msg = err instanceof Error ? err.message : String(err)
+    listResult.value = resultFail(msg)
+    listResultReady.value = true
+    listResultFoldOpen.value = false
+    listResultError.value = ''
+    ElMessage.error(msg)
     emitCursor(null)
   } finally {
     running.value = false
@@ -799,12 +858,27 @@ async function handleRunToCurrent() {
   running.value = true
   errorText.value = ''
   try {
-    const snap = await runFlowToNode(stepContext(), targetId, initialScope())
+    const scope = initialScope()
+    assertRequiredParams(scope)
+    const snap = await runFlowToNode(stepContext(), targetId, scope)
     if (snapshot.value) history.value = [...history.value, snapshot.value]
     snapshot.value = snap
     localScope.value = {}
+    if (snap.businessError) {
+      listResult.value = resultFail(
+        snap.businessError.message,
+        snap.businessError.code,
+      )
+      listResultReady.value = true
+      listResultFoldOpen.value = false
+      listResultError.value = ''
+    }
     emitCursor(snap)
   } catch (err) {
+    if (err instanceof BusinessException) {
+      applyBusinessFail(err)
+      return
+    }
     errorText.value = err instanceof Error ? err.message : String(err)
     ElMessage.error(errorText.value)
   } finally {
@@ -820,11 +894,13 @@ async function handleRunNext() {
   try {
     const start = findStartNode(t.flow)
     if (!start) throw new Error('工作流缺少开始节点')
+    const scope = initialScope()
+    if (!snapshot.value) assertRequiredParams(scope)
     const base: FlowDebugSnapshot =
       snapshot.value ??
       ({
         cursorNodeId: start.id,
-        scope: initialScope(),
+        scope,
         visitedNodeIds: [],
         printByNode: {},
       } satisfies FlowDebugSnapshot)
@@ -832,8 +908,21 @@ async function handleRunNext() {
     if (snapshot.value) history.value = [...history.value, snapshot.value]
     snapshot.value = snap
     localScope.value = {}
+    if (snap.businessError) {
+      listResult.value = resultFail(
+        snap.businessError.message,
+        snap.businessError.code,
+      )
+      listResultReady.value = true
+      listResultFoldOpen.value = false
+      listResultError.value = ''
+    }
     emitCursor(snap)
   } catch (err) {
+    if (err instanceof BusinessException) {
+      applyBusinessFail(err)
+      return
+    }
     errorText.value = err instanceof Error ? err.message : String(err)
     ElMessage.error(errorText.value)
   } finally {

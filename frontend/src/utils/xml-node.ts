@@ -156,7 +156,7 @@ export const WIDGET_OPTIONS: Array<{
   {
     tag: 'MultiWindow',
     label: '多窗口 MultiWindow',
-    description: '按数据池激活项切换显示窗口，每个子控件对应一个窗口',
+    description: '按激活项切换显示窗口，每个子控件对应一个窗口；激活项可绑数据池或 $props',
   },
   {
     tag: 'Modal',

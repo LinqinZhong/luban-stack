@@ -1,4 +1,4 @@
-import { mkdir, readdir, rm } from 'node:fs/promises'
+import { mkdir } from 'node:fs/promises'
 import path from 'node:path'
 import { openProject, ProjectError } from './project.js'
 import { getBuildSchemeByName } from './build-schemes.js'
@@ -6,7 +6,11 @@ import { exportNestJsProject, cleanExportOutput } from './export-nextjs.js'
 import { exportVue3Project } from './export-vue3.js'
 import { exportMpWxProject } from './export-mp-wx.js'
 import { buildApiBaseUrlsFromBackends } from './export-api-base.js'
-import type { BuildScheme } from '../types/build-scheme.js'
+import { emptyDirPreserveDeps } from './clean-output.js'
+import {
+  backendShouldIncludeOss,
+  type BuildScheme,
+} from '../types/build-scheme.js'
 
 export interface BuildProjectResult {
   schemeName: string
@@ -16,26 +20,13 @@ export interface BuildProjectResult {
 }
 
 async function cleanSchemeRoot(outputRoot: string): Promise<void> {
-  await mkdir(outputRoot, { recursive: true })
-  let entries
   try {
-    entries = await readdir(outputRoot, { withFileTypes: true })
-  } catch {
-    return
-  }
-  for (const ent of entries) {
-    if (ent.name === '.git') continue
-    try {
-      await rm(path.join(outputRoot, ent.name), {
-        recursive: true,
-        force: true,
-      })
-    } catch (err) {
-      throw new ProjectError(
-        `无法清理构建目录「${ent.name}」：${err instanceof Error ? err.message : String(err)}`,
-        500,
-      )
-    }
+    await emptyDirPreserveDeps(outputRoot)
+  } catch (err) {
+    throw new ProjectError(
+      `无法清理构建目录：${err instanceof Error ? err.message : String(err)}`,
+      500,
+    )
   }
 }
 
@@ -55,14 +46,19 @@ export async function buildProject(
   const apiBaseUrls = buildApiBaseUrlsFromBackends(scheme.backends)
 
   const backends: BuildProjectResult['backends'] = []
-  for (const backend of scheme.backends) {
+  for (let bi = 0; bi < scheme.backends.length; bi++) {
+    const backend = scheme.backends[bi]!
     const out = path.join(outputRoot, 'backend', backend.name)
     await mkdir(path.dirname(out), { recursive: true })
+    if (backend.type !== 'nestjs') {
+      throw new ProjectError(`暂不支持的后端框架：${backend.type}`, 400)
+    }
     const result = await exportNestJsProject(projectPath, {
       outputPath: out,
       moduleIds: backend.moduleIds,
       port: backend.port,
       projectName: `${scheme.name}-${backend.name}`,
+      includeOss: backendShouldIncludeOss(scheme.backends, bi),
     })
     backends.push({
       name: backend.name,
@@ -79,6 +75,7 @@ export async function buildProject(
       const result = await exportVue3Project(projectPath, {
         outputPath: out,
         pageIds: app.pageIds,
+        entryPage: app.entryPage,
         port: app.port,
         apiBaseUrls,
       })
@@ -91,6 +88,7 @@ export async function buildProject(
       const result = await exportMpWxProject(projectPath, {
         outputPath: out,
         pageIds: app.pageIds,
+        entryPage: app.entryPage,
         wechatAppId: app.wechatAppId,
         apiBaseUrls,
       })

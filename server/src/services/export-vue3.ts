@@ -1,10 +1,11 @@
-import { mkdir, rm, writeFile } from 'node:fs/promises'
+import { mkdir, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { openProject, ProjectError } from './project.js'
 import { listPages, getPage } from './pages.js'
 import { listComponents, getComponent } from './components.js'
 import { readIconLibrary } from './icons.js'
 import { readOssLibrary } from './oss.js'
+import { emptyDirPreserveDeps } from './clean-output.js'
 import type { ComponentConfig } from '../types/component.js'
 import type { DataField } from '../types/page-data.js'
 import { parseXml, findRootNode, type XmlNode } from './export-vue3/xml-parser.js'
@@ -21,6 +22,7 @@ import { buildExportApiBaseUrls } from './export-api-base.js'
 import {
   readBackendServiceLibrary,
 } from './backend-services.js'
+import { preloadApiResolver } from './export-mp-wx.js'
 
 export interface ExportVue3Result {
   outputPath: string
@@ -160,6 +162,8 @@ function migrateLegacyMaskNodes(nodes: XmlNode[]): XmlNode[] {
 export interface ExportVue3Options {
   outputPath?: string
   pageIds?: string[]
+  /** 覆盖项目入口页 */
+  entryPage?: string
   /** H5 开发端口，写入 .env.local */
   port?: number
   apiBaseUrls?: Record<string, string>
@@ -179,9 +183,9 @@ export async function exportVue3Project(
     : path.join(projectPath, OUTPUT_DIR)
 
   try {
-    await rm(outputPath, { recursive: true, force: true })
+    await emptyDirPreserveDeps(outputPath)
   } catch (err) {
-    // 开发服务器占用 output 目录时无法整目录删除，改为保留并覆盖写入
+    // 开发服务器占用时忽略已处理的锁错误；其它错误上抛
     const code = (err as NodeJS.ErrnoException)?.code
     if (code !== 'EBUSY' && code !== 'EPERM' && code !== 'ENOTEMPTY') throw err
   }
@@ -218,6 +222,7 @@ export async function exportVue3Project(
   const iconLibrary = await readIconLibrary(projectPath)
   const ossLibrary = await readOssLibrary(projectPath)
   const serviceLibrary = await readBackendServiceLibrary(projectPath)
+  const resolveApi = await preloadApiResolver(projectPath)
   const apiBaseUrls = buildExportApiBaseUrls(
     config,
     serviceLibrary.services,
@@ -226,7 +231,13 @@ export async function exportVue3Project(
 
   const scaffold = scaffoldFiles({
     projectName: config.name,
-    config,
+    config: {
+      ...config,
+      entryPage:
+        options.entryPage?.trim() ||
+        config.entryPage ||
+        pageSummaries[0]?.id,
+    },
     pages: pageSummaries.map((p) => ({ id: p.id, title: p.title })),
     componentIds: componentSummaries.map((c) => c.id),
   })
@@ -245,6 +256,7 @@ export async function exportVue3Project(
       componentRoots,
       pageRefFields,
       rootNodes,
+      resolveApi,
     })
     await writeProjectFile(
       outputPath,

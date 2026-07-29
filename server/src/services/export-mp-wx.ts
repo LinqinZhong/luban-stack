@@ -1,4 +1,4 @@
-﻿import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+﻿import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { openProject, ProjectError } from './project.js'
 import { listPages, getPage } from './pages.js'
@@ -13,6 +13,7 @@ import {
 } from './backend-services.js'
 import { parseXml, findRootNode, type XmlNode } from './export-vue3/xml-parser.js'
 import { localIconAssetFiles } from './export-vue3/icon-export.js'
+import { emptyDirPreserveDeps } from './clean-output.js'
 import { generateAppIconFiles } from './export-mp-wx/app-icon.js'
 import { scaffoldMpWxFiles } from './export-mp-wx/scaffold.js'
 import { buildExportApiBaseUrls } from './export-api-base.js'
@@ -98,7 +99,7 @@ function migrateLegacyMaskNodes(nodes: XmlNode[]): XmlNode[] {
   return nodes.map(migrateMaskNode)
 }
 
-async function preloadApiResolver(
+export async function preloadApiResolver(
   projectPath: string,
 ): Promise<(raw: string) => MpApiBinding | null> {
   const library = await readBackendServiceLibrary(projectPath)
@@ -147,6 +148,8 @@ async function preloadApiResolver(
 export interface ExportMpWxOptions {
   outputPath?: string
   pageIds?: string[]
+  /** 覆盖项目入口页 */
+  entryPage?: string
   wechatAppId?: string
   apiBaseUrls?: Record<string, string>
 }
@@ -171,7 +174,7 @@ export async function exportMpWxProject(
     : path.join(projectPath, OUTPUT_DIR)
 
   try {
-    await rm(outputPath, { recursive: true, force: true })
+    await emptyDirPreserveDeps(outputPath)
   } catch (err) {
     const code = (err as NodeJS.ErrnoException)?.code
     if (code !== 'EBUSY' && code !== 'EPERM' && code !== 'ENOTEMPTY') throw err
@@ -219,7 +222,13 @@ export async function exportMpWxProject(
   const classRegistry = new ClassRegistry()
 
   const scaffold = scaffoldMpWxFiles({
-    config,
+    config: {
+      ...config,
+      entryPage:
+        options.entryPage?.trim() ||
+        config.entryPage ||
+        pageSummaries[0]?.id,
+    },
     pages: pageSummaries.map((p) => ({ id: p.id, title: p.title })),
     apiBaseUrls,
     wechatAppId,

@@ -2,6 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Plus, Delete, Edit } from '@element-plus/icons-vue'
+import FrameworkTypeIcon from '../icons/FrameworkTypeIcon.vue'
 import {
   getBuildSchemes,
   saveBuildSchemes,
@@ -9,6 +10,7 @@ import {
   type BuildScheme,
   type BuildSchemeLibrary,
   type BuildBackendService,
+  type BuildBackendType,
   type BuildFrontendApp,
   type BuildFrontendType,
 } from '../../api/projects'
@@ -45,8 +47,10 @@ const frontendEditIndex = ref(-1)
 
 const backendDraft = ref<BuildBackendService>({
   name: 'service1',
+  type: 'nestjs',
   port: 3030,
   moduleIds: [],
+  includeOss: false,
 })
 const frontendDraft = ref<BuildFrontendApp>({
   name: 'app1',
@@ -54,7 +58,21 @@ const frontendDraft = ref<BuildFrontendApp>({
   port: 5173,
   wechatAppId: '',
   pageIds: [],
+  entryPage: '',
 })
+
+const frontendEntryOptions = computed(() =>
+  pages.value.filter((p) => frontendDraft.value.pageIds.includes(p.id)),
+)
+
+watch(
+  () => [...frontendDraft.value.pageIds],
+  (ids) => {
+    const entry = frontendDraft.value.entryPage?.trim()
+    if (entry && ids.includes(entry)) return
+    frontendDraft.value.entryPage = ids[0] ?? ''
+  },
+)
 
 const activeScheme = computed(() =>
   library.value.schemes.find((s) => s.id === selectedId.value) ?? null,
@@ -136,15 +154,19 @@ function openBackendEdit(index: number) {
   if (index < 0) {
     backendDraft.value = {
       name: `service${activeScheme.value.backends.length + 1}`,
+      type: 'nestjs',
       port: 3030 + activeScheme.value.backends.length,
       moduleIds: [],
+      includeOss: activeScheme.value.backends.length === 0,
     }
   } else {
     const b = activeScheme.value.backends[index]!
     backendDraft.value = {
       name: b.name,
+      type: b.type ?? 'nestjs',
       port: b.port,
       moduleIds: [...b.moduleIds],
+      includeOss: Boolean(b.includeOss),
     }
   }
   backendEditVisible.value = true
@@ -173,6 +195,11 @@ function saveBackendDraft() {
     ElMessage.error('至少勾选一个模块')
     return
   }
+  const type = (backendDraft.value.type || 'nestjs') as BuildBackendType
+  if (type !== 'nestjs') {
+    ElMessage.error('暂不支持的后端框架')
+    return
+  }
   const dup = activeScheme.value.backends.some(
     (b, i) => b.name === name && i !== backendEditIndex.value,
   )
@@ -182,12 +209,23 @@ function saveBackendDraft() {
   }
   const next: BuildBackendService = {
     name,
+    type,
     port: Math.floor(backendDraft.value.port),
     moduleIds: [...backendDraft.value.moduleIds],
+    includeOss: Boolean(backendDraft.value.includeOss),
   }
   const backends = [...activeScheme.value.backends]
   if (backendEditIndex.value < 0) backends.push(next)
   else backends[backendEditIndex.value] = next
+  // OSS 只能挂一个服务：开启时清掉其它服务的标记
+  if (next.includeOss) {
+    for (let i = 0; i < backends.length; i++) {
+      if (i === (backendEditIndex.value < 0 ? backends.length - 1 : backendEditIndex.value)) {
+        continue
+      }
+      backends[i] = { ...backends[i]!, includeOss: false }
+    }
+  }
   activeScheme.value.backends = backends
   backendEditVisible.value = false
 }
@@ -203,21 +241,29 @@ function openFrontendEdit(index: number) {
   if (!activeScheme.value) return
   frontendEditIndex.value = index
   if (index < 0) {
+    const firstId = pages.value[0]?.id
     frontendDraft.value = {
       name: `app${activeScheme.value.frontends.length + 1}`,
       type: 'vue3',
       port: 5173,
       wechatAppId: '',
-      pageIds: pages.value[0] ? [pages.value[0].id] : [],
+      pageIds: firstId ? [firstId] : [],
+      entryPage: firstId ?? '',
     }
   } else {
     const f = activeScheme.value.frontends[index]!
+    const pageIds = [...f.pageIds]
+    const entry =
+      f.entryPage && pageIds.includes(f.entryPage)
+        ? f.entryPage
+        : (pageIds[0] ?? '')
     frontendDraft.value = {
       name: f.name,
       type: f.type,
       port: f.port ?? 5173,
       wechatAppId: f.wechatAppId ?? '',
-      pageIds: [...f.pageIds],
+      pageIds,
+      entryPage: entry,
     }
   }
   frontendEditVisible.value = true
@@ -232,6 +278,11 @@ function saveFrontendDraft() {
   }
   if (!frontendDraft.value.pageIds.length) {
     ElMessage.error('至少选择一个页面')
+    return
+  }
+  const entryPage = frontendDraft.value.entryPage?.trim() || ''
+  if (!entryPage || !frontendDraft.value.pageIds.includes(entryPage)) {
+    ElMessage.error('请选择入口页')
     return
   }
   const type = frontendDraft.value.type as BuildFrontendType
@@ -257,6 +308,7 @@ function saveFrontendDraft() {
     name,
     type,
     pageIds: [...frontendDraft.value.pageIds],
+    entryPage,
   }
   if (type === 'vue3') next.port = Math.floor(Number(frontendDraft.value.port))
   if (type === 'mp-wx')
@@ -336,7 +388,7 @@ async function handleSave() {
       <aside class="scheme-list">
         <div class="aside-head">
           <span>方案</span>
-          <el-button :icon="Plus" size="small" text type="primary" @click="addScheme">
+          <el-button type="primary" link :icon="Plus" @click="addScheme">
             新建
           </el-button>
         </div>
@@ -349,10 +401,9 @@ async function handleSave() {
         >
           <div class="scheme-name">{{ s.name }}</div>
           <el-button
-            :icon="Delete"
-            size="small"
-            text
             type="danger"
+            link
+            :icon="Delete"
             @click.stop="removeScheme(s.id)"
           />
         </div>
@@ -382,9 +433,11 @@ async function handleSave() {
           <el-form-item label="后端">
             <div class="field-block">
               <div class="field-toolbar">
-                <el-button size="small" :icon="Plus" @click="openBackendEdit(-1)">
-                  添加服务
-                </el-button>
+                <div class="card-actions">
+                  <el-button class="add-link" link :icon="Plus" @click="openBackendEdit(-1)">
+                    添加服务
+                  </el-button>
+                </div>
               </div>
               <div
                 v-for="(b, i) in activeScheme.backends"
@@ -393,17 +446,23 @@ async function handleSave() {
               >
                 <div class="card-main">
                   <strong>{{ b.name }}</strong>
-                  <span class="muted">:{{ b.port }} · {{ b.moduleIds.length }} 个模块</span>
+                  <span class="muted">
+                    <FrameworkTypeIcon :type="b.type || 'nestjs'" />
+                    <span>
+                      {{ b.type === 'nestjs' ? 'Nest.js' : b.type }} :{{ b.port }}
+                      · {{ b.moduleIds.length }} 个模块
+                      <template v-if="b.includeOss"> · OSS</template>
+                    </span>
+                  </span>
                 </div>
                 <div class="card-actions">
-                  <el-button size="small" :icon="Edit" text @click="openBackendEdit(i)">
+                  <el-button type="primary" link :icon="Edit" @click="openBackendEdit(i)">
                     编辑
                   </el-button>
                   <el-button
-                    size="small"
-                    :icon="Delete"
-                    text
                     type="danger"
+                    link
+                    :icon="Delete"
                     @click="removeBackend(i)"
                   />
                 </div>
@@ -416,9 +475,11 @@ async function handleSave() {
           <el-form-item label="前端">
             <div class="field-block">
               <div class="field-toolbar">
-                <el-button size="small" :icon="Plus" @click="openFrontendEdit(-1)">
-                  添加应用
-                </el-button>
+                <div class="card-actions">
+                  <el-button class="add-link" link :icon="Plus" @click="openFrontendEdit(-1)">
+                    添加应用
+                  </el-button>
+                </div>
               </div>
               <div
                 v-for="(f, i) in activeScheme.frontends"
@@ -428,19 +489,21 @@ async function handleSave() {
                 <div class="card-main">
                   <strong>{{ f.name }}</strong>
                   <span class="muted">
-                    {{ f.type === 'vue3' ? `Vue3 :${f.port}` : '微信小程序' }}
-                    · {{ f.pageIds.length }} 页
+                    <FrameworkTypeIcon :type="f.type || 'vue3'" />
+                    <span>
+                      {{ f.type === 'vue3' ? `Vue3 :${f.port}` : '微信小程序' }}
+                      · {{ f.pageIds.length }} 页
+                    </span>
                   </span>
                 </div>
                 <div class="card-actions">
-                  <el-button size="small" :icon="Edit" text @click="openFrontendEdit(i)">
+                  <el-button type="primary" link :icon="Edit" @click="openFrontendEdit(i)">
                     编辑
                   </el-button>
                   <el-button
-                    size="small"
-                    :icon="Delete"
-                    text
                     type="danger"
+                    link
+                    :icon="Delete"
                     @click="removeFrontend(i)"
                   />
                 </div>
@@ -482,6 +545,16 @@ async function handleSave() {
           style="width: 100%"
         />
       </el-form-item>
+      <el-form-item label="框架">
+        <el-radio-group v-model="backendDraft.type">
+          <el-radio value="nestjs">
+            <span class="type-option">
+              <FrameworkTypeIcon type="nestjs" />
+              Nest.js
+            </span>
+          </el-radio>
+        </el-radio-group>
+      </el-form-item>
       <el-form-item label="模块">
         <el-checkbox-group v-model="backendDraft.moduleIds" class="module-checks">
           <el-checkbox
@@ -494,6 +567,14 @@ async function handleSave() {
             <span class="muted">（{{ m.id }}）</span>
           </el-checkbox>
         </el-checkbox-group>
+      </el-form-item>
+      <el-form-item label="OSS">
+        <el-checkbox v-model="backendDraft.includeOss">
+          在本服务挂载 OSS 模块
+        </el-checkbox>
+        <div class="field-hint">
+          提供 <code>POST /oss/sign</code>；同一构建方案只能选一个服务
+        </div>
       </el-form-item>
     </el-form>
     <template #footer>
@@ -515,8 +596,18 @@ async function handleSave() {
       </el-form-item>
       <el-form-item label="类型">
         <el-radio-group v-model="frontendDraft.type">
-          <el-radio value="vue3">Vue3</el-radio>
-          <el-radio value="mp-wx">微信小程序</el-radio>
+          <el-radio value="vue3">
+            <span class="type-option">
+              <FrameworkTypeIcon type="vue3" />
+              Vue3
+            </span>
+          </el-radio>
+          <el-radio value="mp-wx">
+            <span class="type-option">
+              <FrameworkTypeIcon type="mp-wx" />
+              微信小程序
+            </span>
+          </el-radio>
         </el-radio-group>
       </el-form-item>
       <el-form-item v-if="frontendDraft.type === 'vue3'" label="端口">
@@ -544,6 +635,22 @@ async function handleSave() {
         >
           <el-option
             v-for="p in pages"
+            :key="p.id"
+            :label="`${p.title || p.id}（${p.id}）`"
+            :value="p.id"
+          />
+        </el-select>
+      </el-form-item>
+      <el-form-item label="入口页">
+        <el-select
+          v-model="frontendDraft.entryPage"
+          filterable
+          placeholder="从已选页面中选择入口页"
+          style="width: 100%"
+          :disabled="!frontendDraft.pageIds.length"
+        >
+          <el-option
+            v-for="p in frontendEntryOptions"
             :key="p.id"
             :label="`${p.title || p.id}（${p.id}）`"
             :value="p.id"
@@ -618,7 +725,12 @@ async function handleSave() {
 }
 .field-toolbar {
   display: flex;
-  justify-content: flex-start;
+  align-items: center;
+  justify-content: flex-end;
+  min-height: 32px;
+  margin-top: -2px;
+  /* 与下方卡片左右内边距一致，保证操作列起点对齐 */
+  padding: 0 12px;
 }
 .field-empty {
   padding: 12px 14px;
@@ -627,6 +739,19 @@ async function handleSave() {
   color: #909399;
   font-size: 13px;
   background: #fafafa;
+}
+.field-hint {
+  margin-top: 6px;
+  font-size: 12px;
+  color: #909399;
+  line-height: 1.5;
+}
+.field-hint code {
+  font-size: 11px;
+  padding: 0 4px;
+  border-radius: 3px;
+  background: #f2f3f5;
+  color: #606266;
 }
 .card {
   display: flex;
@@ -646,12 +771,28 @@ async function handleSave() {
 }
 .card-actions {
   flex-shrink: 0;
+  width: 7.5rem;
   display: flex;
   align-items: center;
+  justify-content: flex-start;
+  gap: 4px;
+}
+.add-link,
+.add-link:hover,
+.add-link:focus {
+  color: #303133 !important;
 }
 .muted {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   color: #909399;
   font-size: 12px;
+}
+.type-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 .module-checks {
   display: flex;

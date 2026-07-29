@@ -43,11 +43,11 @@
           "T": "type_mrnx6ke8_4d7vry"
         }
       },
-      "requireAuth": true,
+      "requireAuth": false,
       "debugParams": {
         "page": {
-          "current": 3,
-          "pageSize": 10
+          "current": 0,
+          "pageSize": 1
         },
         "keyword": null
       },
@@ -106,6 +106,95 @@
             "id": "edge_mrro18yr_s23s",
             "source": "input_mrrndwfq_bfnc",
             "target": "end_mrro18yq_vwk1"
+          }
+        ]
+      }
+    },
+    {
+      "id": "api_ms4gstja_v6df39",
+      "name": "one",
+      "path": "/",
+      "remark": "获取商品信息",
+      "method": "GET",
+      "inputs": [
+        {
+          "id": "ain_ms4gtfbi_wwoesc",
+          "varName": "id",
+          "location": "query",
+          "type": "string",
+          "typeRef": "",
+          "genericArgs": {},
+          "required": true,
+          "remark": ""
+        }
+      ],
+      "output": {
+        "type": "json",
+        "typeRef": "type_mrnx6ke8_4d7vry",
+        "itemType": "",
+        "itemTypeRef": "",
+        "itemItemType": "",
+        "itemItemTypeRef": "",
+        "genericArgs": {}
+      },
+      "requireAuth": false,
+      "debugParams": {
+        "id": null
+      },
+      "flow": {
+        "nodes": [
+          {
+            "id": "start",
+            "kind": "start",
+            "position": {
+              "x": 280,
+              "y": 40
+            },
+            "data": {}
+          },
+          {
+            "id": "input_ms4gu7fk_6q5x",
+            "kind": "input",
+            "position": {
+              "x": 245.5,
+              "y": 159.6116516898884
+            },
+            "data": {
+              "dataSource": "other_business",
+              "dataProcessorId": "pmrqfxkatf8jl",
+              "dataMethodId": "method_ms4esv8l_wj4x9p",
+              "headerField": "",
+              "varName": "goodsInfo",
+              "methodLabel": "goods.one",
+              "paramBindings": {
+                "id": "id"
+              },
+              "printExpr": ""
+            }
+          },
+          {
+            "id": "end_ms4guqsw_xkhv",
+            "kind": "end",
+            "position": {
+              "x": 277,
+              "y": 302.7702923805644
+            },
+            "data": {
+              "returnExpr": "goodsInfo",
+              "printExpr": ""
+            }
+          }
+        ],
+        "edges": [
+          {
+            "id": "edge_ms4gu7fk_c0sq",
+            "source": "start",
+            "target": "input_ms4gu7fk_6q5x"
+          },
+          {
+            "id": "e_input_ms4gu7fk_6q5x_default_end_ms4guqsw_xkhv_ms4guuxk",
+            "source": "input_ms4gu7fk_6q5x",
+            "target": "end_ms4guqsw_xkhv"
           }
         ]
       }

@@ -20,6 +20,8 @@ export interface NestJsScaffoldContext {
     development: string
     production: string
   }
+  /** 是否生成并挂载 OssModule；默认 true */
+  includeOss?: boolean
 }
 
 const TEMPLATES_DIR = path.resolve(
@@ -43,12 +45,16 @@ async function readTemplate(name: string): Promise<string> {
 export async function scaffoldNestJsFiles(
   ctx: NestJsScaffoldContext,
 ): Promise<Record<string, string>> {
+  const includeOss = ctx.includeOss !== false
   const files: Record<string, string> = {}
   const pkgName = slugify(ctx.projectName)
-  const [dataMethodTpl, ossTpl, dbTpl] = await Promise.all([
+  const templateReads = [
     readTemplate('data-method.ts'),
-    readTemplate('oss.ts'),
     readTemplate('db.ts'),
+  ] as const
+  const [dataMethodTpl, dbTpl, ossTpl] = await Promise.all([
+    ...templateReads,
+    includeOss ? readTemplate('oss.ts') : Promise.resolve(''),
   ])
 
   files['package.json'] = `${JSON.stringify(
@@ -194,9 +200,7 @@ npm run start:dev
 
 默认 \`http://127.0.0.1:3030\`。
 
-OSS 签名：\`POST /oss/sign\`
-
-## 已导出路由（${ctx.routes.length}）
+${includeOss ? 'OSS 签名：`POST /oss/sign`\n' : ''}## 已导出路由（${ctx.routes.length}）
 
 ${
   ctx.routes.length
@@ -249,12 +253,11 @@ bootstrap()
     .join('\n')
   const moduleList = [
     ...ctx.rootModuleImports.map((m) => m.className),
-    'OssModule',
+    ...(includeOss ? ['OssModule'] : []),
   ].join(',\n    ')
 
   files['src/app.module.ts'] = `import { Module } from '@nestjs/common'
-${moduleImports}
-import { OssModule } from './modules/oss/oss.module'
+${moduleImports}${includeOss ? `\nimport { OssModule } from './modules/oss/oss.module'` : ''}
 
 @Module({
   imports: [
@@ -267,15 +270,16 @@ export class AppModule {}
   files['src/common/result.ts'] = `export interface Result<T = unknown> {
   code: number
   message: string
+  error: string
   data: T
 }
 
 export function success<T>(data: T): Result<T> {
-  return { code: 0, message: 'ok', data }
+  return { code: 200, message: 'ok', error: '', data }
 }
 
 export function fail(message: string, code = 500): Result<null> {
-  return { code, message, data: null }
+  return { code, message, error: message, data: null }
 }
 `
 
@@ -300,9 +304,10 @@ export function fail(message: string, code = 500): Result<null> {
   files['src/common/db.ts'] = dbTpl
 
   files['src/common/data-method.ts'] = dataMethodTpl
-  files['src/common/oss.ts'] = ossTpl
+  if (includeOss) {
+    files['src/common/oss.ts'] = ossTpl
 
-  files['src/modules/oss/oss.controller.ts'] = `import { Body, Controller, Post } from '@nestjs/common'
+    files['src/modules/oss/oss.controller.ts'] = `import { Body, Controller, Post } from '@nestjs/common'
 import { success, type Result } from '../../common/result'
 import { signOssObject } from '../../common/oss'
 
@@ -338,7 +343,7 @@ export class OssController {
 }
 `
 
-  files['src/modules/oss/oss.module.ts'] = `import { Module } from '@nestjs/common'
+    files['src/modules/oss/oss.module.ts'] = `import { Module } from '@nestjs/common'
 import { OssController } from './oss.controller'
 
 @Module({
@@ -346,6 +351,7 @@ import { OssController } from './oss.controller'
 })
 export class OssModule {}
 `
+  }
 
   return files
 }

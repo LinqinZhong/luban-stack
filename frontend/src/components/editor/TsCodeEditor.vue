@@ -306,6 +306,9 @@ onMounted(() => {
     wordWrap: 'on',
     theme: 'vs',
     tabFocusMode: false,
+    // 减少被上方表单项裁切；仍用 fixed 逃出编辑器自身 overflow
+    fixedOverflowWidgets: true,
+    hover: { enabled: true, above: false },
     quickSuggestions: { other: true, comments: false, strings: false },
     suggestOnTriggerCharacters: true,
     snippetSuggestions: 'inline',
@@ -394,6 +397,9 @@ onBeforeUnmount(() => {
   border: 1px solid #dcdfe6;
   border-radius: 6px;
   overflow: hidden;
+  /* 给上方 hover 留一点空间时仍可能被裁；配合 hover.above=false */
+  position: relative;
+  z-index: 1;
 }
 
 .ts-editor :deep(.ts-shell-readonly) {
@@ -403,5 +409,11 @@ onBeforeUnmount(() => {
 
 .ts-editor :deep(.ts-shell-readonly-margin) {
   background: #eef1f6;
+}
+
+/* 浮层盖过相邻表单项 */
+.ts-editor :deep(.overflowingContentWidgets),
+.ts-editor :deep(.overflow-widgets-container) {
+  z-index: 20;
 }
 </style>

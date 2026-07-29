@@ -140,6 +140,11 @@ function emitNodeBlock(
     return `${pad}return ${returnExpr}\n`
   }
 
+  if (node.kind === 'throw') {
+    const messageExpr = str(data, 'messageExpr').trim() || "'业务异常'"
+    return `${pad}throw Object.assign(new Error(String(${messageExpr})), { statusCode: 400 })\n`
+  }
+
   if (node.kind === 'define') {
     const varName = safeIdent(str(data, 'varName'), 'v')
     const initExpr = str(data, 'initExpr').trim()

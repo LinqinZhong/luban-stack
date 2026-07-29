@@ -72,21 +72,59 @@ function resolveTableName(
   return table
 }
 
-function pickPageMeta(params: Record<string, unknown>): {
-  current: number
-  pageSize: number
-} {
-  const nested =
-    (params.pageDto as Record<string, unknown> | undefined) ||
-    (params.dto as Record<string, unknown> | undefined) ||
-    (params.query as Record<string, unknown> | undefined)
-  const src = nested && typeof nested === 'object' ? nested : params
+function pickPageMeta(
+  params: Record<string, unknown>,
+  pageParam: string,
+): { current: number; pageSize: number; enabled: boolean } {
+  const key = pageParam.trim()
+  if (!key) {
+    return { current: 1, pageSize: 10, enabled: false }
+  }
+  const resolved = resolvePath(params, key)
+  const src =
+    resolved && typeof resolved === 'object' && !Array.isArray(resolved)
+      ? (resolved as Record<string, unknown>)
+      : null
+  if (!src) {
+    return { current: 1, pageSize: 10, enabled: true }
+  }
   const current = Math.max(1, Number(src.current ?? src.page ?? 1) || 1)
   const pageSize = Math.max(
     1,
     Math.min(200, Number(src.pageSize ?? src.size ?? 10) || 10),
   )
-  return { current, pageSize }
+  return { current, pageSize, enabled: true }
+}
+
+function buildQuerySql(
+  table: string,
+  config: DataMethodConfig,
+  params: Record<string, unknown>,
+): { sql: string; current: number; pageSize: number; paginated: boolean } {
+  const fields =
+    config.queryFields.length > 0 ? config.queryFields : ['*']
+  for (const f of fields) {
+    if (f !== '*' && !/^[A-Za-z_][A-Za-z0-9_]*$/.test(f)) {
+      throw new ProjectError(`查询字段不合法：${f}`, 400)
+    }
+  }
+  const cols =
+    fields[0] === '*'
+      ? '*'
+      : fields.map((f) => quoteIdent(f)).join(', ')
+  const page = pickPageMeta(params, config.pageParam ?? '')
+  const where = buildWhereClause(config.conditionGroups, params)
+  let sql = `SELECT ${cols} FROM ${quoteIdent(table)}${where}`
+  if (page.enabled) {
+    const offset = (page.current - 1) * page.pageSize
+    sql += ` LIMIT ${page.pageSize} OFFSET ${offset}`
+  }
+  return {
+    sql,
+    current: page.current,
+    pageSize: page.pageSize,
+    paginated: page.enabled,
+  }
 }
 
 function buildWhereClause(
@@ -172,29 +210,6 @@ function buildWhereClause(
   if (!groupSqls.length) return ''
   if (groupSqls.length === 1) return ` WHERE ${groupSqls[0]}`
   return ` WHERE ${groupSqls.join(' OR ')}`
-}
-
-function buildQuerySql(
-  table: string,
-  config: DataMethodConfig,
-  params: Record<string, unknown>,
-): { sql: string; current: number; pageSize: number } {
-  const fields =
-    config.queryFields.length > 0 ? config.queryFields : ['*']
-  for (const f of fields) {
-    if (f !== '*' && !/^[A-Za-z_][A-Za-z0-9_]*$/.test(f)) {
-      throw new ProjectError(`查询字段不合法：${f}`, 400)
-    }
-  }
-  const cols =
-    fields[0] === '*'
-      ? '*'
-      : fields.map((f) => quoteIdent(f)).join(', ')
-  const { current, pageSize } = pickPageMeta(params)
-  const offset = (current - 1) * pageSize
-  const where = buildWhereClause(config.conditionGroups, params)
-  const sql = `SELECT ${cols} FROM ${quoteIdent(table)}${where} LIMIT ${pageSize} OFFSET ${offset}`
-  return { sql, current, pageSize }
 }
 
 /**
@@ -452,6 +467,38 @@ function wrapOutput(
       column: m.column.trim(),
     }))
     .filter((m) => m.field && m.column)
+  const operation = method.dataConfig?.operation
+
+  // 查询：按出参类型包装行集（非数组空结果为 null）
+  if (operation === 'query') {
+    if (method.output.type === 'array') {
+      return rows
+    }
+    if (def?.kind === 'interface') {
+      const hasRecords = def.fields.some((f) => f.name === 'records')
+      if (hasRecords) {
+        return {
+          current: meta.current,
+          pageSize: meta.pageSize,
+          hasNext: meta.current * meta.pageSize < meta.total,
+          total: meta.total,
+          records: rows,
+        }
+      }
+    }
+    if (method.output.type === 'number' && !named) {
+      return meta.total
+    }
+    if (method.output.type === 'boolean' && !named) {
+      return meta.total > 0
+    }
+    if (method.output.type === 'string' && !named) {
+      const single = rows.length ? rows[0] : null
+      return JSON.stringify(single)
+    }
+    // 对象 / 具名类型：单条或 null，不出数组
+    return rows.length ? rows[0]! : null
+  }
 
   // 标量出参：按字段映射取列，或取首行首列
   const scalarTypes = new Set(['number', 'string', 'boolean'])
@@ -476,7 +523,7 @@ function wrapOutput(
   }
 
   // 接口出参 + 自定义字段映射：按映射组装对象
-  if (def?.kind === 'interface' && mappings.length && method.dataConfig?.operation === 'custom') {
+  if (def?.kind === 'interface' && mappings.length && operation === 'custom') {
     const hasRecords = def.fields.some((f) => f.name === 'records')
     if (!hasRecords) {
       const row = rows[0] ?? {}
@@ -505,8 +552,7 @@ function wrapOutput(
     }
   }
 
-  if (rows.length === 1) return rows[0]
-  return rows
+  return rows.length ? rows[0]! : null
 }
 
 export type DataMethodDebugResult = {
@@ -561,6 +607,7 @@ export async function debugDataLayerMethod(payload: {
   let sql = ''
   let current = 1
   let pageSize = 10
+  let paginated = false
   let isWrite = false
 
   if (config.operation === 'query') {
@@ -568,6 +615,7 @@ export async function debugDataLayerMethod(payload: {
     sql = built.sql
     current = built.current
     pageSize = built.pageSize
+    paginated = built.paginated
   } else if (config.operation === 'insert') {
     sql = buildInsertSql(table, config.fieldMappings, params)
     isWrite = true
@@ -638,7 +686,7 @@ export async function debugDataLayerMethod(payload: {
 
   const rows = exec.rows
   let total = rows.length
-  if (config.operation === 'query') {
+  if (config.operation === 'query' && paginated) {
     if (rows.length < pageSize) {
       total = (current - 1) * pageSize + rows.length
     } else {

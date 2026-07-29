@@ -7,6 +7,7 @@ import type {
   ServiceController,
   ServiceProcessor,
 } from '../types/backend-services'
+import type { DataTypeLibrary } from '../types/data-types'
 import type {
   ControllerBindingConfig,
   ControllerInputParamConfig,
@@ -14,6 +15,7 @@ import type {
   DataFieldValue,
   PageData,
 } from '../types/page-data'
+import { fillNamedInterfaceDefaults } from './named-type-fields'
 import {
   extractFlowReturnValue,
   runFlowToEnd,
@@ -41,6 +43,8 @@ export type ControllerBindingRuntimeOptions = {
    * 未传时从 loadControllerBoundPageData 的 fields 自动构建。
    */
   pageScope?: Record<string, unknown>
+  /** 具名类型库：回填 json 字段时补齐 interface 缺省值（如 number → 0） */
+  typeLibrary?: DataTypeLibrary | null
 }
 
 function cloneValue<T>(value: T): T {
@@ -125,11 +129,15 @@ export function assembleControllerApiScope(
     const name = inp.varName.trim()
     if (!name) continue
     const value = resolveInputValue(inputs?.[name], name, api, pageScope)
-    if (value === undefined) {
+    const missing =
+      value === undefined ||
+      value === null ||
+      (!(inp.type === 'json' || inp.typeRef) && value === '')
+    if (missing) {
       if (inp.required) {
-        throw new Error(`必填入参「${name}」未配置或绑定值为空`)
+        throw new Error(`${name}不能为空`)
       }
-      continue
+      if (value === undefined) continue
     }
     scope[name] = value
   }
@@ -256,10 +264,22 @@ async function loadOneField(
     )
     const data = unwrapResultData(raw)
     const parsed = runParseBody(cfg.parseBody, data)
+    const filled =
+      field.type === 'json' &&
+      field.typeRef &&
+      parsed != null &&
+      typeof parsed === 'object' &&
+      !Array.isArray(parsed)
+        ? fillNamedInterfaceDefaults(
+            parsed,
+            field.typeRef,
+            options.typeLibrary,
+          )
+        : parsed
     if (cfg.onSuccess.trim() && runEvents) {
-      await runEvents(cfg.onSuccess, { res: parsed })
+      await runEvents(cfg.onSuccess, { res: filled })
     }
-    return parsed as DataFieldValue
+    return filled as DataFieldValue
   } catch (err) {
     if (cfg.onError.trim() && runEvents) {
       await runEvents(cfg.onError, { res: err })
@@ -302,7 +322,10 @@ export async function loadControllerBoundPageData(
           cache,
           pageScope,
         )
-        field.value = value
+        field.value = value as DataFieldValue
+        if (name && isValidIdent(name)) {
+          pageScope[name] = cloneValue(value)
+        }
       } catch (err) {
         console.warn(`[voider] 控制器字段「${name}」加载失败:`, err)
       }

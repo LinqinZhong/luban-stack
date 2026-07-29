@@ -19,6 +19,7 @@ export type DataFieldValue =
   | string
   | number
   | boolean
+  | null
   | Record<string, unknown>
   | unknown[]
 
@@ -231,17 +232,7 @@ export function defaultComputeBody(type: DataFieldType): string {
 
 /** 控制器绑定：自定义解析默认方法体（形参 data = Result.data） */
 export function defaultControllerParseBody(type: DataFieldType): string {
-  const sample =
-    type === 'number'
-      ? '0'
-      : type === 'boolean'
-        ? 'false'
-        : type === 'array'
-          ? '[]'
-          : type === 'json'
-            ? '{}'
-            : "''"
-  return `// data 为接口 Result.data\n// return 的值写入本数据池字段\nreturn data ?? ${sample}\n`
+  return `// data 为接口 Result.data\n// return 的值写入本数据池字段\nreturn data\n`
 }
 
 export function createEmptyControllerBinding(
@@ -257,6 +248,14 @@ export function createEmptyControllerBinding(
     onError: '',
     inputs: {},
   }
+}
+
+/** 绑到控制器时的字段初始值：对象/数组用 null，便于 notEmpty 等在拉数前隐藏 UI */
+export function defaultControllerFieldValue(
+  type: DataFieldType,
+): DataFieldValue {
+  if (type === 'json' || type === 'array') return null
+  return defaultValue(type)
 }
 
 export function normalizeDataSourceBinding(raw: unknown): DataSourceBinding {

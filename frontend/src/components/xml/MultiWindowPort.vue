@@ -1,5 +1,12 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import {
+  computed,
+  nextTick,
+  onBeforeUnmount,
+  onMounted,
+  ref,
+  watch,
+} from 'vue'
 import { Plus } from '@element-plus/icons-vue'
 import type { OverflowStrategy } from '../../utils/xml'
 
@@ -7,6 +14,8 @@ const props = withDefaults(
   defineProps<{
     /** 编辑态：横向平铺全部窗口；预览态：仅展示激活项匹配的窗口 */
     editable?: boolean
+    /** 是否显示「新建窗口」并允许点选切换焦点（组件实例内为 false） */
+    allowManage?: boolean
     /** 预览态溢出策略（默认 visible）；编辑态忽略，始终可溢出 */
     overflow?: OverflowStrategy
     /** 激活项（已解析的数据池值或字面量） */
@@ -17,6 +26,7 @@ const props = withDefaults(
   }>(),
   {
     editable: false,
+    allowManage: true,
     overflow: 'visible',
     activeValue: '',
     focusIndex: 0,
@@ -30,7 +40,18 @@ const emit = defineEmits<{
 
 const viewportRef = ref<HTMLElement | null>(null)
 const paneWidthPx = ref(0)
+/** 编辑态锁定屏幕宽（每一页内容区宽） */
+const lockedEditPaneW = ref(0)
+/**
+ * 深度优先：本页右侧需让出的宽度（嵌套 Swiper 第 2+ 窗、嵌套多窗体等），
+ * 用 margin-right 占位，形成：
+ * 【第一页【Swiper1】】【Swiper2】【Swiper3】【第二页】【第三页】
+ */
+const dfsExtraByIndex = ref<Record<number, number>>({})
+const paneElByIndex = new Map<number, HTMLElement>()
+
 let resizeObserver: ResizeObserver | null = null
+let measureRaf = 0
 
 const EDIT_GAP_PX = 10
 
@@ -58,6 +79,22 @@ function isPreviewVisible(index: number, key: string): boolean {
   return index === previewIndex.value
 }
 
+function paneStyle(index: number): Record<string, string> | undefined {
+  if (!props.editable) return undefined
+  const w = paneWidthPx.value
+  if (!(w > 0)) return undefined
+  const extra = dfsExtraByIndex.value[index] ?? 0
+  const style: Record<string, string> = {
+    width: `${w}px`,
+    flex: `0 0 ${w}px`,
+    minWidth: `${w}px`,
+    maxWidth: `${w}px`,
+  }
+  // 让出内层平铺占用的横向空间，后续页不会叠上来
+  if (extra > 0) style.marginRight = `${extra}px`
+  return style
+}
+
 const viewportStyle = computed(() => {
   const style: Record<string, string> = {}
   if (props.editable && paneWidthPx.value) {
@@ -83,39 +120,157 @@ const trackStyle = computed(() => {
   }
 })
 
+function setPaneRef(index: number, el: Element | null) {
+  if (el instanceof HTMLElement) paneElByIndex.set(index, el)
+  else paneElByIndex.delete(index)
+}
+
+/**
+ * 深度优先：量本页内嵌套平铺超出「第一屏」的宽度。
+ * - Swiper：track 总宽 − 单窗宽（第 2、3… 窗）
+ * - 嵌套 MultiWindow：其子 track 总宽 − 单页宽
+ */
+function measureDfsExtra(pane: HTMLElement, baseW: number): number {
+  if (!(baseW > 0)) return 0
+  let extra = 0
+
+  pane.querySelectorAll('.swiper-viewport.editable').forEach((node) => {
+    const vp = node as HTMLElement
+    const track = vp.querySelector('.swiper-track') as HTMLElement | null
+    if (!track) return
+    const trackW = track.scrollWidth
+    // 窗口宽 = Swiper 宿主布局宽，与 slide 锁定宽一致
+    const hostW = Math.round(vp.parentElement?.clientWidth || 0)
+    const slide = vp.querySelector('.swiper-slide.editable') as HTMLElement | null
+    const winW = hostW || Math.round(slide?.offsetWidth || baseW)
+    if (trackW > winW) extra = Math.max(extra, trackW - winW)
+  })
+
+  const selfPort = viewportRef.value
+  pane.querySelectorAll('.multi-window-port.is-edit').forEach((node) => {
+    const port = node as HTMLElement
+    if (port === selfPort) return
+    if (!pane.contains(port)) return
+    const track = port.querySelector(
+      ':scope > .multi-window-track',
+    ) as HTMLElement | null
+    if (!track) return
+    const trackW = track.scrollWidth
+    if (trackW > baseW) extra = Math.max(extra, trackW - baseW)
+  })
+
+  return Math.max(0, Math.ceil(extra))
+}
+
+function remeasureDfsExtras() {
+  if (!props.editable) return
+  const base = lockedEditPaneW.value || paneWidthPx.value
+  if (!(base > 0)) return
+
+  const next: Record<number, number> = {}
+  let changed = false
+  for (const [index, pane] of paneElByIndex) {
+    const extra = measureDfsExtra(pane, base)
+    next[index] = extra
+    if ((dfsExtraByIndex.value[index] ?? 0) !== extra) changed = true
+  }
+  if (changed) dfsExtraByIndex.value = next
+}
+
+function scheduleRemeasure() {
+  if (!props.editable) return
+  if (measureRaf) cancelAnimationFrame(measureRaf)
+  measureRaf = requestAnimationFrame(() => {
+    measureRaf = 0
+    void nextTick(() => {
+      remeasureDfsExtras()
+      observeTileSources()
+    })
+  })
+}
+
+function observeTileSources() {
+  if (!resizeObserver || !props.editable) return
+  const root = viewportRef.value
+  if (!root) return
+  root
+    .querySelectorAll(
+      '.swiper-viewport.editable, .swiper-track, .multi-window-port.is-edit > .multi-window-track',
+    )
+    .forEach((node) => {
+      resizeObserver!.observe(node)
+    })
+  for (const pane of paneElByIndex.values()) {
+    resizeObserver!.observe(pane)
+  }
+}
+
 function syncPaneWidth() {
   const el = viewportRef.value
   if (!el) return
+  if (props.editable) {
+    if (lockedEditPaneW.value > 0) {
+      paneWidthPx.value = lockedEditPaneW.value
+      scheduleRemeasure()
+      return
+    }
+    const w = Math.max(0, Math.round(el.clientWidth))
+    if (w > 0) {
+      lockedEditPaneW.value = w
+      paneWidthPx.value = w
+      scheduleRemeasure()
+    }
+    return
+  }
+  lockedEditPaneW.value = 0
+  dfsExtraByIndex.value = {}
   paneWidthPx.value = Math.max(0, Math.round(el.clientWidth))
 }
 
 watch(
   () => props.windows.length,
   (n, prev) => {
-    if (props.editable && n > (prev ?? 0)) {
+    if (props.editable && props.allowManage && n > (prev ?? 0)) {
       emit('select-window', n - 1)
     }
+    scheduleRemeasure()
   },
 )
 
 watch(
   () => props.editable,
-  (editable) => {
-    if (editable) void nextTick(() => syncPaneWidth())
+  () => {
+    lockedEditPaneW.value = 0
+    dfsExtraByIndex.value = {}
+    void nextTick(() => syncPaneWidth())
   },
+)
+
+watch(
+  () => props.windows.map((w) => w.key).join('\0'),
+  () => scheduleRemeasure(),
 )
 
 onMounted(() => {
   syncPaneWidth()
   if (typeof ResizeObserver !== 'undefined') {
-    resizeObserver = new ResizeObserver(() => syncPaneWidth())
+    resizeObserver = new ResizeObserver((entries) => {
+      const root = viewportRef.value
+      for (const entry of entries) {
+        if (entry.target === root) syncPaneWidth()
+        else scheduleRemeasure()
+      }
+    })
     if (viewportRef.value) resizeObserver.observe(viewportRef.value)
+    observeTileSources()
   }
 })
 
 onBeforeUnmount(() => {
+  if (measureRaf) cancelAnimationFrame(measureRaf)
   resizeObserver?.disconnect()
   resizeObserver = null
+  paneElByIndex.clear()
 })
 </script>
 
@@ -131,19 +286,23 @@ onBeforeUnmount(() => {
         v-for="win in windows"
         v-show="editable || isPreviewVisible(win.index, win.key)"
         :key="`${win.index}:${win.key}`"
+        :ref="(el) => setPaneRef(win.index, el as Element | null)"
         class="multi-window-pane"
         :class="{
           editable,
           active: editable && win.index === editIndex,
           unbound: editable && !win.key,
         }"
-        @click.stop="editable && emit('select-window', win.index)"
+        :style="paneStyle(win.index)"
+        @click.stop="editable && allowManage && emit('select-window', win.index)"
       >
-        <slot :index="win.index" />
+        <div class="multi-window-pane-screen">
+          <slot :index="win.index" />
+        </div>
       </div>
 
       <button
-        v-if="editable"
+        v-if="editable && allowManage"
         type="button"
         class="multi-window-add"
         @click.stop="emit('add-window')"
@@ -153,7 +312,7 @@ onBeforeUnmount(() => {
       </button>
 
       <div
-        v-if="editable && !windows.length"
+        v-if="editable && allowManage && !windows.length"
         class="multi-window-empty multi-window-empty--edit"
       >
         点击右侧新建窗口
@@ -205,14 +364,26 @@ onBeforeUnmount(() => {
 .multi-window-pane.editable {
   position: relative;
   inset: auto;
-  flex: 0 0 var(--pane-w, 100%);
-  width: var(--pane-w, 100%);
-  min-width: var(--pane-w, 100%);
   height: 100%;
   border: 1px dashed #94a3b8;
   border-radius: 8px;
   background: rgba(148, 163, 184, 0.04);
   overflow: visible;
+  box-sizing: border-box;
+}
+
+.multi-window-pane-screen {
+  /* 透传 pane 的 column flex，避免预览态 match_parent / flex:1 子节点高度塌缩 */
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  box-sizing: border-box;
+  overflow: visible;
+  position: relative;
 }
 
 .multi-window-pane.editable.active {

@@ -11,7 +11,7 @@
       "generics": [],
       "fields": [
         {
-          "id": "field_ms3mjs02_lh2nop",
+          "id": "field_ms4it943_06zrjw",
           "name": "id",
           "type": {
             "intersections": [
@@ -28,7 +28,7 @@
           "optional": false
         },
         {
-          "id": "field_ms3mjs02_ng1rag",
+          "id": "field_ms4it943_eeyv3p",
           "name": "name",
           "type": {
             "intersections": [
@@ -45,7 +45,7 @@
           "optional": false
         },
         {
-          "id": "field_ms3mjs02_ewansd",
+          "id": "field_ms4it943_rkjncz",
           "name": "price",
           "type": {
             "intersections": [
@@ -62,7 +62,7 @@
           "optional": false
         },
         {
-          "id": "field_ms3mjs02_m6dlh5",
+          "id": "field_ms4it943_x73ndi",
           "name": "stock",
           "type": {
             "intersections": [
@@ -79,7 +79,7 @@
           "optional": false
         },
         {
-          "id": "field_ms3mjs02_7r9f5o",
+          "id": "field_ms4it943_zz1ed3",
           "name": "img",
           "type": {
             "intersections": [
@@ -95,6 +95,23 @@
           },
           "remark": "图片",
           "optional": false
+        },
+        {
+          "id": "field_ms4it943_iyk1tu",
+          "name": "deliveryFee",
+          "type": {
+            "intersections": [
+              {
+                "alternatives": [
+                  {
+                    "kind": "number"
+                  }
+                ]
+              }
+            ]
+          },
+          "remark": "运费",
+          "optional": true
         }
       ],
       "enumMembers": [],

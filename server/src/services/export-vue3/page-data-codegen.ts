@@ -14,9 +14,11 @@ function tsTypeForField(field: DataField): string {
     case 'boolean':
       return 'boolean'
     case 'array':
-      return 'any[]'
+      return field.binding === 'controller' ? 'any[] | null' : 'any[]'
     case 'json':
-      return 'Record<string, any>'
+      return field.binding === 'controller'
+        ? 'Record<string, any> | null'
+        : 'Record<string, any>'
     default:
       return 'string'
   }
@@ -120,5 +122,166 @@ ${setCases || '    // no writable fields'}
   },
 }
 `
+}
+
+function isValidIdent(name: string): boolean {
+  return /^[A-Za-z_$][\w$]*$/.test(name)
+}
+
+function indentBlock(src: string, pad: string): string {
+  return src
+    .split('\n')
+    .map((line) => (line.trim() ? pad + line : line))
+    .join('\n')
+}
+
+export type VueApiBinding = {
+  serviceId: string
+  serviceName?: string
+  controllerId: string
+  apiId: string
+  method: string
+  path: string
+}
+
+/**
+ * 页面 onMounted：自动拉取 binding===controller 的数据池字段。
+ * 「加载事件」为空时仍会请求。
+ */
+export function generateControllerBoundPageMounted(options: {
+  fields: DataField[]
+  resolveApi: (raw: string) => VueApiBinding | null
+}): {
+  source: string
+  needsOnMounted: boolean
+  needsRoute: boolean
+  needsInvoke: boolean
+} {
+  const loadBlocks: string[] = []
+  let needsRoute = false
+
+  for (const field of options.fields ?? []) {
+    if (field.binding !== 'controller') continue
+    const cfg = field.controllerBinding
+    const name = field.name.trim()
+    if (!cfg || !name || !isValidIdent(name)) continue
+    const serviceId = cfg.serviceId?.trim() ?? ''
+    const controllerId = cfg.controllerId?.trim() ?? ''
+    const apiId = cfg.apiId?.trim() ?? ''
+    if (!serviceId || !controllerId || !apiId) continue
+
+    const resolved = options.resolveApi(
+      JSON.stringify({ serviceId, controllerId, apiId }),
+    )
+    if (!resolved || !resolved.path) continue
+
+    const argLines: string[] = [`    const args: Record<string, unknown> = {}`]
+    for (const [varName, inp] of Object.entries(cfg.inputs ?? {})) {
+      const key = varName.trim()
+      if (!key || !isValidIdent(key)) continue
+      if (!inp || inp.source !== 'binding') {
+        const lit =
+          inp && 'literal' in inp ? JSON.stringify(inp.literal ?? null) : 'undefined'
+        argLines.push(`    args[${JSON.stringify(key)}] = ${lit}`)
+        continue
+      }
+      const path = (inp.binding ?? '').trim()
+      if (
+        path === '$query' ||
+        path === 'query' ||
+        path.startsWith('$query.') ||
+        path.startsWith('query.') ||
+        path.startsWith('$route.') ||
+        path.startsWith('route.')
+      ) {
+        needsRoute = true
+      }
+      argLines.push(
+        `    args[${JSON.stringify(key)}] = __resolveCtrlBinding(${JSON.stringify(path)})`,
+      )
+    }
+
+    const parseBody = (cfg.parseBody ?? '').trim()
+    const parseCall = parseBody
+      ? `(function (data: any) {\n${indentBlock(parseBody, '      ')}\n    })(data)`
+      : 'data'
+
+    loadBlocks.push(`  tasks.push(
+    (async () => {
+${argLines.join('\n')}
+      const data = await invoke(${JSON.stringify(resolved)}, args)
+      const parsed = ${parseCall}
+      ${name}.value = parsed as typeof ${name}.value
+    })().catch((err) => {
+      console.error(${JSON.stringify(`[voider] controller ${name}`)}, err)
+    }),
+  )`)
+  }
+
+  if (!loadBlocks.length) {
+    return {
+      source: '',
+      needsOnMounted: false,
+      needsRoute: false,
+      needsInvoke: false,
+    }
+  }
+
+  const pageFieldNames = (options.fields ?? [])
+    .map((f) => f.name.trim())
+    .filter((n) => n && isValidIdent(n))
+  const rootObj =
+    pageFieldNames.length > 0
+      ? `{ ${pageFieldNames.map((n) => `${n}: ${n}.value`).join(', ')} }`
+      : '{}'
+  const queryExpr = needsRoute ? 'route.query' : '{}'
+
+  const source = `function __resolveCtrlBinding(path: string): unknown {
+  const p = String(path ?? '').trim()
+  if (!p) return undefined
+  let root: any = null
+  let rest = ''
+  if (p === '$query' || p === 'query' || p === '$route' || p === 'route') {
+    return ${queryExpr}
+  }
+  if (p.startsWith('$query.')) {
+    root = ${queryExpr}
+    rest = p.slice(7)
+  } else if (p.startsWith('query.')) {
+    root = ${queryExpr}
+    rest = p.slice(6)
+  } else if (p.startsWith('$route.')) {
+    root = ${queryExpr}
+    rest = p.slice(7)
+  } else if (p.startsWith('route.')) {
+    root = ${queryExpr}
+    rest = p.slice(6)
+  } else {
+    root = ${rootObj}
+    rest = p
+  }
+  if (!rest) return root
+  const parts = rest.split('.')
+  let cur: any = root
+  for (const part of parts) {
+    if (cur == null || typeof cur !== 'object') return undefined
+    cur = cur[part]
+  }
+  return cur
+}
+
+onMounted(() => {
+  const tasks: Promise<unknown>[] = []
+${loadBlocks.join('\n')}
+  void Promise.all(tasks)
+})
+`
+
+  return {
+    source,
+    needsOnMounted: true,
+    needsRoute,
+    needsInvoke: true,
+  }
 }
 

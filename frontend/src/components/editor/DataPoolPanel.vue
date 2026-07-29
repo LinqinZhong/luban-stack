@@ -18,6 +18,7 @@ import {
   buildArrayValue,
   buildObjectValue,
   defaultComputeBody,
+  defaultControllerFieldValue,
   defaultValue,
   resolveArrayFields,
   resolveObjectFields,
@@ -36,6 +37,7 @@ import { isReservedDataFieldName } from '../../utils/component-props'
 import type { ComponentPropDef, ComponentEventDef } from '../../types/component'
 import type { DataTypeLibrary } from '../../types/data-types'
 import type { PageMethod } from '../../types/page-method'
+import type { PageQueryParamDef } from '../../types/page-query'
 import type { ComponentRenderMap } from '../../types/component-render'
 import type { ComponentMethodsMap } from '../../utils/widget-ref'
 import {
@@ -65,6 +67,8 @@ const props = defineProps<{
   componentMap?: ComponentRenderMap
   componentMethodsMap?: ComponentMethodsMap
   emitEvents?: ComponentEventDef[]
+  /** 页面 Query 入参（控制器绑定可选 $query） */
+  pageQueryParams?: PageQueryParamDef[] | null
 }>()
 
 const emit = defineEmits<{
@@ -437,6 +441,7 @@ function handleBindingChange(index: number, binding: DataSourceBinding) {
     updateField(index, {
       binding: 'controller',
       computeBody: '',
+      value: defaultControllerFieldValue(field.type),
       controllerBinding:
         field.controllerBinding ?? createEmptyControllerBinding(field.type),
       ossBinding: undefined,
@@ -759,6 +764,7 @@ function saveOssBinding(config: OssBindingConfig) {
       :component-props="componentProps"
       :emit-events="emitEvents"
       :type-library="typeLibrary"
+      :page-query-params="pageQueryParams"
       @save="saveControllerBinding"
     />
     <OssResourcePickerDialog

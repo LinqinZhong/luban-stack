@@ -38,6 +38,30 @@
       "value": "",
       "binding": "computed",
       "computeBody": "// 可直接使用同级数据池字段名作为变量（无需形参）\n// return 的值即为该字段的计算值\nreturn titleBarOpacity > 0.5 ? 'black' : 'white'\n"
+    },
+    {
+      "name": "goodsInfo",
+      "type": "json",
+      "remark": "",
+      "value": null,
+      "binding": "controller",
+      "computeBody": "",
+      "controllerBinding": {
+        "serviceId": "svc_mrqdgnhb_3ktq2g",
+        "controllerId": "cmrqed0jzshj7",
+        "apiId": "api_ms4gstja_v6df39",
+        "parseBody": "// data 为接口 Result.data\n// return 的值写入本数据池字段\nreturn data\n",
+        "onLoading": "",
+        "onSuccess": "",
+        "onError": "",
+        "inputs": {
+          "id": {
+            "source": "binding",
+            "binding": "$query.id"
+          }
+        }
+      },
+      "typeRef": "type_mrnx6ke8_4d7vry"
     }
   ]
 }

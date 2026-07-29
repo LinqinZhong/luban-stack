@@ -1,0 +1,21 @@
+{
+  "name": "加载占位器",
+  "title": "加载占位器",
+  "width": "match_parent",
+  "height": "match_parent",
+  "props": [
+    {
+      "name": "loading",
+      "type": "boolean",
+      "remark": "",
+      "defaultValue": true,
+      "twoWay": false,
+      "required": true
+    }
+  ],
+  "events": [],
+  "exposedMethods": [],
+  "debugProps": {
+    "loading": false
+  }
+}

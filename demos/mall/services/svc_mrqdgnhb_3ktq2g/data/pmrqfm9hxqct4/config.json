@@ -62,6 +62,7 @@
         "sql": "",
         "fieldMappings": [],
         "batchSourceParam": "",
+        "pageParam": "pageDto",
         "conditionGroups": [
           {
             "id": "cg_mrqj4pcr_o20n1q",
@@ -84,7 +85,7 @@
           "current": 1,
           "pageSize": 2
         },
-        "keyword": ""
+        "keyword": "芒果"
       },
       "flow": {
         "nodes": [
@@ -159,6 +160,7 @@
           }
         ],
         "batchSourceParam": "data",
+        "pageParam": "",
         "conditionGroups": []
       },
       "debugParams": {
@@ -241,6 +243,7 @@
           }
         ],
         "batchSourceParam": "",
+        "pageParam": "",
         "conditionGroups": []
       },
       "debugParams": {
@@ -304,6 +307,7 @@
         "sql": "",
         "fieldMappings": [],
         "batchSourceParam": "",
+        "pageParam": "",
         "conditionGroups": [
           {
             "id": "cg_mrs1tc6l_btboo7",
@@ -381,10 +385,90 @@
           }
         ],
         "batchSourceParam": "",
+        "pageParam": "",
         "conditionGroups": []
       },
       "debugParams": {
         "keyword": ""
+      },
+      "flow": {
+        "nodes": [
+          {
+            "id": "start",
+            "kind": "start",
+            "position": {
+              "x": 280,
+              "y": 40
+            },
+            "data": {}
+          }
+        ],
+        "edges": []
+      }
+    },
+    {
+      "id": "method_ms4e472m_lzxbxy",
+      "name": "one",
+      "remark": "",
+      "scope": "public",
+      "params": [
+        {
+          "id": "param_ms4e86va_6wksl4",
+          "name": "id",
+          "remark": "",
+          "typeExpr": {
+            "type": "string",
+            "typeRef": "",
+            "itemType": "",
+            "itemTypeRef": "",
+            "itemItemType": "",
+            "itemItemTypeRef": "",
+            "genericArgs": {}
+          }
+        }
+      ],
+      "output": {
+        "type": "json",
+        "typeRef": "type_mrnx6ke8_4d7vry",
+        "itemType": "",
+        "itemTypeRef": "",
+        "itemItemType": "",
+        "itemItemTypeRef": "",
+        "genericArgs": {}
+      },
+      "dataConfig": {
+        "source": "mysql",
+        "operation": "query",
+        "queryFields": [
+          "id",
+          "name",
+          "price",
+          "stock",
+          "img"
+        ],
+        "sql": "",
+        "fieldMappings": [],
+        "batchSourceParam": "",
+        "pageParam": "",
+        "conditionGroups": [
+          {
+            "id": "cg_ms4eguu1_nwonco",
+            "conditions": [
+              {
+                "id": "cond_ms4eguu1_slorl0",
+                "field": "id",
+                "customField": "",
+                "op": "eq",
+                "valueKind": "param",
+                "value": "id",
+                "valueTo": ""
+              }
+            ]
+          }
+        ]
+      },
+      "debugParams": {
+        "id": "1"
       },
       "flow": {
         "nodes": [

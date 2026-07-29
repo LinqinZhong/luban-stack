@@ -186,6 +186,7 @@ const runtimeScope = computed(() => ({
   ...(props.node.scope ?? {}),
   $props: props.dollarProps,
   $route: props.routeParams,
+  $query: props.routeParams,
 }))
 
 const mountAllowed = computed(() => {
@@ -401,6 +402,7 @@ const instanceDollarProps = computed(() => {
   const scope = {
     ...(props.node.scope ?? {}),
     $route: props.routeParams,
+    $query: props.routeParams,
   }
   const resolved: Record<string, unknown> = {}
   const propDefs = config?.props ?? []
@@ -580,7 +582,13 @@ const componentStyle = computed(() => {
         ? '48px'
         : undefined,
     boxSizing: 'border-box' as const,
-    overflow: keepSelectionVisible || stackHeight || !fillHostHeight ? 'visible' : 'hidden',
+    overflow:
+      keepSelectionVisible ||
+      stackHeight ||
+      !fillHostHeight ||
+      !props.interactEnabled
+        ? 'visible'
+        : 'hidden',
   }
 })
 
@@ -810,8 +818,8 @@ provide(
 )
 
 const layoutOverflowStyle = computed(() => {
-  // 编辑态始终 visible，避免选中框角标/绝对定位子项被裁切
-  if (props.selectable) return { overflow: 'visible' as const }
+  // 编辑态始终 visible，避免选中框 / 平铺的 Swiper·多窗体被裁切
+  if (!props.interactEnabled) return { overflow: 'visible' as const }
   return overflowStyle(attrs.value, 'visible')
 })
 
@@ -858,7 +866,7 @@ const linearStyle = computed(() => {
               height: '100%',
               flex: '1 1 auto',
               minHeight: 0,
-              ...(props.selectable ? {} : { overflow: 'hidden' as const }),
+              ...(props.interactEnabled ? { overflow: 'hidden' as const } : {}),
             }
       : isScrollLayout.value
         ? { maxHeight: '100%', minHeight: 0 }
@@ -867,8 +875,8 @@ const linearStyle = computed(() => {
 })
 
 const swiperOverflowStyle = computed(() => {
-  // 编辑态始终露出相邻页；预览态才用 overflow（默认 visible）
-  if (props.selectable) return { overflow: 'visible' as const }
+  // 编辑态（含组件内 Swiper）始终露出相邻页；预览态才用 overflow
+  if (!props.interactEnabled) return { overflow: 'visible' as const }
   const strategy = parseOverflow(attrs.value.overflow, 'visible')
   return {
     overflow: (strategy === 'hidden' ? 'hidden' : 'visible') as
@@ -927,8 +935,8 @@ const swiperIndicatorActiveColor = computed(
 )
 
 const multiWindowOverflowStyle = computed(() => {
-  // 编辑态始终 visible，避免窗内绝对定位 / 选中框被裁切（同 RelativeLayout）
-  if (props.selectable) return { overflow: 'visible' as const }
+  // 编辑态（含页面内嵌套组件）始终 visible，避免窗内绝对定位 / 平铺窗口被裁切
+  if (!props.interactEnabled) return { overflow: 'visible' as const }
   const strategy = parseOverflow(attrs.value.overflow, 'visible')
   return {
     overflow: (strategy === 'hidden' ? 'hidden' : 'visible') as
@@ -1025,7 +1033,7 @@ const relativeStyle = computed(() => {
             }
           : {
               height: '100%',
-              ...(props.selectable ? {} : { overflow: 'hidden' as const }),
+              ...(props.interactEnabled ? { overflow: 'hidden' as const } : {}),
             }
       : isScrollLayout.value
         ? { maxHeight: '100%', minHeight: 0 }
@@ -2070,7 +2078,18 @@ onBeforeUnmount(() => {
     :parent-horizontal="parentHorizontal"
     :parent-vertical="parentVertical"
     :fill-parent="isRoot"
-    :extra-style="shellExtraStyle"
+    :extra-style="
+      !interactEnabled
+        ? {
+            ...shellExtraStyle,
+            // 布局宽锁在 match_parent；平铺页向右画出，勿 maxWidth:none / flexShrink:0 被撑开
+            overflow: 'visible',
+            maxWidth: '100%',
+            minWidth: 0,
+            width: '100%',
+          }
+        : shellExtraStyle
+    "
     :repeat-badge="showRepeatBadge"
     :event-badge-count="eventBadgeCount"
     :visually-hidden="visuallyHidden"
@@ -2085,12 +2104,15 @@ onBeforeUnmount(() => {
     @open-repeat="handleOpenRepeat"
     @open-event="handleOpenEvent"
   >
-    <div class="widget swiper" :style="swiperStyle">
+    <div
+      class="widget swiper"
+      :style="swiperStyle"
+    >
       <SwiperPort
-        :editable="selectable"
+        :editable="!interactEnabled"
         :overflow="parseOverflow(attrs.overflow, 'visible')"
         :slide-count="node.children.length"
-        :autoplay="!selectable && swiperAutoplay"
+        :autoplay="interactEnabled && swiperAutoplay"
         :interval="swiperInterval"
         :circular="swiperCircular"
         :indicator="swiperIndicator"
@@ -2100,6 +2122,7 @@ onBeforeUnmount(() => {
         :current="swiperCurrent"
       >
         <template #default="{ index }">
+          <!-- Swiper 页为确定高度槽：子节点 match_parent 须撑满，勿继承外层 scroll 的 parentScrollable -->
           <XmlNodeView
             v-if="node.children[index]"
             :node="node.children[index]"
@@ -2111,7 +2134,7 @@ onBeforeUnmount(() => {
         :preview-lifecycle-gate="previewLifecycleGate"
             :parent-horizontal="false"
             :parent-vertical="true"
-            :parent-scrollable="inScrollColumn"
+            :parent-scrollable="false"
             :icon-library="iconLibrary"
             :page-data="pageData"
             :hidden-node-ids="hiddenNodeIds"
@@ -2159,7 +2182,8 @@ onBeforeUnmount(() => {
   >
     <div class="widget multi-window" :style="multiWindowStyle">
       <MultiWindowPort
-        :editable="selectable"
+        :editable="!interactEnabled"
+        :allow-manage="selectable"
         :overflow="parseOverflow(attrs.overflow, 'visible')"
         :active-value="multiWindowActiveValue"
         :focus-index="multiWindowFocusIndex"
@@ -2271,6 +2295,7 @@ onBeforeUnmount(() => {
     :visually-hidden="visuallyHidden"
     :interactive="previewInteractive"
     :scroll-port="isScrollLayout"
+    :overflow-visible="!interactEnabled"
     :inside-scroll-port="insideScrollColumn"
     :fill-remaining-height="fillRemainingHeight"
     @click="handleSelect"
@@ -2282,7 +2307,7 @@ onBeforeUnmount(() => {
     @open-event="handleOpenEvent"
   >
     <OverlayScrollPort
-      :enabled="isScrollLayout"
+      :enabled="isScrollLayout && interactEnabled"
       content-class="widget linear"
       :content-style="linearStyle"
       @wheel="$event.stopPropagation()"
@@ -2341,6 +2366,7 @@ onBeforeUnmount(() => {
     :visually-hidden="visuallyHidden"
     :interactive="previewInteractive"
     :scroll-port="isScrollLayout"
+    :overflow-visible="!interactEnabled"
     :inside-scroll-port="insideScrollColumn"
     :fill-remaining-height="fillRemainingHeight"
     @click="handleSelect"
@@ -2352,7 +2378,7 @@ onBeforeUnmount(() => {
     @open-event="handleOpenEvent"
   >
     <OverlayScrollPort
-      :enabled="isScrollLayout"
+      :enabled="isScrollLayout && interactEnabled"
       content-class="widget relative"
       :content-style="relativeStyle"
       @wheel="$event.stopPropagation()"

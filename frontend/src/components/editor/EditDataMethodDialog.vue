@@ -338,6 +338,25 @@ const arrayParamOptions = computed((): SourceOption[] => {
   return opts
 })
 
+/** 查询分页：可选入参（对象 / 具名类型，如 QueryPageDto） */
+const pageParamOptions = computed((): SourceOption[] => {
+  const opts: SourceOption[] = []
+  for (const p of draftParams.value) {
+    const name = p.name.trim()
+    if (!name) continue
+    const t = p.typeExpr.type
+    if (t === 'array' || t === 'string' || t === 'number' || t === 'boolean') {
+      continue
+    }
+    const ts = processorTypeExprToTs(p.typeExpr, props.typeLibrary)
+    opts.push({
+      value: name,
+      label: `${name}${DM.mid}${ts}`,
+    })
+  }
+  return opts
+})
+
 /** ?? / ?????????? */
 const insertSourceOptions = computed((): SourceOption[] => {
   const opts: SourceOption[] = []
@@ -667,6 +686,10 @@ function onBatchSourceChange(value: string | number | boolean | undefined) {
   if (kept.length) insertEnabled.value = kept
 }
 
+function onPageParamChange(value: string | number | boolean | undefined) {
+  draft.pageParam = typeof value === 'string' ? value : ''
+}
+
 function updateInsertSource(field: string, source: string) {
   const list: DataMethodFieldMapping[] = entityFields.value.map((f) => {
     const existing = draft.fieldMappings.find((m) => m.field === f.name)
@@ -884,6 +907,7 @@ function handleSave() {
           : [],
     batchSourceParam:
       draft.operation === 'batchInsert' ? draft.batchSourceParam.trim() : '',
+    pageParam: draft.operation === 'query' ? draft.pageParam.trim() : '',
     conditionGroups: showConditions.value ? serializeConditionGroups() : [],
   }
   emit('save', {
@@ -1091,6 +1115,28 @@ function handleSave() {
               </li>
             </ul>
           </div>
+        </div>
+      </section>
+
+      <section v-if="isQuery" class="dlg-section">
+        <div class="section-label">{{ DM.pageParam }}</div>
+        <div class="section-control">
+          <el-select
+            :model-value="draft.pageParam"
+            clearable
+            filterable
+            :placeholder="DM.pageParamPh"
+            class="page-param-select"
+            @update:model-value="onPageParamChange"
+          >
+            <el-option
+              v-for="opt in pageParamOptions"
+              :key="opt.value"
+              :label="opt.label"
+              :value="opt.value"
+            />
+          </el-select>
+          <p class="page-param-hint">{{ DM.pageParamHint }}</p>
         </div>
       </section>
 
@@ -1593,13 +1639,12 @@ function handleSave() {
 .dlg-section {
   display: flex;
   flex-direction: row;
-  align-items: center;
+  align-items: flex-start;
   gap: 12px;
   min-height: 32px;
 }
 
 .dlg-section--block {
-  align-items: flex-start;
   min-height: 0;
 }
 
@@ -1617,7 +1662,7 @@ function handleSave() {
 }
 
 .dlg-section--block .section-label {
-  height: auto;
+  height: 32px;
   line-height: 32px;
   padding-top: 0;
 }
@@ -1628,7 +1673,7 @@ function handleSave() {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  justify-content: center;
+  justify-content: flex-start;
 }
 
 .section-actions {
@@ -1678,8 +1723,17 @@ function handleSave() {
 
 .dlg-section :deep(.el-input),
 .dlg-section :deep(.el-select),
-.batch-source-select {
+.batch-source-select,
+.page-param-select {
   width: 100%;
+}
+
+.page-param-hint {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: #909399;
+  line-height: 1.5;
+  pointer-events: none;
 }
 
 .dlg-section :deep(.el-input__wrapper),

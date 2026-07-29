@@ -9,14 +9,21 @@ import {
 } from '../types/dynamic-styles'
 import type { XmlNode } from './xml'
 import { DOLLAR_PROPS_NAME } from './component-props'
+import {
+  evaluateBindingExpression,
+  isSimpleBindingPath,
+  scanBindingSpans,
+  unwrapWholeBinding,
+} from './binding-expr'
 
 export interface DynamicStyleScope {
   item?: unknown
   index?: number
   /** 组件入参：$props.xxx */
   $props?: Record<string, unknown>
-  /** 路由参数：$route.xxx */
+  /** 路由参数：$route.xxx / $query.xxx */
   $route?: Record<string, unknown>
+  $query?: Record<string, unknown>
 }
 
 type PathToken = { kind: 'key'; value: string } | { kind: 'index'; value: number }
@@ -68,18 +75,42 @@ export function resolveConditionValue(
   if (raw.startsWith('props.')) {
     return walkTokens(scope?.$props, tokenizePath(raw.slice('props.'.length)))
   }
-  if (raw === '$route' || raw === 'route') return scope?.$route
+  if (raw === '$route' || raw === 'route' || raw === '$query' || raw === 'query') {
+    return scope?.$route ?? scope?.$query
+  }
   if (raw.startsWith('$route.')) {
-    return walkTokens(scope?.$route, tokenizePath(raw.slice('$route.'.length)))
+    return walkTokens(
+      scope?.$route ?? scope?.$query,
+      tokenizePath(raw.slice('$route.'.length)),
+    )
   }
   if (raw.startsWith('route.')) {
-    return walkTokens(scope?.$route, tokenizePath(raw.slice('route.'.length)))
+    return walkTokens(
+      scope?.$route ?? scope?.$query,
+      tokenizePath(raw.slice('route.'.length)),
+    )
+  }
+  if (raw.startsWith('$query.')) {
+    return walkTokens(
+      scope?.$query ?? scope?.$route,
+      tokenizePath(raw.slice('$query.'.length)),
+    )
+  }
+  if (raw.startsWith('query.')) {
+    return walkTokens(
+      scope?.$query ?? scope?.$route,
+      tokenizePath(raw.slice('query.'.length)),
+    )
   }
 
   if (!pageData) return undefined
   const tokens = tokenizePath(raw)
   if (!tokens.length || tokens[0].kind !== 'key') return undefined
-  if (tokens[0].value === DOLLAR_PROPS_NAME || tokens[0].value === '$route') {
+  if (
+    tokens[0].value === DOLLAR_PROPS_NAME ||
+    tokens[0].value === '$route' ||
+    tokens[0].value === '$query'
+  ) {
     return undefined
   }
   const field = pageData.fields.find((item) => item.name.trim() === tokens[0].value)
@@ -99,8 +130,41 @@ function formatBindingValue(value: unknown): string {
   return String(value)
 }
 
+function isValidScopeIdent(name: string): boolean {
+  return /^[A-Za-z_$][\w$]*$/.test(name)
+}
+
+function buildBindingEvalScope(
+  pageData: PageData | undefined,
+  scope?: DynamicStyleScope,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {}
+  for (const field of pageData?.fields ?? []) {
+    const name = field.name.trim()
+    if (!name || !isValidScopeIdent(name)) continue
+    out[name] = field.value
+  }
+  if (scope?.item !== undefined) out.item = scope.item
+  if (scope?.index !== undefined) out.index = scope.index
+  if (scope?.$props !== undefined) {
+    out.$props = scope.$props
+    out.props = scope.$props
+  }
+  const route = scope?.$route ?? scope?.$query
+  const query = scope?.$query ?? scope?.$route
+  if (route !== undefined) {
+    out.$route = route
+    out.route = route
+  }
+  if (query !== undefined) {
+    out.$query = query
+    out.query = query
+  }
+  return out
+}
+
 /**
- * 替换属性/文本中的 `{字段}`：数据池 / item / index / $route 等。
+ * 替换属性/文本中的 `{字段}` / `{表达式}`：数据池 / item / 三元 / 模板字符串等。
  * 解析不到的占位符原样保留（如待后续处理的 {$props.xxx}）。
  */
 export function interpolateDataBindings(
@@ -109,22 +173,53 @@ export function interpolateDataBindings(
   scope?: DynamicStyleScope,
 ): string {
   if (!template || !template.includes('{')) return template
-  return template.replace(/\{([^{}]+)\}/g, (match, rawExpr: string) => {
-    const expr = rawExpr.trim()
-    if (!expr) return match
-    // $props 留给 interpolateDollarProps，避免宿主组装 $props 时自引用
+  const spans = scanBindingSpans(template)
+  if (!spans.length) return template
+
+  const evalScope = buildBindingEvalScope(pageData, scope)
+  let out = ''
+  let cursor = 0
+  for (const span of spans) {
+    out += template.slice(cursor, span.start)
+    const expr = span.expr
+    cursor = span.end
+
+    if (!expr) {
+      out += template.slice(span.start, span.end)
+      continue
+    }
+
+    // 整段简单 {$props.xxx}：留给 interpolateDollarProps
     if (
       expr === '$props' ||
       expr === 'props' ||
-      expr.startsWith('$props.') ||
-      expr.startsWith('props.')
+      (isSimpleBindingPath(expr) &&
+        (expr.startsWith('$props.') || expr.startsWith('props.')))
     ) {
-      return match
+      out += template.slice(span.start, span.end)
+      continue
     }
-    const value = resolveConditionValue(expr, pageData, scope)
-    if (value === undefined) return match
-    return formatBindingValue(value)
-  })
+
+    if (isSimpleBindingPath(expr)) {
+      const value = resolveConditionValue(expr, pageData, scope)
+      if (value === undefined) {
+        out += template.slice(span.start, span.end)
+      } else {
+        out += formatBindingValue(value)
+      }
+      continue
+    }
+
+    // 复杂表达式：三元、比较、模板字符串等
+    const evaluated = evaluateBindingExpression(expr, evalScope)
+    if (!evaluated.ok) {
+      out += template.slice(span.start, span.end)
+      continue
+    }
+    out += formatBindingValue(evaluated.value)
+  }
+  out += template.slice(cursor)
+  return out
 }
 
 /**
@@ -142,23 +237,19 @@ export function resolveAttrBindingValue(
   const text = raw?.trim() ?? ''
   if (!text) return undefined
 
-  // 简单绑定：{item} / {list} / {a.b} / {list[0].x}
-  const simple = text.match(
-    /^\{([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*|\[\d+\])*)\}$/,
-  )
-  if (simple) {
-    const expr = simple[1]!.trim()
-    if (
-      !expr ||
-      expr === '$props' ||
-      expr === 'props' ||
-      expr.startsWith('$props.') ||
-      expr.startsWith('props.')
-    ) {
-      return undefined
+  // 整段单个绑定（可含嵌套 {} / 表达式）
+  const whole = unwrapWholeBinding(text)
+  if (whole != null) {
+    if (isSimpleBindingPath(whole) || whole === '$props' || whole === 'props') {
+      const value = resolveConditionValue(whole, pageData, scope)
+      if (value !== undefined) return value
+    } else {
+      const evaluated = evaluateBindingExpression(
+        whole,
+        buildBindingEvalScope(pageData, scope),
+      )
+      if (evaluated.ok) return evaluated.value
     }
-    const value = resolveConditionValue(expr, pageData, scope)
-    if (value !== undefined) return value
   }
 
   // JSON 对象/数组字面量（含 repeat 展开后的 stringify 结果）
@@ -174,16 +265,23 @@ export function resolveAttrBindingValue(
   }
 
   const interpolated = interpolateDataBindings(text, pageData, scope)
-  if (interpolated === text && /\{[^{}]+\}/.test(text)) return undefined
+  if (interpolated === text && text.includes('{')) return undefined
   return interpolated
+}
+
+function isEmptyBindingValue(left: unknown): boolean {
+  if (left == null || left === '') return true
+  if (Array.isArray(left)) return left.length === 0
+  if (typeof left === 'object') return Object.keys(left as object).length === 0
+  return false
 }
 
 function compareValues(op: StyleConditionOp, left: unknown, right: string): boolean {
   switch (op) {
     case 'empty':
-      return left == null || left === '' || (Array.isArray(left) && left.length === 0)
+      return isEmptyBindingValue(left)
     case 'notEmpty':
-      return !(left == null || left === '' || (Array.isArray(left) && left.length === 0))
+      return !isEmptyBindingValue(left)
     case 'contains':
       return String(left ?? '').includes(right)
     case 'eq':

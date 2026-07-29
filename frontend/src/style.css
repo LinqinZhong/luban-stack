@@ -15,7 +15,12 @@ body,
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* 提示气泡不可点击，避免挡住下方按钮 */
-.el-popper[role='tooltip'] {
+/*
+ * 仅禁用「深色提示」气泡的点击。
+ * Select / Cascader 等下拉也走 el-popper[role=tooltip]，不能一并 none。
+ */
+.el-popper.is-dark[role='tooltip']:not(.el-select__popper):not(
+    .el-cascader__dropdown
+  ):not(.el-autocomplete__popper):not(.el-tree-select__popper) {
   pointer-events: none !important;
 }

@@ -188,3 +188,56 @@ export function isArrayItemTypeLocked(
 ): boolean {
   return Boolean(defaultItemType) && defaultItemType !== 'any'
 }
+
+/**
+ * 按 interface 定义补齐对象上缺失的字段（不覆盖已有键，含 0 / false / null / ''）。
+ * 用于控制器回填后与调试面板一致，避免 `{goods.deliveryFee}` 因缺键无法插值，
+ * 而数字输入框却用 `?? 0` 显示成 0。
+ */
+export function fillNamedInterfaceDefaults(
+  value: unknown,
+  typeRef: string | null | undefined,
+  library: DataTypeLibrary | null | undefined,
+): unknown {
+  const ref = typeRef?.trim()
+  if (!ref) return value
+  const def = findDataTypeDef(library, ref)
+  if (!def || def.kind !== 'interface') return value
+
+  const base: Record<string, unknown> =
+    value && typeof value === 'object' && !Array.isArray(value)
+      ? { ...(value as Record<string, unknown>) }
+      : {}
+
+  for (const f of def.fields) {
+    const name = f.name.trim()
+    if (!name) continue
+
+    const atom = primaryAtom(f.type)
+    const nestedRef =
+      atom.kind === 'named' && atom.ref
+        ? resolveNamedTypeAsField(atom.ref, library)
+        : typeExprToDataFieldType(f.type, library)
+
+    if (Object.prototype.hasOwnProperty.call(base, name)) {
+      if (nestedRef.type === 'json' && nestedRef.typeRef) {
+        base[name] = fillNamedInterfaceDefaults(
+          base[name],
+          nestedRef.typeRef,
+          library,
+        )
+      }
+      continue
+    }
+
+    if (nestedRef.type === 'json' && nestedRef.typeRef) {
+      base[name] = fillNamedInterfaceDefaults({}, nestedRef.typeRef, library)
+    } else if (nestedRef.type === 'array') {
+      base[name] = []
+    } else {
+      base[name] = defaultValue(nestedRef.type)
+    }
+  }
+
+  return base
+}

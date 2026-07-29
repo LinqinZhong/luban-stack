@@ -6,11 +6,4 @@
 }
 */
 
-if(loading) return
-setData('hasNext', true)
-setData('pagination',{
-  current: 1,
-  pageSize: 10
-})
-setData('refreshing', true)
-loadData()
+pullRefresh()

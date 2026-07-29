@@ -60,7 +60,7 @@ export function emitRouteFile(route: RouteEmitInput): string {
     if (inp.required) {
       return `    const ${name} = ${expr}
     if (${name} === undefined || ${name} === null || ${name} === '') {
-      throw new HttpError(400, ${JSON.stringify(`缺少必填入参「${inp.varName}」`)})
+      throw new HttpError(400, ${JSON.stringify(`${inp.varName}不能为空`)})
     }`
     }
     return `    const ${name} = ${expr}`
@@ -141,7 +141,7 @@ export function emitMergedRouteFiles(
         if (inp.required) {
           return `    const ${name} = ${expr}
     if (${name} === undefined || ${name} === null || ${name} === '') {
-      throw new HttpError(400, ${JSON.stringify(`缺少必填入参「${inp.varName}」`)})
+      throw new HttpError(400, ${JSON.stringify(`${inp.varName}不能为空`)})
     }`
         }
         return `    const ${name} = ${expr}`

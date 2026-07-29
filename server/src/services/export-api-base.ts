@@ -31,7 +31,7 @@ function readConfiguredMap(
  * 由构建方案 backends 生成 apiBaseUrls（name → http://127.0.0.1:port）
  */
 export function buildApiBaseUrlsFromBackends(
-  backends: Array<{ name: string; port: number }>,
+  backends: Array<{ name: string; port: number; includeOss?: boolean }>,
 ): Record<string, string> {
   const map: Record<string, string> = {}
   for (const b of backends) {
@@ -42,6 +42,12 @@ export function buildApiBaseUrlsFromBackends(
   }
   const first = Object.values(map)[0] || DEFAULT_EXPORT_API_BASE
   map.default = first
+  const ossHost =
+    backends.find((b) => b.includeOss === true) ?? backends[0] ?? null
+  if (ossHost?.name?.trim()) {
+    const port = ossHost.port > 0 ? Math.floor(ossHost.port) : 3030
+    map.oss = `http://127.0.0.1:${port}`
+  }
   return map
 }
 

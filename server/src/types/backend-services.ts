@@ -475,6 +475,8 @@ export interface ProcessorMethodParam {
   name: string
   remark: string
   typeExpr: ProcessorTypeExpr
+  /** 控制器 API 入参必传（调试 / 生成校验用） */
+  required?: boolean
 }
 
 /** 数据层方法：数据源种类（先实现 MySQL） */
@@ -649,6 +651,8 @@ export interface DataMethodConfig {
   fieldMappings: DataMethodFieldMapping[]
   /** 批量插入：选用的数组入参名 */
   batchSourceParam: string
+  /** 查询：分页入参名（如 pageDto）；未绑定则不分页 */
+  pageParam: string
   /** 非插入操作的查询条件（组内 AND，组间 OR） */
   conditionGroups: DataMethodConditionGroup[]
 }
@@ -661,6 +665,7 @@ export function createEmptyDataMethodConfig(): DataMethodConfig {
     sql: '',
     fieldMappings: [],
     batchSourceParam: '',
+    pageParam: '',
     conditionGroups: [],
   }
 }
@@ -713,6 +718,8 @@ export function normalizeDataMethodConfig(input: unknown): DataMethodConfig {
       typeof input.batchSourceParam === 'string'
         ? input.batchSourceParam.trim()
         : '',
+    pageParam:
+      typeof input.pageParam === 'string' ? input.pageParam.trim() : '',
     conditionGroups,
   }
 }
@@ -765,6 +772,7 @@ export type FlowNodeKind =
   | 'action'
   | 'output'
   | 'define'
+  | 'throw'
   | 'end'
 
 export interface FlowNodePosition {
@@ -820,6 +828,7 @@ export function normalizeMethodFlow(input: unknown): MethodFlow {
       kind !== 'action' &&
       kind !== 'output' &&
       kind !== 'define' &&
+      kind !== 'throw' &&
       kind !== 'end'
     ) {
       continue
@@ -1025,6 +1034,7 @@ export function normalizeProcessorMethodParam(
     name: typeof input.name === 'string' ? input.name.trim() : '',
     remark: typeof input.remark === 'string' ? input.remark : '',
     typeExpr,
+    required: Boolean(input.required),
   }
 }
 

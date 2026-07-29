@@ -8,14 +8,22 @@ export function isValidBuildName(name: string): boolean {
 }
 
 export type BuildFrontendType = 'vue3' | 'mp-wx'
+export type BuildBackendType = 'nestjs'
 
 export interface BuildBackendService {
   /** 输出目录名，如 service1 */
   name: string
+  /** 后端框架 */
+  type: BuildBackendType
   /** Nest 监听端口 */
   port: number
   /** 绑定的模块 id（services/<id>） */
   moduleIds: string[]
+  /**
+   * 是否在本服务挂载 OSS 模块（POST /oss/sign）。
+   * 同一构建方案建议只开启一个；未配置时构建期默认落在第一个后端。
+   */
+  includeOss?: boolean
 }
 
 export interface BuildFrontendApp {
@@ -28,6 +36,8 @@ export interface BuildFrontendApp {
   wechatAppId?: string
   /** 包含的页面 id */
   pageIds: string[]
+  /** 入口页面 id（须属于 pageIds） */
+  entryPage?: string
 }
 
 export interface BuildScheme {
@@ -83,11 +93,15 @@ export function normalizeBuildBackend(
   if (!isPlainObject(input)) return null
   const name = typeof input.name === 'string' ? input.name.trim() : ''
   if (!isValidBuildName(name)) return null
+  const type = input.type === 'nestjs' || input.type == null ? 'nestjs' : null
+  if (!type) return null
   const port = Number(input.port)
   return {
     name,
+    type,
     port: Number.isFinite(port) && port > 0 ? Math.floor(port) : 3030,
     moduleIds: normalizeStringArray(input.moduleIds),
+    includeOss: input.includeOss === true,
   }
 }
 
@@ -100,7 +114,12 @@ export function normalizeBuildFrontend(
   const type = input.type === 'mp-wx' || input.type === 'vue3' ? input.type : null
   if (!type) return null
   const pageIds = normalizeStringArray(input.pageIds)
+  const rawEntry =
+    typeof input.entryPage === 'string' ? input.entryPage.trim() : ''
+  const entryPage =
+    rawEntry && pageIds.includes(rawEntry) ? rawEntry : pageIds[0]
   const app: BuildFrontendApp = { name, type, pageIds }
+  if (entryPage) app.entryPage = entryPage
   if (type === 'vue3') {
     const port = Number(input.port)
     app.port = Number.isFinite(port) && port > 0 ? Math.floor(port) : 5173
@@ -179,6 +198,12 @@ export function validateBuildScheme(
         message: '服务名称须以字母开头，仅含字母、数字、_、-',
       })
     }
+    if (b.type !== 'nestjs') {
+      issues.push({
+        path: `backends[${i}].type`,
+        message: '暂不支持的后端框架',
+      })
+    }
     if (backendNames.has(b.name)) {
       issues.push({
         path: `backends[${i}].name`,
@@ -216,6 +241,14 @@ export function validateBuildScheme(
         claimedModules.set(mid, b.name)
       }
     }
+  }
+
+  const ossHosts = scheme.backends.filter((b) => b.includeOss)
+  if (ossHosts.length > 1) {
+    issues.push({
+      path: 'backends',
+      message: `OSS 模块只能挂在一个后端服务上，当前：${ossHosts.map((b) => b.name).join('、')}`,
+    })
   }
 
   for (const mid of allModuleIds) {
@@ -256,6 +289,20 @@ export function validateBuildScheme(
         message: '至少选择一个页面',
       })
     }
+    if (f.pageIds.length) {
+      const entry = f.entryPage?.trim()
+      if (!entry) {
+        issues.push({
+          path: `frontends[${i}].entryPage`,
+          message: '请选择入口页',
+        })
+      } else if (!f.pageIds.includes(entry)) {
+        issues.push({
+          path: `frontends[${i}].entryPage`,
+          message: '入口页须属于已选页面',
+        })
+      }
+    }
     if (f.type === 'vue3') {
       const port = Number(f.port)
       if (!(port > 0 && port <= 65535)) {
@@ -276,4 +323,23 @@ export function validateBuildScheme(
   }
 
   return issues
+}
+
+/**
+ * 解析 OSS 应挂在哪个后端：显式 includeOss，否则默认第一个。
+ */
+export function resolveOssBackendIndex(
+  backends: BuildBackendService[],
+): number {
+  if (!backends.length) return -1
+  const explicit = backends.findIndex((b) => b.includeOss === true)
+  if (explicit >= 0) return explicit
+  return 0
+}
+
+export function backendShouldIncludeOss(
+  backends: BuildBackendService[],
+  index: number,
+): boolean {
+  return resolveOssBackendIndex(backends) === index
 }

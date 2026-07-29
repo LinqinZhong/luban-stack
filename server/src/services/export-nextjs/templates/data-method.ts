@@ -17,6 +17,7 @@ export type DataMethodConfig = {
   sql: string
   fieldMappings: Array<{ field: string; column: string }>
   batchSourceParam: string
+  pageParam: string
   conditionGroups: Array<{ id?: string; conditions: DataMethodCondition[] }>
 }
 
@@ -63,19 +64,28 @@ function resolvePath(
   return cur
 }
 
-function pickPageMeta(params: Record<string, unknown>) {
-  const nested =
-    (params.pageDto as Record<string, unknown> | undefined) ||
-    (params.dto as Record<string, unknown> | undefined) ||
-    (params.query as Record<string, unknown> | undefined) ||
-    (params.page as Record<string, unknown> | undefined)
-  const src = nested && typeof nested === 'object' ? nested : params
+function pickPageMeta(
+  params: Record<string, unknown>,
+  pageParam: string,
+) {
+  const key = (pageParam || '').trim()
+  if (!key) {
+    return { current: 1, pageSize: 10, enabled: false }
+  }
+  const resolved = resolvePath(params, key)
+  const src =
+    resolved && typeof resolved === 'object' && !Array.isArray(resolved)
+      ? (resolved as Record<string, unknown>)
+      : null
+  if (!src) {
+    return { current: 1, pageSize: 10, enabled: true }
+  }
   const current = Math.max(1, Number(src.current ?? src.page ?? 1) || 1)
   const pageSize = Math.max(
     1,
     Math.min(200, Number(src.pageSize ?? src.size ?? 10) || 10),
   )
-  return { current, pageSize }
+  return { current, pageSize, enabled: true }
 }
 
 function buildWhereClause(
@@ -254,11 +264,19 @@ function buildQuerySql(
   const fields = config.queryFields?.length ? config.queryFields : ['*']
   const cols =
     fields[0] === '*' ? '*' : fields.map((f) => quoteIdent(f)).join(', ')
-  const { current, pageSize } = pickPageMeta(params)
-  const offset = (current - 1) * pageSize
+  const page = pickPageMeta(params, config.pageParam ?? '')
   const where = buildWhereClause(config.conditionGroups, params)
-  const sql = `SELECT ${cols} FROM ${quoteIdent(table)}${where} LIMIT ${pageSize} OFFSET ${offset}`
-  return { sql, current, pageSize }
+  let sql = `SELECT ${cols} FROM ${quoteIdent(table)}${where}`
+  if (page.enabled) {
+    const offset = (page.current - 1) * page.pageSize
+    sql += ` LIMIT ${page.pageSize} OFFSET ${offset}`
+  }
+  return {
+    sql,
+    current: page.current,
+    pageSize: page.pageSize,
+    paginated: page.enabled,
+  }
 }
 
 function buildInsertSql(
@@ -323,14 +341,27 @@ function wrapOutput(
   output: DataMethodOutputMeta,
   config: DataMethodConfig,
   rows: Record<string, unknown>[],
-  _meta: { current: number; pageSize: number; total: number },
+  meta: { current: number; pageSize: number; total: number },
 ): unknown {
   const mappings = (config.fieldMappings || [])
     .map((m) => ({ field: m.field.trim(), column: m.column.trim() }))
     .filter((m) => m.field && m.column)
-
+  const named = (output.typeRef || '').trim()
   const scalar = new Set(['number', 'string', 'boolean'])
-  if (scalar.has(output.type) && !output.typeRef) {
+
+  // 查询：按出参类型包装行集（非数组空结果为 null）
+  if (config.operation === 'query') {
+    if (output.type === 'array') return rows
+    if (output.type === 'number' && !named) return meta.total
+    if (output.type === 'boolean' && !named) return meta.total > 0
+    if (output.type === 'string' && !named) {
+      const single = rows.length ? rows[0] : null
+      return JSON.stringify(single)
+    }
+    return rows.length ? rows[0]! : null
+  }
+
+  if (scalar.has(output.type) && !named) {
     const row = rows[0] ?? {}
     const mapped = mappings.find((m) => m.field === 'value')
     let raw: unknown
@@ -350,8 +381,7 @@ function wrapOutput(
   }
 
   if (output.type === 'array') return rows
-  if (rows.length === 1) return rows[0]
-  return rows
+  return rows.length ? rows[0]! : null
 }
 
 export async function runDataMethod(options: {
@@ -365,6 +395,7 @@ export async function runDataMethod(options: {
   let sql = ''
   let current = 1
   let pageSize = 10
+  let paginated = false
   let isWrite = false
 
   if (config.operation === 'query') {
@@ -372,6 +403,7 @@ export async function runDataMethod(options: {
     sql = built.sql
     current = built.current
     pageSize = built.pageSize
+    paginated = built.paginated
   } else if (config.operation === 'insert') {
     sql = buildInsertSql(table, config.fieldMappings, params)
     isWrite = true
@@ -419,7 +451,7 @@ export async function runDataMethod(options: {
 
   const rows = exec.rows
   let total = rows.length
-  if (config.operation === 'query') {
+  if (config.operation === 'query' && paginated) {
     if (rows.length < pageSize) {
       total = (current - 1) * pageSize + rows.length
     } else {

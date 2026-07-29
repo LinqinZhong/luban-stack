@@ -650,11 +650,15 @@ export function exportProjectNestJs(projectPath: string) {
 export const exportProjectNextJs = exportProjectNestJs
 
 export type BuildFrontendType = 'vue3' | 'mp-wx'
+export type BuildBackendType = 'nestjs'
 
 export interface BuildBackendService {
   name: string
+  type: BuildBackendType
   port: number
   moduleIds: string[]
+  /** 是否在本服务挂载 OSS 模块（/oss/sign） */
+  includeOss?: boolean
 }
 
 export interface BuildFrontendApp {
@@ -663,6 +667,8 @@ export interface BuildFrontendApp {
   port?: number
   wechatAppId?: string
   pageIds: string[]
+  /** 入口页面 id（须属于 pageIds） */
+  entryPage?: string
 }
 
 export interface BuildScheme {

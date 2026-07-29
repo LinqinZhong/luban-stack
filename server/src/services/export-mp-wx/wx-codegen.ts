@@ -5,6 +5,13 @@ import type { PageMethod } from '../../types/page-method.js'
 import type { XmlNode } from '../export-vue3/xml-parser.js'
 import { DEFAULT_CANVAS_WIDTH } from '../../types/voider-project.js'
 import {
+  isSimpleBindingPath,
+  normalizeBindingOperators,
+  scanBindingSpans,
+  templateLiteralsToConcat,
+  unwrapWholeBinding,
+} from './binding-expr.js'
+import {
   parseApiPropBinding,
   type MpApiBinding,
 } from './api-runtime.js'
@@ -12,6 +19,7 @@ import {
   generateComponentAttached,
   generateComponentMethodFn,
   generateComputedObservers,
+  generateControllerBoundPageLoad,
   generatePageSyncHandlers,
 } from './method-codegen.js'
 import {
@@ -393,11 +401,20 @@ function buildEventHandlerPrelude(
 ): string[] {
   const lines: string[] = []
   lines.push(`    var that = this`)
-  lines.push(`    var setData = function (prop, value) {`)
-  lines.push(`      var patch = {}`)
-  lines.push(`      patch[prop] = value`)
-  lines.push(`      that.setData(patch)`)
-  lines.push(`    }`)
+  if (kind === 'scroll' || kind === 'touch') {
+    lines.push(`    var setData = function (prop, value) {`)
+    lines.push(`      if (that.data[prop] === value) return`)
+    lines.push(`      var patch = {}`)
+    lines.push(`      patch[prop] = value`)
+    lines.push(`      that.setData(patch)`)
+    lines.push(`    }`)
+  } else {
+    lines.push(`    var setData = function (prop, value) {`)
+    lines.push(`      var patch = {}`)
+    lines.push(`      patch[prop] = value`)
+    lines.push(`      that.setData(patch)`)
+    lines.push(`    }`)
+  }
   lines.push(`    var showToast = function (message, duration) {`)
   lines.push(
     `      wx.showToast({ title: String(message == null ? '' : message), icon: 'none', duration: duration === 'long' ? 3000 : 1500 })`,
@@ -464,14 +481,27 @@ function registerCustomEventHandler(
       prelude.push(
         `    if (that.data.loading || that.data.refreshing) return`,
       )
+      prelude.push(`    that.__voiderAtLower = true`)
     }
     const bodyIndented = body
       .split('\n')
       .map((line) => (line.trim() ? `    ${line}` : ''))
       .join('\n')
+    // 滚动 / 触摸属于高频事件：每次 setData + 重算计算字段会卡死滚动、拖垮触底
+    const skipRecompute =
+      eventKey === 'onScroll' ||
+      eventKey === 'onScrollToLower' ||
+      eventKey === 'onScrollToUpper' ||
+      eventKey === 'onTouchStart' ||
+      eventKey === 'onTouchMove' ||
+      eventKey === 'onTouchEnd' ||
+      eventKey === 'onTouchCancel'
+    const recomputeLine = skipRecompute
+      ? ''
+      : `\n    if (typeof that.__recomputeComputed === 'function') that.__recomputeComputed()`
     ctx.pageHandlers.push({
       name: finalName,
-      body: `${prelude.join('\n')}\n${bodyIndented}\n    if (typeof that.__recomputeComputed === 'function') that.__recomputeComputed()`,
+      body: `${prelude.join('\n')}\n${bodyIndented}${recomputeLine}`,
     })
     return `${meta.bind}="${finalName}"`
   }
@@ -609,23 +639,81 @@ function buildPresetEventBindAttrs(
     if (method === 'navigateTo') {
       const to = String(args.to ?? '').trim()
       if (!to) continue
+
+      let urlBaseExpr: string
       const toBind = to.match(/^\{([A-Za-z_$][\w.$]*)\}$/)
       if (toBind) {
         if (fromDetail) {
-          stmts.push(
-            `wx.navigateTo({ url: '/pages/' + ${detailPathExpr(toBind[1]!)} + '/index' })`,
-          )
+          urlBaseExpr = `'/pages/' + ${detailPathExpr(toBind[1]!)} + '/index'`
         } else {
           const i = dataIdx++
           dataAttrs.push(`data-val${i}="{{${normalizeExpr(toBind[1]!)}}}"`)
-          stmts.push(
-            `wx.navigateTo({ url: '/pages/' + e.currentTarget.dataset.val${i} + '/index' })`,
-          )
+          urlBaseExpr = `'/pages/' + e.currentTarget.dataset.val${i} + '/index'`
         }
       } else {
+        urlBaseExpr = JSON.stringify(`/pages/${to}/index`)
+      }
+
+      const paramsRaw = String(args.params ?? '').trim()
+      let paramsObj: Record<string, unknown> | null = null
+      if (paramsRaw) {
+        try {
+          const parsed = JSON.parse(paramsRaw) as unknown
+          if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+            paramsObj = parsed as Record<string, unknown>
+          }
+        } catch {
+          // ignore
+        }
+      }
+
+      if (paramsObj && Object.keys(paramsObj).length) {
+        const qsVar = `__navQs${dataIdx}`
+        const urlVar = `__navUrl${dataIdx}`
+        stmts.push(`var ${qsVar} = []`)
+        for (const [key, value] of Object.entries(paramsObj)) {
+          const k = key.trim()
+          if (!k) continue
+          const valueRaw = value == null ? '' : String(value).trim()
+          const bindMatch = valueRaw.match(/^\{([A-Za-z_$][\w.$]*)\}$/)
+          let valueExpr: string
+          if (bindMatch) {
+            const path = bindMatch[1]!
+            if (fromDetail) {
+              valueExpr = detailPathExpr(path)
+            } else {
+              const expr = normalizeExpr(path)
+              if (
+                expr === 'item' ||
+                expr === 'index' ||
+                expr.startsWith('item.')
+              ) {
+                const i = dataIdx++
+                dataAttrs.push(`data-val${i}="{{${expr}}}"`)
+                valueExpr = `e.currentTarget.dataset.val${i}`
+              } else {
+                valueExpr = runtimePropExpr(expr)
+              }
+            }
+          } else {
+            try {
+              valueExpr = JSON.stringify(JSON.parse(valueRaw))
+            } catch {
+              valueExpr = JSON.stringify(valueRaw)
+            }
+          }
+          const vVar = `__navV${dataIdx++}`
+          stmts.push(`var ${vVar} = ${valueExpr}`)
+          stmts.push(
+            `if (${vVar} != null && ${vVar} !== '') ${qsVar}.push(${JSON.stringify(`${k}=`)} + encodeURIComponent(String(${vVar})))`,
+          )
+        }
         stmts.push(
-          `wx.navigateTo({ url: ${JSON.stringify(`/pages/${to}/index`)} })`,
+          `var ${urlVar} = ${urlBaseExpr} + (${qsVar}.length ? '?' + ${qsVar}.join('&') : '')`,
         )
+        stmts.push(`wx.navigateTo({ url: ${urlVar} })`)
+      } else {
+        stmts.push(`wx.navigateTo({ url: ${urlBaseExpr} })`)
       }
       continue
     }
@@ -743,6 +831,100 @@ function runtimePropExpr(expr: string): string {
   return `((${rootExpr}) || {}).${parts.slice(1).join('.')}`
 }
 
+/**
+ * enhanced scroll-view 慢滑到底时 bindscrolltolower 经常不触发。
+ * 用 bindscroll / binddragend 做边缘检测；优先用事件 detail，并用 id + fields 校准。
+ */
+function wireScrollToLowerFallback(
+  ctx: RenderCtx,
+  scrollTouchAttrs: string[],
+  enabled: boolean,
+): { attrs: string[]; scrollId: string | null } {
+  if (!enabled) return { attrs: scrollTouchAttrs, scrollId: null }
+
+  const lowerAttr = scrollTouchAttrs.find((a) =>
+    a.startsWith('bindscrolltolower='),
+  )
+  if (!lowerAttr) return { attrs: scrollTouchAttrs, scrollId: null }
+  const lowerFn = lowerAttr.match(/="([^"]+)"/)?.[1]
+  if (!lowerFn || !/^[A-Za-z_$][\w$]*$/.test(lowerFn)) {
+    return { attrs: scrollTouchAttrs, scrollId: null }
+  }
+
+  const scrollAttr = scrollTouchAttrs.find((a) => a.startsWith('bindscroll='))
+  const scrollFn = scrollAttr?.match(/="([^"]+)"/)?.[1]
+  if (scrollFn && !/^[A-Za-z_$][\w$]*$/.test(scrollFn)) {
+    return { attrs: scrollTouchAttrs, scrollId: null }
+  }
+
+  const seq = ctx.handlerSeq.n++
+  const wrapName = `__onScrollWithLower_${seq}`
+  const scrollId = `voiderScrollY${seq}`
+  const threshold = 150
+  const bodyLines = [
+    `    var that = this`,
+    `    var d = (e && e.detail) || {}`,
+    `    var scrollTop = Number(d.scrollTop)`,
+    `    var scrollHeight = Number(d.scrollHeight)`,
+    `    if (!isFinite(scrollTop)) scrollTop = 0`,
+    `    if (!isFinite(scrollHeight)) scrollHeight = 0`,
+  ]
+  if (scrollFn) {
+    bodyLines.push(
+      `    if (typeof that.${scrollFn} === 'function') that.${scrollFn}(e)`,
+    )
+  }
+  bodyLines.push(
+    `    var tryFire = function (viewH, st, sh) {`,
+    `      if (!(viewH > 0) || !(sh > viewH + 1)) {`,
+    `        that.__voiderAtLower = false`,
+    `        return`,
+    `      }`,
+    `      if (that.__voiderLastScrollH && sh > that.__voiderLastScrollH + 8) {`,
+    `        that.__voiderAtLower = false`,
+    `      }`,
+    `      that.__voiderLastScrollH = sh`,
+    `      var nowLower = st >= sh - viewH - ${threshold}`,
+    `      if (nowLower && !that.__voiderAtLower) {`,
+    `        that.__voiderAtLower = true`,
+    `        if (typeof that.${lowerFn} === 'function') that.${lowerFn}(e)`,
+    `        setTimeout(function () { that.__voiderAtLower = false }, 400)`,
+    `      } else if (!nowLower) {`,
+    `        that.__voiderAtLower = false`,
+    `      }`,
+    `    }`,
+    `    var viewH = that.__voiderScrollViewH || 0`,
+    `    if (viewH > 0 && scrollHeight > 0) tryFire(viewH, scrollTop, scrollHeight)`,
+    `    var now = Date.now()`,
+    `    if (viewH > 0 && that.__voiderScrollLowerTs && now - that.__voiderScrollLowerTs < 100) return`,
+    `    that.__voiderScrollLowerTs = now`,
+    `    wx.createSelectorQuery()`,
+    `      .in(that)`,
+    `      .select(${JSON.stringify('#' + scrollId)})`,
+    `      .fields({ size: true, scrollOffset: true })`,
+    `      .exec(function (res) {`,
+    `        var info = res && res[0]`,
+    `        if (!info) return`,
+    `        if (info.height) that.__voiderScrollViewH = info.height`,
+    `        var st = info.scrollTop != null ? Number(info.scrollTop) : scrollTop`,
+    `        var sh = info.scrollHeight != null ? Number(info.scrollHeight) : scrollHeight`,
+    `        if (!isFinite(st)) st = scrollTop`,
+    `        if (!isFinite(sh)) sh = scrollHeight`,
+    `        tryFire(that.__voiderScrollViewH || 0, st, sh)`,
+    `      })`,
+  )
+
+  ctx.pageHandlers.push({
+    name: wrapName,
+    body: bodyLines.join('\n'),
+  })
+
+  const next = scrollTouchAttrs.filter((a) => !a.startsWith('bindscroll='))
+  next.push(`bindscroll="${wrapName}"`)
+  next.push(`binddragend="${wrapName}"`)
+  return { attrs: next, scrollId }
+}
+
 /** ?? / ?? / ???? ??bind* + methods */
 function collectScrollTouchEventAttrs(
   attrs: Record<string, string>,
@@ -812,9 +994,11 @@ function shouldUseNativeCustomRefresher(
   if (!hasTouch) return false
   const hasRefresh =
     ctx.siblingMethodNames.includes('refresh') ||
+    ctx.siblingMethodNames.includes('pullRefresh') ||
     ctx.dataFieldNames.includes('refreshing')
   const hasPull =
     ctx.dataFieldNames.includes('pullHeight') ||
+    /pullRefresh\s*\(/.test(attrs.onTouchEnd || '') ||
     /refresh\s*\(/.test(attrs.onTouchEnd || '')
   return hasRefresh && hasPull
 }
@@ -851,7 +1035,9 @@ function ensureNativeCustomRefresherHandlers(ctx: RenderCtx): void {
       `    }`,
       `    that.setData({ pullHeight: 40 })`,
       `    if (typeof that.__recomputeComputed === 'function') that.__recomputeComputed()`,
-      `    if (typeof that.refresh === 'function') that.refresh()`,
+      // Pager 等组件：实际逻辑在 pullRefresh；refresh 可能是空的对外方法
+      `    if (typeof that.pullRefresh === 'function') that.pullRefresh()`,
+      `    else if (typeof that.refresh === 'function') that.refresh()`,
       `    else that.setData({ refreshing: true })`,
     ].join('\n'),
   })
@@ -866,14 +1052,26 @@ function ensureNativeCustomRefresherHandlers(ctx: RenderCtx): void {
   })
 }
 
-/** `{foo}` / `hello {name}` ????????*/
+/** `{foo}` / `hello {name}` / 三元与模板字符串 */
 function toWxmlText(raw: string): string {
   if (!raw) return ''
-  if (/^\{([^{}]+)\}$/.test(raw.trim())) {
-    const expr = raw.trim().slice(1, -1).trim()
+  const whole = unwrapWholeBinding(raw)
+  if (whole != null) {
+    const expr = templateLiteralsToConcat(normalizeBindingOperators(whole))
     return `{{${normalizeExpr(expr)}}}`
   }
-  return raw.replace(/\{([^{}]+)\}/g, (_, expr: string) => `{{${normalizeExpr(expr.trim())}}}`)
+  const spans = scanBindingSpans(raw)
+  if (!spans.length) return raw
+  let out = ''
+  let cursor = 0
+  for (const span of spans) {
+    out += raw.slice(cursor, span.start)
+    cursor = span.end
+    const expr = templateLiteralsToConcat(normalizeBindingOperators(span.expr))
+    out += `{{${normalizeExpr(expr)}}}`
+  }
+  out += raw.slice(cursor)
+  return out
 }
 
 function normalizeExpr(expr: string): string {
@@ -882,6 +1080,31 @@ function normalizeExpr(expr: string): string {
   if (expr.startsWith('$props.')) return expr.slice('$props.'.length)
   if (expr.startsWith('props.')) return expr.slice('props.'.length)
   return expr
+}
+
+/**
+ * 组件 prop 可写入 WXML 的绑定：简单路径，或 ! / !! 取反（如 !goodsInfo）。
+ * 避免把 `{!goodsInfo}` 误判成 JSON 对象而整段丢弃。
+ */
+function isWxmlComponentPropExpr(expr: string): boolean {
+  const e = expr.trim()
+  if (!e) return false
+  if (isSimpleBindingPath(e)) return true
+  const not = e.match(/^!{1,2}\s*(.+)$/)
+  return Boolean(not && isSimpleBindingPath(not[1]!))
+}
+
+/** 表达式内的 $props.x → x（页面/组件 WXML 数据域） */
+function normalizeWxmlPropExpr(expr: string): string {
+  const normalized = templateLiteralsToConcat(normalizeBindingOperators(expr.trim()))
+  if (isSimpleBindingPath(normalized)) return normalizeExpr(normalized)
+  const not = normalized.match(/^(!{1,2})\s*(.+)$/)
+  if (not && isSimpleBindingPath(not[2]!)) {
+    return `${not[1]}${normalizeExpr(not[2]!)}`
+  }
+  return normalized
+    .replace(/\b\$props\./g, '')
+    .replace(/\bprops\./g, '')
 }
 
 /** 与编辑器 / vue3 一致：Modal 或全 Modal Fragment 不占文档流 */
@@ -1045,9 +1268,12 @@ function attrLayout(
   } else if (hRaw === 'match_parent' && options?.flexParent === 'column') {
     pushKnown('flex-1', 'min-h-0', 'h-0')
   } else if (
+    // 流式布局里组件外包用内容撑高；RelativeLayout 子项是 absolute，
+    // 必须给明确高度，否则 h-auto 塌成 0（LoadingPlaceholder 等看不见）
     hRaw === 'match_parent' &&
     options?.isComponent &&
-    !options?.flexParent
+    !options?.flexParent &&
+    !isRelativeChild
   ) {
     pushKnown('h-auto')
   } else if (hRaw === 'match_parent') {
@@ -1735,18 +1961,18 @@ export function renderNode(node: XmlNode, ctx: RenderCtx): string {
 
       if (isBinding(value)) {
         const trimmedVal = value.trim()
-        if (
-          (trimmedVal.startsWith('{') || trimmedVal.startsWith('[')) &&
-          !/^\{[A-Za-z_$][\w.$]*\}$/.test(trimmedVal)
-        ) {
+        const whole = unwrapWholeBinding(trimmedVal)
+        if (whole == null) {
+          // 非整段 {expr}（混合文案 / JSON 字面量等）暂不导出为 prop
           continue
         }
-        const expr = trimmedVal.replace(/^\{|\}$/g, '').trim()
-        if (!/^[\w.$\[\]]+$/.test(expr)) continue
-        propAttrs.push(`${key}="{{${normalizeExpr(expr)}}}"`)
+        const expr = normalizeBindingOperators(whole)
+        if (!isWxmlComponentPropExpr(expr)) continue
+        propAttrs.push(`${key}="{{${normalizeWxmlPropExpr(expr)}}}"`)
         if (
           ctx.kind === 'page' &&
           propDef?.twoWay &&
+          isSimpleBindingPath(expr) &&
           /^[A-Za-z_$][\w$]*$/.test(expr)
         ) {
           const handlerName = `__sync_${key}_${expr}`
@@ -1769,6 +1995,26 @@ export function renderNode(node: XmlNode, ctx: RenderCtx): string {
       propAttrs.push(
         ...collectComponentCustomEventAttrs(evtName, attrs[evtName], ctx),
       )
+    }
+
+    // virtualHost:false 时 host 默认撑开内容高；match_parent 需显式拉满外包 view，
+    // 否则内部 scroll-view 的 h-full 没有约束高度，页面又 disableScroll → 无法滚动
+    if (!outOfFlow) {
+      const hRaw = (attrs.height || config?.height || '').trim()
+      const wRaw = (attrs.width || config?.width || '').trim()
+      const hostStyle: string[] = []
+      if (wRaw === 'match_parent') hostStyle.push('width:100%')
+      if (hRaw === 'match_parent') {
+        hostStyle.push(
+          'height:100%',
+          'min-height:0',
+          'display:flex',
+          'flex-direction:column',
+        )
+      }
+      if (hostStyle.length) {
+        propAttrs.push(`style="${hostStyle.join(';')}"`)
+      }
     }
 
     const tagIndent = ctx.indent + 1
@@ -1883,12 +2129,19 @@ function renderWidget(
       'mw-pane',
       'position:absolute;left:0;top:0;right:0;bottom:0;width:100%;height:100%;display:flex;flex-direction:column;overflow:hidden;box-sizing:border-box',
     )
+    // active 计算字段首帧常为空：先显示第一窗，避免白屏等待 attached 重算
+    const activeEmpty = `(${activeExpr} == null || (${activeExpr} + '') === '')`
     const panes = node.children
       .filter((c) => c.tag !== '#text')
-      .map((child) => {
+      .map((child, index) => {
         const windowKey = (child.attrs.windowKey || '').trim()
+        const match = windowKey
+          ? `(${activeExpr} + '') === '${escapeWxmlStr(windowKey)}'`
+          : 'false'
         const ifAttr = windowKey
-          ? `wx:if="{{(${activeExpr} + '') === '${escapeWxmlStr(windowKey)}'}}"`
+          ? index === 0
+            ? `wx:if="{{${match} || ${activeEmpty}}}"`
+            : `wx:if="{{${match}}}"`
           : `wx:if="{{false}}"`
         const childCtx: RenderCtx = {
           ...ctx,
@@ -2184,7 +2437,7 @@ function renderWidget(
     // enable-flex ?? slot ? match_parent ??????????????????????????
     if (isLinear && !useNativeRefresher) scrollAttrs.push('enable-flex="true"')
     if (attrs.onScrollToLower?.trim()) {
-      scrollAttrs.push('lower-threshold="80"')
+      scrollAttrs.push('lower-threshold="150"')
     }
     if (attrs.onScrollToUpper?.trim()) {
       scrollAttrs.push('upper-threshold="50"')
@@ -2205,6 +2458,16 @@ function renderWidget(
   const scrollTouchAttrs = collectScrollTouchEventAttrs(attrs, ctx, {
     skipTouch: useNativeRefresher,
   })
+  // enhanced scroll-view 慢滑触底时常不触发 bindscrolltolower → 用 bindscroll 边缘检测兜底
+  const scrollLowerWired = wireScrollToLowerFallback(
+    ctx,
+    scrollTouchAttrs,
+    Boolean(attrs.onScrollToLower?.trim()),
+  )
+  const scrollTouchWired = scrollLowerWired.attrs
+  if (scrollLowerWired.scrollId) {
+    scrollAttrs.push(`id="${scrollLowerWired.scrollId}"`)
+  }
 
   const childCtx: RenderCtx = {
     ...ctx,
@@ -2243,7 +2506,7 @@ function renderWidget(
       ...vis,
       ...scrollAttrs,
       ...clickAttrs,
-      ...scrollTouchAttrs,
+      ...scrollTouchWired,
       ...classStyleAttrs(classes, layout.style),
     ],
     ctx.indent,
@@ -2291,12 +2554,13 @@ function pageDataObject(data: PageData | undefined): Record<string, unknown> {
     const name = field.name.trim()
     if (!name || !/^[A-Za-z_$][\w$]*$/.test(name)) continue
     if (field.binding === 'computed') {
-      // ?????????????
+      // 计算字段初始占位；onLoad 后会重算
       out[name] = field.value ?? null
       continue
     }
     if (field.type === 'ref' || field.type === 'api') continue
-    out[name] = field.value ?? null
+    // 控制器 json 等允许显式 null（拉取前占位，配合 notEmpty）
+    out[name] = field.value === undefined ? null : field.value
   }
   return out
 }
@@ -2375,6 +2639,12 @@ export function generatePageFiles(options: {
     ? renderNode(options.root, ctx)
     : '<!-- empty page -->'
 
+  const controllerLoad = generateControllerBoundPageLoad({
+    fields: options.data?.fields ?? [],
+    resolveApi: options.resolveApi,
+  })
+  Object.assign(apiData, controllerLoad.apiData)
+
   const dataObj: Record<string, unknown> = {
     ...pageDataObject(options.data),
     ...apiData,
@@ -2416,12 +2686,29 @@ export function generatePageFiles(options: {
     )
   }
 
-  const extraHandlers = [syncCode, eventCode, hasComputed ? recomputeForPage : '']
+  const onLoadLines: string[] = []
+  if (controllerLoad.hasLoader) {
+    onLoadLines.push(
+      `    var that = this`,
+      `    this.__loadControllerBoundData(options).then(function () {`,
+      `      if (typeof that.__recomputeComputed === 'function') that.__recomputeComputed()`,
+      `    })`,
+    )
+  } else if (hasComputed) {
+    onLoadLines.push(`    this.__recomputeComputed()`)
+  }
+
+  const extraHandlers = [
+    syncCode,
+    eventCode,
+    hasComputed ? recomputeForPage : '',
+    controllerLoad.hasLoader ? controllerLoad.methods : '',
+  ]
     .filter(Boolean)
     .join(',\n')
   const js = `Page({
   data: ${JSON.stringify(dataObj, null, 2).replace(/\n/g, '\n  ')},
-  onLoad() {${hasComputed ? '\n    this.__recomputeComputed()' : ''}
+  onLoad(options) {${onLoadLines.length ? `\n${onLoadLines.join('\n')}` : ''}
   },
   onShow() {},
   onReady() {},${extraHandlers ? `\n${extraHandlers},` : ''}
@@ -2651,6 +2938,14 @@ export function generateComponentFiles(options: {
     .join(',\n')
 
   const hasExposed = (options.config.exposedMethods ?? []).some(Boolean)
+  const hostWidth = (options.config.width || 'match_parent').trim()
+  const hostHeight = (options.config.height || 'match_parent').trim()
+  const hostWidthCss =
+    hostWidth === 'match_parent' ? '  width: 100%;\n' : ''
+  const hostHeightCss =
+    hostHeight === 'match_parent'
+      ? '  height: 100%;\n  flex: 1;\n  min-height: 0;\n'
+      : '  min-height: 0;\n'
   const js = `Component({
   options: {
     multipleSlots: true,
@@ -2678,9 +2973,7 @@ ${attached}
 :host {
   display: flex;
   flex-direction: column;
-  width: 100%;
-  min-height: 0;
-  box-sizing: border-box;
+${hostWidthCss}${hostHeightCss}  box-sizing: border-box;
 }
 `,
     js,
