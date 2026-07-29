@@ -89,6 +89,68 @@ function isReadonlyDataField(field: DataField): boolean {
   return isComputedField(field) || field.type === 'ref' || field.type === 'api'
 }
 
+/** json / array 支持 null（未加载）；用勾选表示「有值」 */
+function supportsNullToggle(field: DataField): boolean {
+  return field.type === 'json' || field.type === 'array'
+}
+
+function isDataFieldPresent(field: DataField): boolean {
+  return field.value != null
+}
+
+/** 取消勾选时暂存，再勾选可恢复 */
+const dataFieldNullStash = reactive<Record<string, DataFieldValue>>({})
+
+function defaultPresentDataFieldValue(form: DataFieldFormModel): DataFieldValue {
+  const field = form.field
+  if (field.type === 'array') return []
+  if (field.type === 'json') {
+    const ref = field.typeRef?.trim()
+    if (ref && props.typeLibrary) {
+      const filled = fillNamedInterfaceDefaults({}, ref, props.typeLibrary)
+      if (filled && typeof filled === 'object') {
+        return filled as DataFieldValue
+      }
+    }
+    if (form.fields.length) {
+      const out: Record<string, unknown> = {}
+      for (const f of form.fields) {
+        out[f.name] =
+          f.kind === 'number'
+            ? 0
+            : f.kind === 'boolean'
+              ? false
+              : f.kind === 'array'
+                ? []
+                : f.kind === 'json'
+                  ? {}
+                  : ''
+      }
+      return out
+    }
+    return {}
+  }
+  return field.value as DataFieldValue
+}
+
+function setDataFieldPresent(form: DataFieldFormModel, present: boolean) {
+  if (form.readonly || !supportsNullToggle(form.field)) return
+  const name = form.field.name.trim()
+  if (!name) return
+  if (present) {
+    const restored = dataFieldNullStash[name]
+    const next =
+      restored !== undefined ? restored : defaultPresentDataFieldValue(form)
+    delete dataFieldNullStash[name]
+    onDataFieldInput(form.field, next)
+  } else {
+    if (form.field.value != null) {
+      dataFieldNullStash[name] = form.field.value as DataFieldValue
+    }
+    onDataFieldInput(form.field, null)
+  }
+}
+
 function dataFieldTypeLabel(field: DataField): string {
   const parts = [field.type]
   if (field.binding === 'computed') parts.push('计算')
@@ -174,6 +236,17 @@ function resolveDataFieldForm(field: DataField): DataFieldFormModel {
         : ''
 
   if (field.type === 'array') {
+    // 未加载（null）：整段显示 null，勿当成空数组展开
+    if (field.value == null) {
+      const ref = field.itemTypeRef?.trim() || ''
+      return {
+        field,
+        mode: 'json',
+        typeLabel: `数组${ref ? ` / ${namedTypeLabel(ref)}` : ''}${bindingHint}`,
+        fields: [],
+        readonly,
+      }
+    }
     if (field.itemType === 'array') {
       return {
         field,
@@ -238,8 +311,18 @@ function resolveDataFieldForm(field: DataField): DataFieldFormModel {
   }
 
   if (field.type === 'json') {
-    const fields = resolveDataObjectFields(field)
     const ref = field.typeRef?.trim() || ''
+    // 未加载（null）：显示 null，勿按 typeRef 展开成 id/price=0 等假数据
+    if (field.value == null) {
+      return {
+        field,
+        mode: 'json',
+        typeLabel: (ref ? namedTypeLabel(ref) : '对象') + bindingHint,
+        fields: [],
+        readonly,
+      }
+    }
+    const fields = resolveDataObjectFields(field)
     if (fields.length) {
       return {
         field,
@@ -297,6 +380,8 @@ watch(
     for (const field of dataFields.value) {
       if (field.type !== 'json' || !field.typeRef?.trim()) continue
       if (isReadonlyDataField(field)) continue
+      // null = 未加载；勿填成空对象，否则 !goodsInfo 等 loading 判断失效
+      if (field.value == null) continue
       const filled = fillNamedInterfaceDefaults(
         field.value,
         field.typeRef,
@@ -1075,12 +1160,28 @@ watch(
             class="param-block"
           >
             <div class="prop-label">
+              <el-checkbox
+                v-if="supportsNullToggle(form.field)"
+                :model-value="isDataFieldPresent(form.field)"
+                :disabled="form.readonly"
+                title="勾选=有值；不勾选=null"
+                @update:model-value="
+                  setDataFieldPresent(form, $event === true)
+                "
+              />
               <span class="prop-name">{{ form.field.name }}</span>
               <span class="prop-type">{{ form.typeLabel }}</span>
             </div>
 
+            <div
+              v-if="supportsNullToggle(form.field) && !isDataFieldPresent(form.field)"
+              class="null-hint"
+            >
+              null
+            </div>
+
             <!-- 标量 -->
-            <template v-if="form.mode === 'scalar'">
+            <template v-else-if="form.mode === 'scalar'">
               <el-switch
                 v-if="form.field.type === 'boolean'"
                 :model-value="form.field.value === true"
@@ -1538,9 +1639,16 @@ watch(
 .object-field-label,
 .item-form-label {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 6px;
   min-width: 0;
+}
+
+.null-hint {
+  font-size: 12px;
+  color: #94a3b8;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  padding: 4px 0 2px;
 }
 
 .prop-name,

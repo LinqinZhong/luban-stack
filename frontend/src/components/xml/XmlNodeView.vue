@@ -95,7 +95,7 @@ const props = defineProps<{
   extraStyle?: CSSProperties
   iconLibrary?: IconLibrary
   pageData?: PageData
-  /** 编辑态隐藏的节点（预览不传，不生效） */
+  /** 编辑态隐藏的节点 id（visibility:hidden 占位保留；预览不传） */
   hiddenNodeIds?: string[]
   /** 页面中引用的组件渲染数据 */
   componentMap?: ComponentRenderMap
@@ -416,7 +416,14 @@ const instanceDollarProps = computed(() => {
       continue
     }
     const def = propDefs.find((p) => p.name.trim() === key)
-    if (def && (def.type === 'array' || def.type === 'json')) {
+    // boolean/number 也要原生求值：`{!goodsInfo}` 不能先 stringify 再 coerce（会变成 false）
+    if (
+      def &&
+      (def.type === 'array' ||
+        def.type === 'json' ||
+        def.type === 'boolean' ||
+        def.type === 'number')
+    ) {
       const native = resolveAttrBindingValue(value, props.pageData, scope)
       if (native !== undefined) resolved[key] = native
       continue
@@ -1658,11 +1665,14 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <template v-if="!isEditorHidden && mountAllowed">
+  <template v-if="mountAllowed">
   <div
     v-if="!isSupportedTag(node.tag)"
     class="unsupported"
-    :style="visuallyHidden ? { display: 'none' } : undefined"
+    :style="{
+      ...(visuallyHidden ? { display: 'none' } : {}),
+      ...(isEditorHidden ? { visibility: 'hidden', pointerEvents: 'none' } : {}),
+    }"
   >
     不支持的控件：{{ node.tag }}
   </div>
@@ -1672,6 +1682,9 @@ onBeforeUnmount(() => {
     v-else-if="isFragmentTag(node.tag)"
     class="fragment-host"
     :class="{ 'is-root': isRoot, 'is-out-of-flow': fragmentOutOfFlow }"
+    :style="
+      isEditorHidden ? { visibility: 'hidden', pointerEvents: 'none' } : undefined
+    "
   >
     <XmlNodeView
       v-for="(child, index) in node.children"
@@ -1717,6 +1730,7 @@ onBeforeUnmount(() => {
     :repeat-badge="showRepeatBadge"
     :event-badge-count="eventBadgeCount"
     :visually-hidden="visuallyHidden"
+    :visibility-hidden="isEditorHidden"
     :interactive="previewInteractive"
     :inside-scroll-port="insideScrollColumn"
     :fill-remaining-height="fillRemainingHeight"
@@ -1747,6 +1761,7 @@ onBeforeUnmount(() => {
     :repeat-badge="showRepeatBadge"
     :event-badge-count="eventBadgeCount"
     :visually-hidden="visuallyHidden"
+    :visibility-hidden="isEditorHidden"
     :interactive="previewInteractive"
     :inside-scroll-port="insideScrollColumn"
     :fill-remaining-height="fillRemainingHeight"
@@ -1777,6 +1792,7 @@ onBeforeUnmount(() => {
     :repeat-badge="showRepeatBadge"
     :event-badge-count="eventBadgeCount"
     :visually-hidden="visuallyHidden"
+    :visibility-hidden="isEditorHidden"
     :interactive="previewInteractive"
     :inside-scroll-port="insideScrollColumn"
     :fill-remaining-height="fillRemainingHeight"
@@ -1816,6 +1832,7 @@ onBeforeUnmount(() => {
     :repeat-badge="showRepeatBadge"
     :event-badge-count="eventBadgeCount"
     :visually-hidden="visuallyHidden"
+    :visibility-hidden="isEditorHidden"
     :interactive="previewInteractive"
     :inside-scroll-port="insideScrollColumn"
     :fill-remaining-height="fillRemainingHeight"
@@ -1861,6 +1878,7 @@ onBeforeUnmount(() => {
     :repeat-badge="showRepeatBadge"
     :event-badge-count="eventBadgeCount"
     :visually-hidden="visuallyHidden"
+    :visibility-hidden="isEditorHidden"
     :interactive="previewInteractive"
     :inside-scroll-port="insideScrollColumn"
     :fill-remaining-height="fillRemainingHeight"
@@ -1930,6 +1948,7 @@ onBeforeUnmount(() => {
     :repeat-badge="showRepeatBadge"
     :event-badge-count="eventBadgeCount"
     :visually-hidden="visuallyHidden || hideEmptySlotInPreview"
+    :visibility-hidden="isEditorHidden"
     :interactive="previewInteractive || slotOutletSelectable"
     :inside-scroll-port="insideScrollColumn"
     :fill-remaining-height="fillRemainingHeight"
@@ -2023,6 +2042,7 @@ onBeforeUnmount(() => {
     :repeat-badge="showRepeatBadge"
     :event-badge-count="eventBadgeCount"
     :visually-hidden="visuallyHidden"
+    :visibility-hidden="isEditorHidden"
     :interactive="previewInteractive"
     :inside-scroll-port="insideScrollColumn"
     :fill-remaining-height="componentOutOfFlow ? false : fillRemainingHeight"
@@ -2048,6 +2068,7 @@ onBeforeUnmount(() => {
         :parent-scrollable="inScrollColumn"
         :icon-library="iconLibrary"
         :page-data="componentPageData ?? pageData"
+        :hidden-node-ids="hiddenNodeIds"
         :component-map="componentMap"
         :dollar-props="instanceDollarProps"
         :route-params="routeParams"
@@ -2093,6 +2114,7 @@ onBeforeUnmount(() => {
     :repeat-badge="showRepeatBadge"
     :event-badge-count="eventBadgeCount"
     :visually-hidden="visuallyHidden"
+    :visibility-hidden="isEditorHidden"
     :interactive="previewInteractive"
     :inside-scroll-port="insideScrollColumn"
     :fill-remaining-height="fillRemainingHeight"
@@ -2169,6 +2191,7 @@ onBeforeUnmount(() => {
     :repeat-badge="showRepeatBadge"
     :event-badge-count="eventBadgeCount"
     :visually-hidden="visuallyHidden"
+    :visibility-hidden="isEditorHidden"
     :interactive="previewInteractive"
     :inside-scroll-port="insideScrollColumn"
     :fill-remaining-height="fillRemainingHeight"
@@ -2293,6 +2316,7 @@ onBeforeUnmount(() => {
     :repeat-badge="showRepeatBadge"
     :event-badge-count="eventBadgeCount"
     :visually-hidden="visuallyHidden"
+    :visibility-hidden="isEditorHidden"
     :interactive="previewInteractive"
     :scroll-port="isScrollLayout"
     :overflow-visible="!interactEnabled"
@@ -2364,6 +2388,7 @@ onBeforeUnmount(() => {
     :repeat-badge="showRepeatBadge"
     :event-badge-count="eventBadgeCount"
     :visually-hidden="visuallyHidden"
+    :visibility-hidden="isEditorHidden"
     :interactive="previewInteractive"
     :scroll-port="isScrollLayout"
     :overflow-visible="!interactEnabled"

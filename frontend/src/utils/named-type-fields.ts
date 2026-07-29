@@ -193,19 +193,23 @@ export function isArrayItemTypeLocked(
  * 按 interface 定义补齐对象上缺失的字段（不覆盖已有键，含 0 / false / null / ''）。
  * 用于控制器回填后与调试面板一致，避免 `{goods.deliveryFee}` 因缺键无法插值，
  * 而数字输入框却用 `?? 0` 显示成 0。
+ *
+ * `null` / `undefined` 表示尚未加载，原样返回，勿造空对象——否则 `!goodsInfo` 等
+ * loading 判断会失效（LoadingPlaceholder 进不了加载态）。
  */
 export function fillNamedInterfaceDefaults(
   value: unknown,
   typeRef: string | null | undefined,
   library: DataTypeLibrary | null | undefined,
 ): unknown {
+  if (value == null) return value
   const ref = typeRef?.trim()
   if (!ref) return value
   const def = findDataTypeDef(library, ref)
   if (!def || def.kind !== 'interface') return value
 
   const base: Record<string, unknown> =
-    value && typeof value === 'object' && !Array.isArray(value)
+    typeof value === 'object' && !Array.isArray(value)
       ? { ...(value as Record<string, unknown>) }
       : {}
 

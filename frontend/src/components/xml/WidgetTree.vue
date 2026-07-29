@@ -350,7 +350,7 @@ watch(
               "
               type="button"
               class="eye-btn"
-              :title="isHidden((data as TreeNodeData).id) ? '显示（仅编辑态）' : '隐藏（仅编辑态）'"
+              :title="isHidden((data as TreeNodeData).id) ? '显示（仅编辑态，占位保留）' : '隐藏（仅编辑态，占位保留）'"
               @click="handleToggleHidden($event, (data as TreeNodeData).id)"
             >
               <el-icon :size="14">

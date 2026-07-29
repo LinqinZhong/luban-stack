@@ -1930,6 +1930,26 @@ export function renderNode(node: XmlNode, ctx: RenderCtx): string {
       ? layout.classes
       : [...layout.classes, ...gapClasses, ctx.classRegistry.use('box-border')]
 
+    // 组件根上的 zIndex 必须落到页面外包 view：小程序里组件内 z-index
+    // 无法压过同级 Absolute 兄弟（否则 LoadingPlaceholder 会盖住 TitleBar）
+    if (!outOfFlow) {
+      const usageZ = attrs.zIndex?.trim()
+      const rootZ = componentRoot?.attrs?.zIndex?.trim()
+      const zRaw =
+        usageZ && usageZ !== 'null' && !isBinding(usageZ)
+          ? usageZ
+          : rootZ && rootZ !== 'null' && !isBinding(rootZ)
+            ? rootZ
+            : ''
+      if (zRaw) {
+        const n = Number(zRaw)
+        if (Number.isFinite(n)) {
+          const zClass = ctx.classRegistry.arb('z', 'z-index', String(n))
+          if (!wrapClasses.includes(zClass)) wrapClasses.push(zClass)
+        }
+      }
+    }
+
     const propAttrs: string[] = []
     const wrapExtraAttrs: string[] = []
     const refName = ctx.nodePath
@@ -2129,7 +2149,9 @@ function renderWidget(
       'mw-pane',
       'position:absolute;left:0;top:0;right:0;bottom:0;width:100%;height:100%;display:flex;flex-direction:column;overflow:hidden;box-sizing:border-box',
     )
-    // active 计算字段首帧常为空：先显示第一窗，避免白屏等待 attached 重算
+    // active 计算字段首帧常为空：先显示第一窗，避免白屏等待 attached 重算。
+    // 用 hidden 而非 wx:if：窗格内若有 <slot>（如 LoadingPlaceholder），wx:if
+    // 晚挂载会导致插槽内容空白 → 白屏；hidden 保持节点与插槽始终在树上。
     const activeEmpty = `(${activeExpr} == null || (${activeExpr} + '') === '')`
     const panes = node.children
       .filter((c) => c.tag !== '#text')
@@ -2138,18 +2160,19 @@ function renderWidget(
         const match = windowKey
           ? `(${activeExpr} + '') === '${escapeWxmlStr(windowKey)}'`
           : 'false'
-        const ifAttr = windowKey
+        const showExpr = windowKey
           ? index === 0
-            ? `wx:if="{{${match} || ${activeEmpty}}}"`
-            : `wx:if="{{${match}}}"`
-          : `wx:if="{{false}}"`
+            ? `${match} || ${activeEmpty}`
+            : match
+          : 'false'
+        const hiddenAttr = `hidden="{{!(${showExpr})}}"`
         const childCtx: RenderCtx = {
           ...ctx,
           indent: ctx.indent + 2,
           parentFlex: 'column',
         }
         const inner = renderNode(child, childCtx)
-        return `${pad(ctx.indent + 1)}<view ${ifAttr} class="${paneClass}">\n${inner}\n${pad(ctx.indent + 1)}</view>`
+        return `${pad(ctx.indent + 1)}<view ${hiddenAttr} class="${paneClass}">\n${inner}\n${pad(ctx.indent + 1)}</view>`
       })
       .filter(Boolean)
       .join('\n')

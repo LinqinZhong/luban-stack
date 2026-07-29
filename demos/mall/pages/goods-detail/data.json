@@ -51,9 +51,10 @@
         "controllerId": "cmrqed0jzshj7",
         "apiId": "api_ms4gstja_v6df39",
         "parseBody": "// data 为接口 Result.data\n// return 的值写入本数据池字段\nreturn data\n",
-        "onLoading": "",
+        "onLoading": "[{\"id\":\"bind_1785318194515_70vtk\",\"method\":\"setData\",\"args\":{\"prop\":\"loading\",\"value\":\"true\"}}]",
         "onSuccess": "",
         "onError": "",
+        "onFinally": "[{\"id\":\"bind_1785320065384_nfhai\",\"method\":\"setData\",\"args\":{\"prop\":\"loading\",\"value\":\"false\"}}]",
         "inputs": {
           "id": {
             "source": "binding",
@@ -62,6 +63,14 @@
         }
       },
       "typeRef": "type_mrnx6ke8_4d7vry"
+    },
+    {
+      "name": "loading",
+      "type": "boolean",
+      "remark": "",
+      "value": true,
+      "binding": "",
+      "computeBody": ""
     }
   ]
 }

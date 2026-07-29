@@ -51,7 +51,7 @@ import EventBindDialog from './EventBindDialog.vue'
 import type { PageQueryParamDef } from '../../types/page-query'
 import { buildQueryBindingRoot } from '../../utils/typed-binding-paths'
 
-type EventKind = 'onLoading' | 'onSuccess' | 'onError'
+type EventKind = 'onLoading' | 'onSuccess' | 'onError' | 'onFinally'
 type LiteralMode = 'scalar' | 'object' | 'json'
 type FieldKind = 'string' | 'number' | 'boolean' | 'enum' | 'json' | 'array'
 
@@ -186,6 +186,11 @@ const eventRows = computed(() => [
     label: '加载失败',
     raw: draft.value.onError,
   },
+  {
+    kind: 'onFinally' as const,
+    label: '加载结束',
+    raw: draft.value.onFinally,
+  },
 ])
 
 const eventBindLabel = computed(() => {
@@ -195,9 +200,14 @@ const eventBindLabel = computed(() => {
 
 const eventBindRaw = computed(() => draft.value[eventBindKind.value] ?? '')
 
-/** 控制器加载事件形参：成功/失败带 res */
+/** 控制器加载事件形参：成功/失败带 res；开始/结束无参 */
 const controllerEventParams = computed<MethodParam[]>(() => {
-  if (eventBindKind.value === 'onLoading') return []
+  if (
+    eventBindKind.value === 'onLoading' ||
+    eventBindKind.value === 'onFinally'
+  ) {
+    return []
+  }
   if (eventBindKind.value === 'onError') {
     return [{ name: 'res', type: 'any', tsType: 'unknown' }]
   }
@@ -632,6 +642,7 @@ watch(
       parseBody = parseBody.replace(/\bresponse\b/g, 'data')
     }
     draft.value = {
+      ...createEmptyControllerBinding(field.type),
       ...base,
       parseBody,
       inputs: { ...(base.inputs ?? {}) },

@@ -23,7 +23,8 @@
             "itemItemType": "",
             "itemItemTypeRef": "",
             "genericArgs": {}
-          }
+          },
+          "required": false
         },
         {
           "id": "param_mrqr6f3m_334gcw",
@@ -37,7 +38,8 @@
             "itemItemType": "",
             "itemItemTypeRef": "",
             "genericArgs": {}
-          }
+          },
+          "required": false
         }
       ],
       "output": {
@@ -113,8 +115,8 @@
             "id": "end_mrqruu4u_yw0t",
             "kind": "end",
             "position": {
-              "x": 286.582202614797,
-              "y": 339.1643014226937
+              "x": 285.082202614797,
+              "y": 328.86290389495656
             },
             "data": {
               "returnExpr": "goodsPage"
@@ -241,7 +243,8 @@
             "itemItemType": "",
             "itemItemTypeRef": "",
             "genericArgs": {}
-          }
+          },
+          "required": false
         }
       ],
       "output": {

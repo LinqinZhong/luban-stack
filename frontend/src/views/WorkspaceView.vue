@@ -259,7 +259,7 @@ const backendWorkspaceRef = ref<InstanceType<
 > | null>(null)
 const dataPoolPanelRef = ref<InstanceType<typeof DataPoolPanel> | null>(null)
 let backendServiceSaveTimer: ReturnType<typeof setTimeout> | null = null
-/** 编辑态临时隐藏，不写入 XML；预览模式不生效 */
+/** 编辑态临时隐藏（visibility:hidden，占位保留），不写入 XML；预览模式不生效 */
 const editorHiddenNodeIds = ref<string[]>([])
 const pageMethods = ref<PageMethod[]>([])
 const lifecycleConfig = ref<LifecycleConfig>(createEmptyLifecycleConfig())
@@ -2364,7 +2364,7 @@ function commitPreviewRuntime(
   previewEmitLogs.value = []
 }
 
-/** 页面已展示后拉取控制器绑定并触发 onLoading / onSuccess / onError */
+/** 页面已展示后拉取控制器绑定并触发 onLoading / onSuccess / onError / onFinally */
 async function hydratePreviewControllerBindings() {
   const path = projectStore.path
   const runtime = previewRuntimeData.value
@@ -2391,7 +2391,34 @@ async function hydratePreviewControllerBindings() {
     if (seq !== previewControllerHydrateSeq) return
     if (!isPreviewSessionLive(sessionGen)) return
     if (workspaceMode.value !== 'preview') return
-    previewRuntimeData.value = next
+    // 勿整表替换：钩子里 setData（如 loading=false）写在 live 上，
+    // next 是拉数开始时的字段副本，整表赋值会盖掉钩子改动。
+    const live = previewRuntimeData.value
+    if (!live) {
+      previewRuntimeData.value = next
+      return
+    }
+    const nextByName = new Map(
+      next.fields.map((f) => [f.name.trim(), f] as const),
+    )
+    const fields = live.fields.map((f) => {
+      if (f.binding !== 'controller') return f
+      const name = f.name.trim()
+      const updated = nextByName.get(name)
+      if (!updated) return f
+      return {
+        ...f,
+        value: updated.value,
+        objectFields: updated.objectFields ?? f.objectFields,
+      }
+    })
+    previewRuntimeData.value = resolveComputedPageData(
+      { fields },
+      {
+        getDeviceInfo: previewGetDeviceInfo,
+        dollarProps: editorDollarProps.value ?? {},
+      },
+    )
   } catch (err) {
     console.warn('[voider] 预览控制器数据加载失败:', err)
   }

@@ -115,6 +115,8 @@ export interface ControllerBindingConfig {
   onLoading: string
   onSuccess: string
   onError: string
+  /** 成功或失败后都会触发（finally） */
+  onFinally: string
   /** key = API input.varName */
   inputs?: Record<string, ControllerInputParamConfig>
 }
@@ -246,6 +248,7 @@ export function createEmptyControllerBinding(
     onLoading: '',
     onSuccess: '',
     onError: '',
+    onFinally: '',
     inputs: {},
   }
 }
@@ -310,6 +313,7 @@ export function normalizeControllerBinding(
     onLoading: typeof raw.onLoading === 'string' ? raw.onLoading : '',
     onSuccess: typeof raw.onSuccess === 'string' ? raw.onSuccess : '',
     onError: typeof raw.onError === 'string' ? raw.onError : '',
+    onFinally: typeof raw.onFinally === 'string' ? raw.onFinally : '',
     ...(inputs ? { inputs } : {}),
   }
 }

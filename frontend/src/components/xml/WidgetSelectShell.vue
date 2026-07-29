@@ -37,8 +37,13 @@ const props = defineProps<{
   repeatBadge?: boolean
   /** 编辑模式下，已绑定事件方法的角标数量 */
   eventBadgeCount?: number
-  /** 类似 v-show：保留节点但隐藏 */
+  /** 类似 v-show：保留节点但隐藏（不占位，display:none） */
   visuallyHidden?: boolean
+  /**
+   * 编辑态眼睛隐藏：visibility:hidden，占位保留。
+   * 与 visuallyHidden 同时为真时仍以 display:none 为准。
+   */
+  visibilityHidden?: boolean
   /** 预览态可点击（事件绑定） */
   interactive?: boolean
   /** 预览态滚动容器：壳层需要压住高度，否则子内容撑开后无法滚 */
@@ -95,6 +100,12 @@ const shellStyle = computed<CSSProperties>(() => {
     cursor: props.interactive ? 'pointer' : undefined,
     ...marginStyle(props.marginAttrs),
     ...(props.extraStyle ?? {}),
+  }
+
+  // 放在 extraStyle 之后，避免被覆盖；占位保留
+  if (props.visibilityHidden && !props.visuallyHidden) {
+    style.visibility = 'hidden'
+    style.pointerEvents = 'none'
   }
 
   const zRaw = props.marginAttrs.zIndex?.trim()

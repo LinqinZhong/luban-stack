@@ -11,11 +11,37 @@
       "defaultValue": true,
       "twoWay": false,
       "required": true
+    },
+    {
+      "name": "empty",
+      "type": "boolean",
+      "remark": "",
+      "defaultValue": false,
+      "twoWay": false,
+      "required": false
+    },
+    {
+      "name": "loadingText",
+      "type": "string",
+      "remark": "",
+      "defaultValue": "加载中...",
+      "twoWay": false,
+      "required": false
+    },
+    {
+      "name": "emptyText",
+      "type": "string",
+      "remark": "",
+      "defaultValue": "暂无数据",
+      "twoWay": false,
+      "required": false
     }
   ],
   "events": [],
   "exposedMethods": [],
   "debugProps": {
-    "loading": false
+    "loading": false,
+    "loadingText": "加载中...",
+    "empty": false
   }
 }

@@ -472,9 +472,44 @@ function indentBlock(src: string, pad: string): string {
     .join('\n')
 }
 
+/** 控制器加载钩子（onLoading / onSuccess / onError / onFinally）→ setData / toast 等 */
+function generateControllerHookStmts(
+  raw: string | undefined,
+  indent: string,
+  thatExpr: string,
+): string[] {
+  const stmts: string[] = []
+  for (const bind of parseEventBindings(raw)) {
+    const method = (bind.method || '').trim()
+    if (!method) continue
+    const args = bind.args ?? {}
+
+    if (method === 'setData') {
+      const prop = String(args.prop ?? '').trim()
+      const valueExpr = evalArgLiteral(args.value)
+      if (!prop || !isValidIdent(prop)) continue
+      stmts.push(`${indent}${thatExpr}.setData({ ${prop}: ${valueExpr} })`)
+      continue
+    }
+
+    if (method === 'showToast') {
+      const message = evalArgLiteral(args.message ?? args.msg ?? '')
+      stmts.push(
+        `${indent}wx.showToast({ title: String(${message}), icon: 'none' })`,
+      )
+      continue
+    }
+
+    if (isValidIdent(method) && method !== '__custom__') {
+      stmts.push(`${indent}${thatExpr}.${method}()`)
+    }
+  }
+  return stmts
+}
+
 /**
  * 页面 onLoad：自动拉取 binding===controller 的数据池字段。
- * 「加载事件」onLoading/onSuccess/onError 是可选钩子，空配置仍会请求。
+ * 「加载事件」onLoading/onSuccess/onError/onFinally 是可选钩子，空配置仍会请求。
  */
 export function generateControllerBoundPageLoad(options: {
   fields: DataField[]
@@ -525,10 +560,15 @@ export function generateControllerBoundPageLoad(options: {
       ? `(function (data) {\n${indentBlock(parseBody, '            ')}\n          })(data)`
       : 'data'
 
+    const loadingStmts = generateControllerHookStmts(cfg.onLoading, '          ', 'that')
+    const successStmts = generateControllerHookStmts(cfg.onSuccess, '          ', 'that')
+    const errorStmts = generateControllerHookStmts(cfg.onError, '          ', 'that')
+    const finallyStmts = generateControllerHookStmts(cfg.onFinally, '          ', 'that')
+
     loadBlocks.push(`    tasks.push(
       Promise.resolve()
         .then(function () {
-${argLines.join('\n')}
+${loadingStmts.length ? `${loadingStmts.join('\n')}\n` : ''}${argLines.join('\n')}
           return api.invoke(that.data[${JSON.stringify(bindingKey)}], args)
         })
         .then(function (data) {
@@ -536,10 +576,12 @@ ${argLines.join('\n')}
           var patch = {}
           patch[${JSON.stringify(name)}] = parsed
           that.setData(patch)
-        })
+${successStmts.length ? `${successStmts.join('\n')}\n` : ''}        })
         .catch(function (err) {
           console.error(${JSON.stringify(`[voider] controller ${name}`)}, err)
-        })
+${errorStmts.length ? `${errorStmts.join('\n')}\n` : ''}        })
+        .then(function () {
+${finallyStmts.length ? `${finallyStmts.join('\n')}\n` : ''}        })
     )`)
   }
 

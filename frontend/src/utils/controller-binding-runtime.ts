@@ -285,6 +285,10 @@ async function loadOneField(
       await runEvents(cfg.onError, { res: err })
     }
     throw err
+  } finally {
+    if (cfg.onFinally?.trim() && runEvents) {
+      await runEvents(cfg.onFinally)
+    }
   }
 }
 

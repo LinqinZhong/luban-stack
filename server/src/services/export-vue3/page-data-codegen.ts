@@ -135,6 +135,85 @@ function indentBlock(src: string, pad: string): string {
     .join('\n')
 }
 
+type EventBinding = {
+  method?: string
+  args?: Record<string, unknown>
+}
+
+function parseEventBindings(raw: string | undefined): EventBinding[] {
+  if (!raw?.trim()) return []
+  try {
+    const parsed = JSON.parse(raw) as unknown
+    if (!Array.isArray(parsed)) return []
+    return parsed.filter(
+      (item) => item && typeof item === 'object' && typeof (item as EventBinding).method === 'string',
+    ) as EventBinding[]
+  } catch {
+    return []
+  }
+}
+
+function evalArgLiteral(raw: unknown): string {
+  if (typeof raw === 'number' || typeof raw === 'boolean') return String(raw)
+  if (raw == null) return 'null'
+  if (typeof raw !== 'string') {
+    try {
+      return JSON.stringify(raw)
+    } catch {
+      return 'null'
+    }
+  }
+  const text = raw.trim()
+  if (!text) return '""'
+  if (
+    (text.startsWith('{') && text.endsWith('}')) ||
+    (text.startsWith('[') && text.endsWith(']')) ||
+    text === 'true' ||
+    text === 'false' ||
+    text === 'null' ||
+    /^-?\d+(\.\d+)?$/.test(text)
+  ) {
+    return text
+  }
+  if (/^[A-Za-z_$][\w$]*$/.test(text)) return text
+  try {
+    JSON.parse(text)
+    return text
+  } catch {
+    return JSON.stringify(text)
+  }
+}
+
+/** 控制器加载钩子 → 页面 ref.set / showToast 等 */
+function generateControllerHookStmts(
+  raw: string | undefined,
+  indent: string,
+): string[] {
+  const stmts: string[] = []
+  for (const bind of parseEventBindings(raw)) {
+    const method = (bind.method || '').trim()
+    if (!method) continue
+    const args = bind.args ?? {}
+
+    if (method === 'setData') {
+      const prop = String(args.prop ?? '').trim()
+      const valueExpr = evalArgLiteral(args.value)
+      if (!prop || !isValidIdent(prop)) continue
+      stmts.push(
+        `${indent}${prop}.value = ${valueExpr} as typeof ${prop}.value`,
+      )
+      continue
+    }
+
+    if (method === 'showToast') {
+      const message = evalArgLiteral(args.message ?? args.msg ?? '')
+      stmts.push(`${indent}showToast(String(${message}))`)
+      continue
+    }
+  }
+  return stmts
+}
+
 export type VueApiBinding = {
   serviceId: string
   serviceName?: string
@@ -175,14 +254,14 @@ export function generateControllerBoundPageMounted(options: {
     )
     if (!resolved || !resolved.path) continue
 
-    const argLines: string[] = [`    const args: Record<string, unknown> = {}`]
+    const argLines: string[] = [`      const args: Record<string, unknown> = {}`]
     for (const [varName, inp] of Object.entries(cfg.inputs ?? {})) {
       const key = varName.trim()
       if (!key || !isValidIdent(key)) continue
       if (!inp || inp.source !== 'binding') {
         const lit =
           inp && 'literal' in inp ? JSON.stringify(inp.literal ?? null) : 'undefined'
-        argLines.push(`    args[${JSON.stringify(key)}] = ${lit}`)
+        argLines.push(`      args[${JSON.stringify(key)}] = ${lit}`)
         continue
       }
       const path = (inp.binding ?? '').trim()
@@ -197,24 +276,32 @@ export function generateControllerBoundPageMounted(options: {
         needsRoute = true
       }
       argLines.push(
-        `    args[${JSON.stringify(key)}] = __resolveCtrlBinding(${JSON.stringify(path)})`,
+        `      args[${JSON.stringify(key)}] = __resolveCtrlBinding(${JSON.stringify(path)})`,
       )
     }
 
     const parseBody = (cfg.parseBody ?? '').trim()
     const parseCall = parseBody
-      ? `(function (data: any) {\n${indentBlock(parseBody, '      ')}\n    })(data)`
+      ? `(function (data: any) {\n${indentBlock(parseBody, '        ')}\n      })(data)`
       : 'data'
+
+    const loadingStmts = generateControllerHookStmts(cfg.onLoading, '      ')
+    const successStmts = generateControllerHookStmts(cfg.onSuccess, '        ')
+    const errorStmts = generateControllerHookStmts(cfg.onError, '        ')
+    const finallyStmts = generateControllerHookStmts(cfg.onFinally, '        ')
 
     loadBlocks.push(`  tasks.push(
     (async () => {
+${loadingStmts.length ? `${loadingStmts.join('\n')}\n` : ''}      try {
 ${argLines.join('\n')}
-      const data = await invoke(${JSON.stringify(resolved)}, args)
-      const parsed = ${parseCall}
-      ${name}.value = parsed as typeof ${name}.value
-    })().catch((err) => {
-      console.error(${JSON.stringify(`[voider] controller ${name}`)}, err)
-    }),
+        const data = await invoke(${JSON.stringify(resolved)}, args)
+        const parsed = ${parseCall}
+        ${name}.value = parsed as typeof ${name}.value
+${successStmts.length ? `${successStmts.join('\n')}\n` : ''}      } catch (err) {
+        console.error(${JSON.stringify(`[voider] controller ${name}`)}, err)
+${errorStmts.length ? `${errorStmts.join('\n')}\n` : ''}      } finally {
+${finallyStmts.length ? `${finallyStmts.join('\n')}\n` : ''}      }
+    })(),
   )`)
   }
 
