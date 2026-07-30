@@ -37,6 +37,7 @@ function close() {
     append-to-body
     :close-on-click-modal="false"
     @update:model-value="emit('update:modelValue', $event)"
+    :close-on-press-escape="false"
   >
     <p class="hint">
       数据库中的表结构与本地 <code>mysql/{{ tableName }}.json</code> 不一致，请选择要采纳的一方。
@@ -58,7 +59,6 @@ function close() {
       </section>
     </div>
     <template #footer>
-      <el-button :disabled="resolving" @click="close">取消</el-button>
       <el-button
         type="warning"
         :loading="resolving"

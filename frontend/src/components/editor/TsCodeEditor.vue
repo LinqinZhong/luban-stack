@@ -14,6 +14,8 @@ import type { MethodParam, MethodReturnType } from '../../types/page-method'
   },
 }
 
+const tsLang = (monaco.languages as any).typescript
+
 const props = defineProps<{
   /** 仅方法体（不含函数签名），对外 v-model */
   modelValue: string
@@ -126,7 +128,7 @@ function syncAmbientLib() {
   ambientLib = null
   if (!dts.trim()) return
   ambientLibSeq += 1
-  ambientLib = monaco.languages.typescript.typescriptDefaults.addExtraLib(
+  ambientLib = tsLang.typescriptDefaults.addExtraLib(
     dts,
     `inmemory://voider/method-ambient-${ambientLibSeq}.d.ts`,
   )
@@ -265,17 +267,17 @@ defineExpose({ getBody })
 onMounted(() => {
   if (!hostRef.value) return
 
-  monaco.languages.typescript.typescriptDefaults.setCompilerOptions({
-    target: monaco.languages.typescript.ScriptTarget.ES2020,
+  tsLang.typescriptDefaults.setCompilerOptions({
+    target: tsLang.ScriptTarget.ES2020,
     allowNonTsExtensions: true,
-    moduleResolution: monaco.languages.typescript.ModuleResolutionKind.NodeJs,
-    module: monaco.languages.typescript.ModuleKind.ESNext,
+    moduleResolution: tsLang.ModuleResolutionKind.NodeJs,
+    module: tsLang.ModuleKind.ESNext,
     noEmit: true,
     esModuleInterop: true,
     strict: false,
   })
 
-  monaco.languages.typescript.typescriptDefaults.setDiagnosticsOptions({
+  tsLang.typescriptDefaults.setDiagnosticsOptions({
     noSemanticValidation: false,
     noSyntaxValidation: false,
   })

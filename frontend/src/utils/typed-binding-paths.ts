@@ -85,6 +85,10 @@ function genericsEqual(
 ): boolean {
   const aa = a ?? {}
   const bb = b ?? {}
+  const aBound = Object.values(aa).some((v) => v.trim())
+  const bBound = Object.values(bb).some((v) => v.trim())
+  // 一侧未填泛型实参时，视为与同名类型兼容（QueryPageVo ≈ QueryPageVo<T>）
+  if (!aBound || !bBound) return true
   const keys = new Set([...Object.keys(aa), ...Object.keys(bb)])
   for (const k of keys) {
     if ((aa[k] ?? '').trim() !== (bb[k] ?? '').trim()) return false
@@ -275,6 +279,10 @@ function expandObjectChildren(
     // 泛型字段：若绑定到具体 interface，展开其字段
     if (atom.kind === 'generic') {
       const boundId = (genericArgs[atom.ref ?? ''] ?? '').trim()
+      if (!boundId) {
+        // 未绑定泛型不可当作 any 匹配具体出参（含 T[] 的 records）
+        continue
+      }
       const bound = findDataTypeDef(library, boundId)
       if (bound?.kind === 'interface' && primaryAtom(field.type).kind !== 'array') {
         const boundExpr: ProcessorTypeExpr = {
@@ -310,6 +318,17 @@ function expandObjectChildren(
         ),
         typeRef: fieldExpr.itemTypeRef || '',
         genericArgs: { ...(fieldExpr.genericArgs ?? {}) },
+      }
+      // 未绑定泛型会落成 any，禁止据此生成可选的 [0]
+      if (isAnyExpr(itemExpr) && !namedRefOf(itemExpr)) {
+        if (selectable) {
+          children.push({
+            value: name,
+            label: name,
+            selectable: true,
+          })
+        }
+        continue
       }
       const itemSelectable = isTypeExprCompatible(itemExpr, target, library)
       const itemNested = expandObjectChildren(
@@ -369,17 +388,19 @@ function buildVarOption(
         source.itemType === 'array' ? source.itemItemTypeRef || '' : '',
       genericArgs: { ...(source.genericArgs ?? {}) },
     }
-    const itemSelectable = isTypeExprCompatible(itemExpr, target, library)
-    const itemNested = expandObjectChildren(itemExpr, target, library, 1)
-    if (itemSelectable || itemNested.length) {
-      children = [
-        {
-          value: '[0]',
-          label: '[0]',
-          selectable: itemSelectable,
-          ...(itemNested.length ? { children: itemNested } : {}),
-        },
-      ]
+    if (!(isAnyExpr(itemExpr) && !namedRefOf(itemExpr))) {
+      const itemSelectable = isTypeExprCompatible(itemExpr, target, library)
+      const itemNested = expandObjectChildren(itemExpr, target, library, 1)
+      if (itemSelectable || itemNested.length) {
+        children = [
+          {
+            value: '[0]',
+            label: '[0]',
+            selectable: itemSelectable,
+            ...(itemNested.length ? { children: itemNested } : {}),
+          },
+        ]
+      }
     }
   } else {
     children = expandObjectChildren(source, target, library, 1)

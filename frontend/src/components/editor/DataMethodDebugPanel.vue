@@ -109,6 +109,14 @@ const itemEditDraft = reactive<Record<string, unknown>>({})
 const itemEditScalar = ref<unknown>('')
 
 const method = computed(() => props.target?.method ?? null)
+const methodUnavailable = computed(() => Boolean(method.value?.disabled))
+const unavailableHint = computed(() => {
+  if (!methodUnavailable.value) return ''
+  if (method.value?.name === 'deleteById' || method.value?.id === 'preset_deleteById') {
+    return '请先在数据表设计中勾选逻辑删除字段，才能使用 deleteById'
+  }
+  return '该方法当前不可用'
+})
 
 function defaultForKind(kind: FieldKind): unknown {
   switch (kind) {
@@ -725,6 +733,10 @@ function onItemScalarJsonBlur(text: string) {
 
 async function handleRun() {
   if (!props.target) return
+  if (methodUnavailable.value) {
+    ElMessage.warning(unavailableHint.value || '该方法不可用')
+    return
+  }
   const params = collectParams()
   emit('update:debug-params', params)
   running.value = true
@@ -776,11 +788,20 @@ async function handleRun() {
             size="small"
             :icon="VideoPlay"
             :loading="running"
+            :disabled="methodUnavailable"
             @click="handleRun"
           >
             执行
           </el-button>
         </div>
+        <el-alert
+          v-if="methodUnavailable"
+          class="unavailable-alert"
+          type="warning"
+          :closable="false"
+          show-icon
+          :title="unavailableHint"
+        />
         <div class="dry-run-row">
           <div class="dry-run-label">
             <span>试运行</span>
@@ -1108,7 +1129,9 @@ async function handleRun() {
       append-to-body
       destroy-on-close
       class="array-item-dialog"
-    >
+    :close-on-click-modal="false"
+    :close-on-press-escape="false"
+  >
       <div v-if="itemEditIsObject" class="item-form">
         <div
           v-for="field in itemEditFields"
@@ -1219,7 +1242,6 @@ async function handleRun() {
         </div>
       </div>
       <template #footer>
-        <el-button @click="itemDialogVisible = false">取消</el-button>
         <el-button type="primary" @click="saveItemDialog">确定</el-button>
       </template>
     </el-dialog>
@@ -1288,6 +1310,10 @@ async function handleRun() {
   justify-content: space-between;
   gap: 8px;
   margin-bottom: 0;
+}
+
+.unavailable-alert {
+  margin-top: 10px;
 }
 
 .dry-run-row {

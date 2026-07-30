@@ -46,6 +46,8 @@ import FlowPrintField from '../FlowPrintField.vue'
     },
   }
 
+const tsLang = (monaco.languages as any).typescript
+
 export type DefineNodeForm = {
   varName: string
   valueType: MethodParamType
@@ -236,7 +238,7 @@ function syncAmbientLib() {
   ambientLib = null
   const dts = buildTypeLibraryAmbientDeclarations(props.typeLibrary).trim()
   if (!dts) return
-  ambientLib = monaco.languages.typescript.typescriptDefaults.addExtraLib(
+  ambientLib = tsLang.typescriptDefaults.addExtraLib(
     dts,
     `inmemory://voider/define-ambient-${Date.now()}.d.ts`,
   )
@@ -256,15 +258,15 @@ async function setupEditor() {
   await nextTick()
   if (!hostRef.value) return
 
-  monaco.languages.typescript.typescriptDefaults.setCompilerOptions({
-    target: monaco.languages.typescript.ScriptTarget.ES2020,
+  tsLang.typescriptDefaults.setCompilerOptions({
+    target: tsLang.ScriptTarget.ES2020,
     allowNonTsExtensions: true,
-    moduleResolution: monaco.languages.typescript.ModuleResolutionKind.NodeJs,
-    module: monaco.languages.typescript.ModuleKind.ESNext,
+    moduleResolution: tsLang.ModuleResolutionKind.NodeJs,
+    module: tsLang.ModuleKind.ESNext,
     noEmit: true,
     strict: false,
   })
-  monaco.languages.typescript.typescriptDefaults.setDiagnosticsOptions({
+  tsLang.typescriptDefaults.setDiagnosticsOptions({
     noSemanticValidation: false,
     noSyntaxValidation: false,
   })
@@ -433,6 +435,8 @@ function stopEditorKeys(event: KeyboardEvent) {
     width="560px"
     destroy-on-close
     append-to-body
+    :close-on-click-modal="false"
+    :close-on-press-escape="false"
   >
     <el-form
       class="flow-node-form"
@@ -496,7 +500,6 @@ function stopEditorKeys(event: KeyboardEvent) {
       </el-form-item>
     </el-form>
     <template #footer>
-      <el-button @click="visible = false">取消</el-button>
       <el-button
         type="primary"
         :disabled="Boolean(varNameError)"

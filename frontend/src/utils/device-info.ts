@@ -1,12 +1,15 @@
 /** 与画布 `.device-status-bar` 高度一致 */
 export const EDITOR_STATUS_BAR_HEIGHT = 22
 
-/** 与画布 `.mp-capsule` 大致一致（微信胶囊布局） */
+/**
+ * 与画布 `.mp-capsule` 一致（微信自定义导航常见：状态栏 22 + 上下各 8 + 胶囊 28 → top 30）。
+ * TitleBar 等计算字段依赖此数据与预览胶囊对齐。
+ */
 export const EDITOR_MENU_BUTTON = {
   width: 87,
-  height: 32,
+  height: 28,
   /** 相对屏幕顶部 */
-  top: 26,
+  top: 30,
   /** 距屏幕右缘 */
   marginRight: 7,
 } as const

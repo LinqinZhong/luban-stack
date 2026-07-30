@@ -422,6 +422,7 @@ const kindMap: Record<string, string> = {
   start: '开始',
   input: '输入',
   define: '定义数据',
+  pageMap: '分页映射',
   branch: '判断',
   action: '操作',
   output: '输出',
@@ -468,6 +469,24 @@ function nodeSummaryText(node: {
       typeof data.methodLabel === 'string' ? data.methodLabel.trim() : ''
     return methodLabel.replace(/（[^）]*）$/, '')
   }
+  if (node.kind === 'pageMap') {
+    const description =
+      typeof data.description === 'string' ? data.description.trim() : ''
+    if (description) return description
+    const sourceKind = data.sourceKind === 'array' ? 'array' : 'page'
+    const kindLabel = sourceKind === 'array' ? '数组' : '分页'
+    const sourcePath =
+      typeof data.sourcePath === 'string' ? data.sourcePath.trim() : ''
+    const targetVarName =
+      (typeof data.targetVarName === 'string'
+        ? data.targetVarName.trim()
+        : '') ||
+      (typeof data.targetPath === 'string' ? data.targetPath.trim() : '')
+    if (sourcePath && targetVarName) {
+      return `${kindLabel} · ${sourcePath} → ${targetVarName}`
+    }
+    return sourcePath || targetVarName
+  }
   if (node.kind === 'end') {
     return typeof data.returnExpr === 'string' ? data.returnExpr.trim() : ''
   }
@@ -508,12 +527,6 @@ const isStartSelected = computed(() => {
 const selectedNodeLabel = computed(() => {
   const node = selectedNode.value
   if (!node) return '未选中节点'
-  return nodeKindLabel(node.kind)
-})
-
-const cursorLabel = computed(() => {
-  const node = viewNode.value
-  if (!snapshot.value?.cursorNodeId || !node) return '—'
   return nodeKindLabel(node.kind)
 })
 
@@ -697,7 +710,9 @@ async function handleRunAll() {
         snap.businessError.code,
       )
     } else {
-      listResult.value = resultOk(extractFlowReturnValue(t.flow, snap))
+      listResult.value = resultOk(
+        extractFlowReturnValue(t.flow, snap, t.method.output, props.typeLibrary),
+      )
     }
     listResultReady.value = true
     listResultFoldOpen.value = false
@@ -837,7 +852,6 @@ function saveAmbientEdit() {
     value = Number(ambientEditScalar.value || 0)
   } else if (item.type === 'boolean') {
     value =
-      ambientEditScalar.value === true ||
       ambientEditScalar.value === 'true' ||
       ambientEditScalar.value === '1'
   } else {
@@ -1419,7 +1433,9 @@ watch(isStartSelected, (ok) => {
       append-to-body
       destroy-on-close
       @closed="editingParamForm = null"
-    >
+    :close-on-click-modal="false"
+    :close-on-press-escape="false"
+  >
       <template v-if="editingParamForm">
         <div
           v-if="editingParamForm.mode === 'object'"
@@ -1493,7 +1509,6 @@ watch(isStartSelected, (ok) => {
         </template>
       </template>
       <template #footer>
-        <el-button @click="paramDialogVisible = false">取消</el-button>
         <el-button type="primary" @click="saveParamEdit">确定</el-button>
       </template>
     </el-dialog>
@@ -1506,7 +1521,9 @@ watch(isStartSelected, (ok) => {
       append-to-body
       destroy-on-close
       @closed="editingAmbient = null"
-    >
+    :close-on-click-modal="false"
+    :close-on-press-escape="false"
+  >
       <div v-if="editingAmbient" class="ambient-edit">
         <div class="prop-label">
           <span class="prop-name">{{ editingAmbient.name }}</span>
@@ -1520,9 +1537,7 @@ watch(isStartSelected, (ok) => {
         />
         <el-switch
           v-else-if="editingAmbient.type === 'boolean'"
-          :model-value="
-            ambientEditScalar === true || ambientEditScalar === 'true'
-          "
+          :model-value="ambientEditScalar === 'true'"
           @update:model-value="
             ambientEditScalar = $event === true ? 'true' : 'false'
           "
@@ -1540,7 +1555,6 @@ watch(isStartSelected, (ok) => {
         />
       </div>
       <template #footer>
-        <el-button @click="ambientDialogVisible = false">取消</el-button>
         <el-button type="primary" @click="saveAmbientEdit">确定</el-button>
       </template>
     </el-dialog>

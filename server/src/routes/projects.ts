@@ -29,6 +29,7 @@ import {
   updateMysqlTableRow,
   deleteMysqlTableRow,
   insertMysqlTableRow,
+  readMysqlTableSchema,
 } from '../services/mysql.js'
 import {
   readOssLibrary,
@@ -771,6 +772,29 @@ router.post('/mysql/tables/columns', async (req, res) => {
   }
 })
 
+/** 仅读本地 mysql/{table}.json，不连库（供数据层预置方法等使用） */
+router.post('/mysql/tables/schema/local', async (req, res) => {
+  try {
+    const body = req.body ?? {}
+    const tableName = String(body.tableName ?? '')
+    const projectPath = String(body.projectPath ?? '')
+    if (!projectPath.trim()) {
+      res.status(400).json({ error: '缺少项目路径' })
+      return
+    }
+    const schema = await readMysqlTableSchema(projectPath, tableName)
+    res.json({
+      columns: schema?.columns ?? [],
+      indexes: schema?.indexes ?? [],
+      remark: schema?.remark ?? '',
+      name: schema?.name ?? tableName,
+      syncedAt: schema?.syncedAt ?? null,
+    })
+  } catch (err) {
+    handleError(res, err)
+  }
+})
+
 router.post('/mysql/tables/schema/resolve', async (req, res) => {
   try {
     const body = req.body ?? {}
@@ -832,6 +856,7 @@ router.post('/mysql/tables/design', async (req, res) => {
       body.columns,
       String(body.projectPath ?? ''),
       String(body.remark ?? ''),
+      body.indexes,
     )
     res.json({ tables })
   } catch (err) {

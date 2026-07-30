@@ -14,6 +14,8 @@ import tsWorker from 'monaco-editor/esm/vs/language/typescript/ts.worker?worker'
     },
   }
 
+const tsLang = (monaco.languages as any).typescript
+
 const PRINT_THEME = 'voider-print'
 const LINE_HEIGHT = 20
 const VERTICAL_PAD = 16
@@ -101,7 +103,7 @@ function mountEditor() {
   ambientNamesRef = [...(props.ambientNames || [])]
   ensurePrintTheme()
 
-  monaco.languages.typescript.typescriptDefaults.setDiagnosticsOptions({
+  tsLang.typescriptDefaults.setDiagnosticsOptions({
     noSemanticValidation: true,
     noSyntaxValidation: true,
   })

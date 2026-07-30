@@ -219,6 +219,8 @@ function handleSave() {
     width="640px"
     destroy-on-close
     append-to-body
+    :close-on-click-modal="false"
+    :close-on-press-escape="false"
   >
     <div class="params-head">
       <span class="hint">为方法添加入参；带泛型的类型可选「泛型」配置，未配按 any。</span>
@@ -304,7 +306,6 @@ function handleSave() {
       </el-table-column>
     </el-table>
     <template #footer>
-      <el-button @click="visible = false">取消</el-button>
       <el-button type="primary" @click="handleSave">确定</el-button>
     </template>
 

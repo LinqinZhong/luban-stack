@@ -1,0 +1,254 @@
+{
+  "id": "pms6nkri1xkju",
+  "name": "goodsRemark",
+  "remark": "",
+  "entityRef": "",
+  "dataProcessorRef": "pms6h00c13ixp",
+  "methods": [
+    {
+      "id": "method_ms6nkt2n_5f3g3k",
+      "name": "page",
+      "remark": "",
+      "scope": "public",
+      "params": [
+        {
+          "id": "param_ms6nlu2g_avsjlk",
+          "name": "goodsId",
+          "remark": "",
+          "typeExpr": {
+            "type": "number",
+            "typeRef": "",
+            "itemType": "",
+            "itemTypeRef": "",
+            "itemItemType": "",
+            "itemItemTypeRef": "",
+            "genericArgs": {}
+          },
+          "required": false
+        },
+        {
+          "id": "param_ms6nm568_266hyg",
+          "name": "page",
+          "remark": "",
+          "typeExpr": {
+            "type": "json",
+            "typeRef": "type_common_QueryPageDto",
+            "itemType": "",
+            "itemTypeRef": "",
+            "itemItemType": "",
+            "itemItemTypeRef": "",
+            "genericArgs": {}
+          },
+          "required": false
+        }
+      ],
+      "output": {
+        "type": "json",
+        "typeRef": "type_common_QueryPageVo",
+        "itemType": "",
+        "itemTypeRef": "",
+        "itemItemType": "",
+        "itemItemTypeRef": "",
+        "genericArgs": {
+          "T": "type_ms6gqu8j_vm3j3p"
+        }
+      },
+      "dataConfig": {
+        "source": "mysql",
+        "operation": "query",
+        "queryFields": [],
+        "sql": "",
+        "fieldMappings": [],
+        "batchSourceParam": "",
+        "pageParam": "",
+        "conditionGroups": []
+      },
+      "debugParams": {
+        "goodsId": 38,
+        "page": {
+          "current": 1,
+          "pageSize": 10
+        }
+      },
+      "flow": {
+        "nodes": [
+          {
+            "id": "start",
+            "kind": "start",
+            "position": {
+              "x": 266.1451669368846,
+              "y": -55.66432353103484
+            },
+            "data": {}
+          },
+          {
+            "id": "input_ms6nqm79_1thq",
+            "kind": "input",
+            "position": {
+              "x": 191.1451669368846,
+              "y": 54.549770031515564
+            },
+            "data": {
+              "dataSource": "current_data",
+              "dataProcessorId": "pms6h00c13ixp",
+              "dataMethodId": "preset_countBy_idx_goods",
+              "headerField": "",
+              "varName": "total",
+              "methodLabel": "goodsRemark.countByGoodsId",
+              "paramBindings": {
+                "goodsId": "goodsId"
+              },
+              "printExpr": ""
+            }
+          },
+          {
+            "id": "branch_ms6nr9gc_3cu9",
+            "kind": "branch",
+            "position": {
+              "x": 236.1451669368846,
+              "y": 224.78451766783266
+            },
+            "data": {
+              "expression": "total > 0",
+              "printExpr": ""
+            }
+          },
+          {
+            "id": "input_ms6nrscd_z6lh",
+            "kind": "input",
+            "position": {
+              "x": 384.78763329182937,
+              "y": 423.7845176678327
+            },
+            "data": {
+              "dataSource": "current_data",
+              "dataProcessorId": "pms6h00c13ixp",
+              "dataMethodId": "preset_pageBy_idx_goods",
+              "headerField": "",
+              "varName": "remarkList",
+              "methodLabel": "goodsRemark.pageByGoodsId",
+              "paramBindings": {
+                "pageDto": "page",
+                "goodsId": "goodsId"
+              },
+              "printExpr": ""
+            }
+          },
+          {
+            "id": "pageMap_ms6p27xn_ng4f",
+            "kind": "pageMap",
+            "position": {
+              "x": 410.28763329182937,
+              "y": 562.4527309451815
+            },
+            "data": {
+              "sourceKind": "array",
+              "sourcePath": "remarkList",
+              "currentExpr": "page.current",
+              "pageSizeExpr": "page.pageSize",
+              "totalExpr": "total",
+              "hasNextExpr": "",
+              "targetTypeRef": "type_common_QueryPageVo",
+              "targetGenericArgs": {
+                "T": "type_ms6gqu8j_vm3j3p"
+              },
+              "targetVarName": "remarkPage",
+              "fieldMappings": [
+                {
+                  "targetField": "id",
+                  "sourceField": "id"
+                },
+                {
+                  "targetField": "goodsId",
+                  "sourceField": "goodsId"
+                },
+                {
+                  "targetField": "content",
+                  "sourceField": "content"
+                },
+                {
+                  "targetField": "score",
+                  "sourceField": "score"
+                },
+                {
+                  "targetField": "userId",
+                  "sourceField": "userId"
+                },
+                {
+                  "targetField": "avatar",
+                  "sourceField": ""
+                },
+                {
+                  "targetField": "images",
+                  "sourceField": "images"
+                }
+              ],
+              "description": "",
+              "printExpr": ""
+            }
+          },
+          {
+            "id": "end_ms6p4nbw_aq8o",
+            "kind": "end",
+            "position": {
+              "x": 461.78763329182937,
+              "y": 720.8979833138358
+            },
+            "data": {
+              "returnExpr": "remarkPage",
+              "printExpr": ""
+            }
+          },
+          {
+            "id": "end_ms6pavgy_60nj",
+            "kind": "end",
+            "position": {
+              "x": -5.171273102874075,
+              "y": 372.7845176678327
+            },
+            "data": {
+              "returnExpr": "",
+              "printExpr": ""
+            }
+          }
+        ],
+        "edges": [
+          {
+            "id": "edge_ms6nqm79_305k",
+            "source": "start",
+            "target": "input_ms6nqm79_1thq"
+          },
+          {
+            "id": "edge_ms6nr9gc_ff9a",
+            "source": "input_ms6nqm79_1thq",
+            "target": "branch_ms6nr9gc_3cu9"
+          },
+          {
+            "id": "e_branch_ms6nr9gc_3cu9_true_input_ms6nrscd_z6lh_ms6nrwol",
+            "source": "branch_ms6nr9gc_3cu9",
+            "target": "input_ms6nrscd_z6lh",
+            "sourceHandle": "true",
+            "label": "是"
+          },
+          {
+            "id": "edge_ms6p27xn_iogb",
+            "source": "input_ms6nrscd_z6lh",
+            "target": "pageMap_ms6p27xn_ng4f"
+          },
+          {
+            "id": "edge_ms6p4nbw_jqj1",
+            "source": "pageMap_ms6p27xn_ng4f",
+            "target": "end_ms6p4nbw_aq8o"
+          },
+          {
+            "id": "e_branch_ms6nr9gc_3cu9_false_end_ms6pavgy_60nj_ms6paz50",
+            "source": "branch_ms6nr9gc_3cu9",
+            "target": "end_ms6pavgy_60nj",
+            "sourceHandle": "false",
+            "label": "否"
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -184,19 +184,18 @@ onMounted(() => {
       </div>
     </div>
 
-    <el-dialog v-model="openDialogVisible" title="打开项目" width="560px" destroy-on-close>
+    <el-dialog v-model="openDialogVisible" title="打开项目" width="560px" destroy-on-close :close-on-click-modal="false" :close-on-press-escape="false">
       <p class="hint">选择包含 voider.json 的项目文件夹</p>
       <div class="path-row">
         <el-input v-model="openPath" placeholder="项目文件夹路径" clearable />
         <el-button :icon="Folder" @click="openFolderPicker('open')">浏览</el-button>
       </div>
       <template #footer>
-        <el-button @click="openDialogVisible = false">取消</el-button>
         <el-button type="primary" :loading="loading" @click="handleOpenProject">打开</el-button>
       </template>
     </el-dialog>
 
-    <el-dialog v-model="createDialogVisible" title="新建项目" width="560px" destroy-on-close>
+    <el-dialog v-model="createDialogVisible" title="新建项目" width="560px" destroy-on-close :close-on-click-modal="false" :close-on-press-escape="false">
       <el-form ref="createFormRef" :model="createForm" :rules="createRules" label-width="100px">
         <el-form-item label="项目路径" prop="path">
           <div class="path-row full">
@@ -222,7 +221,6 @@ onMounted(() => {
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="createDialogVisible = false">取消</el-button>
         <el-button type="primary" :loading="loading" @click="handleCreateProject">创建</el-button>
       </template>
     </el-dialog>
@@ -233,7 +231,9 @@ onMounted(() => {
       width="640px"
       append-to-body
       destroy-on-close
-    >
+    :close-on-click-modal="false"
+    :close-on-press-escape="false"
+  >
       <div class="browser-toolbar">
         <el-button
           :icon="ArrowUp"
@@ -261,7 +261,6 @@ onMounted(() => {
         </button>
       </div>
       <template #footer>
-        <el-button @click="folderPickerVisible = false">取消</el-button>
         <el-button type="primary" @click="confirmFolderPick">选择当前文件夹</el-button>
       </template>
     </el-dialog>

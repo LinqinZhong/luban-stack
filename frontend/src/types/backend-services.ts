@@ -786,6 +786,10 @@ export interface ProcessorMethod {
   debugParams: Record<string, unknown>
   /** 业务层等方法工作流（一期先业务层使用） */
   flow: MethodFlow
+  /** 虚拟预置方法（不落盘） */
+  preset?: boolean
+  /** 预置方法不可用（如未配置逻辑删除时的 deleteById） */
+  disabled?: boolean
 }
 
 /** 工作流节点种类 */
@@ -796,6 +800,7 @@ export type FlowNodeKind =
   | 'action'
   | 'output'
   | 'define'
+  | 'pageMap'
   | 'throw'
   | 'end'
 
@@ -854,6 +859,7 @@ export function normalizeMethodFlow(input: unknown): MethodFlow {
       kind !== 'action' &&
       kind !== 'output' &&
       kind !== 'define' &&
+      kind !== 'pageMap' &&
       kind !== 'throw' &&
       kind !== 'end'
     ) {

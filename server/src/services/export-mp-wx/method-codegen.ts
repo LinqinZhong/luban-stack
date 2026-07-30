@@ -277,9 +277,9 @@ function buildRecomputeMethod(
   const lines: string[] = []
   lines.push(`  __recomputeComputed: function () {`)
   lines.push(`    var that = this`)
-  const needsDevice = computed.some((f) =>
-    /\bgetDeviceInfo\s*\(/.test(f.computeBody || ''),
-  )
+  const needsDevice =
+    computed.some((f) => /\bgetDeviceInfo\s*\(/.test(f.computeBody || '')) ||
+    computed.some((f) => f.name.trim() === 'offsetTop')
   if (needsDevice) {
     lines.push(
       `    var getDeviceInfo = require('../../utils/api.js').getDeviceInfo`,
@@ -329,6 +329,24 @@ function buildRecomputeMethod(
       `      patch[${JSON.stringify(name)}] = that.data[${JSON.stringify(name)}]`,
     )
     lines.push(`    }`)
+    // 编辑器侧常用 isFillScreen=false 短路 offsetTop；真机 custom 导航仍须状态栏占位。
+    // 导出层保底，避免项目计算体面向预览时把小程序顶栏顶飞。
+    if (name === 'offsetTop') {
+      lines.push(`    try {`)
+      lines.push(`      var __diOff = getDeviceInfo()`)
+      lines.push(
+        `      var __sbOff = Number(__diOff && __diOff.statusBarHeight) || 0`,
+      )
+      lines.push(`      if (__sbOff > 0) {`)
+      lines.push(
+        `        var __curOff = Number(patch[${JSON.stringify(name)}]) || 0`,
+      )
+      lines.push(
+        `        if (__curOff < __sbOff) patch[${JSON.stringify(name)}] = __sbOff`,
+      )
+      lines.push(`      }`)
+      lines.push(`    } catch (__eOff) {}`)
+    }
   }
   lines.push(`    this.setData(patch)`)
   lines.push(`  }`)

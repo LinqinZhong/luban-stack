@@ -725,6 +725,8 @@ function handleSave() {
     destroy-on-close
     append-to-body
     class="controller-binding-dialog"
+    :close-on-click-modal="false"
+    :close-on-press-escape="false"
   >
     <el-form label-position="top" class="bind-form">
       <el-form-item label="绑定 API" required>
@@ -1009,7 +1011,6 @@ function handleSave() {
     </el-form>
 
     <template #footer>
-      <el-button @click="visible = false">取消</el-button>
       <el-button type="primary" @click="handleSave">保存</el-button>
     </template>
   </el-dialog>

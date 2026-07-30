@@ -12,6 +12,7 @@ import { ProjectError } from './project.js'
 import {
   mysqlDatabaseToPayload,
   readMysqlLibrary,
+  readMysqlTableSchema,
   runMysqlQuery,
 } from './mysql.js'
 import {
@@ -19,6 +20,7 @@ import {
   readServiceProcessors,
 } from './backend-services.js'
 import { readDataTypeLibrary } from './data-types.js'
+import { camelToSnake, mapRowKeysToCamel } from '../utils/sql-naming.js'
 
 function findTypeDef(
   library: DataTypeLibrary,
@@ -111,7 +113,13 @@ function buildQuerySql(
   const cols =
     fields[0] === '*'
       ? '*'
-      : fields.map((f) => quoteIdent(f)).join(', ')
+      : fields
+          .map((f) => {
+            const col = camelToSnake(f)
+            if (col === f) return quoteIdent(f)
+            return `${quoteIdent(col)} AS ${quoteIdent(f)}`
+          })
+          .join(', ')
   const page = pickPageMeta(params, config.pageParam ?? '')
   const where = buildWhereClause(config.conditionGroups, params)
   let sql = `SELECT ${cols} FROM ${quoteIdent(table)}${where}`
@@ -137,10 +145,14 @@ function buildWhereClause(
   for (const group of groups) {
     const parts: string[] = []
     for (const cond of group.conditions ?? []) {
-      const colName =
+      const colNameRaw =
         cond.field === CUSTOM_CONDITION_FIELD || cond.field === ''
           ? cond.customField.trim()
           : cond.field.trim()
+      const colName =
+        cond.field === CUSTOM_CONDITION_FIELD || cond.field === ''
+          ? colNameRaw
+          : camelToSnake(colNameRaw)
       if (!colName || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(colName)) continue
       const col = quoteIdent(colName)
       const op = cond.op
@@ -350,7 +362,7 @@ function buildInsertSql(
   if (!list.length) {
     throw new ProjectError('请先配置插入字段映射', 400)
   }
-  const cols = list.map((m) => quoteIdent(m.field))
+  const cols = list.map((m) => quoteIdent(camelToSnake(m.field)))
   const values = list.map((m) => sqlLiteral(resolvePath(params, m.column)))
   return `INSERT INTO ${quoteIdent(table)} (${cols.join(', ')}) VALUES (${values.join(', ')})`
 }
@@ -365,6 +377,30 @@ function buildDeleteSql(
     throw new ProjectError('删除操作必须配置有效的查询条件', 400)
   }
   return `DELETE FROM ${quoteIdent(table)}${where}`
+}
+
+function buildUpdateSql(
+  table: string,
+  config: DataMethodConfig,
+  params: Record<string, unknown>,
+): string {
+  const list = activeInsertMappings(config.fieldMappings)
+  if (!list.length) {
+    throw new ProjectError('请先配置修改字段映射', 400)
+  }
+  const sets = list.map(
+    (m) =>
+      `${quoteIdent(camelToSnake(m.field))} = ${sqlLiteral(resolvePath(params, m.column))}`,
+  )
+  const where = buildWhereClause(config.conditionGroups, params)
+  if (!where) {
+    throw new ProjectError('修改操作必须配置有效的查询条件', 400)
+  }
+  return `UPDATE ${quoteIdent(table)} SET ${sets.join(', ')}${where}`
+}
+
+function isCustomWriteSql(sql: string): boolean {
+  return /^\s*(INSERT|UPDATE|DELETE|REPLACE)\b/i.test(sql)
 }
 
 function buildBatchInsertSql(
@@ -399,7 +435,7 @@ function buildBatchInsertSql(
     throw new ProjectError(`入参「${arrayName}」需为非空数组`, 400)
   }
 
-  const cols = list.map((m) => quoteIdent(m.field))
+  const cols = list.map((m) => quoteIdent(camelToSnake(m.field)))
   const valueRows = arr.map((item, index) => {
     if (item == null || typeof item !== 'object' || Array.isArray(item)) {
       throw new ProjectError(
@@ -579,19 +615,41 @@ export async function debugDataLayerMethod(payload: {
   const processors = await readServiceProcessors(projectPath, serviceId, 'data')
   const processor = processors.find((p) => p.id === processorId)
   if (!processor) throw new ProjectError('处理器不存在', 404)
-  const method = processor.methods.find((m) => m.id === methodId)
-  if (!method) throw new ProjectError('方法不存在', 404)
-
-  const config = method.dataConfig
-  if (config.source !== 'mysql') {
-    throw new ProjectError('当前仅支持 MySQL 调试', 400)
-  }
 
   const [services, mysqlLib, typeLib] = await Promise.all([
     readBackendServiceLibrary(projectPath),
     readMysqlLibrary(projectPath),
     readDataTypeLibrary(projectPath),
   ])
+
+  let method = processor.methods.find((m) => m.id === methodId) ?? null
+  if (!method) {
+    const entity = findTypeDef(typeLib, processor.entityRef)
+    const tableName =
+      entity?.tableName?.trim() || entity?.name?.trim() || ''
+    const schema = tableName
+      ? await readMysqlTableSchema(projectPath, tableName)
+      : null
+    const { buildPresetMethods, findMethodIncludingPresets } = await import(
+      '../utils/data-preset-methods.js'
+    )
+    const presets = buildPresetMethods({
+      entity,
+      columns: schema?.columns ?? [],
+      indexes: schema?.indexes ?? [],
+    })
+    method = findMethodIncludingPresets(processor.methods, methodId, presets)
+  }
+  if (!method) throw new ProjectError('方法不存在', 404)
+  if (method.disabled) {
+    throw new ProjectError('该方法不可用（未配置逻辑删除字段）', 400)
+  }
+
+  const config = method.dataConfig
+  if (config.source !== 'mysql') {
+    throw new ProjectError('当前仅支持 MySQL 调试', 400)
+  }
+
   const service = services.services.find((s) => s.id === serviceId)
   if (!service) throw new ProjectError('服务不存在', 404)
   const mysqlId = service.testMysqlId?.trim()
@@ -630,18 +688,22 @@ export async function debugDataLayerMethod(payload: {
   } else if (config.operation === 'delete') {
     sql = buildDeleteSql(table, config, params)
     isWrite = true
+  } else if (config.operation === 'update') {
+    sql = buildUpdateSql(table, config, params)
+    isWrite = true
   } else if (config.operation === 'custom') {
     if (!config.sql.trim()) throw new ProjectError('请先配置自定义 SQL', 400)
     sql = applyCustomSql(config.sql, params, table)
+    if (isCustomWriteSql(sql)) isWrite = true
   } else {
     throw new ProjectError(
-      `操作「${config.operation}」调试稍后实现，请先使用查询、插入、删除或自定义`,
+      `操作「${config.operation}」调试稍后实现，请先使用查询、插入、删除、修改或自定义`,
       400,
     )
   }
 
   // 写入默认走事务回滚；查询试运行无副作用，仍可包一层便于统一
-  const useDryRun = dryRun && (isWrite || config.operation === 'custom')
+  const useDryRun = dryRun && isWrite
   const connPayload = mysqlDatabaseToPayload(db)
   const exec = await runMysqlQuery(connPayload, sql, { dryRun: useDryRun })
 
@@ -666,7 +728,11 @@ export async function debugDataLayerMethod(payload: {
     let output: unknown = raw
     if (config.operation === 'batchInsert') {
       output = wrapBatchInsertOutput(method, insertIds, affectedRows)
-    } else if (config.operation === 'delete') {
+    } else if (
+      config.operation === 'delete' ||
+      config.operation === 'update' ||
+      (config.operation === 'custom' && insertId <= 0)
+    ) {
       if (method.output.type === 'string') {
         output = String(affectedRows)
       } else if (method.output.type === 'number') {
@@ -684,7 +750,10 @@ export async function debugDataLayerMethod(payload: {
     return { sql, raw, output, dryRun: useDryRun }
   }
 
-  const rows = exec.rows
+  const rows =
+    config.operation === 'query'
+      ? exec.rows.map((row) => mapRowKeysToCamel(row))
+      : exec.rows
   let total = rows.length
   if (config.operation === 'query' && paginated) {
     if (rows.length < pageSize) {

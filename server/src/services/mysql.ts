@@ -11,6 +11,7 @@ import {
   normalizeMysqlLibrary,
   type MysqlColumnDef,
   type MysqlConnectionPayload,
+  type MysqlIndexDef,
   type MysqlLibrary,
   type MysqlSshConfig,
   type MysqlTableDef,
@@ -44,6 +45,157 @@ function stripColumnMeta(col: MysqlColumnDef): MysqlColumnDef {
     defaultValue: col.defaultValue ?? '',
     comment: col.comment ?? '',
     ...(col.resource ? { resource: true } : {}),
+    ...(col.logicDelete ? { logicDelete: true } : {}),
+  }
+}
+
+function stripIndexMeta(idx: MysqlIndexDef): MysqlIndexDef {
+  return {
+    name: idx.name,
+    columns: [...idx.columns],
+    remark: idx.remark ?? '',
+  }
+}
+
+/** 是否可用于逻辑删除的数字列类型 */
+export function isMysqlNumericColumnType(mysqlType: string): boolean {
+  const t = mysqlType.trim().toLowerCase()
+  if (!t) return false
+  return (
+    /^(tiny|small|medium|big)?int\b/.test(t) ||
+    /^integer\b/.test(t) ||
+    /^bigint\b/.test(t) ||
+    /^float\b/.test(t) ||
+    /^double\b/.test(t) ||
+    /^real\b/.test(t) ||
+    /^decimal\b/.test(t) ||
+    /^numeric\b/.test(t) ||
+    /^dec\b/.test(t) ||
+    /^bit\b/.test(t) ||
+    /^year\b/.test(t) ||
+    t === 'bool' ||
+    t === 'boolean'
+  )
+}
+
+export function secondaryIndexName(columnNames: string | string[]): string {
+  const cols = Array.isArray(columnNames) ? columnNames : [columnNames]
+  return `idx_${cols.join('_')}`
+}
+
+function normalizeIndexInput(input: unknown, index: number): MysqlIndexDef {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    throw new ProjectError(`第 ${index + 1} 个索引定义无效`, 400)
+  }
+  const row = input as Record<string, unknown>
+  const name = typeof row.name === 'string' ? row.name.trim() : ''
+  if (!name || !IDENT_RE.test(name)) {
+    throw new ProjectError(`第 ${index + 1} 个索引名不合法`, 400)
+  }
+  if (name.toUpperCase() === 'PRIMARY') {
+    throw new ProjectError('索引名不能为 PRIMARY', 400)
+  }
+  const colsRaw = Array.isArray(row.columns) ? row.columns : []
+  const columns = colsRaw
+    .map((c) => (typeof c === 'string' ? c.trim() : ''))
+    .filter(Boolean)
+  if (!columns.length) {
+    throw new ProjectError(`索引「${name}」请至少选择一列`, 400)
+  }
+  for (const col of columns) {
+    if (!IDENT_RE.test(col)) {
+      throw new ProjectError(`索引「${name}」含不合法列名「${col}」`, 400)
+    }
+  }
+  return {
+    name,
+    columns,
+    remark: typeof row.remark === 'string' ? row.remark : '',
+  }
+}
+
+function migrateIndexedColumnsToIndexes(
+  columns: MysqlColumnDef[],
+  indexes: MysqlIndexDef[],
+): { columns: MysqlColumnDef[]; indexes: MysqlIndexDef[] } {
+  const nextCols = columns.map((c) => {
+    const { indexed: _drop, ...rest } = c
+    return rest
+  })
+  const existingKeys = new Set(
+    indexes.map((i) => `${i.name}\0${i.columns.join(',')}`),
+  )
+  const nextIndexes = [...indexes]
+  for (const col of columns) {
+    if (!col.indexed || col.primaryKey) continue
+    const name = secondaryIndexName(col.name)
+    const key = `${name}\0${col.name}`
+    if (existingKeys.has(key)) continue
+    if (nextIndexes.some((i) => i.name === name)) continue
+    nextIndexes.push({ name, columns: [col.name], remark: '' })
+    existingKeys.add(key)
+  }
+  return { columns: nextCols, indexes: nextIndexes }
+}
+
+function assertColumnFlags(
+  columns: MysqlColumnDef[],
+  indexes: MysqlIndexDef[] = [],
+): void {
+  const indexedColNames = new Set(indexes.flatMap((i) => i.columns))
+  let logicDeleteCount = 0
+  for (const col of columns) {
+    if (col.primaryKey && col.logicDelete) {
+      throw new ProjectError(`列「${col.name}」是主键，不能设为逻辑删除`, 400)
+    }
+    if (col.logicDelete) {
+      logicDeleteCount += 1
+      if (col.name.toLowerCase() === 'id') {
+        throw new ProjectError('列「id」不能设为逻辑删除', 400)
+      }
+      if (indexedColNames.has(col.name)) {
+        throw new ProjectError(
+          `列「${col.name}」已在索引中，不能设为逻辑删除`,
+          400,
+        )
+      }
+      if (!isMysqlNumericColumnType(col.type)) {
+        throw new ProjectError(
+          `列「${col.name}」非数字类型，不能设为逻辑删除`,
+          400,
+        )
+      }
+    }
+  }
+  if (logicDeleteCount > 1) {
+    throw new ProjectError('一张表只能有一列逻辑删除', 400)
+  }
+
+  const colNames = new Set(columns.map((c) => c.name))
+  const indexNames = new Set<string>()
+  for (const idx of indexes) {
+    if (indexNames.has(idx.name)) {
+      throw new ProjectError(`索引名重复：${idx.name}`, 400)
+    }
+    indexNames.add(idx.name)
+    for (const c of idx.columns) {
+      if (!colNames.has(c)) {
+        throw new ProjectError(`索引「${idx.name}」引用了不存在的列「${c}」`, 400)
+      }
+      const col = columns.find((x) => x.name === c)
+      if (col?.primaryKey) {
+        throw new ProjectError(
+          `索引「${idx.name}」不能包含主键列「${c}」`,
+          400,
+        )
+      }
+      if (col?.logicDelete) {
+        throw new ProjectError(
+          `索引「${idx.name}」不能包含逻辑删除列「${c}」`,
+          400,
+        )
+      }
+    }
   }
 }
 
@@ -71,18 +223,38 @@ export function mysqlSchemasStructurallyEqual(
   return true
 }
 
+/**
+ * 合并本地元数据（resource / logicDelete）到远程列。
+ * indexed 已迁移到表级 indexes，不再合并到列上。
+ */
 export function mergeMysqlResourceFlags(
   remote: MysqlColumnDef[],
   local: MysqlColumnDef[] | null | undefined,
 ): MysqlColumnDef[] {
   if (!local?.length) {
-    return remote.map((c) => ({ ...c, resource: false }))
+    return remote.map((c) => ({
+      ...c,
+      resource: false,
+      logicDelete: false,
+    }))
   }
-  const byName = new Map(local.map((c) => [c.name, Boolean(c.resource)]))
-  return remote.map((c) => ({
-    ...c,
-    resource: byName.get(c.name) ?? false,
-  }))
+  const byName = new Map(
+    local.map((c) => [
+      c.name,
+      {
+        resource: Boolean(c.resource),
+        logicDelete: Boolean(c.logicDelete),
+      },
+    ]),
+  )
+  return remote.map((c) => {
+    const meta = byName.get(c.name)
+    return {
+      ...c,
+      resource: meta?.resource ?? false,
+      logicDelete: meta?.logicDelete ?? false,
+    }
+  })
 }
 
 function normalizeSchemaFile(
@@ -113,12 +285,35 @@ function normalizeSchemaFile(
       defaultValue: typeof row.defaultValue === 'string' ? row.defaultValue : '',
       comment: typeof row.comment === 'string' ? row.comment : '',
       ...(row.resource ? { resource: true } : {}),
+      ...(row.indexed ? { indexed: true } : {}),
+      ...(row.logicDelete ? { logicDelete: true } : {}),
     })
   }
+  const indexesRaw = Array.isArray(raw.indexes) ? raw.indexes : []
+  const indexes: MysqlIndexDef[] = []
+  for (const item of indexesRaw) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) continue
+    const row = item as Record<string, unknown>
+    const indexName = typeof row.name === 'string' ? row.name.trim() : ''
+    if (!indexName || !IDENT_RE.test(indexName)) continue
+    const cols = Array.isArray(row.columns)
+      ? row.columns
+          .map((c) => (typeof c === 'string' ? c.trim() : ''))
+          .filter((c) => IDENT_RE.test(c))
+      : []
+    if (!cols.length) continue
+    indexes.push({
+      name: indexName,
+      columns: cols,
+      remark: typeof row.remark === 'string' ? row.remark : '',
+    })
+  }
+  const migrated = migrateIndexedColumnsToIndexes(columns, indexes)
   return {
     name,
     remark: typeof raw.remark === 'string' ? raw.remark : '',
-    columns,
+    columns: migrated.columns,
+    indexes: migrated.indexes,
     syncedAt:
       raw.syncedAt == null || raw.syncedAt === ''
         ? null
@@ -155,16 +350,22 @@ export async function writeMysqlTableSchema(
   schema: {
     remark?: string
     columns: MysqlColumnDef[]
+    indexes?: MysqlIndexDef[]
   },
 ): Promise<MysqlTableSchemaFile> {
   if (!IDENT_RE.test(tableName)) {
     throw new ProjectError('表名不合法', 400)
   }
   await ensureMysqlSchemaDir(projectPath)
+  const migrated = migrateIndexedColumnsToIndexes(
+    schema.columns,
+    schema.indexes ?? [],
+  )
   const file: MysqlTableSchemaFile = {
     name: tableName,
     remark: schema.remark ?? '',
-    columns: schema.columns.map(stripColumnMeta),
+    columns: migrated.columns.map(stripColumnMeta),
+    indexes: migrated.indexes.map(stripIndexMeta),
     syncedAt: Date.now(),
   }
   try {
@@ -504,6 +705,7 @@ function normalizeColumnInput(input: unknown, index: number): MysqlColumnDef {
     defaultValue: typeof row.defaultValue === 'string' ? row.defaultValue : '',
     comment: typeof row.comment === 'string' ? row.comment : '',
     ...(row.resource ? { resource: true } : {}),
+    ...(row.logicDelete ? { logicDelete: true } : {}),
     originalName,
   }
 }
@@ -529,10 +731,14 @@ function normalizeTableDef(input: unknown): MysqlTableDef {
     }
     names.add(col.name)
   }
+  const indexesRaw = Array.isArray(row.indexes) ? row.indexes : []
+  const indexes = indexesRaw.map((c, i) => normalizeIndexInput(c, i))
+  const migrated = migrateIndexedColumnsToIndexes(columns, indexes)
   return {
     name,
     remark: typeof row.remark === 'string' ? row.remark : '',
-    columns,
+    columns: migrated.columns,
+    indexes: migrated.indexes,
   }
 }
 
@@ -639,11 +845,37 @@ export async function getMysqlTableColumns(
 
 export interface MysqlTableColumnsResult {
   columns: MysqlColumnDef[]
+  indexes: MysqlIndexDef[]
   conflict: boolean
   local: MysqlColumnDef[] | null
   remote: MysqlColumnDef[]
   localRemark: string
   remoteRemark: string
+}
+
+function mergeIndexes(
+  remote: MysqlIndexDef[],
+  local: MysqlIndexDef[] | null | undefined,
+): MysqlIndexDef[] {
+  if (!local?.length) {
+    return remote.map((i) => ({ ...i, remark: i.remark || '' }))
+  }
+  const byName = new Map(local.map((i) => [i.name, i]))
+  const result: MysqlIndexDef[] = remote.map((i) => ({
+    ...i,
+    remark: byName.get(i.name)?.remark ?? i.remark ?? '',
+  }))
+  const seen = new Set(result.map((i) => i.name))
+  for (const loc of local) {
+    if (seen.has(loc.name)) continue
+    result.push({
+      name: loc.name,
+      columns: [...loc.columns],
+      remark: loc.remark || '',
+    })
+    seen.add(loc.name)
+  }
+  return result
 }
 
 /** 拉取远程列并与本地 mysql/{table}.json 比对；冲突时不自动合并 */
@@ -653,13 +885,23 @@ export async function getMysqlTableColumnsWithSchema(
   tableName: string,
 ): Promise<MysqlTableColumnsResult> {
   const remote = await getMysqlTableColumns(payload, tableName)
+  const remoteIndexes = await withMysqlConnection(payload, async (connection) => {
+    await useDatabase(connection, payload.database)
+    return listSecondaryIndexes(connection, tableName)
+  })
   const localFile = projectPath.trim()
     ? await readMysqlTableSchema(projectPath, tableName)
     : null
   const local = localFile?.columns ?? null
+  const indexes = mergeIndexes(remoteIndexes, localFile?.indexes)
   if (!local) {
     return {
-      columns: remote.map((c) => ({ ...c, resource: false })),
+      columns: remote.map((c) => ({
+        ...c,
+        resource: false,
+        logicDelete: false,
+      })),
+      indexes,
       conflict: false,
       local: null,
       remote,
@@ -670,6 +912,7 @@ export async function getMysqlTableColumnsWithSchema(
   if (mysqlSchemasStructurallyEqual(local, remote)) {
     return {
       columns: mergeMysqlResourceFlags(remote, local),
+      indexes,
       conflict: false,
       local,
       remote,
@@ -678,7 +921,12 @@ export async function getMysqlTableColumnsWithSchema(
     }
   }
   return {
-    columns: remote.map((c) => ({ ...c, resource: false })),
+    columns: remote.map((c) => ({
+      ...c,
+      resource: false,
+      logicDelete: false,
+    })),
+    indexes,
     conflict: true,
     local,
     remote,
@@ -699,14 +947,21 @@ export async function resolveMysqlTableSchemaConflict(
   }
   if (adopt === 'remote') {
     const remote = await getMysqlTableColumns(payload, tableName)
+    const remoteIndexes = await withMysqlConnection(payload, async (connection) => {
+      await useDatabase(connection, payload.database)
+      return listSecondaryIndexes(connection, tableName)
+    })
     const localFile = await readMysqlTableSchema(projectPath, tableName)
     const columns = mergeMysqlResourceFlags(remote, localFile?.columns)
+    const indexes = mergeIndexes(remoteIndexes, localFile?.indexes)
     await writeMysqlTableSchema(projectPath, tableName, {
       remark: localFile?.remark ?? '',
       columns,
+      indexes,
     })
     return {
       columns,
+      indexes,
       conflict: false,
       local: columns,
       remote,
@@ -719,15 +974,19 @@ export async function resolveMysqlTableSchemaConflict(
   if (!localFile?.columns.length) {
     throw new ProjectError('本地无表结构可采纳', 400)
   }
-  await updateMysqlTableSchema(payload, tableName, localFile.columns)
-  await writeMysqlTableSchema(projectPath, tableName, {
-    remark: localFile.remark,
-    columns: localFile.columns,
-  })
+  await updateMysqlTableSchema(
+    payload,
+    tableName,
+    localFile.columns,
+    projectPath,
+    localFile.remark,
+    localFile.indexes,
+  )
   const remote = await getMysqlTableColumns(payload, tableName)
   const columns = mergeMysqlResourceFlags(remote, localFile.columns)
   return {
     columns,
+    indexes: localFile.indexes ?? [],
     conflict: false,
     local: localFile.columns,
     remote,
@@ -753,16 +1012,24 @@ export async function createMysqlTable(
   if (table.columns.filter((c) => c.autoIncrement).length > 1) {
     throw new ProjectError('一张表只能有一列自增', 400)
   }
+  const indexes = table.indexes ?? []
+  assertColumnFlags(table.columns, indexes)
   const tables = await withMysqlConnection(payload, async (connection) => {
     await useDatabase(connection, payload.database)
     const colSql = table.columns.map((c) => columnSql(c)).join(',\n  ')
     const pkCols = table.columns.filter((c) => c.primaryKey).map((c) => quoteIdent(c.name))
     const pkSql = pkCols.length ? `,\n  PRIMARY KEY (${pkCols.join(', ')})` : ''
+    const indexSql = indexes
+      .map((idx) => {
+        const cols = idx.columns.map((c) => quoteIdent(c)).join(', ')
+        return `,\n  KEY ${quoteIdent(idx.name)} (${cols})`
+      })
+      .join('')
     const commentSql = table.remark
       ? ` COMMENT='${escapeString(table.remark)}'`
       : ''
     await connection.query(
-      `CREATE TABLE ${quoteIdent(table.name)} (\n  ${colSql}${pkSql}\n) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4${commentSql}`,
+      `CREATE TABLE ${quoteIdent(table.name)} (\n  ${colSql}${pkSql}${indexSql}\n) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4${commentSql}`,
     )
     return listTables(connection, payload.database)
   })
@@ -770,6 +1037,7 @@ export async function createMysqlTable(
     await writeMysqlTableSchema(projectPath, table.name, {
       remark: table.remark,
       columns: table.columns,
+      indexes,
     })
   }
   return tables
@@ -823,6 +1091,7 @@ export async function updateMysqlTableSchema(
   columnsInput: unknown,
   projectPath?: string,
   remark = '',
+  indexesInput?: unknown,
 ): Promise<MysqlTableInfo[]> {
   if (!IDENT_RE.test(tableName)) {
     throw new ProjectError('表名不合法', 400)
@@ -850,6 +1119,10 @@ export async function updateMysqlTableSchema(
   if (autoCount > 1) {
     throw new ProjectError('一张表只能有一列自增', 400)
   }
+  const indexesRaw = Array.isArray(indexesInput) ? indexesInput : []
+  const indexes = indexesRaw.map((c, i) => normalizeIndexInput(c, i))
+  const migrated = migrateIndexedColumnsToIndexes(columns, indexes)
+  assertColumnFlags(migrated.columns, migrated.indexes)
 
   const tables = await withMysqlConnection(payload, async (connection) => {
     await useDatabase(connection, payload.database)
@@ -859,7 +1132,7 @@ export async function updateMysqlTableSchema(
     const existingByName = new Map(existing.map((c) => [c.name, c]))
 
     const nextOriginals = new Set(
-      columns
+      migrated.columns
         .map((c) => c.originalName || c.name)
         .filter((n) => existingNames.has(n)),
     )
@@ -886,7 +1159,7 @@ export async function updateMysqlTableSchema(
     }
 
     // 3) 增改列（暂不带 AUTO_INCREMENT）
-    for (const col of columns) {
+    for (const col of migrated.columns) {
       const from =
         col.originalName && existingNames.has(col.originalName)
           ? col.originalName
@@ -909,7 +1182,6 @@ export async function updateMysqlTableSchema(
         )
       } else {
         const prev = existingByName.get(from)
-        // 类型/可空/默认/备注有变化，或此前有自增（已在步骤1去掉）时再 MODIFY
         const needModify =
           !prev ||
           prev.type !== col.type ||
@@ -939,7 +1211,9 @@ export async function updateMysqlTableSchema(
         `ALTER TABLE ${quoteIdent(tableName)} DROP PRIMARY KEY`,
       )
     }
-    const pkCols = columns.filter((c) => c.primaryKey).map((c) => quoteIdent(c.name))
+    const pkCols = migrated.columns
+      .filter((c) => c.primaryKey)
+      .map((c) => quoteIdent(c.name))
     if (pkCols.length) {
       await connection.query(
         `ALTER TABLE ${quoteIdent(tableName)} ADD PRIMARY KEY (${pkCols.join(', ')})`,
@@ -947,7 +1221,7 @@ export async function updateMysqlTableSchema(
     }
 
     // 5) 主键就绪后再加 AUTO_INCREMENT
-    for (const col of columns) {
+    for (const col of migrated.columns) {
       if (!col.autoIncrement) continue
       await connection.query(
         `ALTER TABLE ${quoteIdent(tableName)} MODIFY COLUMN ${columnSql(col, {
@@ -956,16 +1230,90 @@ export async function updateMysqlTableSchema(
       )
     }
 
+    // 6) 同步二级索引
+    await syncSecondaryIndexes(connection, tableName, migrated.indexes)
+
     return listTables(connection, payload.database)
   })
 
   if (projectPath?.trim()) {
     await writeMysqlTableSchema(projectPath, tableName, {
       remark,
-      columns,
+      columns: migrated.columns,
+      indexes: migrated.indexes,
     })
   }
   return tables
+}
+
+/**
+ * 读取表上全部非 PRIMARY 二级索引
+ */
+async function listSecondaryIndexes(
+  connection: mysql.Connection,
+  tableName: string,
+): Promise<MysqlIndexDef[]> {
+  const [rows] = await connection.query(
+    `SELECT INDEX_NAME AS indexName,
+            COLUMN_NAME AS columnName,
+            SEQ_IN_INDEX AS seqInIndex
+     FROM information_schema.STATISTICS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?
+       AND INDEX_NAME <> 'PRIMARY'
+     ORDER BY INDEX_NAME, SEQ_IN_INDEX`,
+    [tableName],
+  )
+  const list = Array.isArray(rows) ? (rows as any[]) : []
+  const byIndex = new Map<string, { seq: number; column: string }[]>()
+  for (const row of list) {
+    const indexName = String(row.indexName ?? '')
+    const column = String(row.columnName ?? '')
+    if (!indexName || !column || !IDENT_RE.test(column)) continue
+    const bucket = byIndex.get(indexName) ?? []
+    bucket.push({ seq: Number(row.seqInIndex) || 0, column })
+    byIndex.set(indexName, bucket)
+  }
+  const result: MysqlIndexDef[] = []
+  for (const [indexName, cols] of byIndex) {
+    const ordered = [...cols]
+      .sort((a, b) => a.seq - b.seq)
+      .map((c) => c.column)
+    if (!ordered.length) continue
+    result.push({ name: indexName, columns: ordered, remark: '' })
+  }
+  return result
+}
+
+async function syncSecondaryIndexes(
+  connection: mysql.Connection,
+  tableName: string,
+  indexes: MysqlIndexDef[],
+): Promise<void> {
+  const existing = await listSecondaryIndexes(connection, tableName)
+  const wantByName = new Map(indexes.map((i) => [i.name, i]))
+  const existingByName = new Map(existing.map((i) => [i.name, i]))
+
+  for (const old of existing) {
+    const want = wantByName.get(old.name)
+    if (
+      !want ||
+      want.columns.join('\0') !== old.columns.join('\0')
+    ) {
+      await connection.query(
+        `ALTER TABLE ${quoteIdent(tableName)} DROP INDEX ${quoteIdent(old.name)}`,
+      )
+    }
+  }
+
+  const afterDrop = await listSecondaryIndexes(connection, tableName)
+  const afterNames = new Set(afterDrop.map((i) => i.name))
+  for (const idx of indexes) {
+    if (afterNames.has(idx.name)) continue
+    const cols = idx.columns.map((c) => quoteIdent(c)).join(', ')
+    await connection.query(
+      `ALTER TABLE ${quoteIdent(tableName)} ADD INDEX ${quoteIdent(idx.name)} (${cols})`,
+    )
+  }
 }
 
 async function getColumnsOnConnection(
@@ -1185,7 +1533,11 @@ export async function listMysqlTableRows(
       local && !mysqlSchemasStructurallyEqual(local, remote),
     )
     const columns = conflict
-      ? remote.map((c) => ({ ...c, resource: false }))
+      ? remote.map((c) => ({
+          ...c,
+          resource: false,
+          logicDelete: false,
+        }))
       : mergeMysqlResourceFlags(remote, local)
 
     const unique = await resolveUniqueKeyColumns(connection, tableName)

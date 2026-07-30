@@ -766,7 +766,7 @@ onBeforeUnmount(() => {
             trigger="contextmenu"
             class="ctrl-dropdown"
             @command="
-              (cmd) =>
+              (cmd: string) =>
                 cmd === 'edit'
                   ? openEditDialog(ctrl)
                   : void removeController(ctrl)
@@ -813,9 +813,10 @@ onBeforeUnmount(() => {
             empty-text="暂无 API，点击顶部创建"
             highlight-current-row
             :row-class-name="
-              ({ row }) => (row.id === selectedApiId ? 'is-selected-row' : '')
+              ({ row }: { row: ServiceApi }) =>
+                row.id === selectedApiId ? 'is-selected-row' : ''
             "
-            @row-click="(row) => (selectedApiId = (row as ServiceApi).id)"
+            @row-click="(row: ServiceApi) => (selectedApiId = row.id)"
           >
             <el-table-column label="名称" min-width="100">
               <template #default="{ row }">
@@ -941,7 +942,9 @@ onBeforeUnmount(() => {
       width="420px"
       destroy-on-close
       append-to-body
-    >
+    :close-on-click-modal="false"
+    :close-on-press-escape="false"
+  >
       <el-form label-width="64px" @submit.prevent="submitDialog">
         <el-form-item label="名称">
           <el-input
@@ -969,7 +972,6 @@ onBeforeUnmount(() => {
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="dialogVisible = false">取消</el-button>
         <el-button type="primary" @click="submitDialog">确定</el-button>
       </template>
     </el-dialog>

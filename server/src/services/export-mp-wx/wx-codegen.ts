@@ -139,6 +139,7 @@ const LAYOUT_ATTR_KEYS = new Set([
   'borderBottomLeftRadius',
   'borderBottomRightRadius',
   'zIndex',
+  'contentShadow',
   'rotateX',
   'rotateY',
   'rotateZ',
@@ -407,6 +408,10 @@ function buildEventHandlerPrelude(
     lines.push(`      var patch = {}`)
     lines.push(`      patch[prop] = value`)
     lines.push(`      that.setData(patch)`)
+    // 滚动/触摸高频：不在 handler 末尾全量重算；仅在 setData 真正写入后重算依赖字段
+    lines.push(
+      `      if (typeof that.__recomputeComputed === 'function') that.__recomputeComputed()`,
+    )
     lines.push(`    }`)
   } else {
     lines.push(`    var setData = function (prop, value) {`)
@@ -1357,19 +1362,21 @@ function attrLayout(
     // 勿再写 border-radius 简写，否则会盖掉分角
     for (const [key, prefix, prop] of cornerKeys) {
       const raw = attrs[key]?.trim()
-      let n: number | null = null
+      let n = 0
       if (raw && raw !== 'null' && !isBinding(raw)) {
         const v = Number(raw.replace(/px$/i, ''))
         if (Number.isFinite(v)) n = v
       } else if (uniform != null) {
         n = uniform
-      } else {
-        n = 0
       }
       pushArb(prefix, prop, pxToVw(n, designWidth))
     }
   } else if (uniform != null) {
     pushArb('rounded', 'border-radius', pxToVw(uniform, designWidth))
+  }
+  const contentShadow = attrs.contentShadow?.trim()
+  if (contentShadow && contentShadow !== 'null' && !isBinding(contentShadow)) {
+    parts.push(`box-shadow:${contentShadow}`)
   }
   const textColorRaw = attrs.textColor?.trim()
   const colorRaw = attrs.color?.trim()
@@ -1438,12 +1445,18 @@ function attrLayout(
       if (isTrueAttr(attrs.layout_alignParentTop)) pushKnown('top-0')
       if (isTrueAttr(attrs.layout_alignParentBottom)) pushKnown('bottom-0')
       if (isTrueAttr(attrs.layout_centerHorizontal)) {
-        pushKnown('left-1/2')
-        centerTranslate = 'x'
+        // layout_marginLeft/Right 会写死 left/right，勿再叠 translateX
+        if (!attrs.layout_marginLeft?.trim() && !attrs.layout_marginRight?.trim()) {
+          pushKnown('left-1/2')
+          centerTranslate = 'x'
+        }
       }
       if (isTrueAttr(attrs.layout_centerVertical)) {
-        pushKnown('top-1/2')
-        centerTranslate = centerTranslate === 'x' ? 'xy' : 'y'
+        // layout_marginTop/Bottom 会写死 top/bottom；若仍保留 -translate-y-1/2 会整体上移半高
+        if (!attrs.layout_marginTop?.trim() && !attrs.layout_marginBottom?.trim()) {
+          pushKnown('top-1/2')
+          centerTranslate = centerTranslate === 'x' ? 'xy' : 'y'
+        }
       }
     }
   }
@@ -1970,12 +1983,13 @@ export function renderNode(node: XmlNode, ctx: RenderCtx): string {
       if (shouldSkipComponentAttr(key, value, config)) continue
       const propDef = config?.props.find((p) => p.name === key)
 
+      const wxmlProp = propDef ? toWxmlPropName(key) : key
       if (propDef?.type === 'api' || parseApiPropBinding(value)) {
         const binding = ctx.resolveApi(value)
         if (!binding) continue
         const dataKey = `__api_${key}_${ctx.apiDataSeq.n++}`
         ctx.apiData[dataKey] = binding
-        propAttrs.push(`${key}="{{${dataKey}}}"`)
+        propAttrs.push(`${wxmlProp}="{{${dataKey}}}"`)
         continue
       }
 
@@ -1988,7 +2002,7 @@ export function renderNode(node: XmlNode, ctx: RenderCtx): string {
         }
         const expr = normalizeBindingOperators(whole)
         if (!isWxmlComponentPropExpr(expr)) continue
-        propAttrs.push(`${key}="{{${normalizeWxmlPropExpr(expr)}}}"`)
+        propAttrs.push(`${wxmlProp}="{{${normalizeWxmlPropExpr(expr)}}}"`)
         if (
           ctx.kind === 'page' &&
           propDef?.twoWay &&
@@ -2004,9 +2018,9 @@ export function renderNode(node: XmlNode, ctx: RenderCtx): string {
         }
       } else if (propDef?.type === 'boolean') {
         const b = parseBoolAttr(value, false)
-        propAttrs.push(`${key}="{{${b}}}"`)
+        propAttrs.push(`${wxmlProp}="{{${b}}}"`)
       } else if (value != null && value !== '') {
-        propAttrs.push(`${key}="${escapeXml(value)}"`)
+        propAttrs.push(`${wxmlProp}="${escapeXml(value)}"`)
       }
     }
     for (const evt of config?.events ?? []) {
@@ -2070,6 +2084,16 @@ function toComponentTag(componentId: string): string {
     .replace(/[_\s]+/g, '-')
     .toLowerCase()
   return kebab.includes('-') ? kebab : `c-${kebab}`
+}
+
+/** properties 用驼峰；wxml 传参须连字符（官方约定），否则布尔默认值不会被覆盖 */
+function toWxmlPropName(propName: string): string {
+  const name = propName.trim()
+  if (!name) return name
+  return name
+    .replace(/([a-z0-9])([A-Z])/g, '$1-$2')
+    .replace(/[_\s]+/g, '-')
+    .toLowerCase()
 }
 
 function renderWidget(
@@ -2361,6 +2385,15 @@ function renderWidget(
       ...dimClasses,
       ...ctx.classRegistry.useMany(['inline-flex', 'shrink-0']),
     ]
+    const hasRadius =
+      Boolean(attrs.borderRadius?.trim()) ||
+      Boolean(attrs.borderTopLeftRadius?.trim()) ||
+      Boolean(attrs.borderTopRightRadius?.trim()) ||
+      Boolean(attrs.borderBottomRightRadius?.trim()) ||
+      Boolean(attrs.borderBottomLeftRadius?.trim())
+    if (hasRadius) {
+      wrapClasses.push(ctx.classRegistry.use('overflow-hidden'))
+    }
     const wrapStyle = mergeStyle(
       wrapLayout.style,
       dimStyle,

@@ -18,7 +18,7 @@ function shortLabel(label: string) {
 </script>
 
 <template>
-  <el-dialog v-model="visible" title="添加控件" width="560px" destroy-on-close>
+  <el-dialog v-model="visible" title="添加控件" width="560px" destroy-on-close :close-on-click-modal="false" :close-on-press-escape="false">
     <div class="widget-options">
       <button
         v-for="opt in WIDGET_OPTIONS"

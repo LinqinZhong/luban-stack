@@ -126,6 +126,282 @@
           }
         ]
       }
+    },
+    {
+      "id": "type_ms6go08q_0dezt9",
+      "name": "GoodsRemarkItem",
+      "kind": "interface",
+      "remark": "商品评价",
+      "tableName": "goods_remark",
+      "category": "entity",
+      "generics": [],
+      "fields": [
+        {
+          "id": "field_ms6gr0en_7n629o",
+          "name": "id",
+          "type": {
+            "intersections": [
+              {
+                "alternatives": [
+                  {
+                    "kind": "number"
+                  }
+                ]
+              }
+            ]
+          },
+          "remark": "ID",
+          "optional": false
+        },
+        {
+          "id": "field_ms6gr0en_i8f1s0",
+          "name": "goodsId",
+          "type": {
+            "intersections": [
+              {
+                "alternatives": [
+                  {
+                    "kind": "number"
+                  }
+                ]
+              }
+            ]
+          },
+          "remark": "商品ID",
+          "optional": true
+        },
+        {
+          "id": "field_ms6gr0en_rdlzzj",
+          "name": "content",
+          "type": {
+            "intersections": [
+              {
+                "alternatives": [
+                  {
+                    "kind": "string"
+                  }
+                ]
+              }
+            ]
+          },
+          "remark": "内容",
+          "optional": true
+        },
+        {
+          "id": "field_ms6gr0en_05fadp",
+          "name": "score",
+          "type": {
+            "intersections": [
+              {
+                "alternatives": [
+                  {
+                    "kind": "boolean"
+                  }
+                ]
+              }
+            ]
+          },
+          "remark": "评分(0-10)",
+          "optional": true
+        },
+        {
+          "id": "field_ms6gr0en_n7wmjq",
+          "name": "userId",
+          "type": {
+            "intersections": [
+              {
+                "alternatives": [
+                  {
+                    "kind": "number"
+                  }
+                ]
+              }
+            ]
+          },
+          "remark": "用户ID",
+          "optional": true
+        },
+        {
+          "id": "field_ms6gs2uq_yb33ep",
+          "name": "images",
+          "type": {
+            "intersections": [
+              {
+                "alternatives": [
+                  {
+                    "kind": "array",
+                    "item": {
+                      "kind": "named",
+                      "ref": "type_common_URI"
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          "remark": "图片",
+          "optional": false
+        }
+      ],
+      "enumMembers": [],
+      "combination": {
+        "intersections": [
+          {
+            "alternatives": [
+              {
+                "kind": "string"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "type_ms6gqu8j_vm3j3p",
+      "name": "GoodsRemarkVo",
+      "kind": "interface",
+      "remark": "商品评价",
+      "tableName": "",
+      "category": "vo",
+      "generics": [],
+      "fields": [
+        {
+          "id": "field_ms6gu33z_5kwms3",
+          "name": "id",
+          "type": {
+            "intersections": [
+              {
+                "alternatives": [
+                  {
+                    "kind": "number"
+                  }
+                ]
+              }
+            ]
+          },
+          "remark": "ID",
+          "optional": false
+        },
+        {
+          "id": "field_ms6gu33z_r5on8d",
+          "name": "goodsId",
+          "type": {
+            "intersections": [
+              {
+                "alternatives": [
+                  {
+                    "kind": "number"
+                  }
+                ]
+              }
+            ]
+          },
+          "remark": "商品ID",
+          "optional": true
+        },
+        {
+          "id": "field_ms6gu33z_w67usv",
+          "name": "content",
+          "type": {
+            "intersections": [
+              {
+                "alternatives": [
+                  {
+                    "kind": "string"
+                  }
+                ]
+              }
+            ]
+          },
+          "remark": "内容",
+          "optional": true
+        },
+        {
+          "id": "field_ms6gu33z_jvv1q7",
+          "name": "score",
+          "type": {
+            "intersections": [
+              {
+                "alternatives": [
+                  {
+                    "kind": "boolean"
+                  }
+                ]
+              }
+            ]
+          },
+          "remark": "评分(0-10)",
+          "optional": true
+        },
+        {
+          "id": "field_ms6gu33z_zsz490",
+          "name": "userId",
+          "type": {
+            "intersections": [
+              {
+                "alternatives": [
+                  {
+                    "kind": "number"
+                  }
+                ]
+              }
+            ]
+          },
+          "remark": "用户ID",
+          "optional": true
+        },
+        {
+          "id": "field_ms6gu33z_ikf78u",
+          "name": "avatar",
+          "type": {
+            "intersections": [
+              {
+                "alternatives": [
+                  {
+                    "kind": "named",
+                    "ref": "type_common_URI"
+                  }
+                ]
+              }
+            ]
+          },
+          "remark": "用户头像",
+          "optional": true
+        },
+        {
+          "id": "field_ms6gu33z_smiood",
+          "name": "images",
+          "type": {
+            "intersections": [
+              {
+                "alternatives": [
+                  {
+                    "kind": "array",
+                    "item": {
+                      "kind": "named",
+                      "ref": "type_common_URI"
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          "remark": "图片",
+          "optional": false
+        }
+      ],
+      "enumMembers": [],
+      "combination": {
+        "intersections": [
+          {
+            "alternatives": [
+              {
+                "kind": "string"
+              }
+            ]
+          }
+        ]
+      }
     }
   ]
 }

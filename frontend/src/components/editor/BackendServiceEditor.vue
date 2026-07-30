@@ -61,6 +61,8 @@ function handleSave() {
     width="520px"
     destroy-on-close
     append-to-body
+    :close-on-click-modal="false"
+    :close-on-press-escape="false"
   >
     <div class="service-dialog-body">
       <section class="block">
@@ -115,7 +117,6 @@ function handleSave() {
       </section>
     </div>
     <template #footer>
-      <el-button @click="visible = false">取消</el-button>
       <el-button type="primary" @click="handleSave">保存</el-button>
     </template>
   </el-dialog>

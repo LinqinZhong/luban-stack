@@ -20,7 +20,6 @@ const buildingSchemeName = ref('')
 const schemeDialogVisible = ref(false)
 const buildSelectVisible = ref(false)
 const buildSchemeOptions = ref<Array<{ name: string; description: string }>>([])
-const settingsButtonRef = ref<{ open: (tab?: string) => void } | null>(null)
 
 const pageTitle = computed(() => {
   const name = projectStore.config?.name

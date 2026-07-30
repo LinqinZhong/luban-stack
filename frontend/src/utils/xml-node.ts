@@ -604,7 +604,7 @@ function pathIdForElement(el: Element): string {
       segments.unshift(`0:${current.tagName}`)
       break
     }
-    const parent = current.parentElement
+    const parent: Element | null = current.parentElement
     if (!parent) break
     const index = Array.from(parent.children).indexOf(current)
     segments.unshift(`${index}:${current.tagName}`)

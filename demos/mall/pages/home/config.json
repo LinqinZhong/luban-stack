@@ -4,7 +4,7 @@
   "statusBar": {
     "textStyle": "white",
     "backgroundColor": "#409eff",
-    "cover": true,
+    "cover": false,
     "navigationBar": false
   }
 }

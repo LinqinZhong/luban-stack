@@ -47,6 +47,7 @@ const LAYOUT_ATTRS = new Set([
   'borderWidth',
   'borderColor',
   'overflow',
+  'contentShadow',
   'layout_alignParentLeft',
   'layout_alignParentRight',
   'layout_alignParentTop',
@@ -412,10 +413,14 @@ function buildTwClasses(
     if (parseBool(attrs.layout_centerInParent)) {
       classes.push('left-1/2', 'top-1/2', '-translate-x-1/2', '-translate-y-1/2')
     } else {
-      if (parseBool(attrs.layout_centerHorizontal)) {
+      const hasMl = Boolean(attrs.layout_marginLeft?.trim())
+      const hasMr = Boolean(attrs.layout_marginRight?.trim())
+      const hasMt = Boolean(attrs.layout_marginTop?.trim())
+      const hasMb = Boolean(attrs.layout_marginBottom?.trim())
+      if (parseBool(attrs.layout_centerHorizontal) && !hasMl && !hasMr) {
         classes.push('left-1/2', '-translate-x-1/2')
       }
-      if (parseBool(attrs.layout_centerVertical)) {
+      if (parseBool(attrs.layout_centerVertical) && !hasMt && !hasMb) {
         classes.push('top-1/2', '-translate-y-1/2')
       }
     }
@@ -2325,10 +2330,22 @@ ${pad}</template>`
     const size = parseNumber(attrs.size) ?? 16
     const colorRes = resolveColorExpr('color', attrs.color, attrs, ctx, inRepeat, '#333')
     const events = collectInteractionEventAttrs(attrs, inRepeat, ctx)
+    const hasRadius =
+      Boolean(attrs.borderRadius?.trim()) ||
+      Boolean(attrs.borderTopLeftRadius?.trim()) ||
+      Boolean(attrs.borderTopRightRadius?.trim()) ||
+      Boolean(attrs.borderBottomRightRadius?.trim()) ||
+      Boolean(attrs.borderBottomLeftRadius?.trim())
     const tw = twWithRelative(
       attrs,
       parentTag,
-      ['inline-flex', 'items-center', 'justify-center', 'shrink-0'],
+      [
+        'inline-flex',
+        'items-center',
+        'justify-center',
+        'shrink-0',
+        hasRadius ? 'overflow-hidden' : '',
+      ].filter(Boolean),
       twOpts,
     )
     const nameAttr = isStaticBinding(iconRaw)
@@ -2337,6 +2354,13 @@ ${pad}</template>`
     const colorAttr = colorRes.static
       ? `color="${escapeHtmlAttr(colorRes.static)}"`
       : `:color="${colorRes.expr}"`
+    const shadow = attrs.contentShadow?.trim()
+    const styleEntries = [
+      ...rotateStyleEntries(attrs, ctx, inRepeat),
+      shadow && shadow !== 'null'
+        ? `boxShadow: ${JSON.stringify(shadow)}`
+        : '',
+    ]
     return formatVueElement({
       pad,
       tag: 'AppIcon',
@@ -2345,7 +2369,7 @@ ${pad}</template>`
         `:size="${size}"`,
         colorAttr,
         classAttr(tw),
-        styleAttr(rotateStyleEntries(attrs, ctx, inRepeat)),
+        styleAttr(styleEntries),
         ...visibilityAttrs(attrs, ctx, inRepeat),
         ...events,
       ],

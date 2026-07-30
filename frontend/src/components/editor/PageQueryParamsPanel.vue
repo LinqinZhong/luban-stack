@@ -165,6 +165,8 @@ function typeLabel(t: PageQueryParamDef['type']) {
       width="420px"
       append-to-body
       destroy-on-close
+      :close-on-click-modal="false"
+      :close-on-press-escape="false"
     >
       <el-form label-width="72px" @submit.prevent>
         <el-form-item label="名称" required>
@@ -208,7 +210,6 @@ function typeLabel(t: PageQueryParamDef['type']) {
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="dialogVisible = false">取消</el-button>
         <el-button
           type="primary"
           :disabled="!draft.name.trim() || existingNames.includes(draft.name.trim())"
@@ -291,3 +292,4 @@ function typeLabel(t: PageQueryParamDef['type']) {
   gap: 2px;
 }
 </style>
+

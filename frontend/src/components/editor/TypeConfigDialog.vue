@@ -313,6 +313,8 @@ function saveGenericConfig() {
     destroy-on-close
     append-to-body
     @update:model-value="emit('update:modelValue', $event)"
+    :close-on-click-modal="false"
+    :close-on-press-escape="false"
   >
     <fieldset class="readonly-fieldset" :disabled="readonly">
     <template v-if="draft?.kind === 'interface'">
@@ -472,7 +474,7 @@ function saveGenericConfig() {
     </fieldset>
 
     <template #footer>
-      <el-button @click="close">{{ readonly ? '关闭' : '取消' }}</el-button>
+      <el-button v-if="readonly" @click="close">关闭</el-button>
       <el-button v-if="!readonly" type="primary" @click="save">保存</el-button>
     </template>
   </el-dialog>
@@ -483,6 +485,8 @@ function saveGenericConfig() {
     width="680px"
     append-to-body
     destroy-on-close
+    :close-on-click-modal="false"
+    :close-on-press-escape="false"
   >
     <template v-if="genericDraft">
       <div class="generic-form">
@@ -529,9 +533,7 @@ function saveGenericConfig() {
       </div>
     </template>
     <template #footer>
-      <el-button @click="genericDialogVisible = false">
-        {{ readonly ? '关闭' : '取消' }}
-      </el-button>
+      <el-button v-if="readonly" @click="genericDialogVisible = false">关闭</el-button>
       <el-button v-if="!readonly" type="primary" @click="saveGenericConfig">
         确定
       </el-button>

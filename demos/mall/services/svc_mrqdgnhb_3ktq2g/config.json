@@ -1,7 +1,6 @@
 {
   "id": "svc_mrqdgnhb_3ktq2g",
   "name": "shop",
-  "port": 3000,
   "testMysqlId": "mysql_mrole022_bhoxp0",
   "productionMysqlId": ""
 }

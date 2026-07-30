@@ -38,8 +38,22 @@ export interface MysqlColumnDef {
   comment: string
   /** 是否资源外链列（存于 mysql/{table}.json，非 DDL） */
   resource?: boolean
+  /**
+   * @deprecated 已迁移到表级 indexes；读取旧数据时会转换
+   */
+  indexed?: boolean
+  /** 是否逻辑删除标记列（仅本地语义；列本身仍是普通数字列） */
+  logicDelete?: boolean
   /** 编辑时：原列名，用于 CHANGE COLUMN */
   originalName?: string
+}
+
+/** 二级索引（可多列；写 DDL + 本地元数据） */
+export interface MysqlIndexDef {
+  name: string
+  /** 列名，有序 */
+  columns: string[]
+  remark: string
 }
 
 /** 本地持久化的表结构（mysql/{tableName}.json） */
@@ -47,6 +61,7 @@ export interface MysqlTableSchemaFile {
   name: string
   remark: string
   columns: MysqlColumnDef[]
+  indexes: MysqlIndexDef[]
   syncedAt: number | null
 }
 
@@ -54,6 +69,7 @@ export interface MysqlTableDef {
   name: string
   remark: string
   columns: MysqlColumnDef[]
+  indexes?: MysqlIndexDef[]
 }
 
 export interface MysqlDatabaseConfig {

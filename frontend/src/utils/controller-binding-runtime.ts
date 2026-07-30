@@ -207,7 +207,7 @@ async function fetchApiData(
     },
     initialScope,
   )
-  const value = extractFlowReturnValue(flow, snap)
+  const value = extractFlowReturnValue(flow, snap, api.output)
   await applyPreviewApiLatency()
   return value
 }

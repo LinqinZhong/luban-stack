@@ -198,6 +198,8 @@ function handleSave() {
     destroy-on-close
     append-to-body
     @update:model-value="emit('update:modelValue', $event)"
+    :close-on-click-modal="false"
+    :close-on-press-escape="false"
   >
     <div class="mysql-form">
       <div class="form-item">
@@ -371,7 +373,6 @@ function handleSave() {
 
     <template #footer>
       <el-button :loading="testing" @click="handleTest">测试连接</el-button>
-      <el-button @click="close">取消</el-button>
       <el-button type="primary" :disabled="!testedOk" @click="handleSave">
         保存
       </el-button>

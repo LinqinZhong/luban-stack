@@ -16,7 +16,7 @@ import {
 } from '../../types/backend-services'
 import type { DataFieldType } from '../../types/page-data'
 import type { DataTypeLibrary } from '../../types/data-types'
-import DataFieldTypeTreeSelect from './DataFieldTypeTreeSelect.vue'
+import DataFieldTypeTreeSelect, { type TypeSelectPayload } from './DataFieldTypeTreeSelect.vue'
 import TypeGenericArgsDialog from './TypeGenericArgsDialog.vue'
 
 export type ServiceApiEditPayload = {
@@ -149,18 +149,8 @@ function updateInput(index: number, patch: Partial<ServiceApiParam>) {
   )
 }
 
-function handleInputTypeChange(
-  index: number,
-  payload: {
-    type: DataFieldType | 'void'
-    typeRef?: string
-    itemType?: DataFieldType
-    itemTypeRef?: string
-    itemItemType?: DataFieldType
-    itemItemTypeRef?: string
-  },
-) {
-  if (payload.type === 'void') return
+function handleInputTypeChange(index: number, payload: TypeSelectPayload) {
+  if (payload.type === 'void' || payload.type === 'generic') return
   const row = draftInputs.value[index]
   const prevRef = row?.typeRef ?? ''
   const typeRef = payload.typeRef ?? ''
@@ -187,15 +177,8 @@ function handleInputTypeChange(
   }
 }
 
-function handleOutputChange(payload: {
-  type: DataFieldType | 'void'
-  typeRef?: string
-  itemType?: DataFieldType
-  itemTypeRef?: string
-  itemItemType?: DataFieldType
-  itemItemTypeRef?: string
-}) {
-  if (payload.type === 'void') return
+function handleOutputChange(payload: TypeSelectPayload) {
+  if (payload.type === 'void' || payload.type === 'generic') return
   const prev = draftOutput.value
   const next: ProcessorTypeExpr = {
     ...createEmptyProcessorTypeExpr(payload.type),
@@ -328,6 +311,8 @@ function handleSave() {
     destroy-on-close
     append-to-body
     class="service-api-dialog"
+    :close-on-click-modal="false"
+    :close-on-press-escape="false"
   >
     <el-form
       class="api-form"
@@ -547,7 +532,6 @@ function handleSave() {
     </el-form>
 
     <template #footer>
-      <el-button @click="visible = false">取消</el-button>
       <el-button type="primary" @click="handleSave">保存</el-button>
     </template>
   </el-dialog>

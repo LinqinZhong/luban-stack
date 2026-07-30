@@ -479,7 +479,9 @@ async function saveIcon() {
       :title="editingId ? '编辑图标' : '添加图标'"
       width="560px"
       destroy-on-close
-    >
+    :close-on-click-modal="false"
+    :close-on-press-escape="false"
+  >
       <el-form label-position="top" size="default">
         <el-form-item label="图标 ID" required>
           <el-input
@@ -501,7 +503,6 @@ async function saveIcon() {
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="dialogVisible = false">取消</el-button>
         <el-button type="primary" :loading="saving" @click="saveIcon">
           保存
         </el-button>
@@ -514,7 +515,9 @@ async function saveIcon() {
       width="420px"
       destroy-on-close
       append-to-body
-    >
+    :close-on-click-modal="false"
+    :close-on-press-escape="false"
+  >
       <div v-loading="bindLoading" class="bind-form">
         <el-empty
           v-if="!projectPath"
@@ -562,7 +565,6 @@ async function saveIcon() {
         </el-form>
       </div>
       <template #footer>
-        <el-button @click="bindDialogVisible = false">取消</el-button>
         <el-button
           type="primary"
           :loading="bindBusy"

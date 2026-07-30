@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, inject, onBeforeUnmount, onMounted, provide, ref, shallowRef, watch, type CSSProperties } from 'vue'
+import { computed, inject, onBeforeUnmount, onMounted, provide, ref, shallowRef, watch, type ComputedRef, type CSSProperties } from 'vue'
 import type { IconLibrary } from '../../types/icon-library'
 import { findIcon, iconSymbolId } from '../../types/icon-library'
 import type { PageData } from '../../types/page-data'
@@ -766,6 +766,7 @@ const iconStyle = computed(() => {
   const size = iconSize.value
   const hasFixedW = width.value !== 'wrap_content'
   const hasFixedH = height.value !== 'wrap_content'
+  const shadow = attrs.value.contentShadow?.trim()
   return {
     ...layoutStyle.value,
     display: 'inline-flex',
@@ -773,10 +774,13 @@ const iconStyle = computed(() => {
     justifyContent: 'center',
     color: iconColor.value,
     fill: iconColor.value,
+    background: attrs.value.background || 'transparent',
     width: hasFixedW ? undefined : `${size}px`,
     height: hasFixedH ? undefined : `${size}px`,
     flexShrink: 0,
     lineHeight: 0,
+    ...(hasBorderRadius(attrs.value) ? { overflow: 'hidden' as const } : {}),
+    ...(shadow ? { boxShadow: shadow } : {}),
     ...rotateStyle(attrs.value),
   }
 })
@@ -1149,26 +1153,11 @@ function childRelativeStyle(child: XmlNode): CSSProperties {
   if (parseBool(a.layout_alignParentBottom)) {
     style.bottom = 0
   }
-  if (parseBool(a.layout_centerInParent)) {
-    style.left = '50%'
-    style.top = '50%'
-    style.transform = 'translate(-50%, -50%)'
-  } else {
-    if (parseBool(a.layout_centerHorizontal)) {
-      style.left = '50%'
-      style.transform = style.transform
-        ? `${style.transform} translateX(-50%)`
-        : 'translateX(-50%)'
-    }
-    if (parseBool(a.layout_centerVertical)) {
-      style.top = '50%'
-      style.transform = style.transform
-        ? `${style.transform} translateY(-50%)`
-        : 'translateY(-50%)'
-    }
-  }
-
   // layout_margin* 覆盖边缘；忽略空值与字面量 "null"（清空后偶发残留）
+  const hasLayoutMargin = (raw: string | undefined): boolean => {
+    const t = raw?.trim()
+    return Boolean(t && t !== 'null')
+  }
   const marginPx = (raw: string | undefined): number | null => {
     const t = raw?.trim()
     if (!t || t === 'null') return null
@@ -1179,6 +1168,37 @@ function childRelativeStyle(child: XmlNode): CSSProperties {
   const mt = marginPx(a.layout_marginTop)
   const mr = marginPx(a.layout_marginRight)
   const mb = marginPx(a.layout_marginBottom)
+  const hasMl = hasLayoutMargin(a.layout_marginLeft)
+  const hasMt = hasLayoutMargin(a.layout_marginTop)
+  const hasMr = hasLayoutMargin(a.layout_marginRight)
+  const hasMb = hasLayoutMargin(a.layout_marginBottom)
+
+  if (
+    parseBool(a.layout_centerInParent) &&
+    !hasMl &&
+    !hasMr &&
+    !hasMt &&
+    !hasMb
+  ) {
+    style.left = '50%'
+    style.top = '50%'
+    style.transform = 'translate(-50%, -50%)'
+  } else {
+    // 有 layout_margin*（含绑定）时不再叠居中 translate，否则会偏移半个自身尺寸
+    if (parseBool(a.layout_centerHorizontal) && !hasMl && !hasMr) {
+      style.left = '50%'
+      style.transform = style.transform
+        ? `${style.transform} translateX(-50%)`
+        : 'translateX(-50%)'
+    }
+    if (parseBool(a.layout_centerVertical) && !hasMt && !hasMb) {
+      style.top = '50%'
+      style.transform = style.transform
+        ? `${style.transform} translateY(-50%)`
+        : 'translateY(-50%)'
+    }
+  }
+
   if (ml != null) style.left = `${ml}px`
   if (mt != null) style.top = `${mt}px`
   if (mr != null) style.right = `${mr}px`
@@ -1537,6 +1557,14 @@ function forwardInteract(payload: PreviewInteractPayload) {
   emit('interact', payload)
 }
 
+/** Slot 投影内容上的事件：标记来自宿主，避免被外包 Component 抢走 setData 归属 */
+function forwardSlotInteract(payload: PreviewInteractPayload) {
+  emit('interact', {
+    ...payload,
+    fromSlotHost: true,
+  })
+}
+
 /** Component 子树交互：补上 emit 回写上下文后再向上抛（嵌套时挂 outer 链） */
 function forwardComponentInteract(payload: PreviewInteractPayload) {
   const componentId = props.node.attrs.componentId?.trim() || ''
@@ -1559,6 +1587,20 @@ function forwardComponentInteract(payload: PreviewInteractPayload) {
   ): NonNullable<PreviewInteractPayload['componentEmit']> {
     if (!inner.outer) return { ...inner, outer }
     return { ...inner, outer: appendOuter(inner.outer, outer) }
+  }
+
+  // 宿主 Slot 投影：仅当投影树内已有内层 Component 时挂 outer（供 emit）；
+  // 纯页面控件事件不要带上本组件 componentEmit，否则 setData 会写错数据池
+  if (payload.fromSlotHost) {
+    if (payload.componentEmit) {
+      emit('interact', {
+        ...payload,
+        componentEmit: appendOuter(payload.componentEmit, self),
+      })
+    } else {
+      emit('interact', payload)
+    }
+    return
   }
 
   const componentEmit = payload.componentEmit
@@ -1986,7 +2028,7 @@ onBeforeUnmount(() => {
         @hover="forwardHover"
         @open-repeat="forwardOpenRepeat"
         @open-event="forwardOpenEvent"
-        @interact="forwardInteract"
+        @interact="forwardSlotInteract"
         @add-window="forwardAddWindow"
       />
     </div>

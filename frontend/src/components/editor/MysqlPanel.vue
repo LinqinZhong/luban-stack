@@ -299,7 +299,7 @@ function formatTime(ts: number | null): string {
             :key="db.id"
             trigger="contextmenu"
             class="db-dropdown"
-            @command="(cmd) => handleDbMenuCommand(cmd as DbMenuCommand, db)"
+            @command="(cmd: string) => handleDbMenuCommand(cmd as DbMenuCommand, db)"
           >
             <li
               class="db-item"
@@ -431,6 +431,7 @@ function formatTime(ts: number | null): string {
       :connection="connectionPayload"
       :table="designingTable"
       :project-path="projectPath"
+      :type-library="typeLibrary"
       @saved="handleTableSaved"
     />
     <MysqlToTypeDialog

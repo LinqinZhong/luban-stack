@@ -2,10 +2,17 @@ import type {
   MethodFlow,
   FlowNode,
   ProcessorMethod,
+  ProcessorTypeExpr,
   ServiceProcessor,
 } from '../../../types/backend-services.js'
 import { safeIdent, slugify, toCamelCase } from './names.js'
 import { processorTypeExprToTs, type IdToName } from './emit-types.js'
+import {
+  PAGE_META_FIELDS,
+  PAGE_RECORDS_FIELD,
+  readPageMapFieldMappings,
+} from '../../../utils/page-map-flow.js'
+import { defaultEmptyReturnCode } from '../../../utils/empty-return-value.js'
 
 export interface FlowEmitContext {
   /** processorId → resource slug */
@@ -17,6 +24,8 @@ export interface FlowEmitContext {
   mode: 'service' | 'controller'
   idToName: IdToName
   methodById: Map<string, { processorId: string; method: ProcessorMethod }>
+  /** 当前正在导出的方法/API 出参类型（终止节点空返回时用） */
+  methodOutput?: ProcessorTypeExpr
 }
 
 function str(data: Record<string, unknown>, key: string): string {
@@ -136,8 +145,9 @@ function emitNodeBlock(
   }
 
   if (node.kind === 'end') {
-    const returnExpr = str(data, 'returnExpr').trim() || 'undefined'
-    return `${pad}return ${returnExpr}\n`
+    const returnExpr = str(data, 'returnExpr').trim()
+    const fallback = defaultEmptyReturnCode(ctx.methodOutput)
+    return `${pad}return ${returnExpr || fallback}\n`
   }
 
   if (node.kind === 'throw') {
@@ -215,6 +225,83 @@ function emitNodeBlock(
     const call = emitMethodCall(ctx, processorId, methodId, bindings)
     return (
       `${pad}const ${resultVar} = ${call}\n` +
+      emitNodeBlock(
+        flow,
+        pickDefaultNext(flow, node.id),
+        ctx,
+        level,
+        nextStack,
+      )
+    )
+  }
+
+  if (node.kind === 'pageMap') {
+    const sourceKind = str(data, 'sourceKind') === 'array' ? 'array' : 'page'
+    const sourcePath = str(data, 'sourcePath').trim()
+    const targetVarName = safeIdent(
+      str(data, 'targetVarName') || str(data, 'targetPath'),
+      '_pageTarget',
+    )
+    const mappings = readPageMapFieldMappings(data.fieldMappings)
+    const metaKeys = PAGE_META_FIELDS.map((k) => JSON.stringify(k)).join(', ')
+
+    let block =
+      `${pad}let ${targetVarName}: any;\n` +
+      `${pad}{\n` +
+      `${pad}  const _pageOut: Record<string, unknown> = {};\n`
+
+    if (sourceKind === 'page') {
+      block +=
+        `${pad}  const _srcPage = ${sourcePath || 'undefined'};\n` +
+        `${pad}  if (_srcPage && typeof _srcPage === 'object') {\n` +
+        `${pad}    for (const _k of [${metaKeys}] as const) {\n` +
+        `${pad}      if (_k in (_srcPage as object)) _pageOut[_k] = (_srcPage as Record<string, unknown>)[_k];\n` +
+        `${pad}    }\n` +
+        `${pad}  }\n` +
+        `${pad}  const _srcRecords = Array.isArray((_srcPage as Record<string, unknown>)?.${PAGE_RECORDS_FIELD}) ? ((_srcPage as Record<string, unknown>).${PAGE_RECORDS_FIELD} as unknown[]) : [];\n`
+    } else {
+      const currentExpr = str(data, 'currentExpr').trim() || 'undefined'
+      const pageSizeExpr = str(data, 'pageSizeExpr').trim() || 'undefined'
+      const totalExpr = str(data, 'totalExpr').trim() || 'undefined'
+      const hasNextExpr = str(data, 'hasNextExpr').trim()
+      block +=
+        `${pad}  const _srcRecords = Array.isArray(${sourcePath || 'undefined'}) ? (${sourcePath || 'undefined'} as unknown[]) : [];\n` +
+        `${pad}  _pageOut.current = ${currentExpr};\n` +
+        `${pad}  _pageOut.pageSize = ${pageSizeExpr};\n` +
+        `${pad}  _pageOut.total = ${totalExpr};\n`
+      if (hasNextExpr) {
+        block += `${pad}  _pageOut.hasNext = ${hasNextExpr};\n`
+      } else {
+        block +=
+          `${pad}  {\n` +
+          `${pad}    const _cur = Number(_pageOut.current);\n` +
+          `${pad}    const _ps = Number(_pageOut.pageSize);\n` +
+          `${pad}    const _tot = Number(_pageOut.total);\n` +
+          `${pad}    if (!Number.isNaN(_cur) && !Number.isNaN(_ps) && !Number.isNaN(_tot)) {\n` +
+          `${pad}      _pageOut.hasNext = _cur * _ps < _tot;\n` +
+          `${pad}    }\n` +
+          `${pad}  }\n`
+      }
+    }
+
+    block += `${pad}  _pageOut.${PAGE_RECORDS_FIELD} = _srcRecords.map((_item) => {\n` +
+      `${pad}    const _row: Record<string, unknown> = {};\n`
+    for (const m of mappings) {
+      const targetField = m.targetField.trim()
+      const sourceField = m.sourceField.trim()
+      if (!targetField || !sourceField) continue
+      block +=
+        `${pad}    if (_item && typeof _item === 'object' && ${JSON.stringify(sourceField)} in (_item as object)) {\n` +
+        `${pad}      _row[${JSON.stringify(targetField)}] = (_item as Record<string, unknown>)[${JSON.stringify(sourceField)}];\n` +
+        `${pad}    }\n`
+    }
+    block +=
+      `${pad}    return _row;\n` +
+      `${pad}  });\n` +
+      `${pad}  ${targetVarName} = _pageOut;\n` +
+      `${pad}}\n`
+    return (
+      block +
       emitNodeBlock(
         flow,
         pickDefaultNext(flow, node.id),

@@ -27,7 +27,7 @@ import {
 import type { DataTypeLibrary } from '../../types/data-types'
 import IconValueSelect from './IconValueSelect.vue'
 import ColorPicker from './ColorPicker.vue'
-import DataFieldTypeTreeSelect from './DataFieldTypeTreeSelect.vue'
+import DataFieldTypeTreeSelect, { type TypeSelectPayload } from './DataFieldTypeTreeSelect.vue'
 import TypeGenericArgsDialog from './TypeGenericArgsDialog.vue'
 
 const props = defineProps<{
@@ -244,22 +244,22 @@ watch(
   },
 )
 
-function onTypeChange(payload: {
-  type: DataFieldType | 'void'
-  typeRef?: string
-  itemType?: DataFieldType
-  itemTypeRef?: string
-  itemItemType?: DataFieldType
-  itemItemTypeRef?: string
-}) {
-  if (payload.type === 'void') return
+function onTypeChange(payload: TypeSelectPayload) {
+  if (payload.type === 'void' || payload.type === 'generic') return
   draft.type = payload.type
   draft.typeRef = payload.typeRef
-  draft.itemType = payload.type === 'array' ? payload.itemType || 'string' : undefined
+  draft.itemType =
+    payload.type === 'array'
+      ? payload.itemType === 'generic'
+        ? 'any'
+        : payload.itemType || 'string'
+      : undefined
   draft.itemTypeRef = payload.type === 'array' ? payload.itemTypeRef : undefined
   draft.itemItemType =
     payload.type === 'array' && payload.itemType === 'array'
-      ? payload.itemItemType || 'string'
+      ? payload.itemItemType === 'generic'
+        ? 'any'
+        : payload.itemItemType || 'string'
       : undefined
   draft.itemItemTypeRef =
     payload.type === 'array' && payload.itemType === 'array'
@@ -293,17 +293,7 @@ function removeApiParam(index: number) {
   draft.apiParams?.splice(index, 1)
 }
 
-function onApiParamTypeChange(
-  param: MethodParam,
-  payload: {
-    type: DataFieldType | 'void' | 'generic'
-    typeRef?: string
-    itemType?: DataFieldType | 'generic'
-    itemTypeRef?: string
-    itemItemType?: DataFieldType | 'generic'
-    itemItemTypeRef?: string
-  },
-) {
+function onApiParamTypeChange(param: MethodParam, payload: TypeSelectPayload) {
   const fieldType =
     payload.type === 'void' || payload.type === 'generic' ? 'any' : payload.type
   param.type = dataFieldToMethodParamType(fieldType)
@@ -333,14 +323,7 @@ function onApiParamTypeChange(
   }
 }
 
-function onApiReturnTypeChange(payload: {
-  type: DataFieldType | 'void'
-  typeRef?: string
-  itemType?: DataFieldType
-  itemTypeRef?: string
-  itemItemType?: DataFieldType
-  itemItemTypeRef?: string
-}) {
+function onApiReturnTypeChange(payload: TypeSelectPayload) {
   const next = payloadToTypeExpr(payload, draft.apiReturnType)
   draft.apiReturnType = next
   if (genericNamesOf(leafNamedRef(next)).length) {
@@ -498,6 +481,8 @@ function handleSave() {
     :width="isApiType ? '720px' : '520px'"
     destroy-on-close
     append-to-body
+    :close-on-click-modal="false"
+    :close-on-press-escape="false"
   >
     <el-form label-position="top" size="default">
       <el-form-item label="参数名" required>
@@ -670,7 +655,6 @@ function handleSave() {
     </el-form>
 
     <template #footer>
-      <el-button @click="visible = false">取消</el-button>
       <el-button type="primary" @click="handleSave">保存</el-button>
     </template>
   </el-dialog>

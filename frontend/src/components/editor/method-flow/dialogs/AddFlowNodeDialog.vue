@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { FlowNodeKind } from '../../../types/backend-services'
+import type { FlowNodeKind } from '../../../../types/backend-services'
 
 export type AddableFlowNodeKind = Exclude<FlowNodeKind, 'start'>
 
@@ -13,6 +13,7 @@ const NODE_OPTIONS: {
   { kind: 'branch', label: '判断', desc: '按表达式分支到「是 / 否」' },
   { kind: 'action', label: '操作', desc: '执行自定义代码片段' },
   { kind: 'output', label: '输出', desc: '调用数据层写入方法' },
+  { kind: 'pageMap', label: '分页映射', desc: '分页或数组映射为 QueryPageVo<T>（只需选 T）' },
   { kind: 'throw', label: '业务异常', desc: '中断流程并返回业务错误（400）' },
   { kind: 'end', label: '终止', desc: '结束流程并可返回结果' },
 ]
@@ -36,6 +37,8 @@ function pick(kind: AddableFlowNodeKind) {
     width="560px"
     destroy-on-close
     append-to-body
+    :close-on-click-modal="false"
+    :close-on-press-escape="false"
   >
     <div class="node-options">
       <button

@@ -190,6 +190,8 @@ async function handleConfirm() {
     width="640px"
     destroy-on-close
     append-to-body
+    :close-on-click-modal="false"
+    :close-on-press-escape="false"
   >
     <div v-loading="loading" class="to-type">
       <el-form label-position="top">
@@ -236,7 +238,6 @@ async function handleConfirm() {
     </div>
 
     <template #footer>
-      <el-button @click="visible = false">取消</el-button>
       <el-button type="primary" :disabled="loading || !preview.length" @click="handleConfirm">
         生成类型
       </el-button>

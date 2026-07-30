@@ -383,6 +383,8 @@ async function handleSave() {
     destroy-on-close
     append-to-body
     class="build-scheme-dialog"
+    :close-on-click-modal="false"
+    :close-on-press-escape="false"
   >
     <div v-loading="loading" class="body">
       <aside class="scheme-list">
@@ -518,7 +520,6 @@ async function handleSave() {
     </div>
 
     <template #footer>
-      <el-button @click="visible = false">取消</el-button>
       <el-button type="primary" :loading="saving" @click="handleSave">
         保存
       </el-button>
@@ -531,6 +532,8 @@ async function handleSave() {
     width="480px"
     append-to-body
     destroy-on-close
+    :close-on-click-modal="false"
+    :close-on-press-escape="false"
   >
     <el-form label-width="88px" @submit.prevent>
       <el-form-item label="服务名">
@@ -578,7 +581,6 @@ async function handleSave() {
       </el-form-item>
     </el-form>
     <template #footer>
-      <el-button @click="backendEditVisible = false">取消</el-button>
       <el-button type="primary" @click="saveBackendDraft">确定</el-button>
     </template>
   </el-dialog>
@@ -589,6 +591,8 @@ async function handleSave() {
     width="480px"
     append-to-body
     destroy-on-close
+    :close-on-click-modal="false"
+    :close-on-press-escape="false"
   >
     <el-form label-width="100px" @submit.prevent>
       <el-form-item label="应用名">
@@ -659,7 +663,6 @@ async function handleSave() {
       </el-form-item>
     </el-form>
     <template #footer>
-      <el-button @click="frontendEditVisible = false">取消</el-button>
       <el-button type="primary" @click="saveFrontendDraft">确定</el-button>
     </template>
   </el-dialog>

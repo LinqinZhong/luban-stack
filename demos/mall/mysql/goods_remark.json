@@ -46,7 +46,52 @@
       "autoIncrement": false,
       "defaultValue": "",
       "comment": "用户ID"
+    },
+    {
+      "name": "created_at",
+      "type": "datetime",
+      "nullable": true,
+      "primaryKey": false,
+      "autoIncrement": false,
+      "defaultValue": "",
+      "comment": "创建时间"
+    },
+    {
+      "name": "is_deleted",
+      "type": "tinyint(1)",
+      "nullable": true,
+      "primaryKey": false,
+      "autoIncrement": false,
+      "defaultValue": "",
+      "comment": "逻辑删除",
+      "logicDelete": true
+    },
+    {
+      "name": "images",
+      "type": "varchar(255)",
+      "nullable": true,
+      "primaryKey": false,
+      "autoIncrement": false,
+      "defaultValue": "",
+      "comment": "图片",
+      "resource": true
     }
   ],
-  "syncedAt": 1785181987761
+  "indexes": [
+    {
+      "name": "idx_goods",
+      "columns": [
+        "goods_id"
+      ],
+      "remark": ""
+    },
+    {
+      "name": "idx_user",
+      "columns": [
+        "user_id"
+      ],
+      "remark": ""
+    }
+  ],
+  "syncedAt": 1785369888268
 }

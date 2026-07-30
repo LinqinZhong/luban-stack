@@ -55,6 +55,8 @@ defineExpose({ open })
     destroy-on-close
     class="workspace-settings-dialog"
     align-center
+    :close-on-click-modal="false"
+    :close-on-press-escape="false"
   >
     <el-tabs v-model="activeTab" class="settings-tabs">
       <el-tab-pane label="工作台" name="workbench">

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
 import { Delete, Plus } from '@element-plus/icons-vue'
+import { ElMessage } from 'element-plus'
 import {
   DATA_METHOD_CONDITION_OP_OPTIONS,
   DATA_METHOD_OPERATION_OPTIONS,
@@ -69,8 +70,10 @@ const props = defineProps<{
   method: ProcessorMethod | null
   typeLibrary: DataTypeLibrary | null
   typeOptions: Array<{ id: string; label: string }>
-  /** ??????????? id???????????? */
+  /** 绑定实体类型 id */
   entityRef?: string
+  /** 禁止使用的方法名（预置方法名等） */
+  reservedNames?: string[]
 }>()
 
 const emit = defineEmits<{
@@ -276,7 +279,7 @@ const conditionAmbientVars = computed((): MethodParam[] =>
         tsType: processorTypeExprToTs(p.typeExpr, props.typeLibrary),
       } satisfies MethodParam
     })
-    .filter((p): p is MethodParam => Boolean(p)),
+    .filter((p): p is NonNullable<typeof p> => p !== null),
 )
 
 function conditionTargetType(cond: DataMethodCondition): ProcessorTypeExpr {
@@ -872,6 +875,16 @@ function handleSave() {
   }
   const name = draftName.value.trim()
   if (!name) {
+    ElMessage.warning('请填写方法名')
+    return
+  }
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
+    ElMessage.warning('方法名须为合法标识符')
+    return
+  }
+  const reserved = props.reservedNames ?? []
+  if (reserved.some((n) => n.toLowerCase() === name.toLowerCase())) {
+    ElMessage.warning(`方法名「${name}」不可用（与预置方法或其它方法冲突）`)
     return
   }
   const names = new Set(outputFieldNames.value)
@@ -928,6 +941,8 @@ function handleSave() {
     destroy-on-close
     append-to-body
     class="data-method-dialog"
+    :close-on-click-modal="false"
+    :close-on-press-escape="false"
   >
     <div class="dlg-body">
       <section class="dlg-section">
@@ -1600,7 +1615,6 @@ function handleSave() {
     </div>
 
     <template #footer>
-      <el-button @click="visible = false">{{ DM.cancel }}</el-button>
       <el-button
         type="primary"
         :disabled="!isMysql || !draftName.trim()"

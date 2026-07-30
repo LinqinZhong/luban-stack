@@ -13,7 +13,7 @@ import {
   type PageData,
 } from '../types/page-data'
 import { interpolateTemplate } from './repeat'
-import { runComputeBody, sameJson } from './compute-runtime'
+import { sameJson } from './compute-runtime'
 import { interpolateDollarProps, resolveDollarPropsPath } from './component-props'
 import type { ComponentRenderMap } from '../types/component-render'
 import {
@@ -52,6 +52,11 @@ export interface PreviewInteractPayload {
    * outer 指向外层 Component（嵌套组件再 emit 时沿链查找）。
    */
   componentEmit?: ComponentEmitContext
+  /**
+   * 事件写在宿主投影进 Slot 的 XML 上（非组件定义内部）。
+   * setData / 方法解析应走宿主数据池；勿把外包 Component 当成数据归属。
+   */
+  fromSlotHost?: boolean
 }
 
 /** 组件实例 emit 回写上下文（可嵌套 outer） */

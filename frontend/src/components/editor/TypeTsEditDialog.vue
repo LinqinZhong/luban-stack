@@ -214,6 +214,8 @@ async function save() {
     destroy-on-close
     append-to-body
     @update:model-value="emit('update:modelValue', $event)"
+    :close-on-click-modal="false"
+    :close-on-press-escape="false"
   >
     <div class="hint">
       {{
@@ -225,7 +227,7 @@ async function save() {
     <div ref="hostRef" class="ts-host" />
     <div v-if="errorText" class="errors">{{ errorText }}</div>
     <template #footer>
-      <el-button @click="close">{{ readonly ? '关闭' : '取消' }}</el-button>
+      <el-button v-if="readonly" @click="close">关闭</el-button>
       <el-button v-if="!readonly" type="primary" @click="save">保存</el-button>
     </template>
   </el-dialog>

@@ -291,7 +291,7 @@ export function listMysqlDatabases(payload: {
   })
 }
 
-function mysqlTableRequest<T>(path: string, payload: Record<string, unknown>) {
+function mysqlTableRequest<T>(path: string, payload: object) {
   return request<T>(path, {
     method: 'POST',
     body: JSON.stringify(payload),
@@ -310,12 +310,27 @@ export function getMysqlTableColumns(
 ) {
   return mysqlTableRequest<{
     columns: MysqlColumnDef[]
+    indexes: import('../types/mysql').MysqlIndexDef[]
     conflict: boolean
     local: MysqlColumnDef[] | null
     remote: MysqlColumnDef[]
     localRemark: string
     remoteRemark: string
   }>('/api/projects/mysql/tables/columns', payload)
+}
+
+/** 仅读本地 mysql/{table}.json */
+export function getMysqlLocalTableSchema(payload: {
+  projectPath: string
+  tableName: string
+}) {
+  return mysqlTableRequest<{
+    columns: MysqlColumnDef[]
+    indexes: import('../types/mysql').MysqlIndexDef[]
+    remark: string
+    name: string
+    syncedAt: number | null
+  }>('/api/projects/mysql/tables/schema/local', payload)
 }
 
 export function resolveMysqlTableSchema(
@@ -327,6 +342,7 @@ export function resolveMysqlTableSchema(
 ) {
   return mysqlTableRequest<{
     columns: MysqlColumnDef[]
+    indexes: import('../types/mysql').MysqlIndexDef[]
     conflict: boolean
     local: MysqlColumnDef[] | null
     remote: MysqlColumnDef[]
@@ -365,6 +381,7 @@ export function designMysqlTable(
   payload: MysqlConnectionPayload & {
     tableName: string
     columns: MysqlColumnDef[]
+    indexes?: import('../types/mysql').MysqlIndexDef[]
     projectPath?: string
     remark?: string
   },
@@ -466,7 +483,7 @@ export function testOssConnection(payload: OssConnectionPayload) {
   })
 }
 
-function ossRequest<T>(path: string, payload: Record<string, unknown>) {
+function ossRequest<T>(path: string, payload: object) {
   return request<T>(path, {
     method: 'POST',
     body: JSON.stringify(payload),

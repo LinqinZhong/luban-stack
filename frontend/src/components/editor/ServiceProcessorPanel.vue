@@ -3,6 +3,7 @@ import { computed, ref, watch, onBeforeUnmount } from 'vue'
 import { Delete, EditPen, SetUp } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
+  getMysqlLocalTableSchema,
   getServiceProcessors,
   saveServiceProcessors as saveServiceProcessorsApi,
 } from '../../api/projects'
@@ -18,8 +19,17 @@ import {
   type ProcessorTypeExpr,
   type ServiceProcessor,
 } from '../../types/backend-services'
-import type { DataTypeLibrary } from '../../types/data-types'
+import type { DataTypeDef, DataTypeLibrary } from '../../types/data-types'
+import type { MysqlColumnDef, MysqlIndexDef } from '../../types/mysql'
 import { typeLabel, type DataFieldType } from '../../types/page-data'
+import {
+  buildPresetMethods,
+  findMethodIncludingPresets,
+  listPresetMethodNames,
+  mergePresetAndCustomMethods,
+  STATIC_PRESET_METHOD_NAMES,
+} from '../../utils/data-preset-methods'
+import { onMysqlSchemaChanged } from '../../utils/mysql-schema-events'
 import EditBusinessMethodDialog, {
   type BusinessMethodEditPayload,
 } from './EditBusinessMethodDialog.vue'
@@ -110,7 +120,150 @@ const activeProcessor = computed(
   () => processors.value.find((p) => p.id === activeProcessorId.value) ?? null,
 )
 
-const methods = computed(() => activeProcessor.value?.methods ?? [])
+/** 落盘的自定义方法 */
+const storedMethods = computed(() => activeProcessor.value?.methods ?? [])
+
+const tableSchemaCache = ref<
+  Record<string, { columns: MysqlColumnDef[]; indexes: MysqlIndexDef[] }>
+>({})
+
+function findEntityDef(entityRef: string): DataTypeDef | null {
+  if (!entityRef) return null
+  for (const group of props.typeLibrary?.groups ?? []) {
+    const hit = group.types.find((t) => t.id === entityRef)
+    if (hit) return hit
+  }
+  return null
+}
+
+async function loadTableSchema(tableName: string, force = false) {
+  const name = tableName.trim()
+  if (!name || !props.projectPath) return
+  if (!force && tableSchemaCache.value[name]) return
+  try {
+    const res = await getMysqlLocalTableSchema({
+      projectPath: props.projectPath,
+      tableName: name,
+    })
+    tableSchemaCache.value = {
+      ...tableSchemaCache.value,
+      [name]: {
+        columns: res.columns ?? [],
+        indexes: res.indexes ?? [],
+      },
+    }
+  } catch {
+    tableSchemaCache.value = {
+      ...tableSchemaCache.value,
+      [name]: { columns: [], indexes: [] },
+    }
+  }
+}
+
+function invalidateTableSchema(tableName: string) {
+  const name = tableName.trim()
+  if (!name) return
+  const next = { ...tableSchemaCache.value }
+  delete next[name]
+  tableSchemaCache.value = next
+  void loadTableSchema(name, true)
+}
+
+const stopMysqlSchemaWatch = onMysqlSchemaChanged((tableName) => {
+  invalidateTableSchema(tableName)
+})
+onBeforeUnmount(() => {
+  stopMysqlSchemaWatch()
+})
+
+function presetsForProcessor(proc: ServiceProcessor | null): ProcessorMethod[] {
+  if (!proc?.entityRef) return []
+  const entity = findEntityDef(proc.entityRef)
+  const table = entity?.tableName?.trim() || ''
+  const schema = table ? tableSchemaCache.value[table] : null
+  return buildPresetMethods({
+    entity,
+    columns: schema?.columns ?? [],
+    indexes: schema?.indexes ?? [],
+  })
+}
+
+const presetMethods = computed(() =>
+  isDataLayer.value ? presetsForProcessor(activeProcessor.value) : [],
+)
+
+/** 自定义方法禁止占用的预置名 */
+const dataMethodReservedNames = computed(() => {
+  const entity = findEntityDef(activeProcessor.value?.entityRef || '')
+  const table = entity?.tableName?.trim() || ''
+  const schema = table ? tableSchemaCache.value[table] : null
+  const fromSchema = listPresetMethodNames(
+    schema?.columns ?? [],
+    schema?.indexes ?? [],
+  )
+  const fromVisible = presetMethods.value.map((m) => m.name.trim()).filter(Boolean)
+  const editingId =
+    dataMethodEditIndex.value >= 0
+      ? storedMethods.value[dataMethodEditIndex.value]?.id
+      : undefined
+  const selfName = editingId
+    ? storedMethods.value.find((m) => m.id === editingId)?.name.trim()
+    : ''
+  const customOthers = storedMethods.value
+    .filter((m) => m.id !== editingId)
+    .map((m) => m.name.trim())
+    .filter(Boolean)
+  return [
+    ...new Set([
+      ...STATIC_PRESET_METHOD_NAMES,
+      ...fromSchema,
+      ...fromVisible,
+      ...customOthers,
+    ]),
+  ].filter((n) => !selfName || n.toLowerCase() !== selfName.toLowerCase())
+})
+
+/** 展示用：预置 + 自定义（同名自定义覆盖预置） */
+const methods = computed(() =>
+  isDataLayer.value
+    ? mergePresetAndCustomMethods(presetMethods.value, storedMethods.value)
+    : storedMethods.value,
+)
+
+function enrichDataProcessors(
+  list: ServiceProcessor[],
+): ServiceProcessor[] {
+  return list.map((proc) => {
+    const presets = presetsForProcessor(proc).filter((m) => !m.disabled)
+    return {
+      ...proc,
+      methods: mergePresetAndCustomMethods(presets, proc.methods),
+    }
+  })
+}
+
+/** 业务流选用：带预置方法的数据层处理器 */
+const enrichedDataLayerProcessors = computed(() =>
+  enrichDataProcessors(dataLayerProcessors.value),
+)
+
+watch(
+  () => {
+    if (!isDataLayer.value) {
+      return dataLayerProcessors.value
+        .map((p) => findEntityDef(p.entityRef)?.tableName?.trim() || '')
+        .filter(Boolean)
+        .join(',')
+    }
+    const entity = findEntityDef(activeProcessor.value?.entityRef || '')
+    return entity?.tableName?.trim() || ''
+  },
+  (tables) => {
+    const names = tables.split(',').filter(Boolean)
+    for (const name of names) void loadTableSchema(name)
+  },
+  { immediate: true },
+)
 
 const entityOptions = computed(() => {
   const opts: Array<{ id: string; label: string }> = []
@@ -530,21 +683,21 @@ function addMethod() {
     return
   }
   patchActiveMethods([
-    ...methods.value,
-    createEmptyProcessorMethod(`method${methods.value.length + 1}`),
+    ...storedMethods.value,
+    createEmptyProcessorMethod(`method${storedMethods.value.length + 1}`),
   ])
 }
 
 function updateMethod(index: number, patch: Partial<ProcessorMethod>) {
   patchActiveMethods(
-    methods.value.map((m, i) => (i === index ? { ...m, ...patch } : m)),
+    storedMethods.value.map((m, i) => (i === index ? { ...m, ...patch } : m)),
   )
 }
 
 const editingBusinessMethod = computed(() => businessMethodDraft.value)
 
 const businessMethodReservedNames = computed(() =>
-  methods.value
+  storedMethods.value
     .filter((_, i) => i !== businessMethodEditIndex.value)
     .map((m) => m.name.trim())
     .filter(Boolean),
@@ -555,10 +708,10 @@ function openBusinessMethodDesign(index: number) {
   businessMethodEditIndex.value = index
   if (index < 0) {
     businessMethodDraft.value = createEmptyProcessorMethod(
-      `method${methods.value.length + 1}`,
+      `method${storedMethods.value.length + 1}`,
     )
   } else {
-    const method = methods.value[index]
+    const method = storedMethods.value[index]
     if (!method) return
     selectedMethodId.value = method.id
     flowSelectedNodeId.value = 'start'
@@ -584,7 +737,7 @@ function saveBusinessMethodEdit(payload: BusinessMethodEditPayload) {
   if (businessMethodEditIndex.value < 0) {
     const base = businessMethodDraft.value ?? createEmptyProcessorMethod(payload.name)
     patchActiveMethods([
-      ...methods.value,
+      ...storedMethods.value,
       {
         ...base,
         name: payload.name,
@@ -609,7 +762,7 @@ function saveBusinessMethodEdit(payload: BusinessMethodEditPayload) {
 
 function openFlowEditor(index: number) {
   if (!isBusinessLayer.value || !activeProcessor.value) return
-  const method = methods.value[index]
+  const method = storedMethods.value[index]
   if (!method) return
   if (!method.flow?.nodes?.length) {
     updateMethod(index, { flow: createDefaultMethodFlow() })
@@ -650,7 +803,7 @@ function updateFlowMethod(flow: MethodFlow) {
 
 async function removeMethod(index: number) {
   const target = methods.value[index]
-  if (!target) return
+  if (!target || target.preset) return
   try {
     await ElMessageBox.confirm(
       `确定删除方法「${target.name || target.id}」？`,
@@ -660,17 +813,25 @@ async function removeMethod(index: number) {
   } catch {
     return
   }
-  patchActiveMethods(methods.value.filter((_, i) => i !== index))
+  patchActiveMethods(storedMethods.value.filter((m) => m.id !== target.id))
 }
 
 const editingDataMethod = computed(() => {
   if (dataMethodEditIndex.value < 0) return null
-  return methods.value[dataMethodEditIndex.value] ?? null
+  return storedMethods.value[dataMethodEditIndex.value] ?? null
 })
 
 const selectedMethod = computed(() => {
   if (!selectedMethodId.value) return null
-  return methods.value.find((m) => m.id === selectedMethodId.value) ?? null
+  return (
+    findMethodIncludingPresets(
+      storedMethods.value,
+      selectedMethodId.value,
+      presetMethods.value,
+    ) ??
+    methods.value.find((m) => m.id === selectedMethodId.value) ??
+    null
+  )
 })
 
 const dataDebugTarget = computed<ProcessorDebugTarget | null>(() => {
@@ -704,7 +865,7 @@ const flowDebugTarget = computed<ProcessorDebugTarget | null>(() => {
       method: flowEditingMethod.value,
       flow: flowEditingFlow.value,
       selectedNodeId: flowSelectedNodeId.value,
-      dataProcessors: dataLayerProcessors.value,
+      dataProcessors: enrichedDataLayerProcessors.value,
       businessProcessors: processors.value,
       mode: 'canvas',
     }
@@ -720,7 +881,7 @@ const flowDebugTarget = computed<ProcessorDebugTarget | null>(() => {
     method: selectedMethod.value,
     flow: selectedMethod.value.flow ?? createDefaultMethodFlow(),
     selectedNodeId: flowSelectedNodeId.value || 'start',
-    dataProcessors: dataLayerProcessors.value,
+    dataProcessors: enrichedDataLayerProcessors.value,
     businessProcessors: processors.value,
     mode: 'list',
   }
@@ -789,11 +950,12 @@ function selectMethodRow(method: ProcessorMethod) {
   }
 }
 
-function openDataMethodDialog(index: number) {
-  if (!isDataLayer.value) return
+function openDataMethodDialog(row: ProcessorMethod) {
+  if (!isDataLayer.value || row.preset) return
+  const index = storedMethods.value.findIndex((m) => m.id === row.id)
+  if (index < 0) return
   dataMethodEditIndex.value = index
-  const method = methods.value[index]
-  if (method) selectedMethodId.value = method.id
+  selectedMethodId.value = row.id
   dataMethodDialogVisible.value = true
 }
 
@@ -825,7 +987,11 @@ function updateDebugParams(params: Record<string, unknown>) {
   }
   const id = selectedMethodId.value
   if (!id) return
-  const index = methods.value.findIndex((m) => m.id === id)
+  // 预置方法不落盘，仅更新内存展示用 debugParams（不 persist）
+  if (presetMethods.value.some((m) => m.id === id)) {
+    return
+  }
+  const index = storedMethods.value.findIndex((m) => m.id === id)
   if (index < 0) return
   updateMethod(index, { debugParams: { ...params } })
 }
@@ -845,7 +1011,7 @@ defineExpose({
     :flow="flowEditingFlow"
     :method-params="flowEditingMethod.params"
     :method-output="flowEditingMethod.output"
-    :data-processors="dataLayerProcessors"
+    :data-processors="enrichedDataLayerProcessors"
     :business-processors="processors"
     :current-processor-id="flowEditing.processorId"
     :current-method-id="flowEditing.methodId"
@@ -875,7 +1041,7 @@ defineExpose({
           :key="proc.id"
           trigger="contextmenu"
           class="proc-dropdown"
-          @command="(cmd) => handleProcMenu(cmd as ProcMenuCommand, proc)"
+          @command="(cmd: string) => handleProcMenu(cmd as ProcMenuCommand, proc)"
         >
           <li
             class="proc-item"
@@ -890,7 +1056,14 @@ defineExpose({
             <span v-if="processorSub(proc)" class="proc-bind">
               {{ processorSub(proc) }}
             </span>
-            <span class="proc-count">{{ proc.methods.length }}</span>
+            <span class="proc-count">{{
+              isDataLayer
+                ? mergePresetAndCustomMethods(
+                    presetsForProcessor(proc),
+                    proc.methods,
+                  ).length
+                : proc.methods.length
+            }}</span>
           </li>
           <template #dropdown>
             <el-dropdown-menu>
@@ -918,18 +1091,25 @@ defineExpose({
           empty-text="暂无方法，点击顶部创建"
           highlight-current-row
           :row-class-name="
-            ({ row }) =>
-              row.id === selectedMethodId ? 'is-selected-row' : ''
+            ({ row }: { row: ProcessorMethod }) => {
+              const classes: string[] = []
+              if (row.id === selectedMethodId) classes.push('is-selected-row')
+              return classes.join(' ')
+            }
           "
-          @row-click="(row) => selectMethodRow(row as ProcessorMethod)"
+          @row-click="(row: ProcessorMethod) => selectMethodRow(row)"
         >
-          <el-table-column label="名称" min-width="120">
+          <el-table-column label="名称" min-width="140">
             <template #default="{ row }">
-              <span class="cell-text">{{ row.name || '—' }}</span>
+              <span
+                class="cell-text"
+                :class="{ 'preset-name': row.preset }"
+              >
+                {{ row.name || '—' }}
+              </span>
             </template>
           </el-table-column>
           <el-table-column
-            v-if="isBusinessLayer"
             label="说明"
             min-width="120"
           >
@@ -972,13 +1152,13 @@ defineExpose({
             </template>
           </el-table-column>
           <el-table-column label="操作" width="220" align="center" fixed="right">
-            <template #default="{ $index }">
+            <template #default="{ row, $index }">
               <el-button
-                v-if="isDataLayer"
+                v-if="isDataLayer && !row.preset"
                 type="primary"
                 link
                 :icon="EditPen"
-                @click.stop="openDataMethodDialog($index)"
+                @click.stop="openDataMethodDialog(row)"
               >
                 编辑
               </el-button>
@@ -1001,6 +1181,7 @@ defineExpose({
                 </el-button>
               </template>
               <el-button
+                v-if="!row.preset"
                 type="danger"
                 link
                 :icon="Delete"
@@ -1020,7 +1201,9 @@ defineExpose({
       width="440px"
       destroy-on-close
       append-to-body
-    >
+    :close-on-click-modal="false"
+    :close-on-press-escape="false"
+  >
       <el-form label-width="100px" @submit.prevent="submitDialog">
         <el-form-item label="名称" required>
           <el-input
@@ -1082,7 +1265,6 @@ defineExpose({
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="dialogVisible = false">取消</el-button>
         <el-button type="primary" @click="submitDialog">确定</el-button>
       </template>
     </el-dialog>
@@ -1103,6 +1285,7 @@ defineExpose({
       :type-library="typeLibrary"
       :type-options="typeOptions"
       :entity-ref="activeProcessor?.entityRef"
+      :reserved-names="dataMethodReservedNames"
       @save="saveDataMethodEdit"
     />
   </div>
@@ -1306,6 +1489,10 @@ defineExpose({
 
 .method-table :deep(.is-selected-row > td.el-table__cell) {
   background: #ecf5ff !important;
+}
+
+.preset-name {
+  color: #67c23a;
 }
 
 .method-table :deep(.el-table__body tr) {

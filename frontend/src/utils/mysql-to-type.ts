@@ -32,13 +32,28 @@ export function tableNameToTypeName(tableName: string): string {
   return `T${pascal.replace(/[^A-Za-z0-9_]/g, '')}` || 'Table'
 }
 
-/** 列名 → 合法字段名 */
+/** 列名 → 合法字段名（下划线转小驼峰，对齐 entity） */
 export function columnNameToFieldName(columnName: string): string {
   const raw = columnName.trim()
-  if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(raw)) return raw
-  const cleaned = raw.replace(/[^A-Za-z0-9_]/g, '_')
-  if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(cleaned)) return cleaned
-  return `f_${cleaned}`
+  if (!raw) return 'f'
+  const cleaned = raw.replace(/[^A-Za-z0-9_]+/g, '_')
+  const camel = cleaned
+    .replace(/_([a-zA-Z0-9])/g, (_, c: string) => c.toUpperCase())
+    .replace(/^_+/, '')
+  if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(camel)) return camel
+  const fallback = camel.replace(/[^A-Za-z0-9_]/g, '')
+  return fallback ? `f_${fallback}` : 'f'
+}
+
+/** 字段名 → 表列名（小驼峰转下划线） */
+export function fieldNameToColumnName(fieldName: string): string {
+  const raw = fieldName.trim()
+  if (!raw) return raw
+  if (!/[A-Z]/.test(raw)) return raw
+  return raw
+    .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1_$2')
+    .toLowerCase()
 }
 
 /**

@@ -2,6 +2,7 @@ import type {
   FlowEdge,
   FlowNode,
   MethodFlow,
+  ProcessorTypeExpr,
   ServiceApi,
   ServiceController,
   ServiceProcessor,
@@ -14,6 +15,11 @@ import {
 import { debugDataLayerMethod } from '../data-method-debug.js'
 import { ProjectError } from '../project.js'
 import { joinControllerApiPath } from '../export-mp-wx/api-runtime.js'
+import {
+  applyPageMap,
+  readPageMapApplyConfig,
+} from '../../utils/page-map-flow.js'
+import { defaultEmptyReturnValue } from '../../utils/empty-return-value.js'
 
 function asRecord(v: unknown): Record<string, unknown> {
   return v && typeof v === 'object' && !Array.isArray(v)
@@ -127,22 +133,23 @@ function extractReturnValue(
   flow: MethodFlow,
   visited: string[],
   scope: Record<string, unknown>,
+  output?: ProcessorTypeExpr | null,
 ): unknown {
   for (let i = visited.length - 1; i >= 0; i--) {
     const node = findNode(flow, visited[i]!)
     if (node?.kind !== 'end') continue
     const returnExpr = str(asRecord(node.data), 'returnExpr')
-    if (!returnExpr) return undefined
+    if (!returnExpr) return defaultEmptyReturnValue(output)
     return evalInScope(returnExpr, scope)
   }
   const end = flow.nodes.find((n) => n.kind === 'end')
   if (!end) return undefined
   const returnExpr = str(asRecord(end.data), 'returnExpr')
-  if (!returnExpr) return undefined
+  if (!returnExpr) return defaultEmptyReturnValue(output)
   try {
     return evalInScope(returnExpr, scope)
   } catch {
-    return undefined
+    return defaultEmptyReturnValue(output)
   }
 }
 
@@ -154,6 +161,8 @@ type RunnerCtx = {
   businessProcessors: ServiceProcessor[]
   dryRun: boolean
   businessCallStack: string[]
+  /** 当前 flow 所属方法/API 出参；终止节点空返回时用 */
+  methodOutput?: ProcessorTypeExpr | null
 }
 
 async function runBusinessMethod(
@@ -180,6 +189,7 @@ async function runBusinessMethod(
       ...ctx,
       flow,
       businessCallStack: [...ctx.businessCallStack, stackKey],
+      methodOutput: method.output,
     },
     params,
   )
@@ -283,6 +293,15 @@ async function executeNode(
     return { scope, nextId: pickNext(ctx.flow, node, scope) }
   }
 
+  if (node.kind === 'pageMap') {
+    const config = readPageMapApplyConfig(data)
+    if (!config) {
+      throw new Error('分页映射节点未配置数据源或目标变量名')
+    }
+    applyPageMap(scope, config)
+    return { scope, nextId: pickNext(ctx.flow, node, scope) }
+  }
+
   return { scope, nextId: pickNext(ctx.flow, node, scope) }
 }
 
@@ -306,7 +325,7 @@ async function runFlowToEnd(
     cursor = step.nextId
   }
 
-  return extractReturnValue(ctx.flow, visited, scope)
+  return extractReturnValue(ctx.flow, visited, scope, ctx.methodOutput)
 }
 
 function normalizeReqPath(raw: string): string {
@@ -446,6 +465,7 @@ export async function invokeMatchedApi(options: {
       businessProcessors,
       dryRun,
       businessCallStack: [],
+      methodOutput: api.output,
     },
     initialScope,
   )

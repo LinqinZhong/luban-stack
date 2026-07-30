@@ -3,6 +3,10 @@ import type {
   ServiceProcessor,
 } from '../../../types/backend-services.js'
 import type { DataTypeLibrary } from '../../../types/data-types.js'
+import type { MysqlColumnDef, MysqlIndexDef } from '../../../types/mysql.js'
+import {
+  buildPresetMethods,
+} from '../../../utils/data-preset-methods.js'
 import {
   findTypeDef,
   type IdToName,
@@ -101,12 +105,43 @@ function emitDataMethod(
   }`
 }
 
+/** 从业务流节点收集被引用的 dataMethodId（按 processorId 分组） */
+export function collectUsedDataMethodIds(
+  businessProcessors: ServiceProcessor[],
+): Map<string, Set<string>> {
+  const used = new Map<string, Set<string>>()
+  for (const proc of businessProcessors) {
+    for (const method of proc.methods ?? []) {
+      for (const node of method.flow?.nodes ?? []) {
+        const data = node.data
+        if (!data || typeof data !== 'object' || Array.isArray(data)) continue
+        const raw = data as Record<string, unknown>
+        const processorId =
+          typeof raw.dataProcessorId === 'string'
+            ? raw.dataProcessorId.trim()
+            : ''
+        const methodId =
+          typeof raw.dataMethodId === 'string' ? raw.dataMethodId.trim() : ''
+        if (!processorId || !methodId) continue
+        if (!used.has(processorId)) used.set(processorId, new Set())
+        used.get(processorId)!.add(methodId)
+      }
+    }
+  }
+  return used
+}
+
 export function emitRepositoryFile(options: {
   resourceSlug: string
   processor: ServiceProcessor
   typeLibrary: DataTypeLibrary
   idToName: IdToName
   typeIdToGroupStem: Map<string, string>
+  /** 该数据处理器被业务流引用到的方法 id；预置方法仅在此集合内才生成 */
+  usedMethodIds?: Set<string>
+  /** 表列与索引（含 logicDelete），用于还原预置方法 */
+  tableColumns?: MysqlColumnDef[]
+  tableIndexes?: MysqlIndexDef[]
 }): string {
   const {
     resourceSlug,
@@ -114,16 +149,38 @@ export function emitRepositoryFile(options: {
     typeLibrary,
     idToName,
     typeIdToGroupStem,
+    usedMethodIds,
+    tableColumns = [],
+    tableIndexes = [],
   } = options
   const className = `${toPascalCase(resourceSlug)}Repository`
   const table = resolveTableName(processor, typeLibrary)
-  const methods = (processor.methods ?? [])
+
+  const entity = findTypeDef(typeLibrary, processor.entityRef)
+  const presets = buildPresetMethods({
+    entity,
+    columns: tableColumns,
+    indexes: tableIndexes,
+  }).filter((m) => !m.disabled)
+
+  const customMethods = processor.methods ?? []
+  const customNames = new Set(
+    customMethods.map((m) => m.name.trim()).filter(Boolean),
+  )
+  const usedPresets = presets.filter((m) => {
+    if (customNames.has(m.name.trim())) return false
+    if (!usedMethodIds || usedMethodIds.size === 0) return false
+    return usedMethodIds.has(m.id)
+  })
+
+  const methodsToEmit = [...usedPresets, ...customMethods]
+  const methods = methodsToEmit
     .map((m) => emitDataMethod(m, table, idToName))
     .join('\n\n')
 
   const refs = [
     processor.entityRef,
-    ...(processor.methods ?? []).flatMap(collectRefsFromMethod),
+    ...methodsToEmit.flatMap(collectRefsFromMethod),
   ]
   const imports = typeImportLines(
     typeLibrary,

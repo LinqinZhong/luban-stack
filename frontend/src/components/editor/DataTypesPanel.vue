@@ -422,7 +422,7 @@ const namedOptionsForConfig = computed(() => {
             trigger="contextmenu"
             class="group-dropdown"
             @command="
-              (cmd) => handleGroupMenuCommand(cmd as GroupMenuCommand, group)
+              (cmd: string) => handleGroupMenuCommand(cmd as GroupMenuCommand, group)
             "
           >
             <li

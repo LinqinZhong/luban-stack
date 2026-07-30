@@ -39,12 +39,28 @@
     {
       "name": "isFillScreen",
       "type": "boolean",
-      "remark": "是否为沉浸模式",
+      "remark": "沉浸模式（叠在内容上；编辑器非沉浸时不内垫状态栏）",
       "defaultValue": false,
+      "twoWay": false,
+      "required": false
+    },
+    {
+      "name": "backBackground",
+      "type": "color",
+      "remark": "返回键背景色",
+      "defaultValue": "",
       "twoWay": false,
       "required": false
     }
   ],
   "events": [],
-  "exposedMethods": []
+  "exposedMethods": [],
+  "debugProps": {
+    "showBack": true,
+    "background": "#ffffff",
+    "color": "#000000",
+    "isFillScreen": true,
+    "backBackground": "#ffffff",
+    "backBorderColor": "#ffffff"
+  }
 }

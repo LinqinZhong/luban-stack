@@ -152,7 +152,7 @@ function setDataFieldPresent(form: DataFieldFormModel, present: boolean) {
 }
 
 function dataFieldTypeLabel(field: DataField): string {
-  const parts = [field.type]
+  const parts: string[] = [field.type]
   if (field.binding === 'computed') parts.push('计算')
   else if (field.binding === 'controller') parts.push('控制器')
   if (field.remark?.trim()) parts.push(field.remark.trim())
@@ -1376,8 +1376,9 @@ watch(
       width="420px"
       append-to-body
       destroy-on-close
-    >
-      <div v-if="itemEditIsObject" class="item-form">
+      :close-on-click-modal="false"
+      :close-on-press-escape="false"
+    >      <div v-if="itemEditIsObject" class="item-form">
         <div
           v-for="field in itemEditFields"
           :key="field.name"
@@ -1493,8 +1494,8 @@ watch(
         </div>
       </div>
       <template #footer>
-        <el-button @click="itemDialogVisible = false">
-          {{ itemEditReadonly ? '关闭' : '取消' }}
+        <el-button v-if="itemEditReadonly" @click="itemDialogVisible = false">
+          关闭
         </el-button>
         <el-button
           v-if="!itemEditReadonly"

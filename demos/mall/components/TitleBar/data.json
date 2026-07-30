@@ -3,18 +3,34 @@
     {
       "name": "offsetTop",
       "type": "number",
-      "remark": "",
+      "remark": "状态栏高度（沉浸导航顶部预留）",
       "value": 0,
       "binding": "computed",
-      "computeBody": "// 可直接使用同级数据池字段名作为变量（无需形参）\n// return 的值即为该字段的计算值\nconst info = getDeviceInfo()\n// 小程序自定义导航从屏幕顶部绘制，必须预留状态栏；\n// H5 仅在沉浸模式（isFillScreen）下预留\nif (info.platform === 'miniprogram' || ($props.isFillScreen && info.platform !== 'h5')) {\n  return info.statusBarHeight || 0\n}\nreturn 0"
+      "computeBody": "if(!$props.isFillScreen) return 0\nconst info = getDeviceInfo()\nif (info.platform === 'miniprogram') {\n  return info.statusBarHeight || 0\n}\nreturn 0"
     },
     {
       "name": "height",
       "type": "number",
-      "remark": "",
+      "remark": "标题栏总高度（含状态栏预留）",
       "value": 0,
       "binding": "computed",
-      "computeBody": "// 可直接使用同级数据池字段名作为变量（无需形参）\n// return 的值即为该字段的计算值\nconst info = getDeviceInfo()\nif (info.platform === 'h5') {\n  return 45\n}\nconst mb = info.menuButton\nif (!mb) {\n  return offsetTop + 44\n}\n// 胶囊相对状态栏的上间距，导航区上下对称：gap + capsule + gap\nconst gap = Math.max(0, (mb.top || 0) - (info.statusBarHeight || 0))\nreturn offsetTop + (mb.height || 32) + gap * 2"
+      "computeBody": "// 可直接使用同级数据池字段名作为变量（无需形参）\n// return 的值即为该字段的计算值\nconst info = getDeviceInfo()\nconst mb = info.menuButton\nif (!mb) {\n  // H5：固定导航内容区高度，加上顶部预留\n  return offsetTop + 44\n}\n// 胶囊相对状态栏的上间距，导航区上下对称：gap + capsule + gap\nconst gap = Math.max(0, (mb.top || 0) - (info.statusBarHeight || 0))\nreturn offsetTop + (mb.height || 28) + gap * 2"
+    },
+    {
+      "name": "navButtonSize",
+      "type": "number",
+      "remark": "返回按钮尺寸（对齐胶囊高度）",
+      "value": 0,
+      "binding": "computed",
+      "computeBody": "// 可直接使用同级数据池字段名作为变量（无需形参）\n// return 的值即为该字段的计算值\nconst info = getDeviceInfo()\nif (info.menuButton?.height) return info.menuButton.height\nreturn 28"
+    },
+    {
+      "name": "navButtonTop",
+      "type": "number",
+      "remark": "返回按钮距内容区顶（= 胶囊 top - offsetTop）",
+      "value": 0,
+      "binding": "computed",
+      "computeBody": "// 可直接使用同级数据池字段名作为变量（无需形参）\n// return 的值即为该字段的计算值\nconst info = getDeviceInfo()\nconst size = navButtonSize\n// 父级已有 paddingTop=offsetTop，绝对定位相对「内容区」而非屏幕顶\nif (info.menuButton?.top != null) {\n  return Math.max(0, (info.menuButton.top || 0) - offsetTop)\n}\n// H5 无胶囊：在导航内容区内垂直居中\nconst content = Math.max(0, height - offsetTop)\nreturn Math.max(0, (content - size) / 2)"
     }
   ]
 }

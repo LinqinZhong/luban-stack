@@ -134,6 +134,8 @@ function handleClear() {
     width="720px"
     destroy-on-close
     append-to-body
+    :close-on-click-modal="false"
+    :close-on-press-escape="false"
   >
     <p class="block-hint">
       同一场景内条件为「且」；多个场景为「或」。字段支持树形选择；选中数组后可填下标。
@@ -228,7 +230,6 @@ function handleClear() {
 
     <template #footer>
       <el-button @click="handleClear">清除</el-button>
-      <el-button @click="visible = false">取消</el-button>
       <el-button type="primary" @click="handleSave">保存</el-button>
     </template>
   </el-dialog>

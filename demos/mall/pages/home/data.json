@@ -162,7 +162,8 @@
       "binding": "",
       "computeBody": "",
       "itemType": "json",
-      "itemTypeRef": "type_mrnx6ke8_4d7vry"
+      "itemTypeRef": "type_mrnx6ke8_4d7vry",
+      "arrayFields": []
     }
   ]
 }

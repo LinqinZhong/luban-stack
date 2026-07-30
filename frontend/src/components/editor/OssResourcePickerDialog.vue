@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { Folder } from '@element-plus/icons-vue'
+import { Document, Folder, Search } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import {
   getOssLibrary,
   getOssObjectMeta,
   listOssBuckets,
   listOssObjects,
+  signOssObject,
 } from '../../api/projects'
 import type { OssBindingConfig } from '../../types/page-data'
 import type {
@@ -38,10 +39,15 @@ const connections = ref<OssConnectionConfig[]>([])
 const connectionId = ref('')
 const bucketName = ref('')
 const prefix = ref('')
+const keyQuery = ref('')
 const entries = ref<OssObjectInfo[]>([])
 const selectedKey = ref('')
 const selectedUrl = ref('')
 const metaLoading = ref(false)
+/** 私有桶图片缩略图签名 URL */
+const signedThumbMap = ref<Record<string, string>>({})
+/** 缩略图加载失败的 key */
+const failedThumbs = ref<Set<string>>(new Set())
 /** 打开弹窗初始化时跳过 connection/bucket watch 的清空逻辑 */
 const hydrating = ref(false)
 
@@ -65,6 +71,13 @@ const connectionPayload = computed<OssConnectionPayload | null>(() => {
 
 const buckets = computed<OssBucketInfo[]>(() => activeConnection.value?.buckets ?? [])
 
+const activeBucket = computed(
+  () => buckets.value.find((b) => b.name === bucketName.value) ?? null,
+)
+
+const isPrivateBucket = computed(
+  () => activeBucket.value?.access !== 'public',
+)
 const breadcrumb = computed(() => {
   const parts = prefix.value.split('/').filter(Boolean)
   const items: { label: string; prefix: string }[] = [
@@ -100,6 +113,52 @@ function displayName(row: OssObjectInfo): string {
   }
   const parts = key.split('/')
   return parts[parts.length - 1] || key
+}
+
+function isImageKey(key: string): boolean {
+  return /\.(avif|bmp|gif|ico|jpe?g|png|svg|webp)$/i.test(key)
+}
+
+function thumbSrc(key: string): string | undefined {
+  if (failedThumbs.value.has(key)) return undefined
+  if (isPrivateBucket.value) return signedThumbMap.value[key]
+  return buildPublicUrl(key) || undefined
+}
+
+function showImageThumb(row: OssObjectInfo): boolean {
+  return !row.isPrefix && isImageKey(row.key) && Boolean(thumbSrc(row.key))
+}
+
+async function refreshSignedThumbs(rows: OssObjectInfo[]) {
+  const payload = connectionPayload.value
+  if (!payload || !bucketName.value || !isPrivateBucket.value) {
+    signedThumbMap.value = {}
+    return
+  }
+  const images = rows.filter((r) => !r.isPrefix && isImageKey(r.key))
+  const next: Record<string, string> = { ...signedThumbMap.value }
+  await Promise.all(
+    images.map(async (row) => {
+      if (next[row.key]) return
+      try {
+        const result = await signOssObject({
+          ...payload,
+          bucketName: bucketName.value,
+          key: row.key,
+        })
+        next[row.key] = result.signedUrl
+      } catch {
+        // ignore thumb failures
+      }
+    }),
+  )
+  signedThumbMap.value = next
+}
+
+function onThumbError(key: string) {
+  const next = new Set(failedThumbs.value)
+  next.add(key)
+  failedThumbs.value = next
 }
 
 function buildPublicUrl(key: string): string | null {
@@ -155,6 +214,7 @@ async function loadObjects() {
   const payload = connectionPayload.value
   if (!payload || !bucketName.value) {
     entries.value = []
+    signedThumbMap.value = {}
     return
   }
   listing.value = true
@@ -165,23 +225,57 @@ async function loadObjects() {
       prefix: prefix.value || undefined,
     })
     entries.value = [...(result.prefixes ?? []), ...(result.objects ?? [])]
+    signedThumbMap.value = {}
+    failedThumbs.value = new Set()
+    void refreshSignedThumbs(entries.value)
   } catch (err) {
     ElMessage.error(err instanceof Error ? err.message : '列出对象失败')
     entries.value = []
+    signedThumbMap.value = {}
+    failedThumbs.value = new Set()
   } finally {
     listing.value = false
   }
 }
 
+function runSearch() {
+  const q = keyQuery.value.trim()
+  if (!q) {
+    prefix.value = ''
+  } else if (q.endsWith('/')) {
+    prefix.value = q
+  } else if (q.includes('/')) {
+    // 当作完整或半路径前缀；精确文件则高亮选中
+    const slash = q.lastIndexOf('/')
+    prefix.value = q.slice(0, slash + 1)
+  } else {
+    prefix.value = q
+  }
+  if (!props.allowCustomKey) {
+    selectedKey.value = ''
+    selectedUrl.value = ''
+  } else if (q && !q.endsWith('/')) {
+    selectedKey.value = q
+    selectedUrl.value = buildPublicUrl(q) || ''
+  }
+  void loadObjects().then(() => {
+    if (!q || q.endsWith('/')) return
+    const hit = entries.value.find((e) => !e.isPrefix && e.key === q)
+    if (hit) void selectObject(hit)
+  })
+}
+
 async function selectObject(row: OssObjectInfo) {
   if (row.isPrefix) {
     prefix.value = row.key.endsWith('/') ? row.key : `${row.key}/`
+    keyQuery.value = prefix.value
     selectedKey.value = ''
     selectedUrl.value = ''
     await loadObjects()
     return
   }
   selectedKey.value = row.key
+  keyQuery.value = row.key
   selectedUrl.value = buildPublicUrl(row.key) || ''
   const payload = connectionPayload.value
   if (!payload) return
@@ -202,14 +296,10 @@ async function selectObject(row: OssObjectInfo) {
 
 function goPrefix(next: string) {
   prefix.value = next
+  keyQuery.value = next
   selectedKey.value = ''
   selectedUrl.value = ''
   void loadObjects()
-}
-
-function onCustomKeyInput(value: string) {
-  selectedKey.value = value
-  selectedUrl.value = buildPublicUrl(value.trim()) || ''
 }
 
 function close() {
@@ -251,6 +341,7 @@ watch(
       connectionId.value = init?.connectionId || connections.value[0]?.id || ''
       bucketName.value = init?.bucketName || ''
       prefix.value = ''
+      keyQuery.value = init?.objectKey || ''
       selectedKey.value =
         init?.objectKey ||
         (props.allowCustomKey ? props.suggestedKey || '' : '') ||
@@ -273,6 +364,7 @@ watch(
         !selectedKey.value
       ) {
         selectedKey.value = props.suggestedKey
+        keyQuery.value = props.suggestedKey
         selectedUrl.value = buildPublicUrl(props.suggestedKey) || ''
       }
     } finally {
@@ -285,6 +377,7 @@ watch(connectionId, async () => {
   if (!props.modelValue || hydrating.value) return
   bucketName.value = ''
   prefix.value = ''
+  keyQuery.value = ''
   selectedKey.value = props.allowCustomKey ? props.suggestedKey || '' : ''
   selectedUrl.value = selectedKey.value
     ? buildPublicUrl(selectedKey.value) || ''
@@ -300,11 +393,13 @@ watch(connectionId, async () => {
 watch(bucketName, async (name) => {
   if (!props.modelValue || hydrating.value || !name) return
   prefix.value = ''
+  keyQuery.value = props.allowCustomKey ? selectedKey.value : ''
   if (!props.allowCustomKey) {
     selectedKey.value = ''
     selectedUrl.value = ''
   } else if (!selectedKey.value.trim() && props.suggestedKey) {
     selectedKey.value = props.suggestedKey
+    keyQuery.value = props.suggestedKey
     selectedUrl.value = buildPublicUrl(props.suggestedKey) || ''
   } else if (selectedKey.value.trim()) {
     selectedUrl.value = buildPublicUrl(selectedKey.value.trim()) || ''
@@ -317,10 +412,13 @@ watch(bucketName, async (name) => {
   <el-dialog
     :model-value="modelValue"
     :title="dialogTitle"
-    width="720px"
+    width="760px"
     destroy-on-close
     append-to-body
+    class="oss-picker-dialog"
     @update:model-value="emit('update:modelValue', $event)"
+    :close-on-click-modal="false"
+    :close-on-press-escape="false"
   >
     <div v-loading="loading" class="oss-picker">
       <el-empty
@@ -334,13 +432,12 @@ watch(bucketName, async (name) => {
         :image-size="56"
       />
       <template v-else>
-        <div class="picker-row">
-          <span class="picker-label">连接</span>
+        <div class="toolbar">
           <el-select
             v-model="connectionId"
             filterable
-            placeholder="选择连接"
-            style="flex: 1"
+            placeholder="连接"
+            class="toolbar-conn"
           >
             <el-option
               v-for="c in connections"
@@ -349,14 +446,11 @@ watch(bucketName, async (name) => {
               :value="c.id"
             />
           </el-select>
-        </div>
-        <div class="picker-row">
-          <span class="picker-label">桶</span>
           <el-select
             v-model="bucketName"
             filterable
-            placeholder="选择桶"
-            style="flex: 1"
+            placeholder="桶"
+            class="toolbar-bucket"
             :disabled="!connectionId"
           >
             <el-option
@@ -366,10 +460,26 @@ watch(bucketName, async (name) => {
               :value="b.name"
             />
           </el-select>
+          <el-input
+            v-model="keyQuery"
+            clearable
+            placeholder="输入 key"
+            class="toolbar-key"
+            :disabled="!bucketName"
+            @keyup.enter="runSearch"
+          />
+          <el-button
+            type="primary"
+            :icon="Search"
+            :disabled="!bucketName"
+            :loading="listing"
+            class="toolbar-search"
+            @click="runSearch"
+          />
         </div>
 
-        <div v-if="bucketName" class="objects-pane" v-loading="listing">
-          <div class="crumb">
+        <div v-if="bucketName" class="list-pane" v-loading="listing">
+          <div v-if="breadcrumb.length > 1" class="crumb">
             <button
               v-for="(item, i) in breadcrumb"
               :key="item.prefix + i"
@@ -380,60 +490,76 @@ watch(bucketName, async (name) => {
               {{ item.label }}
             </button>
           </div>
-          <el-table
-            :data="entries"
-            height="280"
-            size="small"
-            empty-text="空目录"
-            highlight-current-row
-            @row-click="selectObject"
-          >
-            <el-table-column label="名称" min-width="220">
-              <template #default="{ row }">
-                <span class="obj-name" :class="{ prefix: row.isPrefix }">
-                  <el-icon v-if="row.isPrefix"><Folder /></el-icon>
-                  {{ displayName(row) }}
+          <div class="list-head">
+            <span class="col-name">资源名称</span>
+            <span class="col-action">选择</span>
+          </div>
+          <div class="list-body">
+            <el-empty
+              v-if="!entries.length"
+              description="空目录"
+              :image-size="48"
+            />
+            <button
+              v-for="row in entries"
+              :key="row.key"
+              type="button"
+              class="list-row"
+              :class="{
+                selected: !row.isPrefix && selectedKey === row.key,
+                prefix: row.isPrefix,
+              }"
+              @click="selectObject(row)"
+            >
+              <span class="col-name">
+                <span class="thumb-slot">
+                  <el-icon v-if="row.isPrefix" class="file-icon folder"
+                    ><Folder
+                  /></el-icon>
+                  <img
+                    v-else-if="showImageThumb(row)"
+                    class="thumb-img"
+                    :src="thumbSrc(row.key)"
+                    alt=""
+                    @error="onThumbError(row.key)"
+                  />
+                  <el-icon v-else class="file-icon"><Document /></el-icon>
                 </span>
-              </template>
-            </el-table-column>
-            <el-table-column label="大小" width="100">
-              <template #default="{ row }">
-                {{ row.isPrefix ? '—' : row.size }}
-              </template>
-            </el-table-column>
-          </el-table>
+                <span class="name-text">{{ displayName(row) }}</span>
+                <span v-if="!row.isPrefix" class="size-hint">{{
+                  row.size
+                }}</span>
+              </span>
+              <span class="col-action">
+                <span v-if="row.isPrefix" class="enter-hint">进入</span>
+                <span
+                  v-else-if="selectedKey === row.key"
+                  class="picked-hint"
+                  >已选</span
+                >
+                <span v-else class="pick-hint">选择</span>
+              </span>
+            </button>
+          </div>
         </div>
 
-        <div v-if="allowCustomKey" class="picker-row">
-          <span class="picker-label">对象 key</span>
-          <el-input
-            :model-value="selectedKey"
-            placeholder="例如 icons/home.svg，可点上方文件回填"
-            style="flex: 1"
-            @update:model-value="onCustomKeyInput"
-          />
+        <div v-else class="list-pane list-pane--empty">
+          <el-empty description="请先选择连接与桶" :image-size="48" />
         </div>
 
-        <div class="selected-box">
-          <div class="picker-label">已选外链</div>
-          <el-input
-            :model-value="selectedUrl"
-            type="textarea"
-            :rows="2"
-            readonly
-            :placeholder="
-              metaLoading
-                ? '解析中…'
-                : allowCustomKey
-                  ? '选择连接与桶后自动生成，或点击上方文件'
-                  : '点击上方文件选择'
-            "
-          />
+        <div v-if="selectedKey" class="selected-bar">
+          <span class="selected-label">已选</span>
+          <span class="selected-key" :title="selectedKey">{{
+            selectedKey
+          }}</span>
+          <span v-if="metaLoading" class="selected-url">解析外链中…</span>
+          <span v-else-if="selectedUrl" class="selected-url" :title="selectedUrl">{{
+            selectedUrl
+          }}</span>
         </div>
       </template>
     </div>
     <template #footer>
-      <el-button @click="close">取消</el-button>
       <el-button type="primary" :disabled="!canConfirm" @click="handleConfirm">
         确定
       </el-button>
@@ -449,32 +575,54 @@ watch(bucketName, async (name) => {
   min-height: 120px;
 }
 
-.picker-row {
+.toolbar {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
 }
 
-.picker-label {
-  width: 56px;
+.toolbar-conn {
+  width: 140px;
   flex-shrink: 0;
-  font-size: 13px;
-  color: #606266;
-  text-align: right;
 }
 
-.objects-pane {
-  border: 1px solid #ebeef5;
-  border-radius: 6px;
+.toolbar-bucket {
+  width: 140px;
+  flex-shrink: 0;
+}
+
+.toolbar-key {
+  flex: 1;
+  min-width: 0;
+}
+
+.toolbar-search {
+  width: 40px;
+  padding: 8px 0;
+  flex-shrink: 0;
+}
+
+.list-pane {
+  border: 1px solid #dcdfe6;
+  border-radius: 4px;
   overflow: hidden;
+  background: #fff;
+  min-height: 300px;
+  display: flex;
+  flex-direction: column;
+}
+
+.list-pane--empty {
+  align-items: center;
+  justify-content: center;
 }
 
 .crumb {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
-  padding: 8px 10px;
-  background: #fafafa;
+  gap: 2px;
+  padding: 6px 12px;
+  background: #f5f7fa;
   border-bottom: 1px solid #ebeef5;
 }
 
@@ -485,6 +633,7 @@ watch(bucketName, async (name) => {
   cursor: pointer;
   font-size: 12px;
   padding: 0 2px;
+  line-height: 1.6;
 }
 
 .crumb-btn:not(:last-child)::after {
@@ -493,25 +642,151 @@ watch(bucketName, async (name) => {
   color: #c0c4cc;
 }
 
-.obj-name {
+.list-head {
+  display: flex;
+  align-items: center;
+  padding: 10px 14px;
+  background: #fafafa;
+  border-bottom: 1px solid #ebeef5;
+  font-size: 13px;
+  font-weight: 500;
+  color: #606266;
+}
+
+.list-body {
+  flex: 1;
+  overflow: auto;
+  max-height: 320px;
+}
+
+.list-row {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  padding: 10px 14px;
+  border: none;
+  border-bottom: 1px solid #f0f2f5;
+  background: #fff;
+  cursor: pointer;
+  text-align: left;
+  font-size: 13px;
+  color: #303133;
+  transition: background 0.12s ease;
+}
+
+.list-row:hover {
+  background: #f5f7fa;
+}
+
+.list-row.selected {
+  background: #ecf5ff;
+}
+
+.list-row.prefix .name-text {
+  color: #409eff;
+}
+
+.col-name {
+  flex: 1;
+  min-width: 0;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 10px;
 }
 
-.obj-name.prefix {
+.thumb-slot {
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  background: #f5f7fa;
+  overflow: hidden;
+}
+
+.thumb-img {
+  width: 32px;
+  height: 32px;
+  object-fit: cover;
+  display: block;
+}
+
+.file-icon {
+  font-size: 18px;
+  color: #909399;
+}
+
+.file-icon.folder {
+  color: #e6a23c;
+}
+
+.col-action {
+  width: 56px;
+  flex-shrink: 0;
+  text-align: right;
+  font-size: 13px;
+}
+
+.name-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.size-hint {
+  color: #c0c4cc;
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.pick-hint {
   color: #409eff;
-  cursor: pointer;
 }
 
-.selected-box {
+.picked-hint {
+  color: #67c23a;
+  font-weight: 500;
+}
+
+.enter-hint {
+  color: #909399;
+}
+
+.selected-bar {
   display: flex;
-  flex-direction: column;
-  gap: 6px;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border: 1px solid #e4e7ed;
+  border-radius: 4px;
+  background: #fafafa;
+  font-size: 12px;
+  min-width: 0;
 }
 
-.selected-box .picker-label {
-  width: auto;
-  text-align: left;
+.selected-label {
+  flex-shrink: 0;
+  color: #909399;
+}
+
+.selected-key {
+  flex-shrink: 0;
+  max-width: 36%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #303133;
+  font-weight: 500;
+}
+
+.selected-url {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #909399;
 }
 </style>

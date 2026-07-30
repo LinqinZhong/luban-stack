@@ -331,7 +331,7 @@ function shortEndpoint(endpoint: string): string {
             :key="conn.id"
             trigger="contextmenu"
             class="conn-dropdown"
-            @command="(cmd) => handleConnMenuCommand(cmd as ConnMenuCommand, conn)"
+            @command="(cmd: string) => handleConnMenuCommand(cmd as ConnMenuCommand, conn)"
           >
             <li
               class="conn-item"
@@ -453,7 +453,9 @@ function shortEndpoint(endpoint: string): string {
       width="480px"
       destroy-on-close
       append-to-body
-    >
+    :close-on-click-modal="false"
+    :close-on-press-escape="false"
+  >
       <div class="bucket-form">
         <div class="form-item">
           <div class="label">桶名称</div>
@@ -467,7 +469,6 @@ function shortEndpoint(endpoint: string): string {
         </div>
       </div>
       <template #footer>
-        <el-button @click="createBucketVisible = false">取消</el-button>
         <el-button
           type="primary"
           :loading="creatingBucket"

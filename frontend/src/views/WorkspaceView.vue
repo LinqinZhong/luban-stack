@@ -152,7 +152,6 @@ import {
 } from '../utils/slot-outlet'
 import type { ComponentConfig, ComponentSummary } from '../types/component'
 import type { ComponentRenderMap } from '../types/component-render'
-import type { PageData } from '../types/page-data'
 import {
   createEmptyIconLibrary,
   type IconLibrary,
@@ -3466,7 +3465,7 @@ watch(
                 :key="page.id"
                 trigger="contextmenu"
                 class="page-dropdown"
-                @command="(cmd) => handlePageMenuCommand(cmd as PageMenuCommand, page)"
+                @command="(cmd: string) => handlePageMenuCommand(cmd as PageMenuCommand, page)"
               >
                 <button
                   type="button"
@@ -3513,7 +3512,7 @@ watch(
                 trigger="contextmenu"
                 class="page-dropdown"
                 @command="
-                  (cmd) =>
+                  (cmd: string) =>
                     handleComponentMenuCommand(cmd as ComponentMenuCommand, item)
                 "
               >
@@ -3581,7 +3580,7 @@ watch(
               trigger="contextmenu"
               class="page-dropdown"
               @command="
-                (cmd) =>
+                (cmd: string) =>
                   handleServiceMenuCommand(cmd as ServiceMenuCommand, service)
               "
             >
@@ -4051,7 +4050,7 @@ watch(
       @save="handleBackendServiceUpdate"
     />
 
-    <el-dialog v-model="createVisible" :title="createDialogTitle" width="480px" destroy-on-close>
+    <el-dialog v-model="createVisible" :title="createDialogTitle" width="480px" destroy-on-close :close-on-click-modal="false" :close-on-press-escape="false">
       <el-form ref="createFormRef" :model="createForm" :rules="createRules" label-width="88px">
         <el-form-item :label="isComponentResource ? '组件 ID' : '页面 ID'" prop="id">
           <el-input
@@ -4070,7 +4069,6 @@ watch(
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="createVisible = false">取消</el-button>
         <el-button type="primary" :loading="creating" @click="handleCreatePage">创建</el-button>
       </template>
     </el-dialog>
@@ -4080,6 +4078,8 @@ watch(
       title="重命名组件"
       width="480px"
       destroy-on-close
+      :close-on-click-modal="false"
+      :close-on-press-escape="false"
     >
       <el-form
         ref="renameComponentFormRef"
@@ -4104,7 +4104,6 @@ watch(
         修改 ID 会重命名组件目录，并自动更新页面中的 componentId 引用。
       </p>
       <template #footer>
-        <el-button @click="renameComponentVisible = false">取消</el-button>
         <el-button
           type="primary"
           :loading="renamingComponent"
@@ -4122,6 +4121,8 @@ watch(
       destroy-on-close
       class="add-widget-dialog"
       @closed="addIntoSlotDebug = false"
+      :close-on-click-modal="false"
+      :close-on-press-escape="false"
     >
       <p v-if="addIntoSlotDebug" class="add-hint">
         写入当前插槽的调试预览内容，便于组件编辑时查看布局；导出 Vue 时插槽仍为空

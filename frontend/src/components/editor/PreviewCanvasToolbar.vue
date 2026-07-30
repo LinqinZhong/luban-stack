@@ -157,7 +157,9 @@ function confirmInvoke() {
       width="420px"
       destroy-on-close
       append-to-body
-    >
+    :close-on-click-modal="false"
+    :close-on-press-escape="false"
+  >
       <el-form label-width="88px">
         <el-form-item
           v-for="param in invokeParams"
@@ -180,7 +182,6 @@ function confirmInvoke() {
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="invokeVisible = false">取消</el-button>
         <el-button type="primary" @click="confirmInvoke">执行</el-button>
       </template>
     </el-dialog>

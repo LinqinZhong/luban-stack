@@ -48,6 +48,8 @@ function handleSave() {
     width="520px"
     destroy-on-close
     append-to-body
+    :close-on-click-modal="false"
+    :close-on-press-escape="false"
   >
     <el-form
       class="flow-node-form"
@@ -77,7 +79,6 @@ function handleSave() {
       </el-form-item>
     </el-form>
     <template #footer>
-      <el-button @click="visible = false">取消</el-button>
       <el-button type="primary" @click="handleSave">确定</el-button>
     </template>
   </el-dialog>

@@ -6,7 +6,7 @@ import ArrayFieldsDialog from './ArrayFieldsDialog.vue'
 import IconValueSelect from './IconValueSelect.vue'
 import ColorPicker from './ColorPicker.vue'
 import ObjectFieldsDialog from './ObjectFieldsDialog.vue'
-import DataFieldTypeTreeSelect from './DataFieldTypeTreeSelect.vue'
+import DataFieldTypeTreeSelect, { type TypeSelectPayload } from './DataFieldTypeTreeSelect.vue'
 import JsonCodeEditor from './JsonCodeEditor.vue'
 import OssResourcePickerDialog from './OssResourcePickerDialog.vue'
 import {
@@ -375,22 +375,26 @@ function removeField(index: number) {
   }
 }
 
-function handleTypeChange(
-  item: DraftItem,
-  payload: {
-    type: DataFieldType
-    typeRef?: string
-    itemType?: DataFieldType
-    itemTypeRef?: string
-  },
-) {
-  if (itemTypeLocked.value) return
+function handleTypeChange(item: DraftItem, payload: TypeSelectPayload) {
+  if (
+    itemTypeLocked.value ||
+    payload.cleared ||
+    payload.type === 'void' ||
+    payload.type === 'generic'
+  ) {
+    return
+  }
   item.type = payload.type
   item.typeRef = payload.typeRef
   item.value = defaultValue(payload.type)
   item.arrayFields = []
   item.objectFields = []
-  item.itemType = payload.type === 'array' ? payload.itemType || 'string' : undefined
+  item.itemType =
+    payload.type === 'array'
+      ? payload.itemType === 'generic'
+        ? 'any'
+        : payload.itemType || 'string'
+      : undefined
   item.itemTypeRef = payload.type === 'array' ? payload.itemTypeRef : undefined
 
   if (payload.type === 'json' && payload.typeRef) {
@@ -657,6 +661,8 @@ function handleSave() {
     width="760px"
     destroy-on-close
     @update:model-value="emit('update:modelValue', $event)"
+    :close-on-click-modal="false"
+    :close-on-press-escape="false"
   >
     <div class="dialog-toolbar">
       <p class="hint">
@@ -805,7 +811,6 @@ function handleSave() {
       <JsonCodeEditor v-model="codeText" :schema="codeSchema" :min-height="320" />
     </div>
     <template #footer>
-      <el-button @click="close">取消</el-button>
       <el-button type="primary" @click="handleSave">保存</el-button>
     </template>
 

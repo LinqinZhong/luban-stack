@@ -12,6 +12,8 @@ import type { JsonSchema } from '../../utils/json-type-schema'
   },
 }
 
+const jsonLang = (monaco.languages as any).json
+
 const props = withDefaults(
   defineProps<{
     modelValue: string
@@ -43,12 +45,12 @@ const modelUri = monaco.Uri.parse(
 
 function applySchema(schema: JsonSchema | null | undefined) {
   const existing =
-    monaco.languages.json.jsonDefaults.diagnosticsOptions.schemas?.filter(
-      (item) => item.uri !== schemaUri,
+    jsonLang.jsonDefaults.diagnosticsOptions.schemas?.filter(
+      (item: { uri: string }) => item.uri !== schemaUri,
     ) ?? []
 
   if (!schema) {
-    monaco.languages.json.jsonDefaults.setDiagnosticsOptions({
+    jsonLang.jsonDefaults.setDiagnosticsOptions({
       validate: true,
       allowComments: false,
       schemas: existing,
@@ -56,7 +58,7 @@ function applySchema(schema: JsonSchema | null | undefined) {
     return
   }
 
-  monaco.languages.json.jsonDefaults.setDiagnosticsOptions({
+  jsonLang.jsonDefaults.setDiagnosticsOptions({
     validate: true,
     allowComments: false,
     schemas: [

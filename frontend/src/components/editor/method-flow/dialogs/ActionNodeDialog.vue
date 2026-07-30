@@ -278,6 +278,8 @@ function stopEditorKeys(event: KeyboardEvent) {
     destroy-on-close
     append-to-body
     class="action-node-dialog"
+    :close-on-click-modal="false"
+    :close-on-press-escape="false"
   >
     <p v-if="ambientHint" class="hint">可访问变量：{{ ambientHint }}</p>
 
@@ -356,7 +358,6 @@ function stopEditorKeys(event: KeyboardEvent) {
     </el-form>
 
     <template #footer>
-      <el-button @click="visible = false">取消</el-button>
       <el-button
         type="primary"
         :disabled="Boolean(varNameError)"

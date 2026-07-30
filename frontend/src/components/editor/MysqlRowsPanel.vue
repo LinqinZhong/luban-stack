@@ -429,7 +429,9 @@ watch(
       width="560px"
       append-to-body
       destroy-on-close
-    >
+    :close-on-click-modal="false"
+    :close-on-press-escape="false"
+  >
       <el-form label-width="110px" class="edit-form">
         <el-form-item
           v-for="col in columns"
@@ -469,7 +471,6 @@ watch(
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="formVisible = false">取消</el-button>
         <el-button type="primary" :loading="saving" @click="saveForm">
           {{ formMode === 'create' ? '添加' : '保存' }}
         </el-button>

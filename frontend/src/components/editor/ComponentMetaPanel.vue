@@ -17,9 +17,9 @@ import {
 import { SIZE_OPTIONS } from '../../utils/xml-node'
 import NumericInput from './NumericInput.vue'
 import ComponentPropDialog from './ComponentPropDialog.vue'
-import DataFieldTypeTreeSelect from './DataFieldTypeTreeSelect.vue'
+import DataFieldTypeTreeSelect, { type TypeSelectPayload } from './DataFieldTypeTreeSelect.vue'
 import type { DataTypeLibrary } from '../../types/data-types'
-import { DATA_FIELD_TYPE_OPTIONS, type DataFieldType } from '../../types/page-data'
+import { DATA_FIELD_TYPE_OPTIONS } from '../../types/page-data'
 
 const props = defineProps<{
   config: ComponentConfig
@@ -204,17 +204,7 @@ function removeEventParam(event: ComponentEventDef, index: number) {
   commit()
 }
 
-function onEventParamTypeChange(
-  param: MethodParam,
-  payload: {
-    type: DataFieldType | 'void'
-    typeRef?: string
-    itemType?: DataFieldType
-    itemTypeRef?: string
-    itemItemType?: DataFieldType
-    itemItemTypeRef?: string
-  },
-) {
+function onEventParamTypeChange(param: MethodParam, payload: TypeSelectPayload) {
   const fieldType =
     payload.type === 'void' || payload.type === 'generic' ? 'any' : payload.type
   param.type = dataFieldToMethodParamType(fieldType)

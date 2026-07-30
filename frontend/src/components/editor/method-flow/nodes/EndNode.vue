@@ -29,9 +29,9 @@ const needsReturn = computed(() => {
     <div
       v-if="needsReturn"
       class="flow-node-summary"
-      :title="returnExpr || '未选择返回数据'"
+      :title="returnExpr || '空值（按出参类型）'"
     >
-      {{ returnExpr || '未选择返回数据' }}
+      {{ returnExpr || '空值' }}
     </div>
     <FlowNodePrintBubble :node-id="id" />
   </div>

@@ -12,7 +12,7 @@ import {
   type ModalStackApi,
 } from '../../composables/useModalStack'
 import { CANVAS_RUNTIME_KEY } from '../../composables/useCanvasRuntime'
-import { getDeviceInfo } from '../../utils/device-info'
+import { EDITOR_MENU_BUTTON, getDeviceInfo } from '../../utils/device-info'
 import type { IconLibrary } from '../../types/icon-library'
 import type { PageData } from '../../types/page-data'
 import type { ComponentRenderMap } from '../../types/component-render'
@@ -579,6 +579,13 @@ const navBarStyle = computed(() => {
 
 const capsuleLight = computed(() => effectiveStatusBar.value.textStyle === 'white')
 
+const capsuleStyle = computed(() => ({
+  top: `${EDITOR_MENU_BUTTON.top}px`,
+  right: `${EDITOR_MENU_BUTTON.marginRight}px`,
+  height: `${EDITOR_MENU_BUTTON.height}px`,
+  borderRadius: `${EDITOR_MENU_BUTTON.height / 2}px`,
+}))
+
 function handleStatusBarSelect(event: MouseEvent) {
   if (!props.statusBarSelectable) return
   event.stopPropagation()
@@ -1011,6 +1018,7 @@ watch(
           v-if="showDeviceChrome && scene === 'miniprogram'"
           class="mp-capsule color-pick-ignore"
           :class="{ light: capsuleLight, 'in-nav-bar': showNavigationBar }"
+          :style="capsuleStyle"
           aria-hidden="true"
         >
           <span class="mp-capsule-more" />
@@ -1477,20 +1485,6 @@ watch(
   text-align: center;
 }
 
-/* 小程序标题栏胶囊：需避开状态栏高度 */
-.phone.status-bar-cover .mp-capsule {
-  top: 30px;
-}
-
-.phone.has-navigation-bar .mp-capsule,
-.phone.has-navigation-bar.status-bar-cover .mp-capsule {
-  top: 28px;
-}
-
-.phone.has-navigation-bar .mp-capsule.in-nav-bar {
-  top: 30px;
-}
-
 .status-time {
   font-size: 12px;
   font-weight: 600;
@@ -1526,7 +1520,7 @@ watch(
   height: 10px;
 }
 
-/* 小程序标题栏胶囊：三点 · 关闭环 */
+/* 小程序标题栏胶囊：三点 · 关闭环；位置尺寸与 device-info EDITOR_MENU_BUTTON 对齐 */
 .mp-capsule {
   position: absolute;
   top: 30px;
@@ -1541,11 +1535,6 @@ watch(
   background: rgba(255, 255, 255, 0.6);
   box-sizing: border-box;
   pointer-events: none;
-}
-
-.mp-capsule.in-nav-bar {
-  /* 状态栏 22 + 标题栏垂直居中：(44-28)/2 = 8 → top 22+8 */
-  top: 30px;
 }
 
 .mp-capsule.light {

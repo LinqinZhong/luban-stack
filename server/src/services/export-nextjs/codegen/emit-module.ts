@@ -4,6 +4,8 @@ import type {
   ServiceProcessor,
 } from '../../../types/backend-services.js'
 import type { DataTypeLibrary } from '../../../types/data-types.js'
+import type { MysqlColumnDef, MysqlIndexDef } from '../../../types/mysql.js'
+import { buildPresetMethods } from '../../../utils/data-preset-methods.js'
 import {
   buildMethodIndex,
   buildProcessorMaps,
@@ -11,7 +13,10 @@ import {
   emitMethodSignature,
   type FlowEmitContext,
 } from './emit-flow.js'
-import { emitRepositoryFile } from './emit-repository.js'
+import {
+  collectUsedDataMethodIds,
+  emitRepositoryFile,
+} from './emit-repository.js'
 import {
   dataTypeToTs,
   findTypeDef,
@@ -129,7 +134,11 @@ function emitServiceFile(options: {
       const remark = m.remark?.trim()
         ? `  /** ${m.remark.trim()} */\n`
         : ''
-      const body = emitFlowMethodBody(m.flow, flowCtx, 2)
+      const body = emitFlowMethodBody(
+        m.flow,
+        { ...flowCtx, methodOutput: m.output },
+        2,
+      )
       return `${remark}  async ${name}(${params}): Promise<${returnType}> {\n${body}  }`
     })
     .join('\n\n')
@@ -273,7 +282,11 @@ function emitControllerFile(options: {
         : api.requireAuth
           ? `  /** TODO: requireAuth */\n`
           : ''
-      const flowBody = emitFlowMethodBody(api.flow, flowCtx, 6)
+      const flowBody = emitFlowMethodBody(
+        api.flow,
+        { ...flowCtx, methodOutput: api.output },
+        6,
+      )
       const decoLine = routeArg
         ? `  @${httpDec}(${routeArg})`
         : `  @${httpDec}()`
@@ -444,6 +457,9 @@ export function emitServiceModules(options: {
   typeLibrary: DataTypeLibrary
   idToName: IdToName
   typeIdToGroupStem: Map<string, string>
+  /** tableName → columns / indexes（含 logicDelete） */
+  tableColumnsByName?: Map<string, MysqlColumnDef[]>
+  tableIndexesByName?: Map<string, MysqlIndexDef[]>
 }): ModuleEmitResult {
   const {
     moduleSlug,
@@ -453,16 +469,38 @@ export function emitServiceModules(options: {
     typeLibrary,
     idToName,
     typeIdToGroupStem,
+    tableColumnsByName,
+    tableIndexesByName,
   } = options
 
   const files: Record<string, string> = {}
   const routes: ModuleEmitResult['routes'] = []
+
+  const usedByProcessor = collectUsedDataMethodIds(businessProcessors)
 
   const { processorSlugById, processorLayerById } = buildProcessorMaps(
     dataProcessors,
     businessProcessors,
   )
   const methodById = buildMethodIndex(dataProcessors, businessProcessors)
+  // 预置方法也要进索引，便于业务流 codegen 解析签名
+  for (const proc of dataProcessors) {
+    const entity = findTypeDef(typeLibrary, proc.entityRef)
+    const tableName =
+      entity?.tableName?.trim() || entity?.name?.trim() || ''
+    const columns = tableName
+      ? tableColumnsByName?.get(tableName) ?? []
+      : []
+    const indexes = tableName
+      ? tableIndexesByName?.get(tableName) ?? []
+      : []
+    for (const m of buildPresetMethods({ entity, columns, indexes })) {
+      if (m.disabled) continue
+      if (!methodById.has(m.id)) {
+        methodById.set(m.id, { processorId: proc.id, method: m })
+      }
+    }
+  }
   const flowCtxBase = {
     processorSlugById,
     processorLayerById,
@@ -497,12 +535,22 @@ export function emitServiceModules(options: {
       ) ?? null
 
     if (dataP) {
+      const entity = findTypeDef(typeLibrary, dataP.entityRef)
+      const tableName =
+        entity?.tableName?.trim() || entity?.name?.trim() || ''
       files[`${base}/${resourceSlug}.repository.ts`] = emitRepositoryFile({
         resourceSlug,
         processor: dataP,
         typeLibrary,
         idToName,
         typeIdToGroupStem,
+        usedMethodIds: usedByProcessor.get(dataP.id),
+        tableColumns: tableName
+          ? tableColumnsByName?.get(tableName) ?? []
+          : [],
+        tableIndexes: tableName
+          ? tableIndexesByName?.get(tableName) ?? []
+          : [],
       })
     }
     if (bizP) {

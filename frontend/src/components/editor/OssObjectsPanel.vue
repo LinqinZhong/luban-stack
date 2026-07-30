@@ -433,7 +433,9 @@ watch(
       width="560px"
       destroy-on-close
       append-to-body
-    >
+    :close-on-click-modal="false"
+    :close-on-press-escape="false"
+  >
       <div class="upload-form">
         <div class="form-item">
           <div class="label">对象 Key</div>
@@ -456,7 +458,6 @@ watch(
         </div>
       </div>
       <template #footer>
-        <el-button @click="uploadVisible = false">取消</el-button>
         <el-button type="primary" :loading="uploading" @click="handleUpload">
           上传
         </el-button>
@@ -469,7 +470,9 @@ watch(
       width="640px"
       destroy-on-close
       append-to-body
-    >
+    :close-on-click-modal="false"
+    :close-on-press-escape="false"
+  >
       <div v-loading="metaLoading" class="meta-body">
         <template v-if="objectMeta">
           <div v-if="objectMeta.isImage" class="preview-wrap">

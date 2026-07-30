@@ -158,6 +158,8 @@ function handleSave() {
     width="760px"
     destroy-on-close
     append-to-body
+    :close-on-click-modal="false"
+    :close-on-press-escape="false"
   >
     <el-form label-position="top" size="default">
       <el-form-item label="命名" required>
@@ -247,7 +249,7 @@ function handleSave() {
     </el-form>
 
     <template #footer>
-      <el-button @click="visible = false">{{ draft.builtin ? '关闭' : '取消' }}</el-button>
+      <el-button v-if="draft.builtin" @click="visible = false">关闭</el-button>
       <el-button v-if="!draft.builtin" type="primary" @click="handleSave">保存</el-button>
     </template>
   </el-dialog>

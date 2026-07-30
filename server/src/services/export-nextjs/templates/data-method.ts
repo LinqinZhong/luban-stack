@@ -32,6 +32,33 @@ function quoteIdent(name: string): string {
   return '`' + name.replace(/`/g, '') + '`'
 }
 
+/** entity 小驼峰 → 表列下划线 */
+function camelToSnake(name: string): string {
+  const raw = String(name || '').trim()
+  if (!raw) return raw
+  if (!/[A-Z]/.test(raw)) return raw
+  return raw
+    .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1_$2')
+    .toLowerCase()
+}
+
+function snakeToCamel(name: string): string {
+  const raw = String(name || '').trim()
+  if (!raw || !raw.includes('_')) return raw
+  return raw.replace(/_([a-zA-Z0-9])/g, (_m, c: string) => c.toUpperCase())
+}
+
+function mapRowKeysToCamel(
+  row: Record<string, unknown>,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(row)) {
+    out[snakeToCamel(key)] = value
+  }
+  return out
+}
+
 function sqlLiteral(value: unknown): string {
   if (value == null) return 'NULL'
   if (typeof value === 'number' && Number.isFinite(value)) return String(value)
@@ -97,10 +124,14 @@ function buildWhereClause(
   for (const group of groups) {
     const parts: string[] = []
     for (const cond of group.conditions ?? []) {
-      const colName =
+      const colNameRaw =
         !cond.field || cond.field === '__custom__'
           ? (cond.customField || '').trim()
           : cond.field.trim()
+      const colName =
+        !cond.field || cond.field === '__custom__'
+          ? colNameRaw
+          : camelToSnake(colNameRaw)
       if (!colName || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(colName)) continue
       const col = quoteIdent(colName)
       const op = cond.op
@@ -263,7 +294,15 @@ function buildQuerySql(
 ) {
   const fields = config.queryFields?.length ? config.queryFields : ['*']
   const cols =
-    fields[0] === '*' ? '*' : fields.map((f) => quoteIdent(f)).join(', ')
+    fields[0] === '*'
+      ? '*'
+      : fields
+          .map((f) => {
+            const col = camelToSnake(f)
+            if (col === f) return quoteIdent(f)
+            return `${quoteIdent(col)} AS ${quoteIdent(f)}`
+          })
+          .join(', ')
   const page = pickPageMeta(params, config.pageParam ?? '')
   const where = buildWhereClause(config.conditionGroups, params)
   let sql = `SELECT ${cols} FROM ${quoteIdent(table)}${where}`
@@ -288,7 +327,7 @@ function buildInsertSql(
     .map((m) => ({ field: m.field.trim(), column: m.column.trim() }))
     .filter((m) => m.field && m.column)
   if (!list.length) throw new Error('请先配置插入字段映射')
-  const cols = list.map((m) => quoteIdent(m.field))
+  const cols = list.map((m) => quoteIdent(camelToSnake(m.field)))
   const values = list.map((m) => sqlLiteral(resolvePath(params, m.column)))
   return `INSERT INTO ${quoteIdent(table)} (${cols.join(', ')}) VALUES (${values.join(', ')})`
 }
@@ -301,6 +340,28 @@ function buildDeleteSql(
   const where = buildWhereClause(config.conditionGroups, params)
   if (!where) throw new Error('删除操作必须配置有效的查询条件')
   return `DELETE FROM ${quoteIdent(table)}${where}`
+}
+
+function buildUpdateSql(
+  table: string,
+  config: DataMethodConfig,
+  params: Record<string, unknown>,
+) {
+  const list = (config.fieldMappings || [])
+    .map((m) => ({ field: m.field.trim(), column: m.column.trim() }))
+    .filter((m) => m.field && m.column)
+  if (!list.length) throw new Error('请先配置修改字段映射')
+  const sets = list.map(
+    (m) =>
+      `${quoteIdent(camelToSnake(m.field))} = ${sqlLiteral(resolvePath(params, m.column))}`,
+  )
+  const where = buildWhereClause(config.conditionGroups, params)
+  if (!where) throw new Error('修改操作必须配置有效的查询条件')
+  return `UPDATE ${quoteIdent(table)} SET ${sets.join(', ')}${where}`
+}
+
+function isCustomWriteSql(sql: string): boolean {
+  return /^\s*(INSERT|UPDATE|DELETE|REPLACE)\b/i.test(sql)
 }
 
 function buildBatchInsertSql(
@@ -323,7 +384,7 @@ function buildBatchInsertSql(
   if (!Array.isArray(arr) || !arr.length) {
     throw new Error(`入参「${arrayName}」需为非空数组`)
   }
-  const cols = list.map((m) => quoteIdent(m.field))
+  const cols = list.map((m) => quoteIdent(camelToSnake(m.field)))
   const valueRows = arr.map((item) => {
     const row = item as Record<string, unknown>
     const vals = list.map((m) => {
@@ -418,9 +479,13 @@ export async function runDataMethod(options: {
   } else if (config.operation === 'delete') {
     sql = buildDeleteSql(table, config, params)
     isWrite = true
+  } else if (config.operation === 'update') {
+    sql = buildUpdateSql(table, config, params)
+    isWrite = true
   } else if (config.operation === 'custom') {
     if (!config.sql?.trim()) throw new Error('请先配置自定义 SQL')
     sql = applyCustomSql(config.sql, params, table)
+    if (isCustomWriteSql(sql)) isWrite = true
   } else {
     throw new Error(`不支持的操作：${config.operation}`)
   }
@@ -438,7 +503,11 @@ export async function runDataMethod(options: {
       if (output.type === 'array') return insertIds
       return insertIds[0] ?? 0
     }
-    if (config.operation === 'delete') {
+    if (
+      config.operation === 'delete' ||
+      config.operation === 'update' ||
+      (config.operation === 'custom' && insertId <= 0)
+    ) {
       if (output.type === 'number') return affectedRows
       if (output.type === 'boolean') return affectedRows > 0
       return affectedRows
@@ -449,7 +518,10 @@ export async function runDataMethod(options: {
     return { affectedRows, insertId }
   }
 
-  const rows = exec.rows
+  const rows =
+    config.operation === 'query'
+      ? exec.rows.map((row) => mapRowKeysToCamel(row))
+      : exec.rows
   let total = rows.length
   if (config.operation === 'query' && paginated) {
     if (rows.length < pageSize) {

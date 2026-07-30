@@ -6,9 +6,10 @@ import {
   readServiceProcessors,
 } from '../../backend-services.js'
 import { readDataTypeLibrary } from '../../data-types.js'
-import { readMysqlLibrary } from '../../mysql.js'
+import { readMysqlLibrary, readMysqlTableSchema } from '../../mysql.js'
+import type { MysqlColumnDef, MysqlIndexDef } from '../../../types/mysql.js'
+import { findTypeDef, buildIdToName } from './emit-types.js'
 import { emitAllTypeFiles, emitServiceModules } from './emit-module.js'
-import { buildIdToName } from './emit-types.js'
 import { slugify } from './names.js'
 
 export interface CodegenResult {
@@ -101,6 +102,18 @@ export async function generateNestJsModules(
       ],
     )
 
+    const tableColumnsByName = new Map<string, MysqlColumnDef[]>()
+    const tableIndexesByName = new Map<string, MysqlIndexDef[]>()
+    for (const proc of dataProcessors) {
+      const entity = findTypeDef(typeLib, proc.entityRef)
+      const tableName =
+        entity?.tableName?.trim() || entity?.name?.trim() || ''
+      if (!tableName || tableColumnsByName.has(tableName)) continue
+      const schema = await readMysqlTableSchema(projectPath, tableName)
+      tableColumnsByName.set(tableName, schema?.columns ?? [])
+      tableIndexesByName.set(tableName, schema?.indexes ?? [])
+    }
+
     const emitted = emitServiceModules({
       moduleSlug,
       dataProcessors,
@@ -109,6 +122,8 @@ export async function generateNestJsModules(
       typeLibrary: typeLib,
       idToName,
       typeIdToGroupStem,
+      tableColumnsByName,
+      tableIndexesByName,
     })
     Object.assign(files, emitted.files)
 

@@ -47,7 +47,7 @@ export interface ArraySubField {
 }
 
 /** 数据源绑定：控制器 = 绑定后端 API；计算 = 方法体 return 值；对象存储 = 选资源外链 */
-export type DataSourceBinding = '' | 'controller' | 'computed' | 'oss'
+export type DataSourceBinding = '' | 'controller' | 'computed' | 'oss' | 'literal'
 
 export const DATA_SOURCE_BINDING_OPTIONS: {
   label: string
@@ -233,7 +233,7 @@ export function defaultComputeBody(type: DataFieldType): string {
 }
 
 /** 控制器绑定：自定义解析默认方法体（形参 data = Result.data） */
-export function defaultControllerParseBody(type: DataFieldType): string {
+export function defaultControllerParseBody(_type: DataFieldType): string {
   return `// data 为接口 Result.data\n// return 的值写入本数据池字段\nreturn data\n`
 }
 

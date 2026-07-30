@@ -5,6 +5,7 @@ import type {
   MethodFlow,
   ProcessorMethod,
   ProcessorMethodParam,
+  ProcessorTypeExpr,
   ServiceProcessor,
 } from '../../../types/backend-services'
 import type { DataTypeLibrary } from '../../../types/data-types'
@@ -13,7 +14,12 @@ import {
   processorTypeExprToTs,
 } from '../../../types/page-method'
 import type { MethodParam, MethodParamType, MethodReturnType } from '../../../types/page-method'
+import { defaultEmptyReturnValue } from '../../../utils/empty-return-value'
 import { flowDraftToTypeExpr } from '../../../utils/flow-type-select'
+import {
+  applyPageMap,
+  readPageMapApplyConfig,
+} from '../../../utils/page-map-flow'
 
 export type FlowDebugSnapshot = {
   cursorNodeId: string
@@ -220,6 +226,29 @@ function varFromNode(
       }
     }
     return { name: varName, type: 'any' }
+  }
+  if (node.kind === 'pageMap') {
+    const varName =
+      str(data, 'targetVarName') || str(data, 'targetPath')
+    if (!varName) return null
+    const typeRef = str(data, 'targetTypeRef')
+    const genericArgsRaw = asRecord(data.targetGenericArgs)
+    const genericArgs: Record<string, string> = {}
+    for (const [k, v] of Object.entries(genericArgsRaw)) {
+      if (typeof v === 'string') genericArgs[k] = v
+    }
+    const typeExpr = flowDraftToTypeExpr({
+      type: 'object',
+      typeRef,
+      genericArgs,
+    })
+    const tsType = processorTypeExprToTs(typeExpr, library)
+    return {
+      name: varName,
+      type: 'object',
+      typeExpr,
+      ...(tsType ? { tsType } : {}),
+    }
   }
   return null
 }
@@ -442,12 +471,14 @@ function resolveParamBindings(
 export function extractFlowReturnValue(
   flow: MethodFlow,
   snap: FlowDebugSnapshot,
+  output?: ProcessorTypeExpr | null,
+  typeLibrary?: DataTypeLibrary | null,
 ): unknown {
   for (let i = snap.visitedNodeIds.length - 1; i >= 0; i--) {
     const node = findNode(flow, snap.visitedNodeIds[i]!)
     if (node?.kind !== 'end') continue
     const returnExpr = str(asRecord(node.data), 'returnExpr')
-    if (!returnExpr) return undefined
+    if (!returnExpr) return defaultEmptyReturnValue(output, typeLibrary)
     try {
       return evalInScope(returnExpr, snap.scope)
     } catch (err) {
@@ -461,11 +492,11 @@ export function extractFlowReturnValue(
   const end = flow.nodes.find((n) => n.kind === 'end')
   if (!end) return undefined
   const returnExpr = str(asRecord(end.data), 'returnExpr')
-  if (!returnExpr) return undefined
+  if (!returnExpr) return defaultEmptyReturnValue(output, typeLibrary)
   try {
     return evalInScope(returnExpr, snap.scope)
   } catch {
-    return undefined
+    return defaultEmptyReturnValue(output, typeLibrary)
   }
 }
 
@@ -509,7 +540,7 @@ async function debugRunBusinessMethod(
   if (snap.businessError) {
     throw new BusinessException(snap.businessError.message)
   }
-  return extractFlowReturnValue(flow, snap)
+  return extractFlowReturnValue(flow, snap, method.output)
 }
 
 function defaultForType(type: string): unknown {
@@ -719,6 +750,14 @@ export async function executeFlowNode(
     })
     const resultVar = str(data, 'resultVarName')
     if (resultVar) scope[resultVar] = apiResult.output
+    const next = pickNext(ctx.flow, node, scope)
+    result = { scope, nextNodeId: next.nextId, log: next.log }
+  } else if (node.kind === 'pageMap') {
+    const config = readPageMapApplyConfig(data)
+    if (!config) {
+      throw new Error('分页映射节点未配置数据源或目标变量名')
+    }
+    applyPageMap(scope, config)
     const next = pickNext(ctx.flow, node, scope)
     result = { scope, nextNodeId: next.nextId, log: next.log }
   } else if (node.kind === 'end') {

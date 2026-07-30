@@ -4,7 +4,7 @@ import { Delete, EditPen, Setting } from '@element-plus/icons-vue'
 import ArrayFieldsDialog from './ArrayFieldsDialog.vue'
 import ComputedBindingDialog from './ComputedBindingDialog.vue'
 import ControllerBindingDialog from './ControllerBindingDialog.vue'
-import DataFieldTypeTreeSelect from './DataFieldTypeTreeSelect.vue'
+import DataFieldTypeTreeSelect, { type TypeSelectPayload } from './DataFieldTypeTreeSelect.vue'
 import IconValueSelect from './IconValueSelect.vue'
 import ColorPicker from './ColorPicker.vue'
 import ObjectFieldsDialog from './ObjectFieldsDialog.vue'
@@ -200,18 +200,14 @@ function updateField(index: number, patch: Partial<DataField>) {
   fields.value = next
 }
 
-function handleTypeChange(
-  index: number,
-  payload: {
-    type: DataFieldType
-    typeRef?: string
-    itemType?: DataFieldType
-    itemTypeRef?: string
-    itemItemType?: DataFieldType
-    itemItemTypeRef?: string
-  },
-) {
-  const { type, typeRef, itemType, itemTypeRef, itemItemType, itemItemTypeRef } = payload
+function handleTypeChange(index: number, payload: TypeSelectPayload) {
+  if (payload.cleared || payload.type === 'void' || payload.type === 'generic') return
+  const type = payload.type
+  const itemType =
+    payload.itemType === 'generic' ? undefined : payload.itemType
+  const itemItemType =
+    payload.itemItemType === 'generic' ? undefined : payload.itemItemType
+  const { typeRef, itemTypeRef, itemItemTypeRef } = payload
   const named = leafNamedTypeRef({
     type,
     typeRef,

@@ -277,7 +277,7 @@ function parseSlotParams(raw: string | undefined): SlotParamRow[] {
           itemItemTypeRef,
         } satisfies SlotParamRow
       })
-      .filter((item): item is SlotParamRow => Boolean(item))
+      .filter((item): item is NonNullable<typeof item> => item !== null)
   } catch {
     return []
   }
@@ -370,7 +370,7 @@ const selectableEvents = computed(() => {
       })
       .filter((item): item is { key: string; label: string } => Boolean(item))
   }
-  const list = INTERACTION_EVENTS.map((item) => ({
+  const list: { key: string; label: string }[] = INTERACTION_EVENTS.map((item) => ({
     key: item.key,
     label: item.label,
   }))
@@ -446,6 +446,7 @@ const layoutForm = reactive({
   iconId: '',
   size: '',
   color: '',
+  contentShadow: '',
   rotateX: '',
   rotateY: '',
   rotateZ: '',
@@ -544,6 +545,7 @@ function syncLayoutForm() {
   layoutForm.iconId = node.attrs.iconId ?? ''
   layoutForm.size = node.attrs.size ?? ''
   layoutForm.color = node.attrs.color ?? ''
+  layoutForm.contentShadow = node.attrs.contentShadow ?? ''
   layoutForm.rotateX = node.attrs.rotateX ?? ''
   layoutForm.rotateY = node.attrs.rotateY ?? ''
   layoutForm.rotateZ = node.attrs.rotateZ ?? ''
@@ -1843,6 +1845,21 @@ function saveVisibilityConfig(config: VisibilityConditionConfig) {
                   @change="commitAttr('color', layoutForm.color)"
                 />
               </el-form-item>
+              <el-form-item label="圆角 borderRadius">
+                <NumericInput
+                  v-model="layoutForm.borderRadius"
+                  placeholder="例如：4 / 50%"
+                  @change="commitAttr('borderRadius', layoutForm.borderRadius)"
+                />
+              </el-form-item>
+              <el-form-item label="内容阴影">
+                <el-input
+                  v-model="layoutForm.contentShadow"
+                  clearable
+                  placeholder="如 0 2px 8px rgba(0,0,0,.2)"
+                  @change="commitAttr('contentShadow', layoutForm.contentShadow)"
+                />
+              </el-form-item>
             </el-form>
           </template>
 
@@ -2383,7 +2400,9 @@ function saveVisibilityConfig(config: VisibilityConditionConfig) {
       width="420px"
       destroy-on-close
       append-to-body
-    >
+    :close-on-click-modal="false"
+    :close-on-press-escape="false"
+  >
       <el-form label-position="top" size="default">
         <el-form-item label="绑定数组">
           <el-select
@@ -2411,7 +2430,6 @@ function saveVisibilityConfig(config: VisibilityConditionConfig) {
       </el-form>
       <template #footer>
         <el-button @click="clearRepeatConfig">清除</el-button>
-        <el-button @click="repeatDialogVisible = false">取消</el-button>
         <el-button type="primary" @click="saveRepeatConfig">确定</el-button>
       </template>
     </el-dialog>
@@ -2422,7 +2440,9 @@ function saveVisibilityConfig(config: VisibilityConditionConfig) {
       width="420px"
       destroy-on-close
       append-to-body
-    >
+    :close-on-click-modal="false"
+    :close-on-press-escape="false"
+  >
       <el-form label-position="top" size="default">
         <el-form-item label="数据池字段">
           <el-select
@@ -2448,7 +2468,6 @@ function saveVisibilityConfig(config: VisibilityConditionConfig) {
       </p>
       <template #footer>
         <el-button @click="clearModelConfig">清除</el-button>
-        <el-button @click="modelDialogVisible = false">取消</el-button>
         <el-button type="primary" @click="saveModelConfig">确定</el-button>
       </template>
     </el-dialog>
@@ -2459,7 +2478,9 @@ function saveVisibilityConfig(config: VisibilityConditionConfig) {
       width="420px"
       destroy-on-close
       append-to-body
-    >
+    :close-on-click-modal="false"
+    :close-on-press-escape="false"
+  >
       <el-form label-position="top" size="default">
         <el-form-item label="激活字段">
           <el-select
@@ -2489,7 +2510,6 @@ function saveVisibilityConfig(config: VisibilityConditionConfig) {
       </p>
       <template #footer>
         <el-button @click="clearActiveConfig">清除</el-button>
-        <el-button @click="activeDialogVisible = false">取消</el-button>
         <el-button type="primary" @click="saveActiveConfig">确定</el-button>
       </template>
     </el-dialog>

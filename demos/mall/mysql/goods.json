@@ -56,7 +56,18 @@
       "autoIncrement": false,
       "defaultValue": "",
       "comment": ""
+    },
+    {
+      "name": "is_deleted",
+      "type": "tinyint(1)",
+      "nullable": true,
+      "primaryKey": false,
+      "autoIncrement": false,
+      "defaultValue": "",
+      "comment": "",
+      "logicDelete": true
     }
   ],
-  "syncedAt": 1785234924666
+  "indexes": [],
+  "syncedAt": 1785369874013
 }

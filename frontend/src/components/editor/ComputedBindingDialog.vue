@@ -96,6 +96,8 @@ function handleSave() {
     width="760px"
     destroy-on-close
     append-to-body
+    :close-on-click-modal="false"
+    :close-on-press-escape="false"
   >
     <el-form label-position="top">
       <el-form-item label="方法体">
@@ -117,7 +119,6 @@ function handleSave() {
     </el-form>
 
     <template #footer>
-      <el-button @click="visible = false">取消</el-button>
       <el-button type="primary" @click="handleSave">保存</el-button>
     </template>
   </el-dialog>

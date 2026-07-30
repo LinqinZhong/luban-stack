@@ -6,6 +6,7 @@ import BranchNode from './nodes/BranchNode.vue'
 import ActionNode from './nodes/ActionNode.vue'
 import OutputNode from './nodes/OutputNode.vue'
 import DefineNode from './nodes/DefineNode.vue'
+import PageMapNode from './nodes/PageMapNode.vue'
 import ThrowNode from './nodes/ThrowNode.vue'
 import EndNode from './nodes/EndNode.vue'
 
@@ -17,6 +18,7 @@ const methodFlowNodeTypes = markRaw({
   action: markRaw(ActionNode),
   output: markRaw(OutputNode),
   define: markRaw(DefineNode),
+  pageMap: markRaw(PageMapNode),
   throw: markRaw(ThrowNode),
   end: markRaw(EndNode),
 })
@@ -37,7 +39,6 @@ import {
   VueFlow,
   useVueFlow,
   type Connection,
-  type Edge,
   type EdgeChange,
   type Node,
   type NodeChange,
@@ -65,8 +66,11 @@ import {
   processorTypeExprToTs,
 } from '../../../types/page-method'
 import { flowDraftToTypeExpr } from '../../../utils/flow-type-select'
+import {
+  QUERY_PAGE_VO_TYPE_ID,
+  readFieldMappings,
+} from '../../../utils/page-map-flow'
 import { coarseToProcessorTypeExpr } from '../../../utils/typed-binding-paths'
-import { typeLabel, type DataFieldType } from '../../../types/page-data'
 import InputNodeDialog from './dialogs/InputNodeDialog.vue'
 import type {
   InputDataSource,
@@ -82,6 +86,9 @@ import OutputNodeDialog, {
 import DefineNodeDialog, {
   type DefineNodeForm,
 } from './dialogs/DefineNodeDialog.vue'
+import PageMapNodeDialog, {
+  type PageMapNodeForm,
+} from './dialogs/PageMapNodeDialog.vue'
 import EndNodeDialog, { type EndNodeForm } from './dialogs/EndNodeDialog.vue'
 import ThrowNodeDialog, {
   type ThrowNodeForm,
@@ -138,13 +145,33 @@ const emit = defineEmits<{
   'update:selected-node': [nodeId: string | null]
 }>()
 
+type FlowGraphNode = {
+  id: string
+  type?: string
+  position: { x: number; y: number }
+  data?: Record<string, unknown>
+  deletable?: boolean
+  selected?: boolean
+}
+type FlowGraphEdge = {
+  id: string
+  source: string
+  target: string
+  sourceHandle?: string | null
+  targetHandle?: string | null
+  label?: string
+  selected?: boolean
+  animated?: boolean
+  class?: string
+}
+
 provide(FLOW_DEBUG_KEY, {
   cursorId: toRef(props, 'debugCursorId'),
   visitedIds: toRef(props, 'debugVisitedIds'),
   printByNode: toRef(props, 'debugPrintByNode'),
 })
 
-function flowToNodes(flow: MethodFlow): Node[] {
+function flowToNodes(flow: MethodFlow): FlowGraphNode[] {
   return flow.nodes.map((n) => ({
     id: n.id,
     type: n.kind,
@@ -165,7 +192,10 @@ function sameJson(a: unknown, b: unknown): boolean {
 /** 按 id 合并，保留已有节点对象，避免 Vue Flow 自定义节点整表替换后消失 */
 function syncNodesFromFlow(flow: MethodFlow) {
   const incoming = flowToNodes(flow)
-  const prevById = new Map(nodes.value.map((n) => [n.id, n]))
+  const prevById = new Map<string, FlowGraphNode>()
+  for (const n of nodes.value) {
+    prevById.set(n.id, n)
+  }
   const incomingIds = new Set(incoming.map((n) => n.id))
   const structureChanged =
     incoming.length !== nodes.value.length ||
@@ -219,7 +249,7 @@ function syncEdgesFromFlow(flow: MethodFlow) {
 }
 
 /** visited 相邻节点之间的边 id */
-function debugActiveEdgeIds(list: Edge[]): Set<string> {
+function debugActiveEdgeIds(list: FlowGraphEdge[]): Set<string> {
   const visited = props.debugVisitedIds ?? []
   const active = new Set<string>()
   for (let i = 0; i < visited.length - 1; i++) {
@@ -233,7 +263,7 @@ function debugActiveEdgeIds(list: Edge[]): Set<string> {
 }
 
 /** 套上调试流动样式；无变化时返回原数组引用，避免受控边更新死循环 */
-function withDebugEdgeStyles(list: Edge[]): Edge[] {
+function withDebugEdgeStyles(list: FlowGraphEdge[]): FlowGraphEdge[] {
   const active = debugActiveEdgeIds(list)
   let needsReplace = false
   for (const e of list) {
@@ -271,42 +301,10 @@ const methodHasReturn = computed(() => {
   return true
 })
 
-function typeDefName(id: string): string {
-  if (!id) return ''
-  for (const group of props.typeLibrary?.groups ?? []) {
-    const hit = group.types.find((x) => x.id === id)
-    const name = hit?.name?.trim()
-    if (name) return name
-  }
-  return id
-}
-
-function leafNamedRef(expr: ProcessorTypeExpr): string {
-  if (expr.type === 'array') {
-    if (expr.itemType === 'array') return expr.itemItemTypeRef || ''
-    return expr.itemTypeRef || ''
-  }
-  return expr.typeRef || ''
-}
-
 const methodOutputLabel = computed(() => {
   const expr = props.methodOutput
   if (!expr || !methodHasReturn.value) return 'void'
-  const named = leafNamedRef(expr)
-  const namedLabel = named ? typeDefName(named) : ''
-  if (expr.type === 'array') {
-    if (expr.itemType === 'array') {
-      const leaf =
-        namedLabel ||
-        typeLabel((expr.itemItemType || 'string') as DataFieldType)
-      return `${leaf}[][]`
-    }
-    const leaf =
-      namedLabel || typeLabel((expr.itemType || 'string') as DataFieldType)
-    return `${leaf}[]`
-  }
-  if (namedLabel) return namedLabel
-  return typeLabel((expr.type || 'string') as DataFieldType)
+  return processorTypeExprToTs(expr, props.typeLibrary) || '—'
 })
 
 function enrichNodeData(
@@ -325,7 +323,7 @@ function stripUiOnlyData(data: Record<string, unknown>): Record<string, unknown>
   return next
 }
 
-function flowToEdges(flow: MethodFlow): Edge[] {
+function flowToEdges(flow: MethodFlow): FlowGraphEdge[] {
   return flow.edges.map((e) => ({
     id: e.id,
     source: e.source,
@@ -339,8 +337,8 @@ function ensureFlow(flow: MethodFlow | undefined | null): MethodFlow {
   return flow?.nodes?.length ? flow : createDefaultMethodFlow()
 }
 
-const nodes = ref<Node[]>(flowToNodes(ensureFlow(props.flow)))
-const edges = ref<Edge[]>(flowToEdges(ensureFlow(props.flow)))
+const nodes = ref<FlowGraphNode[]>(flowToNodes(ensureFlow(props.flow)))
+const edges = ref<FlowGraphEdge[]>(flowToEdges(ensureFlow(props.flow)))
 
 watch(
   () =>
@@ -392,12 +390,12 @@ function onNodesChange(changes: NodeChange[]) {
     helperLineVertical.value = helper.vertical
   }
 
-  nodes.value = applyNodeChanges(changes)
+  nodes.value = applyNodeChanges(changes) as FlowGraphNode[]
 }
 
 function onEdgesChange(changes: EdgeChange[]) {
   // applyEdgeChanges 可能丢掉 class/animated，合并调试样式后再写回
-  edges.value = withDebugEdgeStyles(applyEdgeChanges(changes))
+  edges.value = withDebugEdgeStyles(applyEdgeChanges(changes) as FlowGraphEdge[])
 }
 
 let syncingFromProps = false
@@ -578,6 +576,21 @@ function defaultDataForKind(kind: Exclude<FlowNodeKind, 'start'>): Record<string
         description: '',
         printExpr: '',
       }
+    case 'pageMap':
+      return {
+        sourceKind: 'page',
+        sourcePath: '',
+        currentExpr: '',
+        pageSizeExpr: '',
+        totalExpr: '',
+        hasNextExpr: '',
+        targetTypeRef: QUERY_PAGE_VO_TYPE_ID,
+        targetGenericArgs: {},
+        targetVarName: '',
+        fieldMappings: [],
+        description: '',
+        printExpr: '',
+      }
     case 'throw':
       return {
         messageExpr: '',
@@ -640,6 +653,7 @@ const branchDialogVisible = ref(false)
 const actionDialogVisible = ref(false)
 const outputDialogVisible = ref(false)
 const defineDialogVisible = ref(false)
+const pageMapDialogVisible = ref(false)
 const throwDialogVisible = ref(false)
 const endDialogVisible = ref(false)
 const startDialogVisible = ref(false)
@@ -693,6 +707,20 @@ const editingDefineForm = ref<DefineNodeForm>({
   description: '',
   printExpr: '',
 })
+const editingPageMapForm = ref<PageMapNodeForm>({
+  sourceKind: 'page',
+  sourcePath: '',
+  currentExpr: '',
+  pageSizeExpr: '',
+  totalExpr: '',
+  hasNextExpr: '',
+  targetTypeRef: QUERY_PAGE_VO_TYPE_ID,
+  targetGenericArgs: {},
+  targetVarName: '',
+  fieldMappings: [],
+  description: '',
+  printExpr: '',
+})
 const editingEndForm = ref<EndNodeForm>({
   returnExpr: '',
   printExpr: '',
@@ -701,16 +729,6 @@ const editingThrowForm = ref<ThrowNodeForm>({
   messageExpr: '',
   printExpr: '',
 })
-
-function namedTypeTs(typeRef: string): string {
-  if (!typeRef) return ''
-  for (const group of props.typeLibrary?.groups ?? []) {
-    const hit = group.types.find((t) => t.id === typeRef)
-    const name = hit?.name?.trim()
-    if (name) return name
-  }
-  return ''
-}
 
 function readGenericArgs(raw: unknown): Record<string, string> {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {}
@@ -779,6 +797,27 @@ function defineToParam(data: Record<string, unknown>): MethodParam | null {
   }
 }
 
+function pageMapToParam(data: Record<string, unknown>): MethodParam | null {
+  const varName =
+    (typeof data.targetVarName === 'string' ? data.targetVarName.trim() : '') ||
+    (typeof data.targetPath === 'string' ? data.targetPath.trim() : '')
+  if (!varName) return null
+  const typeRef =
+    typeof data.targetTypeRef === 'string' ? data.targetTypeRef.trim() : ''
+  const typeExpr = flowDraftToTypeExpr({
+    type: 'object',
+    typeRef,
+    genericArgs: readGenericArgs(data.targetGenericArgs),
+  })
+  const tsType = processorTypeExprToTs(typeExpr, props.typeLibrary)
+  return {
+    name: varName,
+    type: 'object',
+    typeExpr,
+    ...(tsType ? { tsType } : {}),
+  }
+}
+
 const reservedNames = computed(() => {
   const names = props.methodParams.map((p) => p.name.trim()).filter(Boolean)
   for (const n of nodes.value) {
@@ -794,6 +833,13 @@ const reservedNames = computed(() => {
     } else if (n.type === 'output') {
       const varName =
         typeof data.resultVarName === 'string' ? data.resultVarName.trim() : ''
+      if (varName) names.push(varName)
+    } else if (n.type === 'pageMap') {
+      const varName =
+        (typeof data.targetVarName === 'string'
+          ? data.targetVarName.trim()
+          : '') ||
+        (typeof data.targetPath === 'string' ? data.targetPath.trim() : '')
       if (varName) names.push(varName)
     }
   }
@@ -889,6 +935,14 @@ const ambientVars = computed((): MethodParam[] => {
     if (n.type === 'action') {
       if (n.id === editingNodeId.value && actionDialogVisible.value) continue
       const param = actionOutputToParam(data)
+      if (!param) continue
+      if (vars.some((v) => v.name === param.name)) continue
+      vars.push(param)
+      continue
+    }
+    if (n.type === 'pageMap') {
+      if (n.id === editingNodeId.value && pageMapDialogVisible.value) continue
+      const param = pageMapToParam(data)
       if (!param) continue
       if (vars.some((v) => v.name === param.name)) continue
       vars.push(param)
@@ -1102,6 +1156,33 @@ function openNodeEditor(node: Node) {
       printExpr: typeof data.printExpr === 'string' ? data.printExpr : '',
     }
     defineDialogVisible.value = true
+  } else if (node.type === 'pageMap') {
+    editingPageMapForm.value = {
+      sourceKind: data.sourceKind === 'array' ? 'array' : 'page',
+      sourcePath:
+        typeof data.sourcePath === 'string' ? data.sourcePath : '',
+      currentExpr:
+        typeof data.currentExpr === 'string' ? data.currentExpr : '',
+      pageSizeExpr:
+        typeof data.pageSizeExpr === 'string' ? data.pageSizeExpr : '',
+      totalExpr: typeof data.totalExpr === 'string' ? data.totalExpr : '',
+      hasNextExpr:
+        typeof data.hasNextExpr === 'string' ? data.hasNextExpr : '',
+      targetTypeRef:
+        typeof data.targetTypeRef === 'string' ? data.targetTypeRef : '',
+      targetGenericArgs: readGenericArgs(data.targetGenericArgs),
+      targetVarName:
+        typeof data.targetVarName === 'string'
+          ? data.targetVarName
+          : typeof data.targetPath === 'string'
+            ? data.targetPath
+            : '',
+      fieldMappings: readFieldMappings(data.fieldMappings),
+      description:
+        typeof data.description === 'string' ? data.description : '',
+      printExpr: typeof data.printExpr === 'string' ? data.printExpr : '',
+    }
+    pageMapDialogVisible.value = true
   }
 }
 
@@ -1153,6 +1234,11 @@ function saveDefineNode(form: DefineNodeForm) {
   patchNodeData(editingNodeId.value, { ...form })
 }
 
+function savePageMapNode(form: PageMapNodeForm) {
+  if (!editingNodeId.value) return
+  patchNodeData(editingNodeId.value, { ...form })
+}
+
 function saveEndNode(form: EndNodeForm) {
   if (!editingNodeId.value) return
   patchNodeData(editingNodeId.value, {
@@ -1173,7 +1259,10 @@ function saveThrowNode(form: ThrowNodeForm) {
 watch(methodHasReturn, (needs) => {
   for (const n of nodes.value) {
     if (n.type !== 'end') continue
-    const data = { ...(n.data as Record<string, unknown>), needsReturn: needs }
+    const data: Record<string, unknown> = {
+      ...(n.data as Record<string, unknown>),
+      needsReturn: needs,
+    }
     if (!needs) data.returnExpr = ''
     n.data = data
   }
@@ -1325,6 +1414,13 @@ onUnmounted(() => {
       :type-library="typeLibrary"
       :reserved-names="reservedNames"
       @save="saveDefineNode"
+    />
+    <PageMapNodeDialog
+      v-model="pageMapDialogVisible"
+      :form="editingPageMapForm"
+      :ambient-vars="ambientVars"
+      :type-library="typeLibrary"
+      @save="savePageMapNode"
     />
     <ThrowNodeDialog
       v-model="throwDialogVisible"

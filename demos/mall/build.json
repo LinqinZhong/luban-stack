@@ -10,7 +10,8 @@
           "type": "nestjs",
           "port": 3030,
           "moduleIds": [
-            "svc_mrqdgnhb_3ktq2g"
+            "svc_mrqdgnhb_3ktq2g",
+            "user"
           ],
           "includeOss": true
         }

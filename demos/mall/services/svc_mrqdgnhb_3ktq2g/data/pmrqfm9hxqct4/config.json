@@ -6,356 +6,13 @@
   "dataProcessorRef": "",
   "methods": [
     {
-      "id": "method_mrqfmd1j_ah6zjv",
-      "name": "list",
+      "id": "method_ms6qgzqr_xc9kza",
+      "name": "countByKeyword",
       "remark": "",
       "scope": "public",
       "params": [
         {
-          "id": "param_mrqfn5od_2x0r2s",
-          "name": "pageDto",
-          "remark": "",
-          "typeExpr": {
-            "type": "json",
-            "typeRef": "type_common_QueryPageDto",
-            "itemType": "",
-            "itemTypeRef": "",
-            "itemItemType": "",
-            "itemItemTypeRef": "",
-            "genericArgs": {}
-          },
-          "required": false
-        },
-        {
-          "id": "param_mrqj4aai_nuxni0",
-          "name": "keyword",
-          "remark": "",
-          "typeExpr": {
-            "type": "string",
-            "typeRef": "",
-            "itemType": "",
-            "itemTypeRef": "",
-            "itemItemType": "",
-            "itemItemTypeRef": "",
-            "genericArgs": {}
-          },
-          "required": false
-        }
-      ],
-      "output": {
-        "type": "array",
-        "typeRef": "",
-        "itemType": "json",
-        "itemTypeRef": "type_mrnx6ke8_4d7vry",
-        "itemItemType": "",
-        "itemItemTypeRef": "",
-        "genericArgs": {}
-      },
-      "dataConfig": {
-        "source": "mysql",
-        "operation": "query",
-        "queryFields": [
-          "name",
-          "id",
-          "price",
-          "stock",
-          "img"
-        ],
-        "sql": "",
-        "fieldMappings": [],
-        "batchSourceParam": "",
-        "pageParam": "pageDto",
-        "conditionGroups": [
-          {
-            "id": "cg_mrqj4pcr_o20n1q",
-            "conditions": [
-              {
-                "id": "cond_mrqj4pcr_xm9jst",
-                "field": "name",
-                "customField": "",
-                "op": "like",
-                "valueKind": "param",
-                "value": "keyword",
-                "valueTo": ""
-              }
-            ]
-          }
-        ]
-      },
-      "debugParams": {
-        "pageDto": {
-          "current": 1,
-          "pageSize": 2
-        },
-        "keyword": "芒果"
-      },
-      "flow": {
-        "nodes": [
-          {
-            "id": "start",
-            "kind": "start",
-            "position": {
-              "x": 280,
-              "y": 40
-            },
-            "data": {}
-          }
-        ],
-        "edges": []
-      }
-    },
-    {
-      "id": "method_mrqgzrbx_jl23n8",
-      "name": "saveBatch",
-      "remark": "",
-      "scope": "public",
-      "params": [
-        {
-          "id": "param_mrqgztqe_3d0ofu",
-          "name": "data",
-          "remark": "",
-          "typeExpr": {
-            "type": "array",
-            "typeRef": "",
-            "itemType": "json",
-            "itemTypeRef": "type_mrnx6ke8_4d7vry",
-            "itemItemType": "",
-            "itemItemTypeRef": "",
-            "genericArgs": {}
-          },
-          "required": false
-        }
-      ],
-      "output": {
-        "type": "array",
-        "typeRef": "",
-        "itemType": "number",
-        "itemTypeRef": "",
-        "itemItemType": "",
-        "itemItemTypeRef": "",
-        "genericArgs": {}
-      },
-      "dataConfig": {
-        "source": "mysql",
-        "operation": "batchInsert",
-        "queryFields": [],
-        "sql": "",
-        "fieldMappings": [
-          {
-            "field": "id",
-            "column": "data.id"
-          },
-          {
-            "field": "name",
-            "column": "data.name"
-          },
-          {
-            "field": "price",
-            "column": "data.price"
-          },
-          {
-            "field": "stock",
-            "column": "data.stock"
-          },
-          {
-            "field": "img",
-            "column": "data.img"
-          }
-        ],
-        "batchSourceParam": "data",
-        "pageParam": "",
-        "conditionGroups": []
-      },
-      "debugParams": {
-        "data": [
-          {
-            "id": "",
-            "name": "西瓜",
-            "price": 5,
-            "stock": 0,
-            "img": "https://ts1.tc.mm.bing.net/th/id/OIP-C.VYeFdqnHf_wvawoowpcgaAAAAA?w=108&h=108&c=1&bgcl=6e80fd&r=0&o=7&pid=ImgRC&rm=3"
-          }
-        ]
-      },
-      "flow": {
-        "nodes": [
-          {
-            "id": "start",
-            "kind": "start",
-            "position": {
-              "x": 280,
-              "y": 40
-            },
-            "data": {}
-          }
-        ],
-        "edges": []
-      }
-    },
-    {
-      "id": "method_mrqir4sh_3tqdfb",
-      "name": "save",
-      "remark": "",
-      "scope": "public",
-      "params": [
-        {
-          "id": "param_mrqir9lm_425rtw",
-          "name": "data",
-          "remark": "",
-          "typeExpr": {
-            "type": "json",
-            "typeRef": "type_mrnx6ke8_4d7vry",
-            "itemType": "",
-            "itemTypeRef": "",
-            "itemItemType": "",
-            "itemItemTypeRef": "",
-            "genericArgs": {}
-          },
-          "required": false
-        }
-      ],
-      "output": {
-        "type": "string",
-        "typeRef": "",
-        "itemType": "",
-        "itemTypeRef": "",
-        "itemItemType": "",
-        "itemItemTypeRef": "",
-        "genericArgs": {}
-      },
-      "dataConfig": {
-        "source": "mysql",
-        "operation": "insert",
-        "queryFields": [],
-        "sql": "",
-        "fieldMappings": [
-          {
-            "field": "name",
-            "column": "data.name"
-          },
-          {
-            "field": "price",
-            "column": "data.price"
-          },
-          {
-            "field": "stock",
-            "column": "data.stock"
-          },
-          {
-            "field": "img",
-            "column": "data.img"
-          }
-        ],
-        "batchSourceParam": "",
-        "pageParam": "",
-        "conditionGroups": []
-      },
-      "debugParams": {
-        "data": {
-          "id": "",
-          "name": "哈密瓜",
-          "price": 299.99,
-          "stock": 4,
-          "img": "https://ts3.tc.mm.bing.net/th/id/OIP-C.R1kFUsXP2QVRw6S7sOyPPAAAAA?w=108&h=108&c=1&bgcl=d4ffc6&r=0&o=7&pid=ImgRC&rm=3"
-        }
-      },
-      "flow": {
-        "nodes": [
-          {
-            "id": "start",
-            "kind": "start",
-            "position": {
-              "x": 280,
-              "y": 40
-            },
-            "data": {}
-          }
-        ],
-        "edges": []
-      }
-    },
-    {
-      "id": "method_mrqp6qd5_10mqd0",
-      "name": "deleteById",
-      "remark": "",
-      "scope": "public",
-      "params": [
-        {
-          "id": "param_mrqp703k_4pjd6t",
-          "name": "id",
-          "remark": "",
-          "typeExpr": {
-            "type": "string",
-            "typeRef": "",
-            "itemType": "",
-            "itemTypeRef": "",
-            "itemItemType": "",
-            "itemItemTypeRef": "",
-            "genericArgs": {}
-          },
-          "required": false
-        }
-      ],
-      "output": {
-        "type": "number",
-        "typeRef": "",
-        "itemType": "",
-        "itemTypeRef": "",
-        "itemItemType": "",
-        "itemItemTypeRef": "",
-        "genericArgs": {}
-      },
-      "dataConfig": {
-        "source": "mysql",
-        "operation": "delete",
-        "queryFields": [],
-        "sql": "",
-        "fieldMappings": [],
-        "batchSourceParam": "",
-        "pageParam": "",
-        "conditionGroups": [
-          {
-            "id": "cg_mrs1tc6l_btboo7",
-            "conditions": [
-              {
-                "id": "cond_mrs1tc6m_woih4c",
-                "field": "id",
-                "customField": "",
-                "op": "eq",
-                "valueKind": "param",
-                "value": "id",
-                "valueTo": ""
-              }
-            ]
-          }
-        ]
-      },
-      "debugParams": {
-        "id": "34"
-      },
-      "flow": {
-        "nodes": [
-          {
-            "id": "start",
-            "kind": "start",
-            "position": {
-              "x": 280,
-              "y": 40
-            },
-            "data": {}
-          }
-        ],
-        "edges": []
-      }
-    },
-    {
-      "id": "method_mrqs4khy_m96gpp",
-      "name": "count",
-      "remark": "",
-      "scope": "public",
-      "params": [
-        {
-          "id": "param_mrqs5o1s_3cwjs4",
+          "id": "param_ms6qhek4_dnmlhf",
           "name": "keyword",
           "remark": "",
           "typeExpr": {
@@ -383,7 +40,7 @@
         "source": "mysql",
         "operation": "custom",
         "queryFields": [],
-        "sql": "SELECT COUNT(id) FROM {TABLE_NAME}\r\n<if test=\"keyword != '' && keyword != null\">\r\n  WHERE name LIKE CONCAT('%',#{keyword},'%')\r\n</if>",
+        "sql": "SELECT COUNT(id) FROM {TABLE_NAME} WHERE is_deleted = 0\r\n<if test=\"keyword != null\">\r\n  AND name LIKE CONCAT('%', #{keyword}, '%')\r\n</if>",
         "fieldMappings": [
           {
             "field": "value",
@@ -395,7 +52,7 @@
         "conditionGroups": []
       },
       "debugParams": {
-        "keyword": ""
+        "keyword": null
       },
       "flow": {
         "nodes": [
@@ -413,14 +70,14 @@
       }
     },
     {
-      "id": "method_ms4e472m_lzxbxy",
-      "name": "one",
+      "id": "method_ms6qjd77_qyh4yw",
+      "name": "pageByKeyword",
       "remark": "",
       "scope": "public",
       "params": [
         {
-          "id": "param_ms4e86va_6wksl4",
-          "name": "id",
+          "id": "param_ms6qk31v_7nhvti",
+          "name": "keyword",
           "remark": "",
           "typeExpr": {
             "type": "string",
@@ -432,13 +89,28 @@
             "genericArgs": {}
           },
           "required": false
+        },
+        {
+          "id": "param_ms6qkvm4_8yfq4t",
+          "name": "page",
+          "remark": "",
+          "typeExpr": {
+            "type": "json",
+            "typeRef": "type_common_QueryPageDto",
+            "itemType": "",
+            "itemTypeRef": "",
+            "itemItemType": "",
+            "itemItemTypeRef": "",
+            "genericArgs": {}
+          },
+          "required": false
         }
       ],
       "output": {
-        "type": "json",
-        "typeRef": "type_mrnx6ke8_4d7vry",
-        "itemType": "",
-        "itemTypeRef": "",
+        "type": "array",
+        "typeRef": "",
+        "itemType": "json",
+        "itemTypeRef": "type_mrnx6ke8_4d7vry",
         "itemItemType": "",
         "itemItemTypeRef": "",
         "genericArgs": {}
@@ -451,23 +123,24 @@
           "name",
           "price",
           "stock",
-          "img"
+          "img",
+          "deliveryFee"
         ],
         "sql": "",
         "fieldMappings": [],
         "batchSourceParam": "",
-        "pageParam": "",
+        "pageParam": "page",
         "conditionGroups": [
           {
-            "id": "cg_ms4eguu1_nwonco",
+            "id": "cg_ms6ql437_e2a94x",
             "conditions": [
               {
-                "id": "cond_ms4eguu1_slorl0",
-                "field": "id",
+                "id": "cond_ms6ql437_7u4qa7",
+                "field": "name",
                 "customField": "",
-                "op": "eq",
+                "op": "like",
                 "valueKind": "param",
-                "value": "id",
+                "value": "keyword",
                 "valueTo": ""
               }
             ]
@@ -475,7 +148,11 @@
         ]
       },
       "debugParams": {
-        "id": "1"
+        "keyword": null,
+        "page": {
+          "current": 1,
+          "pageSize": 3
+        }
       },
       "flow": {
         "nodes": [

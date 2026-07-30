@@ -493,6 +493,8 @@ function handleClear() {
     width="720px"
     destroy-on-close
     append-to-body
+    :close-on-click-modal="false"
+    :close-on-press-escape="false"
   >
     <p class="hint">可绑定多个方法，按列表顺序触发；可为目标方法填写参数。末尾「自定义」可直接编写方法体。</p>
 
@@ -774,7 +776,6 @@ function handleClear() {
 
     <template #footer>
       <el-button @click="handleClear">清除</el-button>
-      <el-button @click="visible = false">取消</el-button>
       <el-button type="primary" @click="handleSave">保存</el-button>
     </template>
   </el-dialog>
