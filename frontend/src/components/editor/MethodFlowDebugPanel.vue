@@ -28,6 +28,7 @@ import {
   type FlowAmbientVar,
   type FlowDebugSnapshot,
 } from './method-flow/method-flow-debug'
+import DateTimeValueInput from './DateTimeValueInput.vue'
 
 export type MethodFlowDebugTarget = {
   projectPath: string
@@ -136,6 +137,12 @@ const editingAmbient = ref<FlowAmbientVar | null>(null)
 const ambientEditJson = ref('')
 const ambientEditScalar = ref('')
 const ambientEditIsJson = ref(false)
+
+const ambientEditDateKind = computed((): 'time' | 'date' | 'datetime' | '' => {
+  const t = editingAmbient.value?.typeExpr?.type
+  if (t === 'time' || t === 'date' || t === 'datetime') return t
+  return ''
+})
 
 const method = computed(() => props.target?.method ?? null)
 
@@ -1565,6 +1572,16 @@ watch(isStartSelected, (ok) => {
           controls-position="right"
           style="width: 100%"
           @update:model-value="ambientEditScalar = String($event ?? 0)"
+        />
+        <DateTimeValueInput
+          v-else-if="
+            ambientEditDateKind === 'time' ||
+            ambientEditDateKind === 'date' ||
+            ambientEditDateKind === 'datetime'
+          "
+          :kind="ambientEditDateKind"
+          size="small"
+          v-model="ambientEditScalar"
         />
         <el-input
           v-else

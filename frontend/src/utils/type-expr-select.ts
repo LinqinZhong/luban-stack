@@ -30,7 +30,14 @@ function leafAtomFromPayload(
   if (typeRef) {
     return { kind: 'named', ref: typeRef }
   }
-  if (type === 'number' || type === 'boolean' || type === 'any') {
+  if (
+    type === 'number' ||
+    type === 'boolean' ||
+    type === 'any' ||
+    type === 'time' ||
+    type === 'date' ||
+    type === 'datetime'
+  ) {
     return { kind: type }
   }
   return { kind: 'string' }
@@ -100,7 +107,10 @@ function leafPayloadFromAtom(atom: TypeAtom): {
   if (
     atom.kind === 'number' ||
     atom.kind === 'boolean' ||
-    atom.kind === 'any'
+    atom.kind === 'any' ||
+    atom.kind === 'time' ||
+    atom.kind === 'date' ||
+    atom.kind === 'datetime'
   ) {
     return { type: atom.kind }
   }

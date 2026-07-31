@@ -309,15 +309,7 @@ export function normalizeApiParams(raw: unknown): MethodParam[] {
 
 export function normalizeApiReturnType(raw: unknown): ProcessorTypeExpr {
   if (raw == null) {
-    return {
-      type: 'any',
-      typeRef: '',
-      itemType: '',
-      itemTypeRef: '',
-      itemItemType: '',
-      itemItemTypeRef: '',
-      genericArgs: {},
-    }
+    return createEmptyProcessorTypeExpr('any')
   }
   return normalizeProcessorTypeExpr(raw)
 }

@@ -230,7 +230,7 @@ function handleSave() {
               :library="typeLibrary"
               size="small"
               composable
-              :exclude-types="['api', 'icon', 'color', 'ref', 'resource', 'void']"
+              :exclude-types="['api', 'icon', 'color', 'ref', 'resource']"
               @change="(p) => handleInputTypeChange($index, p)"
             />
             <el-button

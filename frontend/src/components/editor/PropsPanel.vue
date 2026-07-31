@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { Delete, Plus } from '@element-plus/icons-vue'
 import BackLink from './BackLink.vue'
 import ColorPicker from './ColorPicker.vue'
+import DateTimeValueInput from './DateTimeValueInput.vue'
 import DynamicStyleStateDialog from './DynamicStyleStateDialog.vue'
 import EventBindDialog from './EventBindDialog.vue'
 import NumericInput from './NumericInput.vue'
@@ -2465,6 +2466,29 @@ onBeforeUnmount(() => {
                       style="margin-top: 8px"
                       @change="commitComponentProp(def.name)"
                     />
+                  </template>
+                  <template
+                    v-else-if="
+                      def.type === 'time' ||
+                      def.type === 'date' ||
+                      def.type === 'datetime'
+                    "
+                  >
+                    <DateTimeValueInput
+                      v-if="!looksLikeDataBinding(componentPropForm[def.name])"
+                      :kind="def.type"
+                      size="small"
+                      v-model="componentPropForm[def.name]"
+                      @update:model-value="commitComponentProp(def.name)"
+                    />
+                    <el-input
+                      v-else
+                      v-model="componentPropForm[def.name]"
+                      clearable
+                      :placeholder="`默认：${propDefaultPreview(def)}；可用 {数据池字段}`"
+                      @change="commitComponentProp(def.name)"
+                    />
+                    <p class="hint">可选择值，或绑定数据池：<code>{'{字段名}'}</code></p>
                   </template>
                   <el-input
                     v-else

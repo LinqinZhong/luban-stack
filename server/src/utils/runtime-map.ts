@@ -1,4 +1,13 @@
-/** JSON 安全：Map → 普通对象（键转字符串） */
+function formatMysqlDateTime(value: Date): string {
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${value.getFullYear()}-${pad(value.getMonth() + 1)}-${pad(value.getDate())} ${pad(value.getHours())}:${pad(value.getMinutes())}:${pad(value.getSeconds())}`
+}
+
+/**
+ * JSON 安全：
+ * - Map → 普通对象（键转字符串）
+ * - Date / Buffer / bigint 等非纯对象勿走 Object.entries（Date 会变成 {}）
+ */
 export function jsonSafeValue(value: unknown): unknown {
   if (value instanceof Map) {
     const out: Record<string, unknown> = {}
@@ -8,6 +17,13 @@ export function jsonSafeValue(value: unknown): unknown {
     return out
   }
   if (Array.isArray(value)) return value.map(jsonSafeValue)
+  if (typeof value === 'bigint') return value.toString()
+  if (typeof Buffer !== 'undefined' && Buffer.isBuffer(value)) {
+    return value.toString('base64')
+  }
+  if (value instanceof Date) {
+    return formatMysqlDateTime(value)
+  }
   if (value && typeof value === 'object') {
     const out: Record<string, unknown> = {}
     for (const [k, v] of Object.entries(value as Record<string, unknown>)) {

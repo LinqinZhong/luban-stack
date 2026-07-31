@@ -37,6 +37,9 @@ export type TypeAtomKind =
   | 'number'
   | 'string'
   | 'boolean'
+  | 'time'
+  | 'date'
+  | 'datetime'
   | 'named'
   | 'generic'
   | 'any'
@@ -512,10 +515,14 @@ function normalizeAtom(input: unknown): TypeAtom {
     'number',
     'string',
     'boolean',
+    'time',
+    'date',
+    'datetime',
     'named',
     'generic',
     'any',
     'array',
+    'map',
   ]
   const safeKind = allowed.includes(kind as TypeAtomKind)
     ? (kind as TypeAtomKind)
@@ -523,6 +530,13 @@ function normalizeAtom(input: unknown): TypeAtom {
   if (safeKind === 'array') {
     return {
       kind: 'array',
+      item: input.item != null ? normalizeAtom(input.item) : { kind: 'any' },
+    }
+  }
+  if (safeKind === 'map') {
+    return {
+      kind: 'map',
+      key: input.key === 'number' ? 'number' : 'string',
       item: input.item != null ? normalizeAtom(input.item) : { kind: 'any' },
     }
   }
@@ -687,7 +701,14 @@ export function typeExprToSelectValue(expr: TypeExpr): string {
   }
   if (atom.kind === 'map') {
     const key = atom.key === 'number' ? 'number' : 'string'
-    return `Map<${key}, ${formatAtomPreview(atom.item ?? { kind: 'any' }, namedLookup)}>`
+    const item = atom.item ?? { kind: 'any' as const }
+    const inner =
+      item.kind === 'named'
+        ? `named:${item.ref ?? ''}`
+        : item.kind === 'generic'
+          ? `generic:${item.ref ?? ''}`
+          : item.kind
+    return `map:${key}:${inner}`
   }
   if (atom.kind === 'named') return `named:${atom.ref ?? ''}`
   if (atom.kind === 'generic') return `generic:${atom.ref ?? ''}`
@@ -711,11 +732,36 @@ export function selectValueToTypeExpr(value: string): TypeExpr {
       intersections: [{ alternatives: [{ kind: 'generic', ref: value.slice(8) }] }],
     }
   }
+  if (value.startsWith('map:')) {
+    const rest = value.slice(4)
+    const colon = rest.indexOf(':')
+    const keyRaw = colon >= 0 ? rest.slice(0, colon) : 'string'
+    const innerRaw = colon >= 0 ? rest.slice(colon + 1) : 'any'
+    const inner = selectValueToTypeExpr(innerRaw)
+    const item =
+      inner.intersections[0]?.alternatives[0] ?? ({ kind: 'any' } as const)
+    return {
+      intersections: [
+        {
+          alternatives: [
+            {
+              kind: 'map',
+              key: keyRaw === 'number' ? 'number' : 'string',
+              item,
+            },
+          ],
+        },
+      ],
+    }
+  }
   const kind = value as TypeAtomKind
   const allowed: TypeAtomKind[] = [
     'number',
     'string',
     'boolean',
+    'time',
+    'date',
+    'datetime',
     'any',
   ]
   return {

@@ -26,7 +26,11 @@ import {
 import { resolveMatchingStyleOverrides, evaluateScenarios, interpolateDataBindings, resolveAttrBindingValue } from '../../utils/dynamic-style-runtime'
 import { interpolateDollarProps } from '../../utils/component-props'
 import { resolveComponentInstanceDollarProps } from '../../utils/instance-dollar-props'
-import { resolveComputedPageData, buildComputeDepsKey } from '../../utils/compute-runtime'
+import {
+  resolveComputedPageData,
+  buildComputeDepsKey,
+  sameJson,
+} from '../../utils/compute-runtime'
 import { buildRepeatExpandKey, expandRepeatTree, applyEditRepeatPreviewScope } from '../../utils/repeat'
 import { CANVAS_RUNTIME_KEY } from '../../composables/useCanvasRuntime'
 import { COMPONENT_RENDER_MAP_KEY } from '../../composables/useComponentRenderMap'
@@ -438,8 +442,10 @@ const textStyle = computed(() => ({
   ...rotateStyle(attrs.value),
 }))
 
-const instanceDollarProps = computed(() =>
-  resolveComponentInstanceDollarProps({
+/** 稳定 $props 对象引用：宿主 pageData 刷新但绑定值未变时不换新对象 */
+let cachedInstanceDollarProps: Record<string, unknown> | null = null
+const instanceDollarProps = computed(() => {
+  const next = resolveComponentInstanceDollarProps({
     config: componentDetail.value?.config,
     hostAttrs: props.node.attrs,
     pageData: props.pageData,
@@ -451,8 +457,16 @@ const instanceDollarProps = computed(() =>
         }
       : null,
     projectPath: canvasRuntime?.projectPath,
-  }),
-)
+  })
+  if (
+    cachedInstanceDollarProps &&
+    sameJson(cachedInstanceDollarProps, next)
+  ) {
+    return cachedInstanceDollarProps
+  }
+  cachedInstanceDollarProps = next
+  return next
+})
 
 /**
  * 仅当计算体真正用到的 $props / 设备信息变化时才变。
@@ -474,18 +488,15 @@ const componentComputeDepsKey = computed(() => {
 const componentPageData = shallowRef<PageData | undefined>(undefined)
 
 watch(
-  [
-    () => componentDetail.value?.data,
-    componentComputeDepsKey,
-    () => instanceDollarProps.value,
-  ],
+  [() => componentDetail.value?.data, componentComputeDepsKey],
   () => {
     const detail = componentDetail.value
     if (!detail) {
       componentPageData.value = props.pageData
       return
     }
-    // data 引用变化（setData）或计算依赖变化时同步；attrs 绑定靠 pageData 热更新
+    // 仅 data / 计算依赖变化时重算；勿订阅 instanceDollarProps 对象引用
+    // （宿主 pageData 每帧更新都会 new 出 $props，导致 StarRate 等整池重跑）
     componentPageData.value = resolveComputedPageData(detail.data, {
       getDeviceInfo: canvasRuntime?.getDeviceInfo,
       dollarProps: instanceDollarProps.value,
@@ -1416,10 +1427,51 @@ type ScrollEventDetail = {
   clientWidth: number
 }
 
-function handleScroll(detail: ScrollEventDetail) {
+/** 预览 onScroll 防抖：合并高频回调；maxWait 保证拖动过程中仍会落到最新 scrollTop */
+const PREVIEW_SCROLL_DEBOUNCE_MS = 48
+const PREVIEW_SCROLL_MAX_WAIT_MS = 80
+let previewScrollDebounceTimer: ReturnType<typeof setTimeout> | null = null
+let previewScrollMaxWaitTimer: ReturnType<typeof setTimeout> | null = null
+let pendingPreviewScrollDetail: ScrollEventDetail | null = null
+
+function clearPreviewScrollDebounce(flush: boolean) {
+  if (previewScrollDebounceTimer != null) {
+    clearTimeout(previewScrollDebounceTimer)
+    previewScrollDebounceTimer = null
+  }
+  if (previewScrollMaxWaitTimer != null) {
+    clearTimeout(previewScrollMaxWaitTimer)
+    previewScrollMaxWaitTimer = null
+  }
+  if (!flush) {
+    pendingPreviewScrollDetail = null
+    return
+  }
+  const detail = pendingPreviewScrollDetail
+  pendingPreviewScrollDetail = null
+  if (!detail) return
   if (!props.interactEnabled || props.selectable) return
   if (countEventBindings(props.node.attrs.onScroll) <= 0) return
   emitInteract('onScroll', { ...detail })
+}
+
+function handleScroll(detail: ScrollEventDetail) {
+  if (!props.interactEnabled || props.selectable) return
+  if (countEventBindings(props.node.attrs.onScroll) <= 0) return
+  pendingPreviewScrollDetail = { ...detail }
+  if (previewScrollDebounceTimer != null) {
+    clearTimeout(previewScrollDebounceTimer)
+  }
+  previewScrollDebounceTimer = setTimeout(() => {
+    previewScrollDebounceTimer = null
+    clearPreviewScrollDebounce(true)
+  }, PREVIEW_SCROLL_DEBOUNCE_MS)
+  if (previewScrollMaxWaitTimer == null) {
+    previewScrollMaxWaitTimer = setTimeout(() => {
+      previewScrollMaxWaitTimer = null
+      clearPreviewScrollDebounce(true)
+    }, PREVIEW_SCROLL_MAX_WAIT_MS)
+  }
 }
 
 function handleScrollToLower(detail: ScrollEventDetail) {
@@ -1725,6 +1777,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  clearPreviewScrollDebounce(false)
   clearLongPress()
   emitComponentLifecycle('unmount')
 })

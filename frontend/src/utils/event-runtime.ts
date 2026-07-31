@@ -283,7 +283,16 @@ export function coerceFieldValue(
   type: DataFieldType,
   raw: string,
 ): DataFieldValue {
-  if (type === 'string' || type === 'icon' || type === 'color' || type === 'ref' || type === 'resource')
+  if (
+    type === 'string' ||
+    type === 'time' ||
+    type === 'date' ||
+    type === 'datetime' ||
+    type === 'icon' ||
+    type === 'color' ||
+    type === 'ref' ||
+    type === 'resource'
+  )
     return raw
   if (type === 'number') {
     const n = Number(raw)

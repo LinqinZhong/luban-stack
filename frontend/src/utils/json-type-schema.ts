@@ -129,7 +129,14 @@ function schemaForDataFieldType(
     case 'array':
       return { type: 'array' }
     case 'json':
+    case 'map':
       return { type: 'object', additionalProperties: true }
+    case 'time':
+      return { type: 'string', format: 'time' }
+    case 'date':
+      return { type: 'string', format: 'date' }
+    case 'datetime':
+      return { type: 'string', format: 'date-time' }
     case 'any':
       return {}
     default:

@@ -379,7 +379,16 @@ function fieldTypeLabel(type: DataFieldType) {
 }
 
 function serializeArgValue(type: DataFieldType, value: unknown): string {
-  if (type === 'string' || type === 'icon' || type === 'color' || type === 'ref')
+  if (
+    type === 'string' ||
+    type === 'time' ||
+    type === 'date' ||
+    type === 'datetime' ||
+    type === 'icon' ||
+    type === 'color' ||
+    type === 'ref' ||
+    type === 'resource'
+  )
     return String(value ?? '')
   if (type === 'number') {
     const n = Number(value)
@@ -395,7 +404,16 @@ function serializeArgValue(type: DataFieldType, value: unknown): string {
 
 function parseArgValue(type: DataFieldType, raw: string | undefined): unknown {
   const text = raw ?? ''
-  if (type === 'string' || type === 'icon' || type === 'color' || type === 'ref')
+  if (
+    type === 'string' ||
+    type === 'time' ||
+    type === 'date' ||
+    type === 'datetime' ||
+    type === 'icon' ||
+    type === 'color' ||
+    type === 'ref' ||
+    type === 'resource'
+  )
     return text
   if (type === 'number') {
     const n = Number(text)

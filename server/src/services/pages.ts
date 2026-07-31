@@ -165,10 +165,15 @@ const DATA_FIELD_TYPES = new Set([
   'boolean',
   'json',
   'array',
+  'map',
   'icon',
   'color',
+  'time',
+  'date',
+  'datetime',
   'any',
   'ref',
+  'api',
   'resource',
 ])
 
@@ -304,13 +309,19 @@ function defaultValue(type: DataField['type']) {
     case 'boolean':
       return false
     case 'json':
+    case 'map':
       return {}
     case 'array':
       return []
     case 'any':
+    case 'time':
+    case 'date':
+    case 'datetime':
     case 'icon':
     case 'color':
     case 'ref':
+    case 'api':
+    case 'resource':
       return ''
     default:
       return ''

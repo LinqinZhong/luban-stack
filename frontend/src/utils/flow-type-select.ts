@@ -82,6 +82,8 @@ export function flowDraftToTypeExpr(fields: {
   itemTypeRef?: string
   itemItemType?: string
   itemItemTypeRef?: string
+  /** type === 'map' 时：string | number */
+  keyType?: string
   genericArgs?: Record<string, string>
 }): ProcessorTypeExpr {
   if (fields.type === 'void') return createEmptyProcessorTypeExpr('any')

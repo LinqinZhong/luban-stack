@@ -27,6 +27,7 @@ import {
 import type { DataTypeLibrary } from '../../types/data-types'
 import IconValueSelect from './IconValueSelect.vue'
 import ColorPicker from './ColorPicker.vue'
+import DateTimeValueInput from './DateTimeValueInput.vue'
 import DataFieldTypeTreeSelect, { type TypeSelectPayload } from './DataFieldTypeTreeSelect.vue'
 import TypeGenericArgsDialog from './TypeGenericArgsDialog.vue'
 
@@ -179,13 +180,14 @@ function paramNamedRef(param: MethodParam): string {
 const defaultEditor = computed(() => {
   if (isApiType.value) return 'none'
   const type = String(draft.type ?? '')
-  if (type === 'string') return 'string'
+  if (type === 'string' || type === 'resource') return 'string'
   if (type === 'number') return 'number'
   if (type === 'boolean') return 'boolean'
+  if (type === 'time' || type === 'date' || type === 'datetime') return type
   if (type === 'icon') return 'icon'
   if (type === 'color') return 'color'
   if (type === 'array') return 'array'
-  if (type === 'json') return 'json'
+  if (type === 'json' || type === 'map') return 'json'
   return 'json'
 })
 
@@ -609,6 +611,16 @@ function handleSave() {
         <el-switch
           v-else-if="defaultEditor === 'boolean'"
           :model-value="draft.defaultValue === true || draft.defaultValue === 'true'"
+          @update:model-value="draft.defaultValue = $event"
+        />
+        <DateTimeValueInput
+          v-else-if="
+            defaultEditor === 'time' ||
+            defaultEditor === 'date' ||
+            defaultEditor === 'datetime'
+          "
+          :kind="defaultEditor"
+          :model-value="String(draft.defaultValue ?? '')"
           @update:model-value="draft.defaultValue = $event"
         />
         <IconValueSelect

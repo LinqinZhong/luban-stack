@@ -25,15 +25,6 @@ function isValidIdent(name: string): boolean {
   return /^[A-Za-z_$][\w$]*$/.test(name)
 }
 
-function cloneValue<T>(value: T): T {
-  if (value == null || typeof value !== 'object') return value
-  try {
-    return structuredClone(value)
-  } catch {
-    return JSON.parse(JSON.stringify(value)) as T
-  }
-}
-
 /** 在隔离函数中执行计算体；scope 中的字段名可作为自由变量引用 */
 const computeBodyFnCache = new Map<
   string,
@@ -63,21 +54,28 @@ export function runComputeBody(
   return fn(...values)
 }
 
+/** 计算体应只读数据池；scope 用引用，避免滚动 setData 时 structuredClone 大数组 */
 function seedScope(fields: DataField[]): Record<string, unknown> {
   const scope: Record<string, unknown> = {}
   for (const field of fields) {
     const name = field.name.trim()
     if (!name || !isValidIdent(name)) continue
-    scope[name] = cloneValue(field.value)
+    scope[name] = field.value
   }
   return scope
 }
 
 export function sameJson(a: unknown, b: unknown): boolean {
+  if (Object.is(a, b)) return true
+  if (a == null || b == null) return a === b
+  const ta = typeof a
+  if (ta !== typeof b) return false
+  // 标量已由 Object.is 判完；避免无谓 JSON.stringify
+  if (ta !== 'object') return false
   try {
     return JSON.stringify(a) === JSON.stringify(b)
   } catch {
-    return Object.is(a, b)
+    return false
   }
 }
 
@@ -85,22 +83,42 @@ function escapeRegExp(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
-/** 计算体里实际读到的同级普通字段名（不含自身） */
-function collectPlainDepsFromComputeBodies(fields: DataField[]): Set<string> {
-  const names = fields
+function fieldNames(fields: DataField[]): string[] {
+  return fields
     .map((item) => item.name.trim())
     .filter((name) => Boolean(name) && isValidIdent(name))
+}
+
+/** 单个计算体读到的同级字段名（不含自身） */
+function collectDepsFromComputeBody(
+  body: string,
+  selfName: string,
+  names: string[],
+): string[] {
+  if (!body.trim()) return []
+  const deps: string[] = []
+  for (const name of names) {
+    if (name === selfName) continue
+    if (new RegExp(`(^|[^\\w$])${escapeRegExp(name)}(?![\\w$])`).test(body)) {
+      deps.push(name)
+    }
+  }
+  return deps
+}
+
+/** 计算体里实际读到的同级普通字段名（不含自身） */
+function collectPlainDepsFromComputeBodies(fields: DataField[]): Set<string> {
+  const names = fieldNames(fields)
   const deps = new Set<string>()
   for (const field of fields) {
     if (field.binding !== 'computed') continue
-    const body = field.computeBody ?? ''
-    if (!body.trim()) continue
     const self = field.name.trim()
-    for (const name of names) {
-      if (name === self) continue
-      if (new RegExp(`(^|[^\\w$])${escapeRegExp(name)}(?![\\w$])`).test(body)) {
-        deps.add(name)
-      }
+    for (const name of collectDepsFromComputeBody(
+      field.computeBody ?? '',
+      self,
+      names,
+    )) {
+      deps.add(name)
     }
   }
   return deps
@@ -116,6 +134,105 @@ function buildBuiltinScope(options?: ResolveComputedOptions): Record<string, unk
     $query: query,
     $route: query,
   }
+}
+
+/**
+ * 由脏字段出发，收集需要重算的计算字段（含传递依赖）。
+ */
+function collectDirtyComputedNames(
+  fields: DataField[],
+  dirtyNames: Iterable<string>,
+): Set<string> {
+  const names = fieldNames(fields)
+  const computedDeps = new Map<string, string[]>()
+  for (const field of fields) {
+    if (field.binding !== 'computed') continue
+    const self = field.name.trim()
+    if (!self) continue
+    computedDeps.set(
+      self,
+      collectDepsFromComputeBody(field.computeBody ?? '', self, names),
+    )
+  }
+
+  const dirty = new Set<string>()
+  for (const name of dirtyNames) {
+    const n = name.trim()
+    if (n) dirty.add(n)
+  }
+  let grew = true
+  while (grew) {
+    grew = false
+    for (const [name, deps] of computedDeps) {
+      if (dirty.has(name)) continue
+      if (deps.some((d) => dirty.has(d))) {
+        dirty.add(name)
+        grew = true
+      }
+    }
+  }
+  // 只保留计算字段名
+  for (const name of [...dirty]) {
+    if (!computedDeps.has(name)) dirty.delete(name)
+  }
+  return dirty
+}
+
+function runComputedPass(
+  fields: DataField[],
+  options: ResolveComputedOptions | undefined,
+  onlyNames: Set<string> | null,
+): boolean {
+  const scope = { ...buildBuiltinScope(options), ...seedScope(fields) }
+  let changed = false
+  for (const field of fields) {
+    if (field.binding !== 'computed') continue
+    const name = field.name.trim()
+    if (onlyNames && !onlyNames.has(name)) continue
+    const body = field.computeBody?.trim()
+    if (!body) continue
+    try {
+      // 内置名不被同名字段覆盖
+      Object.assign(scope, seedScope(fields), buildBuiltinScope(options))
+      const next = runComputeBody(body, scope) as DataFieldValue
+      const prevStored = field.value
+      // 内容未变时保留原引用，避免 remarkList/stars 等换 identity 打爆 repeat
+      if (sameJson(prevStored, next)) {
+        if (name && isValidIdent(name)) scope[name] = prevStored
+      } else {
+        field.value = next as DataFieldValue
+        if (name && isValidIdent(name)) scope[name] = next
+        changed = true
+      }
+    } catch (err) {
+      console.warn(`[voider] 计算字段「${name || '?'}」执行失败:`, err)
+    }
+  }
+  return changed
+}
+
+/**
+ * 原地重算：仅更新依赖 dirtyNames 的计算字段。
+ * 供预览 setData 热路径使用，避免整表 clone + 换 pageData 引用。
+ * @returns 是否有计算字段值变化
+ */
+export function resolveComputedFieldsInPlace(
+  data: PageData | undefined | null,
+  dirtyNames: Iterable<string>,
+  options?: ResolveComputedOptions,
+): boolean {
+  const fields = data?.fields
+  if (!fields?.length) return false
+  const only = collectDirtyComputedNames(fields, dirtyNames)
+  if (!only.size) return false
+
+  const maxPass = only.size + 1
+  let anyChanged = false
+  for (let pass = 0; pass < maxPass; pass++) {
+    if (!runComputedPass(fields, options, only)) break
+    anyChanged = true
+  }
+  return anyChanged
 }
 
 /**
@@ -136,31 +253,9 @@ export function resolveComputedPageData(
   const computedCount = fields.filter((item) => item.binding === 'computed').length
   if (!computedCount) return { fields }
 
-  const scope = { ...buildBuiltinScope(options), ...seedScope(fields) }
   const maxPass = computedCount + 1
-
   for (let pass = 0; pass < maxPass; pass++) {
-    let changed = false
-    for (const field of fields) {
-      if (field.binding !== 'computed') continue
-      const body = field.computeBody?.trim()
-      if (!body) continue
-      const name = field.name.trim()
-      try {
-        // 每趟用最新字段值，并保证内置方法不被同名字段覆盖
-        Object.assign(scope, seedScope(fields), buildBuiltinScope(options))
-        const next = runComputeBody(body, scope) as DataFieldValue
-        const prev = name && isValidIdent(name) ? scope[name] : field.value
-        field.value = next as DataFieldValue
-        if (name && isValidIdent(name)) {
-          scope[name] = cloneValue(next)
-        }
-        if (!sameJson(prev, next)) changed = true
-      } catch (err) {
-        console.warn(`[voider] 计算字段「${name || '?'}」执行失败:`, err)
-      }
-    }
-    if (!changed) break
+    if (!runComputedPass(fields, options, null)) break
   }
 
   return { fields }

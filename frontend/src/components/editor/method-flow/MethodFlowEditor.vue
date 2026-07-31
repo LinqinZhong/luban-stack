@@ -93,6 +93,9 @@ import DefineNodeDialog, {
 import PageMapNodeDialog, {
   type PageMapNodeForm,
 } from './dialogs/PageMapNodeDialog.vue'
+import ObjectMapNodeDialog, {
+  type ObjectMapNodeForm,
+} from './dialogs/ObjectMapNodeDialog.vue'
 import EndNodeDialog, { type EndNodeForm } from './dialogs/EndNodeDialog.vue'
 import ThrowNodeDialog, {
   type ThrowNodeForm,
@@ -676,6 +679,7 @@ const actionDialogVisible = ref(false)
 const outputDialogVisible = ref(false)
 const defineDialogVisible = ref(false)
 const pageMapDialogVisible = ref(false)
+const objectMapDialogVisible = ref(false)
 const throwDialogVisible = ref(false)
 const endDialogVisible = ref(false)
 const startDialogVisible = ref(false)
@@ -733,6 +737,15 @@ const editingPageMapForm = ref<PageMapNodeForm>({
   totalExpr: '',
   hasNextExpr: '',
   targetTypeRef: QUERY_PAGE_VO_TYPE_ID,
+  targetGenericArgs: {},
+  targetVarName: '',
+  fieldMappings: [],
+  description: '',
+  printExpr: '',
+})
+const editingObjectMapForm = ref<ObjectMapNodeForm>({
+  sourcePath: '',
+  targetTypeRef: '',
   targetGenericArgs: {},
   targetVarName: '',
   fieldMappings: [],

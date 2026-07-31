@@ -144,7 +144,7 @@ export function dataFieldToMethodParamType(type: DataFieldType): MethodParamType
     case 'any':
       return 'any'
     default:
-      // string / icon / color / ref
+      // string / time / date / datetime / icon / color / ref / resource
       return 'string'
   }
 }
@@ -174,6 +174,9 @@ function primitiveTsType(type: DataFieldType | undefined | null): string {
       return 'Record<string, any>'
     case 'any':
       return 'any'
+    case 'time':
+    case 'date':
+    case 'datetime':
     case 'icon':
     case 'color':
     case 'ref':

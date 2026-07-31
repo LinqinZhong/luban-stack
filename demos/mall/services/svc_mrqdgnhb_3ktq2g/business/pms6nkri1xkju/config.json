@@ -182,8 +182,8 @@
             "id": "pageMap_ms6p27xn_ng4f",
             "kind": "pageMap",
             "position": {
-              "x": 379.6451669368846,
-              "y": 647.1289221824082
+              "x": 388.6451669368846,
+              "y": 642.7094828856558
             },
             "data": {
               "sourceKind": "array",
@@ -225,6 +225,14 @@
                 {
                   "targetField": "images",
                   "sourceField": "images"
+                },
+                {
+                  "targetField": "nickname",
+                  "sourceField": ""
+                },
+                {
+                  "targetField": "time",
+                  "sourceField": "createdAt"
                 }
               ],
               "description": "",

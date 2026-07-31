@@ -1,4 +1,7 @@
-import type { ProcessorTypeExpr } from '../types/backend-services'
+import {
+  createEmptyProcessorTypeExpr,
+  type ProcessorTypeExpr,
+} from '../types/backend-services'
 import type { DataTypeLibrary, TypeAtom, TypeExpr } from '../types/data-types'
 import type { MethodParam } from '../types/page-method'
 import { findDataTypeDef } from './named-type-fields'
@@ -119,13 +122,8 @@ export function listPageTypeIds(
       const id = t.id?.trim()
       if (!id) continue
       const probe: ProcessorTypeExpr = {
-        type: 'json',
+        ...createEmptyProcessorTypeExpr('json'),
         typeRef: id,
-        itemType: '',
-        itemTypeRef: '',
-        itemItemType: '',
-        itemItemTypeRef: '',
-        genericArgs: {},
       }
       if (isPageTypeExpr(probe, library)) out.push(id)
     }
@@ -182,13 +180,8 @@ export function resolvePageMapItemTypeRef(
   // 兼容旧配置：若直接存了非分页类型，视为 T
   if (typeRef) {
     const probe: ProcessorTypeExpr = {
-      type: 'json',
+      ...createEmptyProcessorTypeExpr('json'),
       typeRef,
-      itemType: '',
-      itemTypeRef: '',
-      itemItemType: '',
-      itemItemTypeRef: '',
-      genericArgs: {},
     }
     if (!isPageTypeExpr(probe, library)) return typeRef
     const g = resolveQueryPageVoGenericName(library)
@@ -213,12 +206,8 @@ export function buildQueryPageVoTypeExpr(
 ): ProcessorTypeExpr {
   const g = resolveQueryPageVoGenericName(library)
   return {
-    type: 'json',
+    ...createEmptyProcessorTypeExpr('json'),
     typeRef: QUERY_PAGE_VO_TYPE_ID,
-    itemType: '',
-    itemTypeRef: '',
-    itemItemType: '',
-    itemItemTypeRef: '',
     genericArgs: itemTypeRef.trim() ? { [g]: itemTypeRef.trim() } : {},
   }
 }

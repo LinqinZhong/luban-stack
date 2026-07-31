@@ -43,6 +43,12 @@ export function typeExprToDataFieldType(
       return { type: 'number' }
     case 'boolean':
       return { type: 'boolean' }
+    case 'time':
+      return { type: 'time' }
+    case 'date':
+      return { type: 'date' }
+    case 'datetime':
+      return { type: 'datetime' }
     case 'named':
       return resolveNamedTypeAsField(atom.ref ?? '', library)
     case 'any':

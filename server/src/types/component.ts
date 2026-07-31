@@ -1,6 +1,7 @@
 import type { DataFieldType, DataFieldValue } from './page-data.js'
 import type { MethodParam } from './page-method.js'
 import {
+  createEmptyProcessorTypeExpr,
   normalizeProcessorTypeExpr,
   type ProcessorTypeExpr,
 } from './backend-services.js'
@@ -263,15 +264,7 @@ export function normalizeComponentConfig(
                       ? normalizeProcessorTypeExpr(
                           (row as ComponentPropDef).apiReturnType,
                         )
-                      : {
-                          type: 'any',
-                          typeRef: '',
-                          itemType: '',
-                          itemTypeRef: '',
-                          itemItemType: '',
-                          itemItemTypeRef: '',
-                          genericArgs: {},
-                        },
+                      : createEmptyProcessorTypeExpr('any'),
                 }
               : {}),
           }

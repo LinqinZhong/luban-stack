@@ -7,6 +7,7 @@ import ControllerBindingDialog from './ControllerBindingDialog.vue'
 import DataFieldTypeTreeSelect, { type TypeSelectPayload } from './DataFieldTypeTreeSelect.vue'
 import IconValueSelect from './IconValueSelect.vue'
 import ColorPicker from './ColorPicker.vue'
+import DateTimeValueInput from './DateTimeValueInput.vue'
 import ObjectFieldsDialog from './ObjectFieldsDialog.vue'
 import OssResourcePickerDialog from './OssResourcePickerDialog.vue'
 import TypeGenericArgsDialog from './TypeGenericArgsDialog.vue'
@@ -649,6 +650,13 @@ function saveOssBinding(config: OssBindingConfig) {
             <el-switch
               v-else-if="row.type === 'boolean'"
               :model-value="Boolean(row.value)"
+              @update:model-value="updateField($index, { value: $event })"
+            />
+            <DateTimeValueInput
+              v-else-if="row.type === 'time' || row.type === 'date' || row.type === 'datetime'"
+              :kind="row.type"
+              size="default"
+              :model-value="colorSafeString(row.value)"
               @update:model-value="updateField($index, { value: $event })"
             />
             <IconValueSelect

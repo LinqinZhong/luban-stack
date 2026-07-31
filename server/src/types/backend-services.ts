@@ -141,7 +141,7 @@ export interface ServiceApiParam {
   /** 变量名（同时作为 HTTP 入参名） */
   varName: string
   location: ServiceApiParamLocation
-  /** 基础类型：string / number / boolean / json */
+  /** 基础类型：string / number / boolean / json / time / date / datetime … */
   type: string
   /** 具名类型 id（如 DTO）；type 为 json 时可用 */
   typeRef: string
@@ -394,15 +394,7 @@ export function normalizeServiceApi(input: unknown): ServiceApi | null {
             input.output,
             typeof input.outputRef === 'string' ? input.outputRef : undefined,
           )
-        : {
-            type: 'any',
-            typeRef: '',
-            itemType: '',
-            itemTypeRef: '',
-            itemItemType: '',
-            itemItemTypeRef: '',
-            genericArgs: {},
-          },
+        : createEmptyProcessorTypeExpr('any'),
     requireAuth: Boolean(input.requireAuth),
     scope: normalizeProcessorMethodScope(input.scope),
     debugParams: normalizeDebugParams(input.debugParams),
@@ -936,6 +928,7 @@ export function createEmptyProcessorTypeExpr(
     itemTypeRef: '',
     itemItemType: '',
     itemItemTypeRef: '',
+    keyType: type === 'map' ? 'string' : '',
     genericArgs: {},
   }
 }

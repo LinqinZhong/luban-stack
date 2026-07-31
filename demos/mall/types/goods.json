@@ -241,6 +241,23 @@
           },
           "remark": "图片",
           "optional": false
+        },
+        {
+          "id": "field_ms9fmmx1_v4tq0p",
+          "name": "createdAt",
+          "type": {
+            "intersections": [
+              {
+                "alternatives": [
+                  {
+                    "kind": "datetime"
+                  }
+                ]
+              }
+            ]
+          },
+          "remark": "创建时间",
+          "optional": false
         }
       ],
       "enumMembers": [],
@@ -405,6 +422,23 @@
           },
           "remark": "用户昵称",
           "optional": true
+        },
+        {
+          "id": "field_ms9fkuzw_hvouni",
+          "name": "time",
+          "type": {
+            "intersections": [
+              {
+                "alternatives": [
+                  {
+                    "kind": "datetime"
+                  }
+                ]
+              }
+            ]
+          },
+          "remark": "时间",
+          "optional": false
         }
       ],
       "enumMembers": [],

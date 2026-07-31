@@ -23,6 +23,13 @@ function atomToTs(atom: TypeAtom, idToName: IdToName): string {
   }
   if (atom.kind === 'named') return idToName.get(atom.ref || '') || 'any'
   if (atom.kind === 'generic') return atom.ref || 'T'
+  if (
+    atom.kind === 'time' ||
+    atom.kind === 'date' ||
+    atom.kind === 'datetime'
+  ) {
+    return 'string'
+  }
   return atom.kind
 }
 

@@ -158,9 +158,38 @@
         "operation": "custom",
         "queryFields": [],
         "sql": "SELECT id, goods_id, content, score, user_id, images, created_at\nFROM {TABLE_NAME}\nWHERE is_deleted = 0\n  AND goods_id = #{goodsId}\n<if test=\"type == 'good'\">\n  AND score >= 8\n</if>\n<if test=\"type == 'mid'\">\n  AND score >= 5 AND score < 8\n</if>\n<if test=\"type == 'bad'\">\n  AND score < 5\n</if>\nORDER BY id DESC",
-        "fieldMappings": [],
+        "fieldMappings": [
+          {
+            "field": "id",
+            "column": ""
+          },
+          {
+            "field": "goodsId",
+            "column": ""
+          },
+          {
+            "field": "content",
+            "column": ""
+          },
+          {
+            "field": "score",
+            "column": ""
+          },
+          {
+            "field": "userId",
+            "column": ""
+          },
+          {
+            "field": "images",
+            "column": ""
+          },
+          {
+            "field": "createdAt",
+            "column": "created_at"
+          }
+        ],
         "batchSourceParam": "",
-        "pageParam": "pageDto",
+        "pageParam": "",
         "conditionGroups": []
       },
       "debugParams": {
@@ -225,10 +254,22 @@
         "queryFields": [],
         "sql": "SELECT\n  COUNT(id) AS total,\n  COALESCE(SUM(CASE WHEN score >= 8 THEN 1 ELSE 0 END), 0) AS good,\n  COALESCE(SUM(CASE WHEN score >= 5 AND score < 8 THEN 1 ELSE 0 END), 0) AS mid,\n  COALESCE(SUM(CASE WHEN score < 5 THEN 1 ELSE 0 END), 0) AS bad\nFROM {TABLE_NAME}\nWHERE is_deleted = 0\n  AND goods_id = #{goodsId}",
         "fieldMappings": [
-          { "field": "total", "column": "total" },
-          { "field": "good", "column": "good" },
-          { "field": "mid", "column": "mid" },
-          { "field": "bad", "column": "bad" }
+          {
+            "field": "total",
+            "column": "total"
+          },
+          {
+            "field": "good",
+            "column": "good"
+          },
+          {
+            "field": "mid",
+            "column": "mid"
+          },
+          {
+            "field": "bad",
+            "column": "bad"
+          }
         ],
         "batchSourceParam": "",
         "pageParam": "",
@@ -242,7 +283,10 @@
           {
             "id": "start",
             "kind": "start",
-            "position": { "x": 280, "y": 40 },
+            "position": {
+              "x": 280,
+              "y": 40
+            },
             "data": {}
           }
         ],

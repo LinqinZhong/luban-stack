@@ -3305,7 +3305,7 @@ export function generateComponentFiles(options: {
     } else if (def.type === 'json' || (def.type as string) === 'object') {
       properties[name] = { type: Object, value: null }
     } else {
-      // string / icon / color / ref / resource 等：带上 config 默认值
+      // string / time / date / datetime / icon / color / ref / resource 等
       const dv = def.defaultValue
       const strDefault =
         dv == null || dv === ''

@@ -18,7 +18,6 @@ import {
   createEmptyServiceController,
   type ProcessorMethod,
   type ProcessorMethodParam,
-  type ProcessorTypeExpr,
   type ServiceApi,
   type ServiceApiParamLocation,
   type ServiceController,
@@ -452,10 +451,6 @@ const apiFlowEditingApi = computed(() => {
   return ctrl?.apis.find((a) => a.id === ctx.apiId) ?? null
 })
 
-const apiFlowEditingFlow = computed(
-  () => apiFlowEditingApi.value?.flow ?? createDefaultMethodFlow(),
-)
-
 const selectedApi = computed(
   () => apis.value.find((a) => a.id === selectedApiId.value) ?? null,
 )
@@ -488,17 +483,6 @@ function buildApiMethodParams(api: ServiceApi): ProcessorMethodParam[] {
     }
   })
 }
-
-/** API 入参：供流程图环境变量使用（非 body 对象已平铺） */
-const apiFlowMethodParams = computed((): ProcessorMethodParam[] => {
-  const api = apiFlowEditingApi.value
-  if (!api) return []
-  return buildApiMethodParams(api)
-})
-
-const apiFlowMethodOutput = computed(
-  (): ProcessorTypeExpr => createEmptyProcessorTypeExpr(),
-)
 
 function apiAsProcessorMethod(api: ServiceApi): ProcessorMethod {
   return {
@@ -604,10 +588,6 @@ function clearApiFlowDebug() {
   apiFlowDebugPrintByNode.value = {}
 }
 
-function onApiFlowSelectedNode(nodeId: string | null) {
-  apiFlowSelectedNodeId.value = nodeId
-}
-
 function onApiFlowDebugCursor(state: {
   cursorNodeId: string | null
   visitedNodeIds: string[]
@@ -632,35 +612,6 @@ function updateApiDebugParams(params: Record<string, unknown>) {
     }
   })
   persistControllers()
-}
-
-/** 编辑：打开弹窗（流程图已移除） */
-async function openApiFlow(index: number) {
-  openApiEdit(index)
-}
-
-function closeApiFlow() {
-  apiFlowEditing.value = null
-  clearApiFlowDebug()
-}
-
-function updateApiFlow(apiId: string, flow: import('../../types/backend-services').MethodFlow) {
-  const ctrlId = activeControllerId.value
-  if (!ctrlId) return
-  controllers.value = controllers.value.map((c) => {
-    if (c.id !== ctrlId) return c
-    return {
-      ...c,
-      apis: c.apis.map((a) => (a.id === apiId ? { ...a, flow } : a)),
-    }
-  })
-  persistControllers()
-}
-
-function onApiFlowUpdate(flow: import('../../types/backend-services').MethodFlow) {
-  const ctx = apiFlowEditing.value
-  if (!ctx) return
-  updateApiFlow(ctx.apiId, flow)
 }
 
 watch(

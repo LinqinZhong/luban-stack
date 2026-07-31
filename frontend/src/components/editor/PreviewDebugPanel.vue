@@ -14,6 +14,7 @@ import {
 } from '../../utils/component-props'
 import { findDataTypeDef, typeExprToDataFieldType, fillNamedInterfaceDefaults } from '../../utils/named-type-fields'
 import ColorPicker from './ColorPicker.vue'
+import DateTimeValueInput from './DateTimeValueInput.vue'
 import ApiPropBindField from './ApiPropBindField.vue'
 
 export type EmitLogEntry = {
@@ -972,6 +973,18 @@ watch(
               placeholder="#409eff / rgba(...)"
               @update:model-value="onPropInput(form.def, $event)"
             />
+            <DateTimeValueInput
+              v-else-if="
+                form.mode === 'scalar' &&
+                (form.def.type === 'time' ||
+                  form.def.type === 'date' ||
+                  form.def.type === 'datetime')
+              "
+              :kind="form.def.type"
+              size="small"
+              :model-value="String(propDisplayValue(form.def) ?? '')"
+              @update:model-value="onPropInput(form.def, $event)"
+            />
             <ApiPropBindField
               v-else-if="form.mode === 'api'"
               :model-value="String(propDisplayValue(form.def) ?? '')"
@@ -1320,6 +1333,20 @@ watch(
                   :model-value="String(form.field.value ?? '')"
                   placeholder="#409eff / rgba(...)"
                   @update:model-value="onDataFieldInput(form.field, $event)"
+                />
+                <DateTimeValueInput
+                  v-else-if="
+                    form.field.type === 'time' ||
+                    form.field.type === 'date' ||
+                    form.field.type === 'datetime'
+                  "
+                  :kind="form.field.type"
+                  size="small"
+                  :clearable="!form.readonly"
+                  :model-value="String(form.field.value ?? '')"
+                  @update:model-value="
+                    form.readonly ? undefined : onDataFieldInput(form.field, $event)
+                  "
                 />
                 <el-input
                   v-else

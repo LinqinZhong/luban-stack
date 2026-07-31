@@ -8,6 +8,12 @@ export type DataFieldType =
   | 'map'
   | 'icon'
   | 'color'
+  /** 时间 HH:mm:ss（字符串） */
+  | 'time'
+  /** 日期 YYYY-MM-DD（字符串） */
+  | 'date'
+  /** 日期时间 YYYY-MM-DD HH:mm:ss（字符串） */
+  | 'datetime'
   /** 任意类型（常用于 any[]：数组内每项可自选类型） */
   | 'any'
   /** 引用当前页面/组件控件树节点（值为节点 path id） */

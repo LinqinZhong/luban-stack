@@ -8,6 +8,12 @@ export type DataFieldType =
   | 'map'
   | 'icon'
   | 'color'
+  /** 时间 HH:mm:ss（字符串） */
+  | 'time'
+  /** 日期 YYYY-MM-DD（字符串） */
+  | 'date'
+  /** 日期时间 YYYY-MM-DD HH:mm:ss（字符串） */
+  | 'datetime'
   /** 任意类型（常用于 any[]：数组内每项可自选类型） */
   | 'any'
   /** 引用当前页面/组件控件树节点（值为节点 path id） */
@@ -181,6 +187,9 @@ export const DATA_FIELD_TYPE_OPTIONS: { label: string; value: DataFieldType }[] 
   { label: '字符串', value: 'string' },
   { label: '数值', value: 'number' },
   { label: '布尔值', value: 'boolean' },
+  { label: '时间', value: 'time' },
+  { label: '日期', value: 'date' },
+  { label: '日期时间', value: 'datetime' },
   { label: '图标', value: 'icon' },
   { label: '颜色', value: 'color' },
   { label: '资源', value: 'resource' },
@@ -212,6 +221,9 @@ export const NESTED_FIELD_TYPE_OPTIONS: { label: string; value: DataFieldType }[
   { label: '字符串', value: 'string' },
   { label: '数值', value: 'number' },
   { label: '布尔值', value: 'boolean' },
+  { label: '时间', value: 'time' },
+  { label: '日期', value: 'date' },
+  { label: '日期时间', value: 'datetime' },
   { label: '图标', value: 'icon' },
   { label: '颜色', value: 'color' },
   { label: '资源', value: 'resource' },
@@ -355,6 +367,9 @@ export function defaultValue(type: DataFieldType): DataFieldValue {
       return []
     case 'any':
       return ''
+    case 'time':
+    case 'date':
+    case 'datetime':
     case 'icon':
     case 'color':
     case 'ref':

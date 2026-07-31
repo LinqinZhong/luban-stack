@@ -492,7 +492,13 @@ watch(selectedApi, (api) => {
                       ? '输入数字常量'
                       : inp.type === 'boolean'
                         ? 'true / false'
-                        : '输入常量'
+                        : inp.type === 'time'
+                          ? 'HH:mm:ss'
+                          : inp.type === 'date'
+                            ? 'YYYY-MM-DD'
+                            : inp.type === 'datetime'
+                              ? 'YYYY-MM-DD HH:mm:ss'
+                              : '输入常量'
                   "
                   @update:model-value="
                     onParamLiteralChange(inp.varName, String($event ?? ''))

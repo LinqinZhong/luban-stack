@@ -23,9 +23,6 @@ const remoteLines = computed(() =>
   props.remote.map((c) => formatMysqlColumnSummary(c)),
 )
 
-function close() {
-  emit('update:modelValue', false)
-}
 </script>
 
 <template>

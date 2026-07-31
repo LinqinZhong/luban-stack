@@ -5,6 +5,7 @@ import { ElMessage } from 'element-plus'
 import ArrayFieldsDialog from './ArrayFieldsDialog.vue'
 import IconValueSelect from './IconValueSelect.vue'
 import ColorPicker from './ColorPicker.vue'
+import DateTimeValueInput from './DateTimeValueInput.vue'
 import ObjectFieldsDialog from './ObjectFieldsDialog.vue'
 import DataFieldTypeTreeSelect, { type TypeSelectPayload } from './DataFieldTypeTreeSelect.vue'
 import JsonCodeEditor from './JsonCodeEditor.vue'
@@ -752,6 +753,12 @@ function handleSave() {
             <el-switch
               v-else-if="item.type === 'boolean'"
               :model-value="Boolean(item.value)"
+              @update:model-value="item.value = $event"
+            />
+            <DateTimeValueInput
+              v-else-if="item.type === 'time' || item.type === 'date' || item.type === 'datetime'"
+              :kind="item.type"
+              :model-value="String(item.value ?? '')"
               @update:model-value="item.value = $event"
             />
             <IconValueSelect

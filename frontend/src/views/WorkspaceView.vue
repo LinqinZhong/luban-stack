@@ -134,7 +134,11 @@ import type {
   ComponentEmitContext,
   PreviewInteractPayload,
 } from '../utils/event-runtime'
-import { resolveComputedPageData, sameJson } from '../utils/compute-runtime'
+import {
+  resolveComputedFieldsInPlace,
+  resolveComputedPageData,
+  sameJson,
+} from '../utils/compute-runtime'
 import {
   buildQueryObject,
   type PageQueryParamDef,
@@ -504,6 +508,18 @@ function restoreComponentDebugProps(): Record<string, unknown> {
   return { ...saved }
 }
 
+/** 预览数据池写入前解析计算字段（含 $query），保证 Pager 等挂载时 goodsId 已就绪 */
+function resolvePreviewPageData(
+  data: import('../types/page-data').PageData,
+): import('../types/page-data').PageData {
+  return resolveComputedPageData(data, {
+    getDeviceInfo: previewGetDeviceInfo,
+    dollarProps: editorDollarProps.value ?? {},
+    dollarQuery: isPageResource.value ? routeParams.value : undefined,
+    colorPalette: colorPalette.value,
+  })
+}
+
 function resetPreviewRuntime() {
   if (!activeDoc.value) {
     previewRuntimeData.value = null
@@ -513,7 +529,9 @@ function resetPreviewRuntime() {
     previewRuntimeLogs.value = []
     return
   }
-  previewRuntimeData.value = clonePageData(activeDoc.value.data ?? { fields: [] })
+  previewRuntimeData.value = resolvePreviewPageData(
+    clonePageData(activeDoc.value.data ?? { fields: [] }),
+  )
   previewComponentMap.value = cloneComponentRenderMap(componentMap.value)
   // 组件调试 Props 从 config.debugProps 恢复
   previewPropOverrides.value = isComponentResource.value
@@ -533,20 +551,20 @@ function clearPreviewRuntime() {
   previewRuntimeLogs.value = []
 }
 
-/** 画布/预览运行时使用：预览走副本，编辑走数据池 */
-const resolvedPageData = computed(() =>
-  resolveComputedPageData(
-    workspaceMode.value === 'preview' && previewRuntimeData.value
-      ? previewRuntimeData.value
-      : (activeDoc.value?.data ?? { fields: [] }),
-    {
-      getDeviceInfo: previewGetDeviceInfo,
-      dollarProps: editorDollarProps.value ?? {},
-      dollarQuery: isPageResource.value ? routeParams.value : undefined,
-      colorPalette: colorPalette.value,
-    },
-  ),
-)
+/** 画布/预览运行时使用：预览走副本（写入时已 resolve），编辑走数据池现算 */
+const resolvedPageData = computed(() => {
+  if (workspaceMode.value === 'preview' && previewRuntimeData.value) {
+    // applyPreviewSetData / resetPreviewRuntime 已写入解析结果，勿再 resolve
+    // （否则每帧换掉 remarkList 等数组引用，打爆 repeat 展开缓存）
+    return previewRuntimeData.value
+  }
+  return resolveComputedPageData(activeDoc.value?.data ?? { fields: [] }, {
+    getDeviceInfo: previewGetDeviceInfo,
+    dollarProps: editorDollarProps.value ?? {},
+    dollarQuery: isPageResource.value ? routeParams.value : undefined,
+    colorPalette: colorPalette.value,
+  })
+})
 
 const canvasComponentMap = computed(() =>
   workspaceMode.value === 'preview' && previewComponentMap.value
@@ -2291,7 +2309,7 @@ function applyComponentPreviewSetData(
     })
     return
   }
-  const fields = [...(info.data.fields ?? [])]
+  const fields = info.data.fields ?? []
   const index = fields.findIndex((item) => item.name.trim() === prop.trim())
   if (index < 0) {
     pushPreviewRuntimeLog({
@@ -2303,7 +2321,8 @@ function applyComponentPreviewSetData(
   }
   const prev = fields[index]!
   if (sameJson(prev.value, value)) return
-  let objectFields = prev.objectFields
+  // 原地写：勿换 data / map 引用，避免滚动时整树按 props 全量更新
+  prev.value = value
   if (
     prev.type === 'json' &&
     value &&
@@ -2313,27 +2332,17 @@ function applyComponentPreviewSetData(
     prev.objectFields.length
   ) {
     const obj = value as Record<string, unknown>
-    objectFields = prev.objectFields.map((sub) => {
+    for (const sub of prev.objectFields) {
       const key = sub.name.trim()
-      if (!key || !(key in obj)) return sub
-      return { ...sub, value: obj[key] as DataFieldValue }
-    })
+      if (!key || !(key in obj)) continue
+      sub.value = obj[key] as DataFieldValue
+    }
   }
-  fields[index] = { ...prev, value, objectFields }
-  previewComponentMap.value = {
-    ...map,
-    [componentId]: {
-      ...info,
-      data: resolveComputedPageData(
-        { fields },
-        {
-          getDeviceInfo: previewGetDeviceInfo,
-          dollarProps: buildDollarProps(info.config),
-          colorPalette: colorPalette.value,
-        },
-      ),
-    },
-  }
+  resolveComputedFieldsInPlace(info.data, [prop], {
+    getDeviceInfo: previewGetDeviceInfo,
+    dollarProps: buildDollarProps(info.config),
+    colorPalette: colorPalette.value,
+  })
 }
 
 /** 解析 Component 属性上的纯数据池绑定：`{field}` */
@@ -2761,7 +2770,8 @@ function commitPreviewRuntime(
   data: import('../types/page-data').PageData,
   map: ComponentRenderMap,
 ) {
-  previewRuntimeData.value = data
+  // 必须先 resolve：组件 onMounted/loadData 依赖 goodsId 等计算字段
+  previewRuntimeData.value = resolvePreviewPageData(data)
   previewComponentMap.value = map
   previewPropOverrides.value = isComponentResource.value
     ? restoreComponentDebugProps()
@@ -3183,7 +3193,9 @@ async function handlePreviewInteract(payload: PreviewInteractPayload) {
 function applyPreviewSetData(prop: string, value: import('../types/page-data').DataFieldValue) {
   if (!activeDoc.value || workspaceMode.value !== 'preview') return
   if (!previewRuntimeData.value) resetPreviewRuntime()
-  const fields = [...(previewRuntimeData.value?.fields ?? [])]
+  const live = previewRuntimeData.value
+  if (!live) return
+  const fields = live.fields ?? []
   const index = fields.findIndex((item) => item.name.trim() === prop.trim())
   if (index < 0) {
     pushPreviewRuntimeLog({
@@ -3195,8 +3207,8 @@ function applyPreviewSetData(prop: string, value: import('../types/page-data').D
   }
   const prev = fields[index]!
   if (sameJson(prev.value, value)) return
-  // json 对象同步 objectFields，避免面板/后续逻辑读到旧嵌套值
-  let objectFields = prev.objectFields
+  // 原地写字段 + 只重算依赖它的 computed（滚动改 titleBarOpacity 不再 clone remarkList）
+  prev.value = value
   if (
     prev.type === 'json' &&
     value &&
@@ -3206,23 +3218,18 @@ function applyPreviewSetData(prop: string, value: import('../types/page-data').D
     prev.objectFields.length
   ) {
     const obj = value as Record<string, unknown>
-    objectFields = prev.objectFields.map((sub) => {
+    for (const sub of prev.objectFields) {
       const key = sub.name.trim()
-      if (!key || !(key in obj)) return sub
-      return { ...sub, value: obj[key] as import('../types/page-data').DataFieldValue }
-    })
+      if (!key || !(key in obj)) continue
+      sub.value = obj[key] as import('../types/page-data').DataFieldValue
+    }
   }
-  fields[index] = { ...prev, value, objectFields }
-  // 与组件路径一致：写入时重算，避免 pullText 等仍停在旧值
-  previewRuntimeData.value = resolveComputedPageData(
-    { fields },
-    {
-      getDeviceInfo: previewGetDeviceInfo,
-      dollarProps: editorDollarProps.value ?? {},
-      dollarQuery: isPageResource.value ? routeParams.value : undefined,
-      colorPalette: colorPalette.value,
-    },
-  )
+  resolveComputedFieldsInPlace(live, [prop], {
+    getDeviceInfo: previewGetDeviceInfo,
+    dollarProps: editorDollarProps.value ?? {},
+    dollarQuery: isPageResource.value ? routeParams.value : undefined,
+    colorPalette: colorPalette.value,
+  })
   scheduleLifecycleUpdate()
 }
 

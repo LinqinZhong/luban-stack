@@ -23,6 +23,7 @@ import {
 } from '../../utils/json-type-schema'
 import IconValueSelect from './IconValueSelect.vue'
 import ColorPicker from './ColorPicker.vue'
+import DateTimeValueInput from './DateTimeValueInput.vue'
 import DataFieldTypeTreeSelect, { type TypeSelectPayload } from './DataFieldTypeTreeSelect.vue'
 import JsonCodeEditor from './JsonCodeEditor.vue'
 import OssResourcePickerDialog from './OssResourcePickerDialog.vue'
@@ -423,6 +424,21 @@ function handleSave() {
           <label>数据值</label>
           <el-switch
             :model-value="Boolean(selectedNode.value)"
+            @update:model-value="selectedNode.value = $event"
+          />
+        </div>
+        <div
+          v-else-if="
+            selectedNode.type === 'time' ||
+            selectedNode.type === 'date' ||
+            selectedNode.type === 'datetime'
+          "
+          class="field-row"
+        >
+          <label>数据值</label>
+          <DateTimeValueInput
+            :kind="selectedNode.type"
+            :model-value="String(selectedNode.value ?? '')"
             @update:model-value="selectedNode.value = $event"
           />
         </div>

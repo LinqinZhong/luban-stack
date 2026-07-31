@@ -40,6 +40,13 @@ function atomToTs(atom: TypeAtom, ctx: DataTypeTsContext): string {
   }
   if (atom.kind === 'named') return resolveName(atom.ref, ctx)
   if (atom.kind === 'generic') return atom.ref || 'T'
+  if (
+    atom.kind === 'time' ||
+    atom.kind === 'date' ||
+    atom.kind === 'datetime'
+  ) {
+    return 'string'
+  }
   return atom.kind
 }
 

@@ -62,6 +62,7 @@ function cloneExpr(expr: ProcessorTypeExpr): ProcessorTypeExpr {
     itemTypeRef: expr.itemTypeRef,
     itemItemType: expr.itemItemType,
     itemItemTypeRef: expr.itemItemTypeRef,
+    keyType: expr.keyType ?? '',
     genericArgs: { ...(expr.genericArgs ?? {}) },
   }
 }
