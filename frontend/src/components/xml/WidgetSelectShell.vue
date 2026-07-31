@@ -62,6 +62,8 @@ const props = defineProps<{
    * 仅此类节点使用 flex:1；其它纵向子项按内容堆叠。
    */
   fillRemainingHeight?: boolean
+  /** 右键菜单定位用：节点 path id */
+  widgetNodeId?: string
 }>()
 
 const emit = defineEmits<{
@@ -432,6 +434,7 @@ onBeforeUnmount(() => {
   <div
     class="select-shell"
     :style="shellStyle"
+    :data-widget-node-id="widgetNodeId || undefined"
     @click="onClick"
     @mouseenter="emit('mouseenter')"
   >

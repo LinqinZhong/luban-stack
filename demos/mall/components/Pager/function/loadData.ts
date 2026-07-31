@@ -20,7 +20,6 @@ if(isRefresh) {
   updateProps('loading', true)
 }
 const args = {
-  ...($props.params && typeof $props.params === 'object' ? $props.params : {}),
   page: pagination,
 }
 $props.fetchApi(args).then((res) => {

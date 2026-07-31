@@ -311,13 +311,13 @@ function emitControllerFile(options: {
           ty = idToName.get(inp.typeRef) || 'Record<string, unknown>'
         }
 
-        paramDecls.push(`${decorator} ${rawName}?: string`)
+        paramDecls.push(`${decorator} ${rawName}?: unknown`)
 
         if (inp.type === 'number') {
           prepLines.push(`      const ${n} = Number(${rawName})`)
         } else if (inp.type === 'boolean') {
           prepLines.push(
-            `      const ${n} = String(${rawName}) === 'true' || ${rawName} === '1'`,
+            `      const ${n} = String(${rawName}) === 'true' || ${rawName} === '1' || ${rawName} === true`,
           )
         } else if (inp.type === 'json' || inp.typeRef) {
           prepLines.push(`      const ${n} = parseMaybeJson(${rawName}) as ${ty}`)

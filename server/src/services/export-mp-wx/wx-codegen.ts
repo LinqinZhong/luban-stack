@@ -18,8 +18,8 @@ import {
   unwrapWholeBinding,
 } from './binding-expr.js'
 import {
-  apiRefKey,
   parseApiPropBinding,
+  toApiPropDataValue,
   type MpApiBinding,
 } from './api-runtime.js'
 import { codeUsesIdent, lineComment } from './js-comments.js'
@@ -1965,6 +1965,47 @@ type RenderCtx = {
   inScrollColumn?: boolean
   flexGapPx?: number
   isLastFlexChild?: boolean
+  /**
+   * RelativeLayout 内与 overflow=scroll 同级、贴底的浮层：
+   * 抬高 z-index，避免被 enhanced scroll-view 盖住（对齐编辑器叠层）
+   */
+  overlayAboveScroll?: boolean
+}
+
+/** 从布局结果拆出 padding，供 scroll-view 挪到内容包裹层 */
+function extractPaddingFromLayout(
+  classes: string[],
+  style: string,
+): {
+  restClasses: string[]
+  restStyle: string
+  padClasses: string[]
+  padStyle: string
+} {
+  const padClasses: string[] = []
+  const restClasses: string[] = []
+  for (const c of classes) {
+    if (/^(p|pt|pr|pb|pl)(-|$)/.test(c)) padClasses.push(c)
+    else restClasses.push(c)
+  }
+  const padStyleParts: string[] = []
+  const restStyleParts: string[] = []
+  for (const part of String(style || '')
+    .split(';')
+    .map((s) => s.trim())
+    .filter(Boolean)) {
+    if (/^padding(-top|-right|-bottom|-left)?\s*:/i.test(part)) {
+      padStyleParts.push(part)
+    } else {
+      restStyleParts.push(part)
+    }
+  }
+  return {
+    restClasses,
+    restStyle: restStyleParts.join(';'),
+    padClasses,
+    padStyle: padStyleParts.join(';'),
+  }
 }
 
 /** 统一布局：静态 → class，绑定 → style */
@@ -1982,6 +2023,13 @@ function layoutResult(
   const classes = [...base.classes]
   if (ctx.inScrollColumn && ctx.parentFlex !== 'row') {
     classes.push(ctx.classRegistry.use('shrink-0'))
+  }
+  // 贴底操作栏等浮层压过 scroll-view 原生层
+  if (
+    ctx.overlayAboveScroll &&
+    !classes.some((c) => c === 'z-arb-20' || /^z-arb-/.test(c) || c.startsWith('z-'))
+  ) {
+    classes.push(ctx.classRegistry.arb('z', 'z-index', '20'))
   }
   return { classes, style: base.style }
 }
@@ -2007,15 +2055,27 @@ function renderChildren(children: XmlNode[], ctx: RenderCtx): string {
       ({ child }) =>
         child.tag !== '#text' || Boolean((child.text || '').trim()),
     )
+  const hasScrollSibling =
+    Boolean(ctx.parentIsRelative) &&
+    entries.some(
+      ({ child }) =>
+        (child.attrs?.overflow || '').trim().toLowerCase() === 'scroll',
+    )
   return entries
     .map(({ child, index }, i) => {
       const childPath = parentPath
         ? `${parentPath}/${index}:${child.tag}`
         : `0:${child.tag}`
+      const attrs = child.attrs || {}
+      const overlayAboveScroll =
+        hasScrollSibling &&
+        isTrueAttr(attrs.layout_alignParentBottom) &&
+        !(attrs.zIndex || '').trim()
       return renderNode(child, {
         ...ctx,
         nodePath: childPath,
         isLastFlexChild: i === entries.length - 1,
+        overlayAboveScroll,
       })
     })
     .filter(Boolean)
@@ -2688,13 +2748,36 @@ function renderWidget(
   const isRelative = node.tag === 'RelativeLayout'
   const useNativeRefresher =
     isScroll && shouldUseNativeCustomRefresher(attrs, ctx)
+  /**
+   * 纵向 scroll-view：不要把 padding / flex 直接打在 scroll-view 上。
+   * enhanced + enable-flex 时 padding-bottom 常不计入滚动高度，和编辑器 CSS overflow 不一致。
+   * 改为内层内容列承载 padding+flex，scroll-view 只负责视口滚动。
+   */
+  const wrapScrollContent =
+    isScroll &&
+    isLinear &&
+    attrs.orientation !== 'horizontal' &&
+    !useNativeRefresher
   const layout = layoutResult(attrs, ctx)
-  const classes = [
-    ...layout.classes,
-    ...siblingGapClasses(ctx),
-    ...(isLinear && !useNativeRefresher
+  let scrollClasses = [...layout.classes]
+  let scrollStyle = layout.style
+  let contentPadClasses: string[] = []
+  let contentPadStyle = ''
+  if (wrapScrollContent) {
+    const split = extractPaddingFromLayout(scrollClasses, scrollStyle)
+    scrollClasses = split.restClasses
+    scrollStyle = split.restStyle
+    contentPadClasses = split.padClasses
+    contentPadStyle = split.padStyle
+  }
+  const linearFlexClasses =
+    isLinear && !useNativeRefresher
       ? flexClasses(attrs, ctx.classRegistry)
-      : []),
+      : []
+  const classes = [
+    ...scrollClasses,
+    ...siblingGapClasses(ctx),
+    ...(wrapScrollContent ? [] : linearFlexClasses),
   ]
   if (isRelative) {
     classes.push(...ctx.classRegistry.useMany(['relative', 'box-border']))
@@ -2738,8 +2821,10 @@ function renderWidget(
     }
     scrollAttrs.push('enhanced="true"')
     scrollAttrs.push('show-scrollbar="false"')
-    // enable-flex ?? slot ? match_parent ??????????????????????????
-    if (isLinear && !useNativeRefresher) scrollAttrs.push('enable-flex="true"')
+    // 纵向内容已包内层 flex 列，勿再 enable-flex（padding 失效 / 滚动高度异常）
+    if (isLinear && !useNativeRefresher && !wrapScrollContent) {
+      scrollAttrs.push('enable-flex="true"')
+    }
     if (attrs.onScrollToLower?.trim()) {
       scrollAttrs.push('lower-threshold="150"')
     }
@@ -2775,7 +2860,7 @@ function renderWidget(
 
   const childCtx: RenderCtx = {
     ...ctx,
-    indent: ctx.indent + (isRelative ? 2 : 1),
+    indent: ctx.indent + (isRelative || wrapScrollContent ? 2 : 1),
     parentFlex: childFlex,
     parentIsRelative: isRelative,
     inScrollColumn:
@@ -2811,13 +2896,26 @@ function renderWidget(
       ...scrollAttrs,
       ...clickAttrs,
       ...scrollTouchWired,
-      ...classStyleAttrs(classes, layout.style),
+      ...classStyleAttrs(classes, scrollStyle),
     ],
     ctx.indent,
   )
   // RelativeLayout：内层再开一层 relative，使 padding（如 statusBar）压缩内容区
   let bodyInner = contentInner
-  if (isRelative && contentInner.trim()) {
+  if (wrapScrollContent && contentInner.trim()) {
+    const innerPad = pad(ctx.indent + 1)
+    const wrapClasses = [
+      ...ctx.classRegistry.useMany(['w-full', 'box-border']),
+      ...linearFlexClasses,
+      ...contentPadClasses,
+    ]
+    const wrapOpen = openTag(
+      'view',
+      classStyleAttrs(wrapClasses, contentPadStyle),
+      ctx.indent + 1,
+    )
+    bodyInner = `${wrapOpen}\n${contentInner}\n${innerPad}</view>`
+  } else if (isRelative && contentInner.trim()) {
     const innerPad = pad(ctx.indent + 1)
     const innerClass = ctx.classRegistry.shell(
       'relative-inner',
@@ -2982,10 +3080,10 @@ export function generatePageFiles(options: {
     fields: options.data?.fields ?? [],
     resolveApi: options.resolveApi,
   })
-  // 组件 api prop：data 里只存 apis 注册表 key（如 shop/goods.one），完整绑定在 apis/
-  const apiPropData: Record<string, string> = {}
+  // 组件 api prop：{ key, paramBindings? }；key 指向 apis/index，paramBindings 运行时从当前页解析
+  const apiPropData: Record<string, ReturnType<typeof toApiPropDataValue>> = {}
   for (const [key, binding] of Object.entries(apiData)) {
-    apiPropData[key] = apiRefKey(binding)
+    apiPropData[key] = toApiPropDataValue(binding)
   }
   const usedApis: MpApiBinding[] = [
     ...controllerLoad.usedApis,
@@ -3189,8 +3287,8 @@ export function generateComponentFiles(options: {
     const name = def.name.trim()
     if (!name) continue
     if (def.type === 'api') {
-      // 父页传入 apis 注册表 key（string），如 shop/goods.page
-      properties[name] = { type: String, value: '' }
+      // 父页传入 { key, paramBindings? }；key 如 shop/goods.page
+      properties[name] = { type: Object, value: null }
     } else if (def.type === 'array') {
       properties[name] = { type: Array, value: [] }
     } else if (def.type === 'boolean') {

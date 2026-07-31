@@ -1,4 +1,4 @@
-﻿/** 导出到小程序的 `utils/api.js` 源码 */
+/** 导出到小程序的 `utils/api.js` 源码 */
 
 export function generateApiJs(): string {
   return `/**
@@ -15,22 +15,28 @@ function unwrapResult(data) {
   return looksLikeResult ? data.data : data
 }
 
+/**
+ * Nest @Query('page') + parseMaybeJson 需要 page={"current":1,"pageSize":10}
+ * 不能用 page[current]=1（Express 不会把括号键合成 page 对象 → page 为空 → data:null）
+ */
 function serializeQuery(data) {
   var out = {}
-  if (!data || typeof data !== 'object') return out
-  Object.keys(data).forEach(function (k) {
-    var v = data[k]
-    if (v == null) return
-    if (typeof v === 'object') {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return out
+  var keys = Object.keys(data)
+  for (var i = 0; i < keys.length; i++) {
+    var key = keys[i]
+    var value = data[key]
+    if (value == null) continue
+    if (typeof value === 'object') {
       try {
-        out[k] = JSON.stringify(v)
+        out[key] = JSON.stringify(value)
       } catch (e) {
-        out[k] = String(v)
+        out[key] = String(value)
       }
-    } else {
-      out[k] = v
+      continue
     }
-  })
+    out[key] = value
+  }
   return out
 }
 
@@ -92,7 +98,24 @@ function request(method, path, args, serviceName) {
       header: { 'content-type': 'application/json' },
       success: function (res) {
         if (res.statusCode >= 200 && res.statusCode < 300) {
-          resolve(unwrapResult(res.data))
+          var body = res.data
+          // HTTP 200 但业务 Result.code 非成功时（如 page 不能为空）应走 reject
+          if (
+            body &&
+            typeof body === 'object' &&
+            !Array.isArray(body) &&
+            'code' in body &&
+            body.code !== 0 &&
+            body.code !== 200 &&
+            body.code !== '0' &&
+            body.code !== '200'
+          ) {
+            var bizMsg =
+              body.message || body.msg || body.error || 'request failed'
+            reject(new Error(String(bizMsg)))
+            return
+          }
+          resolve(unwrapResult(body))
         } else {
           var msg =
             (res.data && (res.data.message || res.data.msg)) ||
@@ -113,29 +136,111 @@ function request(method, path, args, serviceName) {
   })
 }
 
-/** 组件 api prop：传入注册表 key（如 shop/goods.page）时走 apis/index */
+/** 与页面 __resolveCtrlBinding 一致：从当前页 data / query 解析绑定路径 */
+function resolvePageBinding(path, pageData, query) {
+  var p = String(path == null ? '' : path).trim()
+  if (!p) return undefined
+  var root = null
+  var rest = ''
+  if (p === '$query' || p === 'query' || p === '$route' || p === 'route') {
+    return query || {}
+  }
+  if (p.indexOf('$query.') === 0) {
+    root = query || {}
+    rest = p.slice(7)
+  } else if (p.indexOf('query.') === 0) {
+    root = query || {}
+    rest = p.slice(6)
+  } else if (p.indexOf('$route.') === 0) {
+    root = query || {}
+    rest = p.slice(7)
+  } else if (p.indexOf('route.') === 0) {
+    root = query || {}
+    rest = p.slice(6)
+  } else {
+    root = pageData || {}
+    rest = p
+  }
+  if (!rest) return root
+  var parts = rest.split('.')
+  var cur = root
+  for (var i = 0; i < parts.length; i++) {
+    if (cur == null || typeof cur !== 'object') return undefined
+    cur = cur[parts[i]]
+  }
+  return cur
+}
+
+function getCurrentPageScope() {
+  try {
+    var pages = typeof getCurrentPages === 'function' ? getCurrentPages() : null
+    var page = pages && pages.length ? pages[pages.length - 1] : null
+    if (!page) return { data: {}, query: {} }
+    var query =
+      (page.__pageQuery && typeof page.__pageQuery === 'object'
+        ? page.__pageQuery
+        : null) ||
+      (page.options && typeof page.options === 'object' ? page.options : {}) ||
+      {}
+    return { data: page.data || {}, query: query }
+  } catch (e) {
+    return { data: {}, query: {} }
+  }
+}
+
+/**
+ * 组件 api prop：
+ * - string：apis 注册表 key（如 shop/goods.page）
+ * - object：{ key, paramBindings? }，paramBindings 从当前页解析后与 args 合并（调用方优先）
+ */
 function invoke(keyOrFn, args) {
   if (typeof keyOrFn === 'function') {
     return keyOrFn(args)
   }
+  var key = ''
+  var callArgs =
+    args && typeof args === 'object' && !Array.isArray(args)
+      ? Object.assign({}, args)
+      : {}
   if (typeof keyOrFn === 'string') {
-    var key = keyOrFn.trim()
-    if (!key) {
-      return Promise.reject(new Error('API key missing'))
+    key = keyOrFn.trim()
+  } else if (keyOrFn && typeof keyOrFn === 'object') {
+    key = String(keyOrFn.key || '').trim()
+    var pbs = keyOrFn.paramBindings
+    if (pbs && typeof pbs === 'object') {
+      var scope = getCurrentPageScope()
+      var names = Object.keys(pbs)
+      for (var i = 0; i < names.length; i++) {
+        var name = names[i]
+        if (!name || Object.prototype.hasOwnProperty.call(callArgs, name)) continue
+        var pb = pbs[name]
+        if (!pb || typeof pb !== 'object') continue
+        if (pb.source === 'literal') {
+          callArgs[name] = pb.literal
+          continue
+        }
+        var expr = String(pb.binding || '').trim()
+        if (!expr) continue
+        callArgs[name] = resolvePageBinding(expr, scope.data, scope.query)
+      }
     }
-    var registry
-    try {
-      registry = require('../apis/index.js')
-    } catch (e) {
-      return Promise.reject(new Error('apis/index.js missing'))
-    }
-    var fn = registry && registry[key]
-    if (typeof fn !== 'function') {
-      return Promise.reject(new Error('API not found: ' + key))
-    }
-    return fn(args)
+  } else {
+    return Promise.reject(new Error('API invoke target invalid'))
   }
-  return Promise.reject(new Error('API invoke target invalid'))
+  if (!key) {
+    return Promise.reject(new Error('API key missing'))
+  }
+  var registry
+  try {
+    registry = require('../apis/index.js')
+  } catch (e) {
+    return Promise.reject(new Error('apis/index.js missing'))
+  }
+  var fn = registry && registry[key]
+  if (typeof fn !== 'function') {
+    return Promise.reject(new Error('API not found: ' + key))
+  }
+  return fn(callArgs)
 }
 
 ${getDeviceInfoFnSource()}
@@ -277,6 +382,13 @@ module.exports = {
 `
 }
 
+/** 组件 api prop 额外入参（与编辑器 ApiPropParamBinding 对齐） */
+export type MpApiPropParamBinding = {
+  source: 'binding' | 'literal'
+  binding?: string
+  literal?: string
+}
+
 export type MpApiBinding = {
   serviceId: string
   /** 服务名，便于 apiBaseUrls 用可读 key */
@@ -293,6 +405,11 @@ export type MpApiBinding = {
   inputRemarks?: Array<{ name: string; remark: string }>
   method: string
   path: string
+  /**
+   * 仅组件 api prop：额外入参绑定（写入页面 data，invoke 时从当前页解析）
+   * 不影响 apis/*.js 生成
+   */
+  paramBindings?: Record<string, MpApiPropParamBinding>
 }
 
 /** shop / goods-remark */
@@ -340,6 +457,36 @@ export function apiModuleRelPath(binding: MpApiBinding): string {
 /** shop/goods.one — 组件 api prop / invoke 注册表 key */
 export function apiRefKey(binding: MpApiBinding): string {
   return `${apiServiceSlug(binding)}/${apiControllerSlug(binding)}.${apiMethodExportName(binding)}`
+}
+
+/**
+ * 页面 / 父组件传给子组件 api prop 的 data 值。
+ * 始终为对象，便于 properties type:Object 与 invoke 合并 paramBindings。
+ */
+export function toApiPropDataValue(binding: MpApiBinding): {
+  key: string
+  paramBindings?: Record<string, MpApiPropParamBinding>
+} {
+  const key = apiRefKey(binding)
+  const raw = binding.paramBindings
+  if (!raw || typeof raw !== 'object') return { key }
+  const paramBindings: Record<string, MpApiPropParamBinding> = {}
+  for (const [k, v] of Object.entries(raw)) {
+    const name = k.trim()
+    if (!name || !v) continue
+    if (v.source === 'literal') {
+      paramBindings[name] = {
+        source: 'literal',
+        literal: String(v.literal ?? ''),
+      }
+      continue
+    }
+    const expr = String(v.binding ?? '').trim()
+    if (!expr) continue
+    paramBindings[name] = { source: 'binding', binding: expr }
+  }
+  if (!Object.keys(paramBindings).length) return { key }
+  return { key, paramBindings }
 }
 
 /** 转义注释内容，避免提前结束块注释 */
@@ -468,6 +615,37 @@ export type ApiPropBindingIds = {
   serviceId: string
   controllerId: string
   apiId: string
+  paramBindings?: Record<string, MpApiPropParamBinding>
+}
+
+function normalizeMpApiPropParamBinding(
+  raw: unknown,
+): MpApiPropParamBinding | null {
+  if (raw == null) return null
+  if (typeof raw === 'string') {
+    const s = raw.trim()
+    if (!s) return null
+    return { source: 'binding', binding: s }
+  }
+  if (typeof raw !== 'object' || Array.isArray(raw)) return null
+  const row = raw as Record<string, unknown>
+  if (row.source === 'literal') {
+    const literal =
+      typeof row.literal === 'string'
+        ? row.literal
+        : row.literal == null
+          ? ''
+          : String(row.literal)
+    return { source: 'literal', literal }
+  }
+  const binding =
+    typeof row.binding === 'string'
+      ? row.binding.trim()
+      : typeof row.binding === 'number' || typeof row.binding === 'boolean'
+        ? String(row.binding)
+        : ''
+  if (!binding) return null
+  return { source: 'binding', binding }
 }
 
 export function parseApiPropBinding(
@@ -483,7 +661,29 @@ export function parseApiPropBinding(
       typeof row.controllerId === 'string' ? row.controllerId.trim() : ''
     const apiId = typeof row.apiId === 'string' ? row.apiId.trim() : ''
     if (!serviceId || !controllerId || !apiId) return null
-    return { serviceId, controllerId, apiId }
+    const paramBindings: Record<string, MpApiPropParamBinding> = {}
+    const rawBindings = row.paramBindings
+    if (rawBindings && typeof rawBindings === 'object' && !Array.isArray(rawBindings)) {
+      for (const [k, v] of Object.entries(rawBindings as Record<string, unknown>)) {
+        const key = k.trim()
+        if (!key) continue
+        const normalized = normalizeMpApiPropParamBinding(v)
+        if (!normalized) continue
+        if (
+          normalized.source === 'binding' &&
+          !(normalized.binding ?? '').trim()
+        ) {
+          continue
+        }
+        paramBindings[key] = normalized
+      }
+    }
+    return {
+      serviceId,
+      controllerId,
+      apiId,
+      ...(Object.keys(paramBindings).length ? { paramBindings } : {}),
+    }
   } catch {
     return null
   }

@@ -754,52 +754,67 @@ export function isCustomEventMethod(method: string | undefined): boolean {
   return method === CUSTOM_EVENT_METHOD
 }
 
+const eventBindingsCache = new Map<string, EventMethodBinding[]>()
+const EVENT_BINDINGS_CACHE_MAX = 256
+
 export function parseEventBindings(raw: string | undefined): EventMethodBinding[] {
   if (!raw?.trim()) return []
+  const hit = eventBindingsCache.get(raw)
+  if (hit) return hit
+
+  let result: EventMethodBinding[] = []
   try {
     const parsed = JSON.parse(raw) as unknown
     if (!Array.isArray(parsed)) {
       // 兼容旧纯字符串：当作无参方法名
       const name = raw.trim()
       if (!name) return []
-      return [
+      result = [
         {
           id: `bind_${Date.now()}`,
-          method: name.includes(':') ? name.split(':')[0] : name,
+          method: name.includes(':') ? name.split(':')[0]! : name,
           args: {},
         },
       ]
+    } else {
+      result = parsed
+        .filter((item) => item && typeof item === 'object')
+        .map((item, index) => {
+          const row = item as Partial<EventMethodBinding>
+          const method = String(row.method ?? '').trim()
+          const body =
+            typeof row.body === 'string' ? row.body : undefined
+          return {
+            id: row.id || `bind_${index}_${Date.now()}`,
+            method,
+            args:
+              row.args && typeof row.args === 'object' && !Array.isArray(row.args)
+                ? Object.fromEntries(
+                    Object.entries(row.args).map(([k, v]) => [
+                      k,
+                      v == null ? '' : String(v),
+                    ]),
+                  )
+                : {},
+            ...(method === CUSTOM_EVENT_METHOD || body != null
+              ? { body: body ?? '' }
+              : {}),
+          }
+        })
+        .filter((item) => item.method)
     }
-    return parsed
-      .filter((item) => item && typeof item === 'object')
-      .map((item, index) => {
-        const row = item as Partial<EventMethodBinding>
-        const method = String(row.method ?? '').trim()
-        const body =
-          typeof row.body === 'string' ? row.body : undefined
-        return {
-          id: row.id || `bind_${index}_${Date.now()}`,
-          method,
-          args:
-            row.args && typeof row.args === 'object' && !Array.isArray(row.args)
-              ? Object.fromEntries(
-                  Object.entries(row.args).map(([k, v]) => [
-                    k,
-                    v == null ? '' : String(v),
-                  ]),
-                )
-              : {},
-          ...(method === CUSTOM_EVENT_METHOD || body != null
-            ? { body: body ?? '' }
-            : {}),
-        }
-      })
-      .filter((item) => item.method)
   } catch {
     const name = raw.trim()
     if (!name) return []
-    return [{ id: `bind_${Date.now()}`, method: name, args: {} }]
+    result = [{ id: `bind_${Date.now()}`, method: name, args: {} }]
   }
+
+  if (eventBindingsCache.size >= EVENT_BINDINGS_CACHE_MAX) {
+    const first = eventBindingsCache.keys().next().value
+    if (first != null) eventBindingsCache.delete(first)
+  }
+  eventBindingsCache.set(raw, result)
+  return result
 }
 
 export function serializeEventBindings(bindings: EventMethodBinding[]): string {

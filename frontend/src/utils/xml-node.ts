@@ -703,6 +703,164 @@ export function moveWidget(
   }
 }
 
+/** 复制节点为 XML 片段（含子孙） */
+export function copyWidgetFragment(xml: string, nodeId: string): string {
+  if (!nodeId) throw new Error('未选中控件')
+  const parser = new DOMParser()
+  const doc = parser.parseFromString(xml, 'application/xml')
+  if (doc.querySelector('parsererror')) {
+    throw new Error('XML 解析失败，无法复制')
+  }
+  const el = elementAtPath(doc, nodeId)
+  if (!el) throw new Error('未找到要复制的节点')
+  return new XMLSerializer().serializeToString(el)
+}
+
+export type PasteWidgetMode = 'sibling' | 'child'
+
+/** 是否可粘贴为同级（根节点不可） */
+export function canPasteWidgetAsSibling(targetId: string): boolean {
+  return Boolean(targetId && targetId.includes('/'))
+}
+
+/** 是否可粘贴为子级 */
+export function canPasteWidgetAsChild(xml: string, targetId: string): boolean {
+  if (!targetId) return false
+  const tag = findNodeFromXml(xml, targetId)?.tag
+  if (!tag) return false
+  return canAcceptChildWidgets(tag)
+}
+
+/**
+ * 粘贴剪贴板片段：sibling=目标后方同级；child=目标容器末尾。
+ */
+export function pasteWidget(
+  xml: string,
+  targetId: string,
+  fragmentXml: string,
+  mode: PasteWidgetMode,
+  options?: { slot?: string },
+): { xml: string; newNodeId: string } {
+  const frag = fragmentXml.trim()
+  if (!frag) throw new Error('剪贴板为空')
+  if (!targetId) throw new Error('未选中粘贴目标')
+
+  const parser = new DOMParser()
+  const doc = parser.parseFromString(xml, 'application/xml')
+  if (doc.querySelector('parsererror')) {
+    throw new Error('XML 解析失败，无法粘贴')
+  }
+  const targetEl = elementAtPath(doc, targetId)
+  if (!targetEl) throw new Error('未找到粘贴目标')
+
+  const wrapped = parser.parseFromString(
+    `<VoiderPasteRoot>${frag}</VoiderPasteRoot>`,
+    'application/xml',
+  )
+  if (wrapped.querySelector('parsererror')) {
+    throw new Error('剪贴板内容不是有效的控件 XML')
+  }
+  const sourceEl = wrapped.documentElement?.firstElementChild
+  if (!sourceEl) throw new Error('剪贴板中没有可粘贴的控件')
+  const imported = doc.importNode(sourceEl, true)
+
+  if (mode === 'child') {
+    if (!canAcceptChildWidgets(targetEl.tagName)) {
+      throw new Error(`${targetEl.tagName} 不支持子节点`)
+    }
+    targetEl.appendChild(imported)
+    if (targetEl.tagName === 'Component') {
+      const slotName = options?.slot?.trim() || 'default'
+      imported.setAttribute('slot', slotName)
+    }
+    if (targetEl.tagName === 'Modal') {
+      if (
+        !Array.from(imported.attributes).some((a) =>
+          a.name.startsWith('layout_'),
+        )
+      ) {
+        imported.setAttribute('layout_centerInParent', 'true')
+      }
+    }
+  } else {
+    if (!canPasteWidgetAsSibling(targetId)) {
+      throw new Error('不能粘贴为根节点的同级')
+    }
+    const parent = targetEl.parentElement
+    if (!parent) throw new Error('找不到父节点')
+    parent.insertBefore(imported, targetEl.nextSibling)
+    // 同级粘贴到 Component 下时保留/补齐 slot
+    if (parent.tagName === 'Component') {
+      const slotName =
+        options?.slot?.trim() ||
+        targetEl.getAttribute('slot')?.trim() ||
+        'default'
+      imported.setAttribute('slot', slotName)
+    }
+  }
+
+  return {
+    xml: serializeDoc(doc),
+    newNodeId: pathIdForElement(imported as Element),
+  }
+}
+
+export type SiblingMoveDirection = 'up' | 'down'
+
+export function canMoveWidgetSibling(
+  xml: string,
+  nodeId: string,
+  direction: SiblingMoveDirection,
+): boolean {
+  if (!canDeleteNode(nodeId)) return false
+  try {
+    const parser = new DOMParser()
+    const doc = parser.parseFromString(xml, 'application/xml')
+    if (doc.querySelector('parsererror')) return false
+    const el = elementAtPath(doc, nodeId)
+    if (!el?.parentElement) return false
+    return direction === 'up'
+      ? Boolean(el.previousElementSibling)
+      : Boolean(el.nextElementSibling)
+  } catch {
+    return false
+  }
+}
+
+/** 在同级中上移 / 下移一格 */
+export function moveWidgetSibling(
+  xml: string,
+  nodeId: string,
+  direction: SiblingMoveDirection,
+): { xml: string; newNodeId: string } {
+  if (!canDeleteNode(nodeId)) {
+    throw new Error('根节点不能移动')
+  }
+  const parser = new DOMParser()
+  const doc = parser.parseFromString(xml, 'application/xml')
+  if (doc.querySelector('parsererror')) {
+    throw new Error('XML 解析失败，无法移动')
+  }
+  const el = elementAtPath(doc, nodeId)
+  const parent = el?.parentElement
+  if (!el || !parent) throw new Error('未找到要移动的节点')
+
+  if (direction === 'up') {
+    const prev = el.previousElementSibling
+    if (!prev) throw new Error('已经是第一个，无法上移')
+    parent.insertBefore(el, prev)
+  } else {
+    const next = el.nextElementSibling
+    if (!next) throw new Error('已经是最后一个，无法下移')
+    parent.insertBefore(el, next.nextSibling)
+  }
+
+  return {
+    xml: serializeDoc(doc),
+    newNodeId: pathIdForElement(el),
+  }
+}
+
 export const INTERACTION_EVENTS = [
   { key: 'onClick', label: '点击' },
   { key: 'onLongClick', label: '长按' },

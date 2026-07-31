@@ -1,4 +1,4 @@
-﻿import type { PageMethod } from '../../types/page-method.js'
+import type { PageMethod } from '../../types/page-method.js'
 import type { LifecycleConfig } from '../../types/lifecycle.js'
 import type { DataField } from '../../types/page-data.js'
 import type { MpApiBinding } from './api-runtime.js'
@@ -176,7 +176,7 @@ export function generateComponentMethodFn(
     lines.push(`    var ${field} = that.data.${field}`)
   }
 
-  // $props：普通 prop 读 properties；api prop 变成可调用（内部 wx.request）
+  // $props：普通 prop 读 properties；api prop 变成可调用（内部 wx.request，含 paramBindings 合并）
   if (needProps) {
     lines.push(`    var $props = {}`)
     for (const prop of propNames) {

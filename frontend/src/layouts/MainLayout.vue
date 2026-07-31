@@ -7,19 +7,31 @@ import { useProjectStore } from '../stores/project'
 import {
   buildProject,
   getBuildSchemes,
+  type BuildScheme,
 } from '../api/projects'
 import WorkspaceSettingsButton from '../components/editor/WorkspaceSettingsButton.vue'
 import BuildSchemeDialog from '../components/editor/BuildSchemeDialog.vue'
 import BuildSchemeIcon from '../components/icons/BuildSchemeIcon.vue'
 import HammerIcon from '../components/icons/HammerIcon.vue'
 
+type BuildTargetKind = 'backend' | 'frontend'
+
+type BuildTarget = {
+  key: string
+  kind: BuildTargetKind
+  name: string
+  label: string
+  detail: string
+}
+
 const router = useRouter()
 const projectStore = useProjectStore()
 const building = ref(false)
-const buildingSchemeName = ref('')
+const buildingKey = ref('')
+const buildingLabel = ref('')
 const schemeDialogVisible = ref(false)
 const buildSelectVisible = ref(false)
-const buildSchemeOptions = ref<Array<{ name: string; description: string }>>([])
+const schemes = ref<BuildScheme[]>([])
 
 const pageTitle = computed(() => {
   const name = projectStore.config?.name
@@ -39,6 +51,52 @@ function openSchemeDialog() {
   schemeDialogVisible.value = true
 }
 
+function frontendTypeLabel(type: string): string {
+  if (type === 'mp-wx') return '微信小程序'
+  if (type === 'vue3') return 'Vue3'
+  return type || '前端'
+}
+
+function targetsOf(scheme: BuildScheme): BuildTarget[] {
+  const out: BuildTarget[] = []
+  const schemeName = scheme.name.trim()
+  for (const b of scheme.backends ?? []) {
+    const name = b.name.trim()
+    if (!name) continue
+    out.push({
+      key: `${schemeName}::backend::${name}`,
+      kind: 'backend',
+      name,
+      label: name,
+      detail: `${b.type === 'nestjs' ? 'Nest.js' : b.type || '后端'} :${b.port}${
+        b.includeOss ? ' · OSS' : ''
+      }`,
+    })
+  }
+  for (const f of scheme.frontends ?? []) {
+    const name = f.name.trim()
+    if (!name) continue
+    const pageCount = f.pageIds?.length ?? 0
+    out.push({
+      key: `${schemeName}::frontend::${name}`,
+      kind: 'frontend',
+      name,
+      label: name,
+      detail: `${frontendTypeLabel(f.type)}${
+        pageCount ? ` · ${pageCount} 页` : ''
+      }`,
+    })
+  }
+  return out
+}
+
+const schemeRows = computed(() =>
+  schemes.value.map((scheme) => ({
+    scheme,
+    targets: targetsOf(scheme),
+  })),
+)
+
 async function handleBuild() {
   if (!projectStore.path) {
     ElMessage.warning('请先打开项目')
@@ -51,24 +109,34 @@ async function handleBuild() {
       schemeDialogVisible.value = true
       return
     }
-    buildSchemeOptions.value = lib.schemes.map((s) => ({
-      name: s.name,
-      description: s.description?.trim() || '',
-    }))
+    schemes.value = lib.schemes
     buildSelectVisible.value = true
   } catch (err) {
     ElMessage.error(err instanceof Error ? err.message : '读取构建方案失败')
   }
 }
 
-async function runBuild(schemeName: string) {
-  if (!projectStore.path || !schemeName || building.value) return
+async function runBuild(payload: {
+  schemeName: string
+  backendNames?: string[]
+  frontendNames?: string[]
+  label: string
+  key?: string
+}) {
+  if (!projectStore.path || building.value) return
   building.value = true
-  buildingSchemeName.value = schemeName
+  buildingKey.value = payload.key || ''
+  buildingLabel.value = payload.label
   try {
     const result = await buildProject({
       projectPath: projectStore.path,
-      schemeName,
+      schemeName: payload.schemeName,
+      ...(payload.backendNames != null
+        ? { backendNames: payload.backendNames }
+        : {}),
+      ...(payload.frontendNames != null
+        ? { frontendNames: payload.frontendNames }
+        : {}),
     })
     ElMessage.success(
       `构建完成：${result.backends.length} 个后端 / ${result.frontends.length} 个前端 → ${result.outputRoot}`,
@@ -78,17 +146,36 @@ async function runBuild(schemeName: string) {
     ElMessage.error(err instanceof Error ? err.message : '构建失败')
   } finally {
     building.value = false
-    buildingSchemeName.value = ''
+    buildingKey.value = ''
+    buildingLabel.value = ''
   }
 }
 
-function onBuildSchemeRowClick(row: { name: string }) {
-  void runBuild(row.name)
+function onTargetClick(scheme: BuildScheme, item: BuildTarget) {
+  void runBuild({
+    schemeName: scheme.name,
+    backendNames: item.kind === 'backend' ? [item.name] : [],
+    frontendNames: item.kind === 'frontend' ? [item.name] : [],
+    label: `正在构建 ${item.label}…`,
+    key: item.key,
+  })
+}
+
+function onBuildAll(scheme: BuildScheme) {
+  void runBuild({
+    schemeName: scheme.name,
+    label: `正在构建 ${scheme.name}…`,
+    key: `${scheme.name}::all`,
+  })
 }
 
 function onBuildSelectClose(done: () => void) {
   if (building.value) return
   done()
+}
+
+function onDialogClosed() {
+  schemes.value = []
 }
 </script>
 
@@ -142,7 +229,7 @@ function onBuildSelectClose(done: () => void) {
     <el-dialog
       v-model="buildSelectVisible"
       title="选择要构建的方案"
-      width="480px"
+      width="560px"
       align-center
       destroy-on-close
       append-to-body
@@ -150,26 +237,59 @@ function onBuildSelectClose(done: () => void) {
       :close-on-press-escape="!building"
       :show-close="!building"
       :before-close="onBuildSelectClose"
+      @closed="onDialogClosed"
     >
       <div
         v-loading="building"
-        class="build-scheme-cards"
-        :element-loading-text="
-          buildingSchemeName ? `正在构建 ${buildingSchemeName}…` : '正在构建…'
-        "
+        class="build-picker"
+        :element-loading-text="buildingLabel || '正在构建…'"
       >
-        <button
-          v-for="item in buildSchemeOptions"
-          :key="item.name"
-          type="button"
-          class="build-scheme-card"
-          :class="{ 'is-building': building && buildingSchemeName === item.name }"
-          :disabled="building"
-          @click="onBuildSchemeRowClick(item)"
+        <div
+          v-for="row in schemeRows"
+          :key="row.scheme.id || row.scheme.name"
+          class="scheme-block"
         >
-          <div class="card-name">{{ item.name }}</div>
-          <div class="card-desc">{{ item.description || '暂无说明' }}</div>
-        </button>
+          <div class="scheme-head">
+            <div class="scheme-titles">
+              <div class="scheme-name">{{ row.scheme.name }}</div>
+              <div class="scheme-desc">
+                {{ row.scheme.description?.trim() || '暂无说明' }}
+              </div>
+            </div>
+            <el-button
+              type="primary"
+              size="small"
+              :disabled="building || !row.targets.length"
+              :loading="
+                building && buildingKey === `${row.scheme.name}::all`
+              "
+              @click="onBuildAll(row.scheme)"
+            >
+              构建全部
+            </el-button>
+          </div>
+
+          <div v-if="row.targets.length" class="target-grid">
+            <button
+              v-for="item in row.targets"
+              :key="item.key"
+              type="button"
+              class="target-tile"
+              :class="{ 'is-building': building && buildingKey === item.key }"
+              :disabled="building"
+              @click="onTargetClick(row.scheme, item)"
+            >
+              <div class="tile-body">
+                <div class="tile-name">{{ item.label }}</div>
+                <div class="tile-detail">{{ item.detail }}</div>
+              </div>
+              <span class="tile-kind">
+                {{ item.kind === 'backend' ? '后端' : '前端' }}
+              </span>
+            </button>
+          </div>
+          <div v-else class="targets-empty">没有可构建的后端/前端</div>
+        </div>
       </div>
     </el-dialog>
   </div>
@@ -244,23 +364,69 @@ function onBuildSelectClose(done: () => void) {
   display: block;
 }
 
-.build-scheme-cards {
+.build-picker {
   position: relative;
+  min-height: 80px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  min-height: 80px;
+  gap: 16px;
 }
 
-.build-scheme-card {
-  display: block;
-  width: 100%;
+.scheme-block {
+  padding: 14px;
+  border: 1px solid #ebeef5;
+  border-radius: 12px;
+  background: #fff;
+}
+
+.scheme-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.scheme-titles {
+  min-width: 0;
+}
+
+.scheme-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: #303133;
+  line-height: 1.4;
+}
+
+.scheme-desc {
+  margin-top: 4px;
+  font-size: 12px;
+  color: #909399;
+  line-height: 1.5;
+}
+
+.targets-empty {
+  padding: 8px 0 2px;
+  font-size: 12px;
+  color: #c0c4cc;
+}
+
+.target-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.target-tile {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
   margin: 0;
-  padding: 14px 16px;
+  padding: 12px;
   text-align: left;
   border: 1px solid #ebeef5;
   border-radius: 10px;
-  background: #fff;
+  background: #fafafa;
   cursor: pointer;
   transition:
     border-color 0.15s ease,
@@ -268,40 +434,57 @@ function onBuildSelectClose(done: () => void) {
     box-shadow 0.15s ease;
 }
 
-.build-scheme-card:hover:not(:disabled) {
+.target-tile:hover:not(:disabled) {
   border-color: #409eff;
   background: #f5faff;
   box-shadow: 0 2px 8px rgba(64, 158, 255, 0.12);
 }
 
-.build-scheme-card.is-building {
+.target-tile.is-building {
   border-color: #409eff;
-  background: #f5faff;
+  background: #ecf5ff;
 }
 
-.build-scheme-card:disabled {
+.target-tile:disabled {
   cursor: not-allowed;
 }
 
-.card-name {
-  font-size: 14px;
+.tile-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.tile-name {
+  font-size: 13px;
   font-weight: 600;
   color: #303133;
   line-height: 1.4;
-  pointer-events: none;
+  word-break: break-all;
 }
 
-.card-desc {
+.tile-detail {
   margin-top: 4px;
   font-size: 12px;
   color: #909399;
-  line-height: 1.5;
-  pointer-events: none;
+  line-height: 1.4;
+}
+
+.tile-kind {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: #909399;
+  line-height: 22px;
 }
 
 .main {
   flex: 1;
   min-height: 0;
   overflow: hidden;
+}
+
+@media (max-width: 560px) {
+  .target-grid {
+    grid-template-columns: 1fr;
+  }
 }
 </style>

@@ -564,6 +564,25 @@ function reportCustomBodyError(
   })
 }
 
+/** 编译缓存：同一段自定义方法体不重复 new Function（滚动 onScroll 等高频路径） */
+const customBodyFnCache = new Map<string, (env: object) => void>()
+const CUSTOM_BODY_FN_CACHE_MAX = 128
+
+function getCustomBodyFn(body: string): (env: object) => void {
+  const cached = customBodyFnCache.get(body)
+  if (cached) return cached
+  // eslint-disable-next-line no-new-func
+  const fn = new Function('__env', `with (__env) {\n${body}\n}`) as (
+    env: object,
+  ) => void
+  if (customBodyFnCache.size >= CUSTOM_BODY_FN_CACHE_MAX) {
+    const first = customBodyFnCache.keys().next().value
+    if (first != null) customBodyFnCache.delete(first)
+  }
+  customBodyFnCache.set(body, fn)
+  return fn
+}
+
 function runCustomBody(
   body: string,
   ctx: RunEventBindingsContext,
@@ -606,9 +625,7 @@ function runCustomBody(
         return Reflect.get(target, prop, receiver)
       },
     })
-    // eslint-disable-next-line no-new-func
-    const fn = new Function('__env', `with (__env) {\n${trimmed}\n}`)
-    fn(env)
+    getCustomBodyFn(trimmed)(env)
   } catch (err) {
     reportCustomBodyError(err, ctx, methodLabel)
   }

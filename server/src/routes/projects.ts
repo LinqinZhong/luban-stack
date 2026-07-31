@@ -322,7 +322,16 @@ router.post('/build', async (req, res) => {
       res.status(400).json({ message: '请提供 schemeName' })
       return
     }
-    const result = await buildProject(projectPath.trim(), schemeName.trim())
+    const backendNames = Array.isArray(req.body?.backendNames)
+      ? req.body.backendNames.filter((n: unknown) => typeof n === 'string')
+      : undefined
+    const frontendNames = Array.isArray(req.body?.frontendNames)
+      ? req.body.frontendNames.filter((n: unknown) => typeof n === 'string')
+      : undefined
+    const result = await buildProject(projectPath.trim(), schemeName.trim(), {
+      ...(backendNames !== undefined ? { backendNames } : {}),
+      ...(frontendNames !== undefined ? { frontendNames } : {}),
+    })
     res.json(result)
   } catch (err) {
     handleError(res, err)

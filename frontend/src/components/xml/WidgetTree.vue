@@ -42,6 +42,7 @@ const emit = defineEmits<{
     },
   ]
   'toggle-hidden': [id: string]
+  contextmenu: [payload: { nodeId: string; x: number; y: number }]
 }>()
 
 const treeRef = ref<InstanceType<typeof ElTree>>()
@@ -111,6 +112,20 @@ function handleOpenEvent(id: string) {
 function handleToggleHidden(event: MouseEvent, id: string) {
   event.stopPropagation()
   emit('toggle-hidden', id)
+}
+
+function handleNodeContextMenu(event: MouseEvent, data: TreeNodeData) {
+  if (!props.editable) return
+  if (data.id === STATUS_BAR_NODE_ID) return
+  if (isSlotOutletNodeId(data.id)) return
+  event.preventDefault()
+  event.stopPropagation()
+  emit('select', data.id)
+  emit('contextmenu', {
+    nodeId: data.id,
+    x: event.clientX,
+    y: event.clientY,
+  })
 }
 
 function allowDrag(node: TreeNode) {
@@ -327,6 +342,7 @@ watch(
           <div
             class="tree-node"
             :class="{ 'is-hidden': isHidden((data as TreeNodeData).id) }"
+            @contextmenu="handleNodeContextMenu($event, data as TreeNodeData)"
           >
             <span class="tree-label">{{ (data as TreeNodeData).label }}</span>
             <EventBadge

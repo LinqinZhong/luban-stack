@@ -29,6 +29,7 @@ import { resolveComponentInstanceDollarProps } from '../../utils/instance-dollar
 import { resolveComputedPageData, buildComputeDepsKey } from '../../utils/compute-runtime'
 import { buildRepeatExpandKey, expandRepeatTree, applyEditRepeatPreviewScope } from '../../utils/repeat'
 import { CANVAS_RUNTIME_KEY } from '../../composables/useCanvasRuntime'
+import { COMPONENT_RENDER_MAP_KEY } from '../../composables/useComponentRenderMap'
 import {
   DYNAMIC_STYLES_ATTR,
   V_IF_ATTR,
@@ -132,6 +133,11 @@ const emit = defineEmits<{
 const modalStack = inject(MODAL_STACK_KEY, null)
 const modalHostRef = inject(MODAL_HOST_KEY, null)
 const canvasRuntime = inject(CANVAS_RUNTIME_KEY, null)
+/** 优先 inject（PageCanvas provide），避免整树随 map 引用变化重渲染；无 provide 时回退 props */
+const injectedComponentMap = inject(COMPONENT_RENDER_MAP_KEY, null)
+const resolvedComponentMap = computed(
+  () => injectedComponentMap?.value ?? props.componentMap,
+)
 
 function buildSlotContentMap(
   host: XmlNode,
@@ -266,8 +272,9 @@ const previewInteractive = computed(
 const componentDetail = computed(() => {
   if (props.node.tag !== 'Component') return null
   const id = props.node.attrs.componentId?.trim()
-  if (!id || !props.componentMap) return null
-  return props.componentMap[id] ?? null
+  const map = resolvedComponentMap.value
+  if (!id || !map) return null
+  return map[id] ?? null
 })
 
 /** 基础 attrs + 动态样式；解析数据池绑定；预览态再替换 $props */
@@ -1778,6 +1785,7 @@ onBeforeUnmount(() => {
 
   <WidgetSelectShell
     v-else-if="node.tag === 'Text'"
+    :widget-node-id="nodeId"
     :selected="isSelected"
     :hovered="isHovered"
     :margin-attrs="attrs"
@@ -1809,6 +1817,7 @@ onBeforeUnmount(() => {
 
   <WidgetSelectShell
     v-else-if="node.tag === 'Button'"
+    :widget-node-id="nodeId"
     :selected="isSelected"
     :hovered="isHovered"
     :margin-attrs="attrs"
@@ -1840,6 +1849,7 @@ onBeforeUnmount(() => {
 
   <WidgetSelectShell
     v-else-if="node.tag === 'Input'"
+    :widget-node-id="nodeId"
     :selected="isSelected"
     :hovered="isHovered"
     :margin-attrs="attrs"
@@ -1880,6 +1890,7 @@ onBeforeUnmount(() => {
 
   <WidgetSelectShell
     v-else-if="node.tag === 'Image'"
+    :widget-node-id="nodeId"
     :selected="isSelected"
     :hovered="isHovered"
     :margin-attrs="attrs"
@@ -1926,6 +1937,7 @@ onBeforeUnmount(() => {
 
   <WidgetSelectShell
     v-else-if="node.tag === 'Icon'"
+    :widget-node-id="nodeId"
     :selected="isSelected"
     :hovered="isHovered"
     :margin-attrs="attrs"
@@ -1997,6 +2009,7 @@ onBeforeUnmount(() => {
 
   <WidgetSelectShell
     v-else-if="node.tag === 'Slot'"
+    :widget-node-id="nodeId"
     :selected="isSelected"
     :hovered="isHovered"
     :margin-attrs="attrs"
@@ -2093,6 +2106,7 @@ onBeforeUnmount(() => {
 
   <WidgetSelectShell
     v-else-if="node.tag === 'Component'"
+    :widget-node-id="nodeId"
     :selected="isSelected"
     :hovered="isHovered"
     :margin-attrs="componentOutOfFlow ? {} : attrs"
@@ -2154,6 +2168,7 @@ onBeforeUnmount(() => {
 
   <WidgetSelectShell
     v-else-if="node.tag === 'Swiper'"
+    :widget-node-id="nodeId"
     :selected="isSelected"
     :hovered="isHovered"
     :margin-attrs="attrs"
@@ -2243,6 +2258,7 @@ onBeforeUnmount(() => {
 
   <WidgetSelectShell
     v-else-if="node.tag === 'MultiWindow'"
+    :widget-node-id="nodeId"
     :selected="isSelected"
     :hovered="isHovered"
     :margin-attrs="attrs"
@@ -2369,6 +2385,7 @@ onBeforeUnmount(() => {
 
   <WidgetSelectShell
     v-else-if="node.tag === 'LinearLayout'"
+    :widget-node-id="nodeId"
     :selected="isSelected"
     :hovered="isHovered"
     :margin-attrs="attrs"
@@ -2442,6 +2459,7 @@ onBeforeUnmount(() => {
 
   <WidgetSelectShell
     v-else-if="node.tag === 'RelativeLayout'"
+    :widget-node-id="nodeId"
     :selected="isSelected"
     :hovered="isHovered"
     :margin-attrs="attrs"

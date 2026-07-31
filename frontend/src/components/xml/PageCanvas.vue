@@ -12,6 +12,7 @@ import {
   type ModalStackApi,
 } from '../../composables/useModalStack'
 import { CANVAS_RUNTIME_KEY } from '../../composables/useCanvasRuntime'
+import { COMPONENT_RENDER_MAP_KEY } from '../../composables/useComponentRenderMap'
 import { EDITOR_MENU_BUTTON, getDeviceInfo } from '../../utils/device-info'
 import type { IconLibrary } from '../../types/icon-library'
 import type { PageData } from '../../types/page-data'
@@ -84,7 +85,22 @@ const emit = defineEmits<{
   'open-event': [id: string]
   'add-window': [parentId: string]
   interact: [payload: import('../../utils/event-runtime').PreviewInteractPayload]
+  contextmenu: [payload: { nodeId: string; x: number; y: number }]
 }>()
+
+function handleWidgetContextMenu(event: MouseEvent) {
+  if (!props.selectable) return
+  const target = event.target
+  if (!(target instanceof Element)) return
+  const host = target.closest('[data-widget-node-id]')
+  if (!(host instanceof HTMLElement)) return
+  const nodeId = host.dataset.widgetNodeId?.trim()
+  if (!nodeId) return
+  event.preventDefault()
+  event.stopPropagation()
+  emit('select', nodeId)
+  emit('contextmenu', { nodeId, x: event.clientX, y: event.clientY })
+}
 
 const fallbackModalStack = createModalStack()
 const modalHostRef = ref<HTMLElement | null>(null)
@@ -99,6 +115,10 @@ provide(MODAL_STACK_KEY, props.modalStack ?? fallbackModalStack)
 provide(MODAL_HOST_KEY, modalHostRef)
 provide(BADGE_HOST_KEY, badgeHostRef)
 provide(CANVAS_TOOL_MODE_KEY, toolMode)
+provide(
+  COMPONENT_RENDER_MAP_KEY,
+  computed(() => props.componentMap),
+)
 provide(CANVAS_RUNTIME_KEY, {
   getDeviceInfo: () =>
     getDeviceInfo({
@@ -1047,7 +1067,11 @@ watch(
           :closable="false"
         />
         <!-- 隔离页面内容的 z-index，避免绝对定位控件压过角标/光标 -->
-        <div v-else-if="parsed.root" class="phone-page-layer">
+        <div
+          v-else-if="parsed.root"
+          class="phone-page-layer"
+          @contextmenu="handleWidgetContextMenu"
+        >
           <XmlNodeView
             :node="parsed.root"
             :node-id="rootId"
@@ -1059,7 +1083,6 @@ watch(
             :icon-library="iconLibrary"
             :page-data="pageData"
             :hidden-node-ids="hiddenNodeIds"
-            :component-map="componentMap"
             :dollar-props="dollarProps"
             :route-params="routeParams"
             :preview-lifecycle-gate="previewLifecycleGate"

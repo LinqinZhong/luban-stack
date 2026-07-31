@@ -17,14 +17,6 @@
       "computeBody": "return Number($query.id) || 0\n"
     },
     {
-      "name": "pagerParams",
-      "type": "json",
-      "remark": "Pager 额外请求参数",
-      "value": {},
-      "binding": "computed",
-      "computeBody": "return {\n  goodsId: goodsId,\n  type: activeTab\n}\n"
-    },
-    {
       "name": "remarkCounts",
       "type": "json",
       "remark": "评价各类型数量（独立接口）",

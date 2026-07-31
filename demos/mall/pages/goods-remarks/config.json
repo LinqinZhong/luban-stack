@@ -10,13 +10,13 @@
   "queryParams": [
     {
       "name": "id",
-      "type": "string",
+      "type": "number",
       "remark": "商品 ID",
       "required": true,
-      "defaultValue": "1"
+      "defaultValue": 1
     }
   ],
   "debugQuery": {
-    "id": "1"
+    "id": "39"
   }
 }

@@ -1,5 +1,13 @@
 <script setup lang="ts">
-import { computed, nextTick, reactive, ref, watch } from 'vue'
+import {
+  computed,
+  nextTick,
+  onBeforeUnmount,
+  onMounted,
+  reactive,
+  ref,
+  watch,
+} from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   Box,
@@ -157,14 +165,25 @@ import {
   appendComponent,
   appendWidget,
   canDeleteNode,
+  canMoveWidgetSibling,
+  canPasteWidgetAsChild,
+  canPasteWidgetAsSibling,
+  copyWidgetFragment,
   findXmlNodeById,
   moveWidget,
+  moveWidgetSibling,
+  pasteWidget,
   removeWidget,
   migrateLegacyMaskToModal,
   WIDGET_OPTIONS,
   type MovePosition,
   type WidgetTag,
 } from '../utils/xml-node'
+import {
+  getWidgetClipboard,
+  hasWidgetClipboard,
+  setWidgetClipboard,
+} from '../utils/widget-clipboard'
 import { parsePageXml } from '../utils/xml'
 import {
   isSlotOutletNodeId,
@@ -944,6 +963,102 @@ const canDeleteSelected = computed(
     !isSlotOutletNodeId(selectedNodeId.value) &&
     canDeleteNode(selectedNodeId.value),
 )
+
+type WidgetCtxCommand =
+  | 'copy'
+  | 'delete'
+  | 'moveUp'
+  | 'moveDown'
+  | 'pasteSibling'
+  | 'pasteChild'
+
+const widgetCtxMenu = ref<{
+  visible: boolean
+  x: number
+  y: number
+  nodeId: string
+}>({ visible: false, x: 0, y: 0, nodeId: '' })
+
+const widgetCtxClipboardTick = ref(0)
+
+const widgetCtxCanCopy = computed(
+  () =>
+    Boolean(widgetCtxMenu.value.nodeId) &&
+    !isSlotOutletNodeId(widgetCtxMenu.value.nodeId) &&
+    canDeleteNode(widgetCtxMenu.value.nodeId),
+)
+const widgetCtxCanDelete = computed(() => widgetCtxCanCopy.value)
+const widgetCtxCanMoveUp = computed(() => {
+  void widgetCtxClipboardTick.value
+  if (!activeDoc.value || !widgetCtxMenu.value.nodeId) return false
+  return canMoveWidgetSibling(
+    activeDoc.value.xml,
+    widgetCtxMenu.value.nodeId,
+    'up',
+  )
+})
+const widgetCtxCanMoveDown = computed(() => {
+  void widgetCtxClipboardTick.value
+  if (!activeDoc.value || !widgetCtxMenu.value.nodeId) return false
+  return canMoveWidgetSibling(
+    activeDoc.value.xml,
+    widgetCtxMenu.value.nodeId,
+    'down',
+  )
+})
+const widgetCtxCanPasteSibling = computed(() => {
+  void widgetCtxClipboardTick.value
+  return (
+    hasWidgetClipboard() &&
+    canPasteWidgetAsSibling(widgetCtxMenu.value.nodeId)
+  )
+})
+const widgetCtxCanPasteChild = computed(() => {
+  void widgetCtxClipboardTick.value
+  if (!activeDoc.value || !widgetCtxMenu.value.nodeId) return false
+  return (
+    hasWidgetClipboard() &&
+    canPasteWidgetAsChild(activeDoc.value.xml, widgetCtxMenu.value.nodeId)
+  )
+})
+
+function closeWidgetCtxMenu() {
+  widgetCtxMenu.value = { visible: false, x: 0, y: 0, nodeId: '' }
+}
+
+function openWidgetCtxMenu(payload: { nodeId: string; x: number; y: number }) {
+  if (!isEditMode.value || !activeDoc.value) return
+  if (!payload.nodeId || isSlotOutletNodeId(payload.nodeId)) return
+  selectedNodeId.value = payload.nodeId
+  widgetCtxClipboardTick.value += 1
+  const pad = 8
+  const menuW = 160
+  const menuH = 220
+  const x = Math.min(payload.x, window.innerWidth - menuW - pad)
+  const y = Math.min(payload.y, window.innerHeight - menuH - pad)
+  widgetCtxMenu.value = {
+    visible: true,
+    x: Math.max(pad, x),
+    y: Math.max(pad, y),
+    nodeId: payload.nodeId,
+  }
+}
+
+function onGlobalPointerDownForCtx(event: MouseEvent) {
+  if (!widgetCtxMenu.value.visible) return
+  const t = event.target
+  if (t instanceof Element && t.closest('.widget-ctx-menu')) return
+  closeWidgetCtxMenu()
+}
+
+onMounted(() => {
+  window.addEventListener('mousedown', onGlobalPointerDownForCtx, true)
+  window.addEventListener('scroll', closeWidgetCtxMenu, true)
+})
+onBeforeUnmount(() => {
+  window.removeEventListener('mousedown', onGlobalPointerDownForCtx, true)
+  window.removeEventListener('scroll', closeWidgetCtxMenu, true)
+})
 
 /** 组件定义中选中 Slot 时，可添加调试预览元素 */
 const showAddDebugButton = computed(() => {
@@ -3637,6 +3752,7 @@ async function handleAddMultiWindow(parentId: string) {
 async function handleDeleteWidget() {
   if (
     !activeDoc.value ||
+    !isEditMode.value ||
     isSlotOutletNodeId(selectedNodeId.value) ||
     !canDeleteNode(selectedNodeId.value)
   ) {
@@ -3665,6 +3781,92 @@ async function handleDeleteWidget() {
     ElMessage.success('已删除控件')
   } catch (err) {
     ElMessage.error(err instanceof Error ? err.message : '删除控件失败')
+  }
+}
+
+function handleCopyWidget(nodeId = selectedNodeId.value) {
+  if (!activeDoc.value || !isEditMode.value || !nodeId) return
+  if (isSlotOutletNodeId(nodeId) || !canDeleteNode(nodeId)) {
+    ElMessage.warning('该节点不能复制')
+    return
+  }
+  try {
+    const frag = copyWidgetFragment(activeDoc.value.xml, nodeId)
+    setWidgetClipboard(frag)
+    widgetCtxClipboardTick.value += 1
+    ElMessage.success('已复制')
+  } catch (err) {
+    ElMessage.error(err instanceof Error ? err.message : '复制失败')
+  }
+}
+
+async function handleMoveWidgetSibling(direction: 'up' | 'down') {
+  if (!activeDoc.value || !isEditMode.value) return
+  const nodeId = selectedNodeId.value
+  if (!nodeId || isSlotOutletNodeId(nodeId)) return
+  try {
+    const { xml, newNodeId } = moveWidgetSibling(
+      activeDoc.value.xml,
+      nodeId,
+      direction,
+    )
+    selectedNodeId.value = newNodeId
+    await handleXmlUpdate(xml)
+  } catch (err) {
+    ElMessage.error(err instanceof Error ? err.message : '移动失败')
+  }
+}
+
+async function handlePasteWidget(mode: 'sibling' | 'child') {
+  if (!activeDoc.value || !isEditMode.value) return
+  const nodeId = selectedNodeId.value
+  const frag = getWidgetClipboard()
+  if (!nodeId || !frag) {
+    ElMessage.warning('请先复制一个控件')
+    return
+  }
+  try {
+    const { xml, newNodeId } = pasteWidget(
+      activeDoc.value.xml,
+      nodeId,
+      frag,
+      mode,
+    )
+    selectedNodeId.value = newNodeId
+    await handleXmlUpdate(xml)
+    ElMessage.success(mode === 'child' ? '已粘贴为子级' : '已粘贴为同级')
+  } catch (err) {
+    ElMessage.error(err instanceof Error ? err.message : '粘贴失败')
+  }
+}
+
+async function handleWidgetCtxCommand(command: WidgetCtxCommand) {
+  const nodeId = widgetCtxMenu.value.nodeId
+  closeWidgetCtxMenu()
+  if (!nodeId) return
+  selectedNodeId.value = nodeId
+  if (command === 'copy') {
+    handleCopyWidget(nodeId)
+    return
+  }
+  if (command === 'delete') {
+    await handleDeleteWidget()
+    return
+  }
+  if (command === 'moveUp') {
+    await handleMoveWidgetSibling('up')
+    return
+  }
+  if (command === 'moveDown') {
+    await handleMoveWidgetSibling('down')
+    return
+  }
+  if (command === 'pasteSibling') {
+    await handlePasteWidget('sibling')
+    return
+  }
+  if (command === 'pasteChild') {
+    await handlePasteWidget('child')
   }
 }
 
@@ -3897,6 +4099,7 @@ watch(
         @open-event="handleOpenEventConfig"
         @move="handleMoveWidget"
         @toggle-hidden="toggleEditorHidden"
+        @contextmenu="openWidgetCtxMenu"
       />
       <PreviewRuntimeLog
         v-else-if="activeDoc && workspaceMode === 'preview'"
@@ -4224,6 +4427,7 @@ watch(
           @add="openAddWidgetDialog"
           @add-debug="openAddDebugDialog"
           @delete="handleDeleteWidget"
+          @contextmenu="openWidgetCtxMenu"
         />
         <PreviewCanvasToolbar
           v-if="workspaceMode === 'preview' && activeDoc"
@@ -4536,6 +4740,65 @@ watch(
       </el-tabs>
     </el-dialog>
   </div>
+    <Teleport to="body">
+      <div
+        v-if="widgetCtxMenu.visible"
+        class="widget-ctx-menu"
+        :style="{ left: `${widgetCtxMenu.x}px`, top: `${widgetCtxMenu.y}px` }"
+        @contextmenu.prevent
+      >
+        <button
+          type="button"
+          class="widget-ctx-item"
+          :disabled="!widgetCtxCanCopy"
+          @click="handleWidgetCtxCommand('copy')"
+        >
+          复制
+        </button>
+        <button
+          type="button"
+          class="widget-ctx-item"
+          :disabled="!widgetCtxCanDelete"
+          @click="handleWidgetCtxCommand('delete')"
+        >
+          删除
+        </button>
+        <div class="widget-ctx-divider" />
+        <button
+          type="button"
+          class="widget-ctx-item"
+          :disabled="!widgetCtxCanMoveUp"
+          @click="handleWidgetCtxCommand('moveUp')"
+        >
+          上移
+        </button>
+        <button
+          type="button"
+          class="widget-ctx-item"
+          :disabled="!widgetCtxCanMoveDown"
+          @click="handleWidgetCtxCommand('moveDown')"
+        >
+          下移
+        </button>
+        <div class="widget-ctx-divider" />
+        <button
+          type="button"
+          class="widget-ctx-item"
+          :disabled="!widgetCtxCanPasteSibling"
+          @click="handleWidgetCtxCommand('pasteSibling')"
+        >
+          粘贴为同级
+        </button>
+        <button
+          type="button"
+          class="widget-ctx-item"
+          :disabled="!widgetCtxCanPasteChild"
+          @click="handleWidgetCtxCommand('pasteChild')"
+        >
+          粘贴为子级
+        </button>
+      </div>
+    </Teleport>
 </template>
 
 <style scoped>
@@ -4965,5 +5228,48 @@ watch(
   -webkit-box-orient: vertical;
   overflow: hidden;
   word-break: break-all;
+}
+</style>
+
+<style>
+.widget-ctx-menu {
+  position: fixed;
+  z-index: 5000;
+  min-width: 148px;
+  padding: 4px;
+  border: 1px solid #e4e7ed;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.12);
+}
+
+.widget-ctx-item {
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 8px 12px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: #303133;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.widget-ctx-item:hover:not(:disabled) {
+  background: #ecf5ff;
+  color: #409eff;
+}
+
+.widget-ctx-item:disabled {
+  color: #c0c4cc;
+  cursor: not-allowed;
+}
+
+.widget-ctx-divider {
+  height: 1px;
+  margin: 4px 6px;
+  background: #ebeef5;
 }
 </style>

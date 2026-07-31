@@ -35,14 +35,31 @@ function cloneValue<T>(value: T): T {
 }
 
 /** 在隔离函数中执行计算体；scope 中的字段名可作为自由变量引用 */
+const computeBodyFnCache = new Map<
+  string,
+  (...args: unknown[]) => unknown
+>()
+const COMPUTE_BODY_FN_CACHE_MAX = 64
+
 export function runComputeBody(
   body: string,
   scope: Record<string, unknown>,
 ): unknown {
   const names = Object.keys(scope).filter(isValidIdent)
   const values = names.map((name) => scope[name])
-  // eslint-disable-next-line no-new-func
-  const fn = new Function(...names, `"use strict";\n${body}`)
+  const cacheKey = `${names.join('\0')}\n${body}`
+  let fn = computeBodyFnCache.get(cacheKey)
+  if (!fn) {
+    // eslint-disable-next-line no-new-func
+    fn = new Function(...names, `"use strict";\n${body}`) as (
+      ...args: unknown[]
+    ) => unknown
+    if (computeBodyFnCache.size >= COMPUTE_BODY_FN_CACHE_MAX) {
+      const first = computeBodyFnCache.keys().next().value
+      if (first != null) computeBodyFnCache.delete(first)
+    }
+    computeBodyFnCache.set(cacheKey, fn)
+  }
   return fn(...values)
 }
 

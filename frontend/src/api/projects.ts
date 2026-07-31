@@ -740,6 +740,10 @@ export function saveBuildSchemes(payload: {
 export function buildProject(payload: {
   projectPath: string
   schemeName: string
+  /** 传入则只构建这些后端（可与 frontendNames 组合做部分构建） */
+  backendNames?: string[]
+  /** 传入则只构建这些前端 */
+  frontendNames?: string[]
 }) {
   return request<{
     schemeName: string

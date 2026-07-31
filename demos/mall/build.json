@@ -30,6 +30,24 @@
           "wechatAppId": "wx063d4987d9089a28"
         }
       ]
+    },
+    {
+      "id": "bld_ms9cv901_3ej3",
+      "name": "build2",
+      "description": "",
+      "backends": [
+        {
+          "name": "service1",
+          "type": "nestjs",
+          "port": 3030,
+          "moduleIds": [
+            "svc_mrqdgnhb_3ktq2g",
+            "user"
+          ],
+          "includeOss": true
+        }
+      ],
+      "frontends": []
     }
   ]
 }
