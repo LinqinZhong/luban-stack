@@ -16,7 +16,7 @@ function findTypeName(
   return ''
 }
 
-/** 是否为 QueryPageVo（含泛型） */
+/** ????QueryPageVo??????*/
 export function isQueryPageVoOutput(
   expr: ProcessorTypeExpr | null | undefined,
   library?: DataTypeLibrary | null,
@@ -28,7 +28,7 @@ export function isQueryPageVoOutput(
   return findTypeName(library, ref) === 'QueryPageVo'
 }
 
-/** 终止节点未选返回数据时，按方法出参构造空值 */
+/** ??????????????????????*/
 export function defaultEmptyReturnValue(
   expr: ProcessorTypeExpr | null | undefined,
   library?: DataTypeLibrary | null,
@@ -37,16 +37,23 @@ export function defaultEmptyReturnValue(
   const t = (expr.type || '').trim()
   if (!t || t === 'void') return undefined
   if (isQueryPageVoOutput(expr, library)) {
-    return { total: 0, records: [] }
+    return {
+      current: 0,
+      pageSize: 0,
+      hasNext: false,
+      total: 0,
+      records: [],
+    }
   }
   if (t === 'array') return []
   if (t === 'boolean') return false
   if (t === 'number') return 0
   if (t === 'string') return null
+  if (t === 'map') return new Map()
   return null
 }
 
-/** 导出代码中的空返回表达式 */
+/** ???????????? */
 export function defaultEmptyReturnCode(
   expr: ProcessorTypeExpr | null | undefined,
   library?: DataTypeLibrary | null,
@@ -55,11 +62,12 @@ export function defaultEmptyReturnCode(
   const t = (expr.type || '').trim()
   if (!t || t === 'void') return 'undefined'
   if (isQueryPageVoOutput(expr, library)) {
-    return '{ total: 0, records: [] }'
+    return '{ current: 0, pageSize: 0, hasNext: false, total: 0, records: [] }'
   }
   if (t === 'array') return '[]'
   if (t === 'boolean') return 'false'
   if (t === 'number') return '0'
   if (t === 'string') return 'null'
+  if (t === 'map') return 'new Map()'
   return 'null'
 }

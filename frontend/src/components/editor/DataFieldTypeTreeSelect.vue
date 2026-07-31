@@ -3,7 +3,9 @@ import { computed } from 'vue'
 import {
   COMPOSABLE_FIELD_TYPE_OPTIONS,
   DATA_FIELD_TYPE_OPTIONS,
+  MAP_KEY_TYPE_OPTIONS,
   type DataFieldType,
+  type MapKeyType,
 } from '../../types/page-data'
 import type { DataTypeLibrary } from '../../types/data-types'
 
@@ -14,10 +16,12 @@ export type TypeSelectPayload = {
   typeRef?: string
   itemType?: DataFieldType | 'generic'
   itemTypeRef?: string
-  /** itemType === 'array' 时，内层数组的元素类型 */
+  /** itemType === 'array' ??????????? */
   itemItemType?: DataFieldType | 'generic'
   itemItemTypeRef?: string
-  /** clearable + emptyOnClear 清空时为 true */
+  /** type === 'map' ????? */
+  keyType?: MapKeyType
+  /** clearable + emptyOnClear ???? true */
   cleared?: boolean
 }
 
@@ -37,28 +41,31 @@ const props = withDefaults(
     itemTypeRef?: string | null
     itemItemType?: DataFieldType | 'generic' | null
     itemItemTypeRef?: string | null
-    /** 为 true 时 cascader 显示为空（未选择） */
+    keyType?: MapKeyType | null
+    /** ? true ? cascader ????????? */
     empty?: boolean
     library?: DataTypeLibrary | null
-    /** 当前类型上的泛型参数名（如 T / U），展示在「泛型」分组 */
+    /** ????????????? T / U??????????? */
     genericNames?: string[]
-    /** 排除的具名类型 id（如正在编辑的类型自身） */
+    /** ??????? id???????????? */
     excludeNamedIds?: string[]
     allowRef?: boolean
     allowNamed?: boolean
-    /** 允许选择 void（方法出参等） */
+    /** ???? void??????? */
     allowVoid?: boolean
-    /** 顶层也展示「任意」（类型库字段等；数据池仅数组元素层有 any） */
+    /** ??????????????????????????? any? */
     allowAny?: boolean
-    /** 清空时发出 cleared: true（类型库字段等） */
+    /** ????? cleared: true???????? */
     emptyOnClear?: boolean
     composable?: boolean
     nested?: boolean
     excludeTypes?: DataFieldType[]
+    /** ? true ??????????????/??? */
+    mapLeaf?: boolean
     placeholder?: string
     clearable?: boolean
     size?: 'large' | 'default' | 'small'
-    /** 覆盖输入框展示文案（如 QueryPageVo<GoodsItem>） */
+    /** ??????????? QueryPageVo<GoodsItem>? */
     labelOverride?: string | null
   }>(),
   {
@@ -70,15 +77,16 @@ const props = withDefaults(
     empty: false,
     composable: false,
     nested: false,
+    mapLeaf: false,
     clearable: false,
-    placeholder: '选择类型',
+    placeholder: '????',
     size: 'default',
   },
 )
 
 const emit = defineEmits<{
   change: [payload: TypeSelectPayload]
-  /** 点击覆盖文案（用于打开泛型配置） */
+  /** ???????????????? */
   'label-click': []
 }>()
 
@@ -106,7 +114,7 @@ function genericGroupNode(): CascaderNode | null {
   if (!names.length) return null
   return {
     value: GENERIC_GROUP,
-    label: '泛型',
+    label: '??',
     children: names.map((name) => ({
       value: `generic:${name}`,
       label: name,
@@ -136,15 +144,17 @@ function namedGroupNodes(): CascaderNode[] {
 }
 
 /**
- * arrayDepth：数组下还可再展开几层元素类型（>0 可继续嵌套数组；0 仍可选元素但不再嵌套数组；<0 不再出现数组）
- * forArrayElement：元素类型层才展示「任意」（any[]）
+ * arrayDepth????????????????>0 ????????0 ?????????????<0 ???????
+ * forArrayElement??????????????any[]?
  */
 function buildCascaderOptions(arrayDepth: number, forArrayElement = false): CascaderNode[] {
-  // 数组元素类型不含「引用」（引用仅数据池顶层）
+  // ??????????????????????
   const base = baseOptions().filter((o) => {
     if (o.value === 'any') return forArrayElement || props.allowAny
     if (o.value === 'ref') return !forArrayElement
     if (o.value === 'array' && arrayDepth < 0) return false
+    // ?????????????? / ??????? map ?????
+    if (o.value === 'map' && forArrayElement) return false
     return true
   })
   const named = namedGroupNodes()
@@ -157,6 +167,20 @@ function buildCascaderOptions(arrayDepth: number, forArrayElement = false): Casc
         label: opt.label,
         children: buildCascaderOptions(arrayDepth - 1, true),
       })
+    } else if (opt.value === 'map') {
+      if (props.mapLeaf) {
+        nodes.push({ value: 'map', label: opt.label })
+      } else {
+        nodes.push({
+          value: 'map',
+          label: opt.label,
+          children: MAP_KEY_TYPE_OPTIONS.map((k) => ({
+            value: `mapKey:${k.value}`,
+            label: k.label,
+            children: buildCascaderOptions(arrayDepth, true),
+          })),
+        })
+      }
     } else {
       nodes.push({ value: opt.value, label: opt.label })
     }
@@ -197,7 +221,28 @@ function encodeLeaf(
   return [type]
 }
 
+function encodeValuePath(): string[] {
+  if (props.itemType === 'array') {
+    return [
+      'array',
+      ...encodeLeaf(
+        (props.itemItemType || 'string') as DataFieldType | 'generic',
+        props.itemItemTypeRef,
+      ),
+    ]
+  }
+  return encodeLeaf(
+    (props.itemType || 'string') as DataFieldType | 'generic',
+    props.itemTypeRef,
+  )
+}
+
 const cascaderValue = computed<string[]>(() => {
+  if (props.type === 'map') {
+    if (props.mapLeaf) return ['map']
+    const key: MapKeyType = props.keyType === 'number' ? 'number' : 'string'
+    return ['map', `mapKey:${key}`, ...encodeValuePath()]
+  }
   if (props.empty) return []
   if (props.type === 'void') return ['void']
   if (props.type === 'generic') {
@@ -243,8 +288,61 @@ function decodeLeaf(path: string[]): {
   return { type: (allowed ? last : 'string') as DataFieldType }
 }
 
+function decodeValuePath(path: string[]): Pick<
+  TypeSelectPayload,
+  'itemType' | 'itemTypeRef' | 'itemItemType' | 'itemItemTypeRef' | 'typeRef'
+> {
+  if (path[0] === 'array') {
+    const leaf =
+      path.length > 1 ? decodeLeaf(path.slice(1)) : { type: 'string' as DataFieldType }
+    return {
+      itemType: 'array',
+      itemTypeRef: '',
+      itemItemType: leaf.type,
+      itemItemTypeRef: leaf.typeRef,
+      typeRef: '',
+    }
+  }
+  const leaf = path.length ? decodeLeaf(path) : { type: 'string' as DataFieldType }
+  return {
+    itemType: leaf.type,
+    itemTypeRef: leaf.typeRef,
+    typeRef: '',
+  }
+}
+
 function decodePath(path: string[]): TypeSelectPayload {
   if (!path.length) return { type: 'string' }
+  if (path[0] === 'map') {
+    // ????????????/?????? ??? ? ???
+    if (path.length === 1 || props.mapLeaf) {
+      const keyType: MapKeyType =
+        props.keyType === 'number' ? 'number' : 'string'
+      if (props.type === 'map' && props.itemType) {
+        return {
+          type: 'map',
+          keyType,
+          itemType: props.itemType as DataFieldType | 'generic',
+          itemTypeRef: props.itemTypeRef || undefined,
+          itemItemType: (props.itemItemType || undefined) as
+            | DataFieldType
+            | 'generic'
+            | undefined,
+          itemItemTypeRef: props.itemItemTypeRef || undefined,
+        }
+      }
+      return { type: 'map', keyType, itemType: 'string' }
+    }
+    const keyToken = path[1] || 'mapKey:string'
+    const keyType: MapKeyType =
+      keyToken === 'mapKey:number' || keyToken === 'number' ? 'number' : 'string'
+    const value = decodeValuePath(path.slice(2))
+    return {
+      type: 'map',
+      keyType,
+      ...value,
+    }
+  }
   if (path[0] === 'void') return { type: 'void' }
 
   let arrayDepth = 0

@@ -212,7 +212,7 @@ function resolveParamForm(param: ProcessorMethodParam): ParamFormModel {
     return {
       param,
       mode: 'json',
-      typeLabel: '数组',
+      typeLabel: '[]',
       kind: 'array',
       enumOptions: [],
       fields: [],
@@ -221,7 +221,7 @@ function resolveParamForm(param: ProcessorMethodParam): ParamFormModel {
   const typeLabel = expr.typeRef
     ? namedTypeLabel(expr.typeRef)
     : expr.type === 'json'
-      ? '对象'
+      ? 'object'
       : expr.type || 'string'
 
   if (expr.typeRef || expr.type === 'json') {
@@ -423,6 +423,7 @@ const kindMap: Record<string, string> = {
   input: '输入',
   define: '定义数据',
   pageMap: '分页映射',
+  objectMap: '对象映射',
   branch: '判断',
   action: '操作',
   output: '输出',
@@ -474,7 +475,7 @@ function nodeSummaryText(node: {
       typeof data.description === 'string' ? data.description.trim() : ''
     if (description) return description
     const sourceKind = data.sourceKind === 'array' ? 'array' : 'page'
-    const kindLabel = sourceKind === 'array' ? '数组' : '分页'
+    const kindLabel = sourceKind === 'array' ? '[]' : '分页'
     const sourcePath =
       typeof data.sourcePath === 'string' ? data.sourcePath.trim() : ''
     const targetVarName =
@@ -484,6 +485,22 @@ function nodeSummaryText(node: {
       (typeof data.targetPath === 'string' ? data.targetPath.trim() : '')
     if (sourcePath && targetVarName) {
       return `${kindLabel} · ${sourcePath} → ${targetVarName}`
+    }
+    return sourcePath || targetVarName
+  }
+  if (node.kind === 'objectMap') {
+    const description =
+      typeof data.description === 'string' ? data.description.trim() : ''
+    if (description) return description
+    const sourcePath =
+      typeof data.sourcePath === 'string' ? data.sourcePath.trim() : ''
+    const targetVarName =
+      (typeof data.targetVarName === 'string'
+        ? data.targetVarName.trim()
+        : '') ||
+      (typeof data.targetPath === 'string' ? data.targetPath.trim() : '')
+    if (sourcePath && targetVarName) {
+      return `${sourcePath} → ${targetVarName}`
     }
     return sourcePath || targetVarName
   }

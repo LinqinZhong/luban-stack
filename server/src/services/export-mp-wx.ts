@@ -6,6 +6,11 @@ import { listComponents, getComponent } from './components.js'
 import { listPageMethods } from './functions.js'
 import { getLifecycle } from './lifecycle.js'
 import { readIconLibrary } from './icons.js'
+import { readColorPalette } from './palette.js'
+import {
+  buildPaletteCssVars,
+  buildPaletteWxs,
+} from '../types/color-palette.js'
 import { readOssLibrary } from './oss.js'
 import {
   readBackendServiceLibrary,
@@ -21,8 +26,11 @@ import {
   generatePageFiles,
   generateComponentFiles,
   ClassRegistry,
+  withColorPalette,
 } from './export-mp-wx/wx-codegen.js'
 import {
+  apiRefKey,
+  generateApisFiles,
   joinControllerApiPath,
   parseApiPropBinding,
   type MpApiBinding,
@@ -139,6 +147,15 @@ export async function preloadApiResolver(
     return {
       ...ids,
       ...(serviceName ? { serviceName } : {}),
+      controllerName: (ctrl.name || '').trim() || undefined,
+      apiName: (api.name || '').trim() || undefined,
+      remark: (api.remark || '').trim() || undefined,
+      inputRemarks: (api.inputs ?? [])
+        .map((inp) => ({
+          name: (inp.varName || '').trim(),
+          remark: (inp.remark || '').trim(),
+        }))
+        .filter((r) => r.name && r.remark),
       method: (api.method || 'GET').toUpperCase(),
       path: joinControllerApiPath(ctrl.path || '', api.path || ''),
     }
@@ -199,6 +216,7 @@ export async function exportMpWxProject(
     componentSummaries.map((summary) => getComponent(projectPath, summary.id)),
   )
   const iconLibrary = await readIconLibrary(projectPath)
+  const colorPalette = await readColorPalette(projectPath)
   const ossLibrary = await readOssLibrary(projectPath)
   const resolveApi = await preloadApiResolver(projectPath)
   const serviceLibrary = await readBackendServiceLibrary(projectPath)
@@ -235,27 +253,37 @@ export async function exportMpWxProject(
   })
   await writeMany(outputPath, scaffold)
 
+  const usedApisByKey = new Map<string, MpApiBinding>()
+
   for (const page of pageDetails) {
     const rootNodes = migrateLegacyMaskNodes(parseXml(page.xml))
     const root = findRootNode(rootNodes)
-    const files = generatePageFiles({
-      pageId: page.id,
-      title: page.config.title || page.config.name || page.id,
-      root,
-      data: page.data,
-      componentConfigs,
-      componentRoots,
-      resolveApi,
-      statusBar: page.config.statusBar,
-      designWidth,
-      classRegistry,
-    })
+    const files = withColorPalette(colorPalette, () =>
+      generatePageFiles({
+        pageId: page.id,
+        title: page.config.title || page.config.name || page.id,
+        root,
+        data: page.data,
+        componentConfigs,
+        componentRoots,
+        resolveApi,
+        statusBar: page.config.statusBar,
+        designWidth,
+        classRegistry,
+      }),
+    )
+    for (const b of files.usedApis) {
+      if (!b.path?.trim()) continue
+      usedApisByKey.set(apiRefKey(b), b)
+    }
     const base = `pages/${page.id}/index`
     await writeProjectFile(outputPath, `${base}.wxml`, files.wxml)
     await writeProjectFile(outputPath, `${base}.wxss`, files.wxss)
     await writeProjectFile(outputPath, `${base}.js`, files.js)
     await writeProjectFile(outputPath, `${base}.json`, files.json)
   }
+
+  await writeMany(outputPath, generateApisFiles([...usedApisByKey.values()]))
 
   for (const component of componentDetails) {
     const rootNodes = migrateLegacyMaskNodes(parseXml(component.xml))
@@ -264,18 +292,20 @@ export async function exportMpWxProject(
       listPageMethods(projectPath, component.id, 'components'),
       getLifecycle(projectPath, component.id, 'components'),
     ])
-    const files = generateComponentFiles({
-      componentId: component.id,
-      root,
-      data: component.data,
-      config: component.config,
-      methods,
-      lifecycle,
-      componentConfigs,
-      componentRoots,
-      designWidth,
-      classRegistry,
-    })
+    const files = withColorPalette(colorPalette, () =>
+      generateComponentFiles({
+        componentId: component.id,
+        root,
+        data: component.data,
+        config: component.config,
+        methods,
+        lifecycle,
+        componentConfigs,
+        componentRoots,
+        designWidth,
+        classRegistry,
+      }),
+    )
     const base = `components/${component.id}/index`
     await writeProjectFile(outputPath, `${base}.wxml`, files.wxml)
     await writeProjectFile(outputPath, `${base}.wxss`, files.wxss)
@@ -288,15 +318,48 @@ export async function exportMpWxProject(
     classRegistry.toWxss() ||
     '/* Voider utilities — none generated */\n'
   await writeProjectFile(outputPath, 'styles/utilities.wxss', utilities)
+  // 绑定色值（如 background="{{props.background}}"）经 WXS 把 key 转成 var(--key)
+  await writeProjectFile(
+    outputPath,
+    'utils/palette.wxs',
+    buildPaletteWxs(colorPalette),
+  )
+  await writeProjectFile(
+    outputPath,
+    'utils/util.wxs',
+    `/** WXML 表达式辅助：Number/String/Boolean/Array.isArray 等须走 WXS */
+function n(v) {
+  return +v;
+}
+function s(v) {
+  if (v === undefined || v === null) return '';
+  return '' + v;
+}
+function b(v) {
+  return !!v;
+}
+function isArray(v) {
+  return v && typeof v === 'object' && typeof v.length === 'number' && typeof v.splice === 'function';
+}
+module.exports = {
+  n: n,
+  s: s,
+  b: b,
+  isArray: isArray
+};
+`,
+  )
+  // 小程序自定义属性挂在 page 上（:root 兼容性差）
+  const paletteCss = buildPaletteCssVars(colorPalette, 'page')
   const existing = await readFile(path.join(outputPath, 'app.wxss'), 'utf-8')
   await writeProjectFile(
     outputPath,
     'app.wxss',
-    `@import "./styles/utilities.wxss";\n\n${existing.trim()}\n`,
+    `@import "./styles/utilities.wxss";\n\n${paletteCss}${existing.trim()}\n`,
   )
 
   const iconFiles: Record<string, string> = {
-    ...generateAppIconFiles(iconLibrary, ossLibrary),
+    ...generateAppIconFiles(iconLibrary, ossLibrary, colorPalette),
     ...localIconAssetFiles(iconLibrary, 'assets/icons'),
   }
   await writeMany(outputPath, iconFiles)

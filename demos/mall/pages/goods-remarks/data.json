@@ -1,0 +1,140 @@
+{
+  "fields": [
+    {
+      "name": "activeTab",
+      "type": "string",
+      "remark": "评价筛选：all / good / mid / bad",
+      "value": "all",
+      "binding": "",
+      "computeBody": ""
+    },
+    {
+      "name": "goodsId",
+      "type": "number",
+      "remark": "路由商品 ID",
+      "value": 0,
+      "binding": "computed",
+      "computeBody": "return Number($query.id) || 0\n"
+    },
+    {
+      "name": "pagerParams",
+      "type": "json",
+      "remark": "Pager 额外请求参数",
+      "value": {},
+      "binding": "computed",
+      "computeBody": "return {\n  goodsId: goodsId,\n  type: activeTab\n}\n"
+    },
+    {
+      "name": "remarkCounts",
+      "type": "json",
+      "remark": "评价各类型数量（独立接口）",
+      "value": null,
+      "binding": "controller",
+      "computeBody": "",
+      "controllerBinding": {
+        "serviceId": "svc_mrqdgnhb_3ktq2g",
+        "controllerId": "cms8ol9you9yc",
+        "apiId": "api_ms8qizo4_2ab7bq",
+        "parseBody": "return data\n",
+        "onLoading": "",
+        "onSuccess": "",
+        "onError": "",
+        "onFinally": "",
+        "inputs": {
+          "goodsId": {
+            "source": "binding",
+            "binding": "goodsId"
+          }
+        }
+      },
+      "typeRef": "type_ms7remark_count_vo"
+    },
+    {
+      "name": "totalCount",
+      "type": "number",
+      "remark": "全部评价数量",
+      "value": 0,
+      "binding": "computed",
+      "computeBody": "return Number(remarkCounts?.total) || 0\n"
+    },
+    {
+      "name": "goodCount",
+      "type": "number",
+      "remark": "好评数量",
+      "value": 0,
+      "binding": "computed",
+      "computeBody": "return Number(remarkCounts?.good) || 0\n"
+    },
+    {
+      "name": "midCount",
+      "type": "number",
+      "remark": "中评数量",
+      "value": 0,
+      "binding": "computed",
+      "computeBody": "return Number(remarkCounts?.mid) || 0\n"
+    },
+    {
+      "name": "badCount",
+      "type": "number",
+      "remark": "差评数量",
+      "value": 0,
+      "binding": "computed",
+      "computeBody": "return Number(remarkCounts?.bad) || 0\n"
+    },
+    {
+      "name": "tabItems",
+      "type": "array",
+      "remark": "TabBar 标签项",
+      "value": [],
+      "binding": "computed",
+      "computeBody": "return [\n  { key: 'all', label: '全部', count: totalCount },\n  { key: 'good', label: '好评', count: goodCount },\n  { key: 'mid', label: '中评', count: midCount },\n  { key: 'bad', label: '差评', count: badCount }\n]\n",
+      "itemType": "json",
+      "arrayFields": []
+    },
+    {
+      "name": "loading",
+      "type": "boolean",
+      "remark": "首屏 LoadingPlaceholder（false 时直接展示 Pager）",
+      "value": false,
+      "binding": "",
+      "computeBody": ""
+    },
+    {
+      "name": "remarkList",
+      "type": "array",
+      "remark": "Pager 拉取的评价列表（已按 activeTab 服务端筛选）",
+      "value": null,
+      "binding": "",
+      "computeBody": "",
+      "itemType": "json",
+      "itemTypeRef": "type_ms6gqu8j_vm3j3p",
+      "arrayFields": []
+    },
+    {
+      "name": "displayList",
+      "type": "array",
+      "remark": "当前 Tab 展示列表",
+      "value": [],
+      "binding": "computed",
+      "computeBody": "return remarkList || []\n",
+      "itemType": "json",
+      "itemTypeRef": "type_ms6gqu8j_vm3j3p",
+      "arrayFields": []
+    },
+    {
+      "name": "emptyText",
+      "type": "string",
+      "remark": "空列表提示",
+      "value": "",
+      "binding": "computed",
+      "computeBody": "if (activeTab === 'good') return '暂无好评'\nif (activeTab === 'mid') return '暂无中评'\nif (activeTab === 'bad') return '暂无差评'\nreturn '暂无评价'\n"
+    },
+    {
+      "name": "pagerRef",
+      "type": "ref",
+      "remark": "评价列表 Pager",
+      "value": "0:LinearLayout/2:Component/0:Component",
+      "binding": ""
+    }
+  ]
+}

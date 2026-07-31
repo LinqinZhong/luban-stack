@@ -12,6 +12,7 @@ import {
   PAGE_RECORDS_FIELD,
   readPageMapFieldMappings,
 } from '../../../utils/page-map-flow.js'
+import { readObjectMapFieldMappings } from '../../../utils/object-map-flow.js'
 import { defaultEmptyReturnCode } from '../../../utils/empty-return-value.js'
 
 export interface FlowEmitContext {
@@ -19,6 +20,8 @@ export interface FlowEmitContext {
   processorSlugById: Map<string, string>
   /** processorId → 'data' | 'business' */
   processorLayerById: Map<string, 'data' | 'business'>
+  /** processorId → 域模块 slug（如 shop / user） */
+  processorModuleSlugById?: Map<string, string>
   /** 当前类内资源 slug */
   selfResourceSlug: string
   mode: 'service' | 'controller'
@@ -26,6 +29,10 @@ export interface FlowEmitContext {
   methodById: Map<string, { processorId: string; method: ProcessorMethod }>
   /** 当前正在导出的方法/API 出参类型（终止节点空返回时用） */
   methodOutput?: ProcessorTypeExpr
+  /** 当前 BackendService id；跨模块输入节点查找用 */
+  currentServiceId?: string
+  /** 当前域模块 slug */
+  currentModuleSlug?: string
 }
 
 function str(data: Record<string, unknown>, key: string): string {
@@ -86,11 +93,19 @@ function emitMethodCall(
   processorId: string,
   methodId: string,
   bindings: Record<string, string>,
+  opts?: { serviceId?: string },
 ): string {
+  const targetServiceId = opts?.serviceId?.trim() || ''
   const meta = ctx.methodById.get(methodId)
   const method = meta?.method
-  if (!method) return `/* missing method ${methodId} */ undefined as never`
+  if (!method) {
+    const cross = targetServiceId
+      ? ` (serviceId=${targetServiceId})`
+      : ''
+    return `/* missing method ${methodId}${cross}; cross-module call not emitted */ undefined as never`
+  }
 
+  // 预置方法 id（如 preset_oneById）跨表重复，必须以节点上的 processorId 定位资源
   const slug = ctx.processorSlugById.get(processorId) || 'resource'
   const layer = ctx.processorLayerById.get(processorId) || 'data'
   const methodName = safeIdent(method.name, 'method')
@@ -113,6 +128,57 @@ function emitMethodCall(
   }
   const svc = `${toCamelCase(slug)}Service`
   return `await this.${svc}.${methodName}(${args})`
+}
+
+/** 业务/控制器流中引用的外部资源（跨 resource / 跨域模块） */
+export type ExternalInjectDep = {
+  resourceSlug: string
+  moduleSlug: string
+  layer: 'data' | 'business'
+}
+
+export function collectExternalInjectDeps(
+  flows: Array<MethodFlow | null | undefined>,
+  ctx: Pick<
+    FlowEmitContext,
+    | 'processorSlugById'
+    | 'processorLayerById'
+    | 'processorModuleSlugById'
+    | 'methodById'
+    | 'selfResourceSlug'
+    | 'currentModuleSlug'
+  >,
+): ExternalInjectDep[] {
+  const out = new Map<string, ExternalInjectDep>()
+  for (const flow of flows) {
+    for (const node of flow?.nodes ?? []) {
+      if (node.kind !== 'input' && node.kind !== 'output') continue
+      const data = asRecord(node.data)
+      if (node.kind === 'input' && str(data, 'dataSource') === 'request_header') {
+        continue
+      }
+      const processorId = str(data, 'dataProcessorId')
+      if (!processorId) continue
+      const resourceSlug = ctx.processorSlugById.get(processorId) || ''
+      if (!resourceSlug) continue
+      const moduleSlug =
+        ctx.processorModuleSlugById?.get(processorId) ||
+        ctx.currentModuleSlug ||
+        ''
+      const layer = ctx.processorLayerById.get(processorId) || 'data'
+      const sameResource = resourceSlug === ctx.selfResourceSlug
+      const sameModule =
+        !moduleSlug ||
+        !ctx.currentModuleSlug ||
+        moduleSlug === ctx.currentModuleSlug
+      if (sameResource && sameModule) continue
+      const key = `${moduleSlug}/${resourceSlug}/${layer}`
+      if (!out.has(key)) {
+        out.set(key, { resourceSlug, moduleSlug, layer })
+      }
+    }
+  }
+  return [...out.values()]
 }
 
 function emitNodeBlock(
@@ -147,7 +213,7 @@ function emitNodeBlock(
   if (node.kind === 'end') {
     const returnExpr = str(data, 'returnExpr').trim()
     const fallback = defaultEmptyReturnCode(ctx.methodOutput)
-    return `${pad}return ${returnExpr || fallback}\n`
+    return `${pad}return ${returnExpr || fallback};\n`
   }
 
   if (node.kind === 'throw') {
@@ -165,9 +231,9 @@ function emitNodeBlock(
         .split('\n')
         .map((l, i) => (i === 0 ? l : `${pad}${l}`))
         .join('\n')
-      line = `${pad}let ${varName}: any = ${normalized}\n`
+      line = `${pad}let ${varName}: any = ${normalized};\n`
     } else {
-      line = `${pad}let ${varName}: any = null\n`
+      line = `${pad}let ${varName}: any = null;\n`
     }
     return (
       line +
@@ -183,7 +249,7 @@ function emitNodeBlock(
 
   if (node.kind === 'input') {
     const varName = safeIdent(str(data, 'varName'), 'v')
-    const dataSource = str(data, 'dataSource') || 'other_data'
+    const dataSource = str(data, 'dataSource') || 'data'
     const bindingsRaw = asRecord(data.paramBindings)
     const bindings: Record<string, string> = {}
     for (const [k, v] of Object.entries(bindingsRaw)) {
@@ -191,12 +257,15 @@ function emitNodeBlock(
     }
     let assign: string
     if (dataSource === 'request_header') {
-      assign = `${pad}const ${varName} = ''\n`
+      assign = `${pad}const ${varName} = '';\n`
     } else {
       const processorId = str(data, 'dataProcessorId')
       const methodId = str(data, 'dataMethodId')
-      const call = emitMethodCall(ctx, processorId, methodId, bindings)
-      assign = `${pad}const ${varName} = ${call}\n`
+      const targetServiceId = str(data, 'serviceId')
+      const call = emitMethodCall(ctx, processorId, methodId, bindings, {
+        serviceId: targetServiceId,
+      })
+      assign = `${pad}const ${varName} = ${call};\n`
     }
     return (
       assign +
@@ -224,7 +293,7 @@ function emitNodeBlock(
     )
     const call = emitMethodCall(ctx, processorId, methodId, bindings)
     return (
-      `${pad}const ${resultVar} = ${call}\n` +
+      `${pad}const ${resultVar} = ${call};\n` +
       emitNodeBlock(
         flow,
         pickDefaultNext(flow, node.id),
@@ -255,10 +324,10 @@ function emitNodeBlock(
         `${pad}  const _srcPage = ${sourcePath || 'undefined'};\n` +
         `${pad}  if (_srcPage && typeof _srcPage === 'object') {\n` +
         `${pad}    for (const _k of [${metaKeys}] as const) {\n` +
-        `${pad}      if (_k in (_srcPage as object)) _pageOut[_k] = (_srcPage as Record<string, unknown>)[_k];\n` +
+        `${pad}      if (_k in (_srcPage as object)) _pageOut[_k] = (_srcPage as unknown as Record<string, unknown>)[_k];\n` +
         `${pad}    }\n` +
         `${pad}  }\n` +
-        `${pad}  const _srcRecords = Array.isArray((_srcPage as Record<string, unknown>)?.${PAGE_RECORDS_FIELD}) ? ((_srcPage as Record<string, unknown>).${PAGE_RECORDS_FIELD} as unknown[]) : [];\n`
+        `${pad}  const _srcRecords = Array.isArray((_srcPage as unknown as Record<string, unknown>)?.${PAGE_RECORDS_FIELD}) ? ((_srcPage as unknown as Record<string, unknown>).${PAGE_RECORDS_FIELD} as unknown[]) : [];\n`
     } else {
       const currentExpr = str(data, 'currentExpr').trim() || 'undefined'
       const pageSizeExpr = str(data, 'pageSizeExpr').trim() || 'undefined'
@@ -292,7 +361,7 @@ function emitNodeBlock(
       if (!targetField || !sourceField) continue
       block +=
         `${pad}    if (_item && typeof _item === 'object' && ${JSON.stringify(sourceField)} in (_item as object)) {\n` +
-        `${pad}      _row[${JSON.stringify(targetField)}] = (_item as Record<string, unknown>)[${JSON.stringify(sourceField)}];\n` +
+        `${pad}      _row[${JSON.stringify(targetField)}] = (_item as unknown as Record<string, unknown>)[${JSON.stringify(sourceField)}];\n` +
         `${pad}    }\n`
     }
     block +=
@@ -312,16 +381,67 @@ function emitNodeBlock(
     )
   }
 
+  if (node.kind === 'objectMap') {
+    const sourcePath = str(data, 'sourcePath').trim()
+    const targetVarName = safeIdent(
+      str(data, 'targetVarName') || str(data, 'targetPath'),
+      '_objectTarget',
+    )
+    const mappings = readObjectMapFieldMappings(data.fieldMappings)
+    let block =
+      `${pad}let ${targetVarName}: any;\n` +
+      `${pad}{\n` +
+      `${pad}  const _srcObj = ${sourcePath || 'undefined'};\n` +
+      `${pad}  const _objOut: Record<string, unknown> = {};\n` +
+      `${pad}  if (_srcObj && typeof _srcObj === 'object') {\n`
+    for (const m of mappings) {
+      const targetField = m.targetField.trim()
+      const sourceField = m.sourceField.trim()
+      if (!targetField || !sourceField) continue
+      block +=
+        `${pad}    if (${JSON.stringify(sourceField)} in (_srcObj as object)) {\n` +
+        `${pad}      _objOut[${JSON.stringify(targetField)}] = (_srcObj as unknown as Record<string, unknown>)[${JSON.stringify(sourceField)}];\n` +
+        `${pad}    }\n`
+    }
+    block +=
+      `${pad}  }\n` +
+      `${pad}  ${targetVarName} = _objOut;\n` +
+      `${pad}}\n`
+    return (
+      block +
+      emitNodeBlock(
+        flow,
+        pickDefaultNext(flow, node.id),
+        ctx,
+        level,
+        nextStack,
+      )
+    )
+  }
+
   if (node.kind === 'action') {
     const code = str(data, 'code').trim()
+    const outputVarRaw = str(data, 'outputVarName').trim()
+    const outputVar = outputVarRaw ? safeIdent(outputVarRaw, 'v') : ''
     let block = ''
     if (code) {
-      block += code
+      // 与调试运行时一致：action 内 return 是节点出参，不能泄漏成方法 return
+      // 前导分号避免上一行无分号时与 IIFE 发生 ASI 粘连
+      const inner = code
         .replace(/\r\n/g, '\n')
         .split('\n')
-        .map((l) => `${pad}${l}`)
+        .map((l) => `${pad}  ${l}`)
         .join('\n')
-      block += '\n'
+      if (outputVar) {
+        block =
+          `${pad}const ${outputVar}: any = (() => {\n` +
+          `${inner}\n` +
+          `${pad}})();\n`
+      } else {
+        block = `${pad};(() => {\n${inner}\n${pad}})();\n`
+      }
+    } else if (outputVar) {
+      block = `${pad}const ${outputVar}: any = undefined;\n`
     }
     return (
       block +

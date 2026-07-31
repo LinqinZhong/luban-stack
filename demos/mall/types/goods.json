@@ -195,7 +195,7 @@
               {
                 "alternatives": [
                   {
-                    "kind": "boolean"
+                    "kind": "number"
                   }
                 ]
               }
@@ -324,7 +324,7 @@
               {
                 "alternatives": [
                   {
-                    "kind": "boolean"
+                    "kind": "number"
                   }
                 ]
               }
@@ -387,6 +387,114 @@
             ]
           },
           "remark": "图片",
+          "optional": false
+        },
+        {
+          "id": "field_ms8rhk6g_ycr55b",
+          "name": "nickname",
+          "type": {
+            "intersections": [
+              {
+                "alternatives": [
+                  {
+                    "kind": "string"
+                  }
+                ]
+              }
+            ]
+          },
+          "remark": "用户昵称",
+          "optional": true
+        }
+      ],
+      "enumMembers": [],
+      "combination": {
+        "intersections": [
+          {
+            "alternatives": [
+              {
+                "kind": "string"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "type_ms7remark_count_vo",
+      "name": "GoodsRemarkCountVo",
+      "kind": "interface",
+      "remark": "商品评价按类型数量",
+      "tableName": "",
+      "category": "vo",
+      "generics": [],
+      "fields": [
+        {
+          "id": "field_ms7remark_cnt_total",
+          "name": "total",
+          "type": {
+            "intersections": [
+              {
+                "alternatives": [
+                  {
+                    "kind": "number"
+                  }
+                ]
+              }
+            ]
+          },
+          "remark": "全部数量",
+          "optional": false
+        },
+        {
+          "id": "field_ms7remark_cnt_good",
+          "name": "good",
+          "type": {
+            "intersections": [
+              {
+                "alternatives": [
+                  {
+                    "kind": "number"
+                  }
+                ]
+              }
+            ]
+          },
+          "remark": "好评数量（score≥8）",
+          "optional": false
+        },
+        {
+          "id": "field_ms7remark_cnt_mid",
+          "name": "mid",
+          "type": {
+            "intersections": [
+              {
+                "alternatives": [
+                  {
+                    "kind": "number"
+                  }
+                ]
+              }
+            ]
+          },
+          "remark": "中评数量（5≤score<8）",
+          "optional": false
+        },
+        {
+          "id": "field_ms7remark_cnt_bad",
+          "name": "bad",
+          "type": {
+            "intersections": [
+              {
+                "alternatives": [
+                  {
+                    "kind": "number"
+                  }
+                ]
+              }
+            ]
+          },
+          "remark": "差评数量（score<5）",
           "optional": false
         }
       ],

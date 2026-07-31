@@ -3,7 +3,6 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import {
   Delete,
   EditPen,
-  SetUp,
 } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
@@ -17,7 +16,6 @@ import {
   createEmptyProcessorTypeExpr,
   createEmptyServiceApi,
   createEmptyServiceController,
-  type MethodFlow,
   type ProcessorMethod,
   type ProcessorMethodParam,
   type ProcessorTypeExpr,
@@ -30,7 +28,6 @@ import type { DataTypeLibrary } from '../../types/data-types'
 import EditServiceApiDialog, {
   type ServiceApiEditPayload,
 } from './EditServiceApiDialog.vue'
-import MethodFlowEditor from './method-flow/MethodFlowEditor.vue'
 import ServiceProcessorPanel, {
   type ProcessorDebugTarget,
   type ProcessorSelectionState,
@@ -43,6 +40,8 @@ const props = defineProps<{
   serviceId: string
   serviceName: string
   typeLibrary: DataTypeLibrary | null
+  /** 全部模块选项（输入节点选模块） */
+  moduleOptions?: Array<{ id: string; name: string }>
   /** 受控：当前层（由工作区持久化） */
   layer?: ServiceLayer
   /** 恢复：控制器选中 */
@@ -366,11 +365,11 @@ function addApi() {
     ElMessage.warning('请先选择或创建控制器')
     return
   }
-  openApiDesign(-1)
+  openApiEdit(-1)
 }
 
-/** 设计：弹窗编辑 API 元信息 */
-function openApiDesign(index: number) {
+/** 编辑 / 创建：弹窗绑定业务方法（不再打开流程图） */
+function openApiEdit(index: number) {
   if (!activeController.value) return
   apiEditIndex.value = index
   if (index < 0) {
@@ -384,6 +383,7 @@ function openApiDesign(index: number) {
       output: api.output
         ? { ...api.output, genericArgs: { ...(api.output.genericArgs ?? {}) } }
         : createEmptyProcessorTypeExpr('any'),
+      scope: api.scope === 'private' ? 'private' : 'public',
       flow: api.flow ?? createDefaultMethodFlow(),
     }
     selectedApiId.value = api.id
@@ -405,7 +405,8 @@ function saveApiEdit(payload: ServiceApiEditPayload) {
         inputs: payload.inputs,
         output: payload.output,
         requireAuth: payload.requireAuth,
-        flow: base.flow ?? createDefaultMethodFlow(),
+        scope: payload.scope,
+        flow: payload.flow ?? createDefaultMethodFlow(),
       },
     ])
     selectedApiId.value = base.id
@@ -421,6 +422,8 @@ function saveApiEdit(payload: ServiceApiEditPayload) {
             inputs: payload.inputs,
             output: payload.output,
             requireAuth: payload.requireAuth,
+            scope: payload.scope,
+            flow: payload.flow ?? api.flow ?? createDefaultMethodFlow(),
           }
         : api,
     )
@@ -502,9 +505,9 @@ function apiAsProcessorMethod(api: ServiceApi): ProcessorMethod {
     id: api.id,
     name: api.name,
     remark: api.remark,
-    scope: 'public',
+    scope: api.scope === 'private' ? 'private' : 'public',
     params: buildApiMethodParams(api),
-    output: createEmptyProcessorTypeExpr(),
+    output: api.output ?? createEmptyProcessorTypeExpr(),
     dataConfig: createEmptyDataMethodConfig(),
     debugParams: api.debugParams ?? {},
     flow: api.flow ?? createDefaultMethodFlow(),
@@ -631,20 +634,9 @@ function updateApiDebugParams(params: Record<string, unknown>) {
   persistControllers()
 }
 
-/** 编辑：打开 API 流程图（与业务层方法一致） */
+/** 编辑：打开弹窗（流程图已移除） */
 async function openApiFlow(index: number) {
-  const api = apis.value[index]
-  if (!api || !activeControllerId.value) return
-  if (!api.flow?.nodes?.length) {
-    updateApiFlow(api.id, createDefaultMethodFlow())
-  }
-  selectedApiId.value = api.id
-  clearApiFlowDebug()
-  apiFlowEditing.value = {
-    controllerId: activeControllerId.value,
-    apiId: api.id,
-  }
-  await loadFlowProcessors()
+  openApiEdit(index)
 }
 
 function closeApiFlow() {
@@ -652,7 +644,7 @@ function closeApiFlow() {
   clearApiFlowDebug()
 }
 
-function updateApiFlow(apiId: string, flow: MethodFlow) {
+function updateApiFlow(apiId: string, flow: import('../../types/backend-services').MethodFlow) {
   const ctrlId = activeControllerId.value
   if (!ctrlId) return
   controllers.value = controllers.value.map((c) => {
@@ -665,7 +657,7 @@ function updateApiFlow(apiId: string, flow: MethodFlow) {
   persistControllers()
 }
 
-function onApiFlowUpdate(flow: MethodFlow) {
+function onApiFlowUpdate(flow: import('../../types/backend-services').MethodFlow) {
   const ctx = apiFlowEditing.value
   if (!ctx) return
   updateApiFlow(ctx.apiId, flow)
@@ -727,29 +719,8 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="svc-workspace">
-    <MethodFlowEditor
-      v-if="activeLayer === 'controller' && apiFlowEditing && apiFlowEditingApi"
-      :method-name="apiFlowEditingApi.name"
-      title-kind="API"
-      input-source-mode="business"
-      :flow="apiFlowEditingFlow"
-      :method-params="apiFlowMethodParams"
-      :method-output="apiFlowMethodOutput"
-      :data-processors="dataLayerProcessors"
-      :business-processors="businessProcessors"
-      current-processor-id=""
-      current-method-id=""
-      bound-data-processor-id=""
-      :type-library="typeLibrary"
-      :debug-cursor-id="apiFlowDebugCursorId"
-      :debug-visited-ids="apiFlowDebugVisitedIds"
-      :debug-print-by-node="apiFlowDebugPrintByNode"
-      @back="closeApiFlow"
-      @update:flow="onApiFlowUpdate"
-      @update:selected-node="onApiFlowSelectedNode"
-    />
     <div
-      v-else-if="activeLayer === 'controller'"
+      v-if="activeLayer === 'controller'"
       class="svc-workspace-body"
     >
       <aside class="ctrl-pane">
@@ -870,21 +841,13 @@ onBeforeUnmount(() => {
                 <span class="cell-text">{{ row.requireAuth ? '是' : '否' }}</span>
               </template>
             </el-table-column>
-            <el-table-column label="操作" width="220" align="center" fixed="right">
+            <el-table-column label="操作" width="140" align="center" fixed="right">
               <template #default="{ $index }">
                 <el-button
                   type="primary"
                   link
-                  :icon="SetUp"
-                  @click.stop="openApiDesign($index)"
-                >
-                  设计
-                </el-button>
-                <el-button
-                  type="primary"
-                  link
                   :icon="EditPen"
-                  @click.stop="openApiFlow($index)"
+                  @click.stop="openApiEdit($index)"
                 >
                   编辑
                 </el-button>
@@ -909,6 +872,7 @@ onBeforeUnmount(() => {
       :service-id="serviceId"
       layer="business"
       :type-library="typeLibrary"
+      :module-options="moduleOptions ?? []"
       :restored="restoredBusiness"
       @update:debug-target="onDebugTarget"
       @update:selection="emit('update:business-selection', $event)"
@@ -920,6 +884,7 @@ onBeforeUnmount(() => {
       :service-id="serviceId"
       layer="data"
       :type-library="typeLibrary"
+      :module-options="moduleOptions ?? []"
       :restored="
         restoredData
           ? {
@@ -982,6 +947,8 @@ onBeforeUnmount(() => {
       :dto-options="dtoOptions"
       :type-library="typeLibrary"
       :reserved-names="apiReservedNames"
+      :project-path="projectPath"
+      :service-id="serviceId"
       @save="saveApiEdit"
     />
   </div>

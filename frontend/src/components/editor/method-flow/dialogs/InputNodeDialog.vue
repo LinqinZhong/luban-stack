@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
+import { getServiceProcessors } from '../../../../api/projects'
 import type {
   ProcessorMethodParam,
   ServiceProcessor,
@@ -13,13 +14,21 @@ import {
   INPUT_HEADER_CUSTOM,
   INPUT_HEADER_FIELD_OPTIONS,
   INPUT_HEADER_PRESET_FIELDS,
+  createEmptyInputNodeForm,
+  normalizeInputDataSource,
   type InputDataSource,
+  type InputModuleOption,
   type InputNodeForm,
 } from './input-node'
 
 const props = defineProps<{
   modelValue: boolean
   form: InputNodeForm
+  projectPath: string
+  /** 当前正在编辑的模块（服务）id */
+  currentServiceId: string
+  /** 全部模块选项 */
+  moduleOptions: InputModuleOption[]
   /** 当前服务全部业务层处理器 */
   businessProcessors: ServiceProcessor[]
   /** 当前服务全部数据层处理器 */
@@ -28,8 +37,6 @@ const props = defineProps<{
   currentProcessorId: string
   /** 当前正在编辑的业务方法（当前业务来源中排除自身） */
   currentMethodId: string
-  /** 当前业务处理器绑定的数据层 id；空则不展示「当前数据层」 */
-  boundDataProcessorId: string
   /**
    * 输入来源范围：
    * - all：业务 / 数据层 / 请求头（业务方法流）
@@ -46,23 +53,47 @@ const emit = defineEmits<{
   save: [form: InputNodeForm]
 }>()
 
-const draft = reactive<InputNodeForm>({
-  dataSource: 'other_business',
-  dataProcessorId: '',
-  dataMethodId: '',
-  headerField: '',
-  varName: '',
-  methodLabel: '',
-  paramBindings: {},
-  printExpr: '',
-})
+const draft = reactive<InputNodeForm>(createEmptyInputNodeForm())
 
 /** 请求头下拉：预设或「自定义」 */
 const headerKind = ref<string>('user-id')
 /** 自定义请求头名 */
 const customHeaderName = ref('')
 
+const remoteBusiness = ref<ServiceProcessor[]>([])
+const remoteData = ref<ServiceProcessor[]>([])
+const loadingProcessors = ref(false)
+const processorCache = new Map<
+  string,
+  { business: ServiceProcessor[]; data: ServiceProcessor[] }
+>()
+
 const businessOnly = computed(() => props.sourceMode === 'business')
+
+const visible = computed({
+  get: () => props.modelValue,
+  set: (v) => emit('update:modelValue', v),
+})
+
+const isHeaderSource = computed(() => draft.dataSource === 'request_header')
+const isBusinessSource = computed(() => draft.dataSource === 'business')
+
+const layerOptions = computed(() => {
+  const opts: Array<{ value: InputDataSource; label: string }> = [
+    { value: 'business', label: '业务层' },
+  ]
+  if (!businessOnly.value) {
+    opts.push({ value: 'data', label: '数据层' })
+    opts.push({ value: 'request_header', label: '请求头' })
+  }
+  return opts
+})
+
+const methodFieldLabel = computed(() => {
+  if (isHeaderSource.value) return '请求头字段'
+  if (isBusinessSource.value || businessOnly.value) return '业务方法'
+  return '数据层方法'
+})
 
 function isPresetHeader(field: string): boolean {
   return (INPUT_HEADER_PRESET_FIELDS as readonly string[]).includes(field)
@@ -90,88 +121,110 @@ function resolvedHeaderField(): string {
   return headerKind.value.trim()
 }
 
-const visible = computed({
-  get: () => props.modelValue,
-  set: (v) => emit('update:modelValue', v),
-})
+function coerceLayer(source: InputDataSource): InputDataSource {
+  if (businessOnly.value) return 'business'
+  if (source === 'request_header') return 'request_header'
+  if (source === 'business' || source === 'data') return source
+  return 'data'
+}
 
-const dataSourceOptions = computed(() => {
-  const opts: Array<{ value: InputDataSource; label: string }> = []
-  if (props.currentProcessorId) {
-    opts.push({ value: 'current_business', label: '当前业务' })
+function clearMethodSelection() {
+  draft.dataProcessorId = ''
+  draft.dataMethodId = ''
+  draft.methodLabel = ''
+  draft.paramBindings = {}
+}
+
+async function ensureProcessorsForModule(serviceId: string) {
+  const sid = serviceId.trim()
+  if (!sid || !props.projectPath) {
+    remoteBusiness.value = []
+    remoteData.value = []
+    return
   }
-  opts.push({
-    value: 'other_business',
-    label: businessOnly.value && !props.currentProcessorId ? '业务层' : '其它业务',
-  })
-  if (businessOnly.value) return opts
-  if (props.boundDataProcessorId) {
-    opts.push({ value: 'current_data', label: '当前数据层' })
+  if (sid === props.currentServiceId) {
+    remoteBusiness.value = props.businessProcessors
+    remoteData.value = props.dataProcessors
+    return
   }
-  opts.push(
-    { value: 'other_data', label: '其它数据层' },
-    { value: 'request_header', label: '请求头' },
-  )
-  return opts
-})
-
-const showDataSourceSelect = computed(() => dataSourceOptions.value.length > 1)
-
-const isHeaderSource = computed(() => draft.dataSource === 'request_header')
-const isBusinessSource = computed(
-  () =>
-    draft.dataSource === 'current_business' ||
-    draft.dataSource === 'other_business',
-)
-const methodFieldLabel = computed(() => {
-  if (isHeaderSource.value) return '请求头字段'
-  if (isBusinessSource.value || businessOnly.value) return '业务方法'
-  return '数据层方法'
-})
-
-function coerceDataSource(source: InputDataSource): InputDataSource {
-  if (businessOnly.value) {
-    if (source === 'current_business' && props.currentProcessorId) {
-      return 'current_business'
+  const cached = processorCache.get(sid)
+  if (cached) {
+    remoteBusiness.value = cached.business
+    remoteData.value = cached.data
+    return
+  }
+  loadingProcessors.value = true
+  try {
+    const [biz, data] = await Promise.all([
+      getServiceProcessors(props.projectPath, sid, 'business'),
+      getServiceProcessors(props.projectPath, sid, 'data'),
+    ])
+    const next = {
+      business: biz.processors ?? [],
+      data: data.processors ?? [],
     }
-    return 'other_business'
+    processorCache.set(sid, next)
+    remoteBusiness.value = next.business
+    remoteData.value = next.data
+  } catch {
+    remoteBusiness.value = []
+    remoteData.value = []
+  } finally {
+    loadingProcessors.value = false
   }
-  if (source === 'current_data' && !props.boundDataProcessorId) {
-    return 'other_data'
-  }
-  if (source === 'current_business' && !props.currentProcessorId) {
-    return 'other_business'
-  }
-  return source
 }
 
 watch(
   () => props.modelValue,
-  (open) => {
+  async (open) => {
     if (!open) return
     const next: InputNodeForm = {
+      ...createEmptyInputNodeForm(),
       ...props.form,
       paramBindings: { ...(props.form.paramBindings ?? {}) },
     }
-    next.dataSource = coerceDataSource(next.dataSource)
+    next.dataSource = coerceLayer(
+      normalizeInputDataSource(next.dataSource, {
+        businessOnly: businessOnly.value,
+      }),
+    )
+    if (!next.serviceId.trim()) {
+      next.serviceId = props.currentServiceId
+    }
     Object.assign(draft, next)
     syncHeaderUiFromField(next.headerField)
+    if (next.dataSource !== 'request_header') {
+      await ensureProcessorsForModule(next.serviceId)
+    }
   },
 )
 
 watch(
   () => draft.dataSource,
-  (source) => {
+  async (source, prev) => {
     if (!props.modelValue) return
-    const coercedForm = coerceDataSource(props.form.dataSource)
-    // 打开弹窗同步 form 时不要清空已有配置
-    if (source === coercedForm) return
+    if (source === prev) return
     clearMethodSelection()
     if (source === 'request_header') {
       headerKind.value = 'user-id'
       customHeaderName.value = ''
       draft.headerField = 'user-id'
+      return
     }
+    if (!draft.serviceId.trim()) {
+      draft.serviceId = props.currentServiceId
+    }
+    await ensureProcessorsForModule(draft.serviceId)
+  },
+)
+
+watch(
+  () => draft.serviceId,
+  async (sid, prev) => {
+    if (!props.modelValue || isHeaderSource.value) return
+    if (sid === prev) return
+    clearMethodSelection()
+    await ensureProcessorsForModule(sid)
   },
 )
 
@@ -217,42 +270,33 @@ function collectMethods(
   return opts
 }
 
-const methodOptions = computed((): MethodOpt[] => {
-  const source = draft.dataSource
-  if (source === 'request_header') return []
-  if (source === 'current_business') {
-    const proc = props.businessProcessors.find(
-      (p) => p.id === props.currentProcessorId,
-    )
-    if (!proc) return []
-    return collectMethods([proc], (_p, methodId) => {
-      return methodId !== props.currentMethodId
-    })
-  }
-  if (source === 'other_business') {
-    return collectMethods(props.businessProcessors, (proc) => {
-      return proc.id !== props.currentProcessorId
-    })
-  }
-  if (source === 'current_data') {
-    const bound = props.boundDataProcessorId
-    if (!bound) return []
-    const proc = props.dataProcessors.find((p) => p.id === bound)
-    return proc ? collectMethods([proc]) : []
-  }
-  // other_data
-  const bound = props.boundDataProcessorId
-  return collectMethods(props.dataProcessors, (proc) => {
-    return !bound || proc.id !== bound
-  })
+const activeProcessors = computed(() => {
+  if (isHeaderSource.value) return [] as ServiceProcessor[]
+  if (isBusinessSource.value) return remoteBusiness.value
+  return remoteData.value
 })
 
-const processorPool = computed(() =>
-  isBusinessSource.value ? props.businessProcessors : props.dataProcessors,
-)
+const methodOptions = computed((): MethodOpt[] => {
+  if (isHeaderSource.value) return []
+  const sameModule = draft.serviceId.trim() === props.currentServiceId
+  if (isBusinessSource.value) {
+    return collectMethods(remoteBusiness.value, (proc, methodId) => {
+      if (
+        sameModule &&
+        props.currentProcessorId &&
+        proc.id === props.currentProcessorId &&
+        methodId === props.currentMethodId
+      ) {
+        return false
+      }
+      return true
+    })
+  }
+  return collectMethods(remoteData.value)
+})
 
 const selectedMethod = computed(() => {
-  for (const proc of processorPool.value) {
+  for (const proc of activeProcessors.value) {
     if (proc.id !== draft.dataProcessorId) continue
     const method = proc.methods.find((m) => m.id === draft.dataMethodId)
     if (method) return method
@@ -282,31 +326,18 @@ const selectedMethodKey = computed({
   set(key: string) {
     const opt = methodOptions.value.find((o) => o.value === key)
     if (!opt) {
-      draft.dataProcessorId = ''
-      draft.dataMethodId = ''
-      draft.methodLabel = ''
-      draft.paramBindings = {}
+      clearMethodSelection()
       return
     }
     draft.dataProcessorId = opt.processorId
     draft.dataMethodId = opt.methodId
     draft.methodLabel = opt.label
-    const method = processorPool.value
+    const method = activeProcessors.value
       .find((p) => p.id === opt.processorId)
       ?.methods.find((m) => m.id === opt.methodId)
     syncParamBindings(method?.params ?? [])
   },
 })
-
-function clearMethodSelection() {
-  draft.dataProcessorId = ''
-  draft.dataMethodId = ''
-  draft.methodLabel = ''
-  draft.paramBindings = {}
-  draft.headerField = ''
-  headerKind.value = 'user-id'
-  customHeaderName.value = ''
-}
 
 watch(
   methodParams,
@@ -352,6 +383,12 @@ const headerError = computed(() => {
   return ''
 })
 
+const moduleError = computed(() => {
+  if (isHeaderSource.value) return ''
+  if (!draft.serviceId.trim()) return '请选择模块'
+  return ''
+})
+
 function paramTypeLabel(p: ProcessorMethodParam): string {
   return processorTypeExprToTs(p.typeExpr, props.typeLibrary)
 }
@@ -360,6 +397,7 @@ const canSave = computed(() => {
   if (varNameError.value) return false
   if (isHeaderSource.value) return !headerError.value
   return (
+    !moduleError.value &&
     !bindingError.value &&
     Boolean(draft.dataProcessorId && draft.dataMethodId)
   )
@@ -370,6 +408,7 @@ function handleSave() {
   if (isHeaderSource.value) {
     const field = resolvedHeaderField()
     emit('save', {
+      serviceId: '',
       dataSource: 'request_header',
       dataProcessorId: '',
       dataMethodId: '',
@@ -378,6 +417,7 @@ function handleSave() {
       methodLabel: `请求头.${field}`,
       paramBindings: {},
       printExpr: draft.printExpr.trim(),
+      outputTypeExpr: null,
     })
     visible.value = false
     return
@@ -389,6 +429,7 @@ function handleSave() {
     paramBindings[name] = (draft.paramBindings[name] ?? '').trim()
   }
   emit('save', {
+    serviceId: draft.serviceId.trim() || props.currentServiceId,
     dataSource: draft.dataSource,
     dataProcessorId: draft.dataProcessorId,
     dataMethodId: draft.dataMethodId,
@@ -397,6 +438,9 @@ function handleSave() {
     methodLabel: draft.methodLabel,
     paramBindings,
     printExpr: draft.printExpr.trim(),
+    outputTypeExpr: selectedMethod.value?.output
+      ? { ...selectedMethod.value.output }
+      : null,
   })
   visible.value = false
 }
@@ -417,14 +461,35 @@ function handleSave() {
       label-position="right"
       label-width="110px"
     >
-      <el-form-item v-if="showDataSourceSelect" label="数据来源" required>
+      <el-form-item
+        v-if="!isHeaderSource"
+        label="模块"
+        required
+        :error="moduleError || undefined"
+      >
         <el-select
-          v-model="draft.dataSource"
-          placeholder="选择数据来源"
+          v-model="draft.serviceId"
+          filterable
+          placeholder="选择模块"
           style="width: 100%"
         >
           <el-option
-            v-for="opt in dataSourceOptions"
+            v-for="opt in moduleOptions"
+            :key="opt.id"
+            :label="opt.name ? `${opt.name}（${opt.id}）` : opt.id"
+            :value="opt.id"
+          />
+        </el-select>
+      </el-form-item>
+
+      <el-form-item v-if="layerOptions.length > 1" label="层" required>
+        <el-select
+          v-model="draft.dataSource"
+          placeholder="选择层"
+          style="width: 100%"
+        >
+          <el-option
+            v-for="opt in layerOptions"
             :key="opt.value"
             :label="opt.label"
             :value="opt.value"
@@ -467,10 +532,11 @@ function handleSave() {
             v-model="selectedMethodKey"
             filterable
             clearable
+            :loading="loadingProcessors"
             :placeholder="
               isBusinessSource || businessOnly
-                ? '选择业务层处理器方法'
-                : '选择数据层处理器方法'
+                ? '选择业务层方法'
+                : '选择数据层方法'
             "
             style="width: 100%"
           >
@@ -481,21 +547,11 @@ function handleSave() {
               :value="opt.value"
             />
           </el-select>
-          <p v-if="!methodOptions.length" class="hint">
-            <template v-if="draft.dataSource === 'current_business'">
-              当前业务暂无其它可调用方法
+          <p v-if="!loadingProcessors && !methodOptions.length" class="hint">
+            <template v-if="isBusinessSource || businessOnly">
+              该模块暂无业务层方法
             </template>
-            <template v-else-if="draft.dataSource === 'other_business'">
-              {{
-                businessOnly
-                  ? '暂无业务层方法，请先在业务层创建'
-                  : '暂无其它业务处理器方法'
-              }}
-            </template>
-            <template v-else-if="draft.dataSource === 'current_data'">
-              当前绑定的数据层暂无方法
-            </template>
-            <template v-else> 暂无其它数据层方法，请先在数据层创建 </template>
+            <template v-else> 该模块暂无数据层方法 </template>
           </p>
         </el-form-item>
 

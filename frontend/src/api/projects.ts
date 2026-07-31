@@ -1,5 +1,6 @@
 import { request } from './index'
 import type { IconDefinition, IconLibrary } from '../types/icon-library'
+import type { ColorPalette, PaletteColor } from '../types/color-palette'
 import type { DataTypeGroup, DataTypeLibrary } from '../types/data-types'
 import type {
   MysqlColumnDef,
@@ -24,6 +25,7 @@ import type {
 } from '../types/backend-services'
 
 export type { IconDefinition, IconLibrary }
+export type { ColorPalette, PaletteColor }
 export type { DataTypeGroup, DataTypeLibrary }
 export type { MysqlDatabaseConfig, MysqlLibrary, MysqlColumnDef, MysqlTableDef }
 export type { OssBucketInfo, OssConnectionConfig, OssLibrary, OssObjectInfo }
@@ -42,6 +44,8 @@ export interface VoiderProjectConfig {
   engineVersion: string
   canvas: {
     width: number
+    /** 预览场景：H5 / 微信小程序 */
+    scene?: 'h5' | 'miniprogram'
   }
   /** 入口页面 id */
   entryPage?: string
@@ -119,6 +123,22 @@ export function saveIconLibrary(payload: {
   icons: IconDefinition[]
 }) {
   return request<IconLibrary>('/api/projects/icons', {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  })
+}
+
+export function getColorPalette(projectPath: string) {
+  return request<ColorPalette>(
+    `/api/projects/palette?projectPath=${encodeURIComponent(projectPath)}`,
+  )
+}
+
+export function saveColorPalette(payload: {
+  projectPath: string
+  colors: PaletteColor[]
+}) {
+  return request<ColorPalette>('/api/projects/palette', {
     method: 'PUT',
     body: JSON.stringify(payload),
   })
@@ -623,6 +643,7 @@ export function setProjectEntryPage(payload: {
 export function patchProjectConfig(payload: {
   projectPath: string
   wechatAppId?: string | null
+  canvasScene?: 'h5' | 'miniprogram' | null
 }) {
   return request<ProjectResult>('/api/projects/config', {
     method: 'PUT',

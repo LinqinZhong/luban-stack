@@ -1,5 +1,6 @@
 ﻿import type { IconLibrary } from '../../types/icon-library.js'
 import type { OssLibrary } from '../../types/oss.js'
+import type { ColorPalette } from '../../types/color-palette.js'
 import {
   buildIconSvg,
   iconRemoteExportMaps,
@@ -12,6 +13,7 @@ const SIGN_EXPIRES_IN = 7 * 24 * 3600
 export function generateAppIconFiles(
   library: IconLibrary,
   ossLibrary?: OssLibrary | null,
+  colorPalette?: ColorPalette | null,
 ): Record<string, string> {
   const icons: Record<string, string> = {}
   for (const icon of library.icons) {
@@ -23,6 +25,13 @@ export function generateAppIconFiles(
   const iconsLiteral = JSON.stringify(icons, null, 2)
   const publicLiteral = JSON.stringify(publicUrls, null, 2)
   const privateLiteral = JSON.stringify(privateBindings, null, 2)
+  const paletteMap: Record<string, string> = {}
+  for (const c of colorPalette?.colors ?? []) {
+    if (c.name?.trim() && c.value?.trim()) {
+      paletteMap[c.name.trim()] = c.value.trim()
+    }
+  }
+  const paletteLiteral = JSON.stringify(paletteMap, null, 2)
 
   return {
     'components/app-icon/index.json': `${JSON.stringify(
@@ -43,6 +52,7 @@ export function generateAppIconFiles(
     'components/app-icon/index.js': `const ICONS = ${iconsLiteral}
 const REMOTE_URLS = ${publicLiteral}
 const PRIVATE_BINDINGS = ${privateLiteral}
+const PALETTE = ${paletteLiteral}
 const SIGN_EXPIRES_IN = ${SIGN_EXPIRES_IN}
 /** 提前 1 小时视为过期，避免边界失效 */
 const CACHE_SKEW_MS = 60 * 60 * 1000
@@ -79,8 +89,20 @@ function writeCachedUrl(iconId, objectKey, url, expiresInSec) {
   }
 }
 
+/** 调色板 key / var(--key) → 具体色值（SVG fill 不能用 CSS 变量） */
+function resolveColor(color) {
+  var s = String(color || '').trim()
+  if (!s) return '#333333'
+  if (PALETTE[s]) return PALETTE[s]
+  if (s.indexOf('var(--') === 0 && s.charAt(s.length - 1) === ')') {
+    var name = s.substring(6, s.length - 1)
+    if (PALETTE[name]) return PALETTE[name]
+  }
+  return s
+}
+
 function tintSvg(svg, color) {
-  const fill = String(color || '').trim() || '#333333'
+  const fill = resolveColor(color)
   return String(svg || '')
     .replace(/currentColor/g, fill)
     .replace(/\\sfill="#(?:[Ff]{3}|[Ff]{6}|FFFFFF|ffffff)"/g, ' fill="transparent"')

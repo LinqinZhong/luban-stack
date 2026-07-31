@@ -4,6 +4,7 @@ import { openProject, ProjectError } from './project.js'
 import { listPages, getPage } from './pages.js'
 import { listComponents, getComponent } from './components.js'
 import { readIconLibrary } from './icons.js'
+import { readColorPalette } from './palette.js'
 import { readOssLibrary } from './oss.js'
 import { emptyDirPreserveDeps } from './clean-output.js'
 import type { ComponentConfig } from '../types/component.js'
@@ -220,6 +221,7 @@ export async function exportVue3Project(
   )
 
   const iconLibrary = await readIconLibrary(projectPath)
+  const colorPalette = await readColorPalette(projectPath)
   const ossLibrary = await readOssLibrary(projectPath)
   const serviceLibrary = await readBackendServiceLibrary(projectPath)
   const resolveApi = await preloadApiResolver(projectPath)
@@ -240,6 +242,7 @@ export async function exportVue3Project(
     },
     pages: pageSummaries.map((p) => ({ id: p.id, title: p.title })),
     componentIds: componentSummaries.map((c) => c.id),
+    colorPalette,
   })
   await writeMany(outputPath, scaffold)
 
@@ -257,6 +260,7 @@ export async function exportVue3Project(
       pageRefFields,
       rootNodes,
       resolveApi,
+      colorPalette,
     })
     await writeProjectFile(
       outputPath,
@@ -277,6 +281,7 @@ export async function exportVue3Project(
       componentConfigs,
       componentRoots,
       rootNodes,
+      colorPalette,
     })
     await writeProjectFile(
       outputPath,

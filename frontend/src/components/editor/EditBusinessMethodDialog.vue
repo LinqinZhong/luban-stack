@@ -12,7 +12,7 @@ import {
   type ProcessorTypeExpr,
 } from '../../types/backend-services'
 import type { DataTypeLibrary } from '../../types/data-types'
-import { typeLabel, type DataFieldType } from '../../types/page-data'
+import { typeLabel, arrayTypeLabel, type DataFieldType } from '../../types/page-data'
 import DataFieldTypeTreeSelect, {
   type TypeSelectPayload,
 } from './DataFieldTypeTreeSelect.vue'
@@ -107,7 +107,7 @@ function genericNamesOf(typeRef: string): string[] {
 }
 
 function leafNamedRef(expr: ProcessorTypeExpr): string {
-  if (expr.type === 'array') {
+  if (expr.type === 'array' || expr.type === 'map') {
     if (expr.itemType === 'array') return expr.itemItemTypeRef || ''
     return expr.itemTypeRef || ''
   }
@@ -137,16 +137,28 @@ function formatTypeExpr(expr: ProcessorTypeExpr): string {
   const namedLabel = named
     ? formatTypeWithGenerics(named, expr.genericArgs ?? {})
     : ''
+  if (expr.type === 'map') {
+    const keyLabel = expr.keyType === 'number' ? '数字' : '字符串'
+    if (expr.itemType === 'array') {
+      const leaf =
+        namedLabel ||
+        typeLabel((expr.itemItemType || 'string') as DataFieldType)
+      return `映射 / ${keyLabel} / ${arrayTypeLabel(leaf)}`
+    }
+    const leaf =
+      namedLabel || typeLabel((expr.itemType || 'string') as DataFieldType)
+    return `映射 / ${keyLabel} / ${leaf}`
+  }
   if (expr.type === 'array') {
     if (expr.itemType === 'array') {
       const leaf =
         namedLabel ||
         typeLabel((expr.itemItemType || 'string') as DataFieldType)
-      return `数组 / 数组 / ${leaf}`
+      return arrayTypeLabel(leaf, 2)
     }
     const leaf =
       namedLabel || typeLabel((expr.itemType || 'string') as DataFieldType)
-    return `数组 / ${leaf}`
+    return arrayTypeLabel(leaf)
   }
   if (named) return namedLabel
   return typeLabel((expr.type || 'string') as DataFieldType)
@@ -170,6 +182,12 @@ function payloadToTypeExpr(
         ? 'any'
         : (payload.itemItemType ?? ''),
     itemItemTypeRef: payload.itemItemTypeRef ?? '',
+    keyType:
+      fieldType === 'map'
+        ? payload.keyType === 'number'
+          ? 'number'
+          : 'string'
+        : '',
     genericArgs: {},
   }
   const named = leafNamedRef(next)
@@ -353,6 +371,12 @@ function handleSave() {
             (draftOutput.itemItemType || undefined) as DataFieldType | undefined
           "
           :item-item-type-ref="draftOutput.itemItemTypeRef"
+              :key-type="
+                draftOutput.keyType === 'number' ||
+                draftOutput.keyType === 'string'
+                  ? draftOutput.keyType
+                  : undefined
+              "
           :library="typeLibrary"
           :exclude-types="PROCESSOR_EXCLUDE_TYPES"
           :allow-ref="false"
@@ -418,6 +442,12 @@ function handleSave() {
                         | undefined
                     "
                     :item-item-type-ref="row.typeExpr.itemItemTypeRef"
+              :key-type="
+                row.typeExpr.keyType === 'number' ||
+                row.typeExpr.keyType === 'string'
+                  ? row.typeExpr.keyType
+                  : undefined
+              "
                     :library="typeLibrary"
                     :exclude-types="PROCESSOR_EXCLUDE_TYPES"
                     :allow-ref="false"

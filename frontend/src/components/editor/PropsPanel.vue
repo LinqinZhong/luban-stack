@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { Delete, Plus } from '@element-plus/icons-vue'
 import BackLink from './BackLink.vue'
 import ColorPicker from './ColorPicker.vue'
@@ -201,7 +201,7 @@ const selectedNode = computed(() =>
     : null,
 )
 
-/** 根节点不可配置重复（v-for） */
+/** 根节点不可配置列表重复 */
 const isRootNode = computed(() => Boolean(props.selectedId) && !props.selectedId.includes('/'))
 
 const parentTag = computed(() =>
@@ -1185,8 +1185,8 @@ const editingVisibilityConfig = ref<VisibilityConditionConfig | null>(null)
 
 const visibilityDialogTitle = computed(() =>
   visibilityDialogKind.value === 'show'
-    ? '编辑显示条件 · v-show'
-    : '编辑挂载条件 · v-if',
+    ? '编辑显示条件'
+    : '编辑挂载条件',
 )
 
 function openVisibilityDialog(kind: 'show' | 'mount') {
@@ -1222,6 +1222,138 @@ function saveVisibilityConfig(config: VisibilityConditionConfig) {
   const attr = visibilityDialogKind.value === 'show' ? V_SHOW_ATTR : V_IF_ATTR
   commitVisibilityAttr(attr, config)
 }
+
+/** 样式页分区导航 */
+const panelBodyRef = ref<HTMLElement | null>(null)
+const sectionNavRef = ref<HTMLElement | null>(null)
+const activeSectionId = ref('')
+let scrollingToSection = false
+let scrollSpyRaf = 0
+
+const styleNavItems = computed(() => {
+  if (
+    !selectedNode.value ||
+    isStatusBarSelected.value ||
+    isSlotOutletSelected.value
+  ) {
+    return [] as Array<{ id: string; label: string }>
+  }
+  const items: Array<{ id: string; label: string }> = [
+    { id: 'basic', label: '基本' },
+  ]
+  if (isSlotNode.value) items.push({ id: 'slot-params', label: '传参' })
+  if (showSizeProps.value) items.push({ id: 'size', label: '尺寸' })
+  items.push({ id: 'spacing', label: '间距' })
+  items.push({ id: 'appearance', label: '外观' })
+  if (showTextProps.value) items.push({ id: 'text', label: '内容' })
+  if (showInputProps.value) items.push({ id: 'input', label: '输入' })
+  if (showImageProps.value) items.push({ id: 'image', label: '图片' })
+  if (showIconProps.value) items.push({ id: 'icon', label: '图标' })
+  if (showRotateProps.value) items.push({ id: 'rotate', label: '旋转' })
+  if (showLinearProps.value) items.push({ id: 'linear', label: '线性布局' })
+  if (showSwiperProps.value) items.push({ id: 'swiper', label: '滑动窗口' })
+  if (showMultiWindowProps.value) items.push({ id: 'multi-window', label: '多窗口' })
+  if (isMultiWindowChild.value) items.push({ id: 'window-key', label: '窗口项名' })
+  if (showModalProps.value) items.push({ id: 'modal', label: '弹层' })
+  if (isRelativeChild.value) items.push({ id: 'relative', label: '相对定位' })
+  return items
+})
+
+const dynamicNavItems = computed(() => {
+  if (
+    !selectedNode.value ||
+    isStatusBarSelected.value ||
+    isSlotOutletSelected.value
+  ) {
+    return [] as Array<{ id: string; label: string }>
+  }
+  const items: Array<{ id: string; label: string }> = []
+  if (isComponentNode.value) items.push({ id: 'dyn-props', label: '组件参数' })
+  items.push({ id: 'dyn-repeat', label: '列表渲染' })
+  if (showInputProps.value) items.push({ id: 'dyn-model', label: '双向绑定' })
+  if (showMultiWindowProps.value) {
+    items.push({ id: 'dyn-active', label: '激活项' })
+  }
+  items.push({ id: 'dyn-vshow', label: '显示条件' })
+  items.push({ id: 'dyn-vif', label: '挂载条件' })
+  items.push({ id: 'dyn-styles', label: '动态样式' })
+  return items
+})
+
+const currentNavItems = computed(() => {
+  if (props.tab === 'style') return styleNavItems.value
+  if (props.tab === 'dynamic') return dynamicNavItems.value
+  return []
+})
+
+function updateActiveSectionFromScroll() {
+  if (scrollingToSection) return
+  const root = panelBodyRef.value
+  const items = currentNavItems.value
+  if (!root || !items.length) {
+    activeSectionId.value = ''
+    return
+  }
+  const navH = sectionNavRef.value?.offsetHeight ?? 0
+  const threshold = root.getBoundingClientRect().top + navH + 10
+  let current = items[0]!.id
+  for (const item of items) {
+    const el = root.querySelector<HTMLElement>(
+      `[data-section-id="${item.id}"]`,
+    )
+    if (!el) continue
+    if (el.getBoundingClientRect().top <= threshold) {
+      current = item.id
+    }
+  }
+  activeSectionId.value = current
+}
+
+function onPanelBodyScroll() {
+  if (scrollSpyRaf) cancelAnimationFrame(scrollSpyRaf)
+  scrollSpyRaf = requestAnimationFrame(() => {
+    scrollSpyRaf = 0
+    updateActiveSectionFromScroll()
+  })
+}
+
+async function scrollToSection(id: string) {
+  const root = panelBodyRef.value
+  const el = root?.querySelector<HTMLElement>(`[data-section-id="${id}"]`)
+  if (!root || !el) return
+
+  scrollingToSection = true
+  activeSectionId.value = id
+  const navH = sectionNavRef.value?.offsetHeight ?? 0
+  const elRect = el.getBoundingClientRect()
+  const rootRect = root.getBoundingClientRect()
+  const top = elRect.top - rootRect.top - navH - 6 + root.scrollTop
+  root.scrollTo({ top: Math.max(0, top), behavior: 'smooth' })
+
+  window.setTimeout(() => {
+    scrollingToSection = false
+    updateActiveSectionFromScroll()
+  }, 420)
+}
+
+watch(
+  [() => props.tab, () => props.selectedId, currentNavItems],
+  async () => {
+    await nextTick()
+    if (
+      currentNavItems.value.length &&
+      !currentNavItems.value.some((i) => i.id === activeSectionId.value)
+    ) {
+      activeSectionId.value = currentNavItems.value[0]!.id
+    }
+    updateActiveSectionFromScroll()
+  },
+  { immediate: true },
+)
+
+onBeforeUnmount(() => {
+  if (scrollSpyRaf) cancelAnimationFrame(scrollSpyRaf)
+})
 </script>
 
 <template>
@@ -1245,22 +1377,24 @@ function saveVisibilityConfig(config: VisibilityConditionConfig) {
       </el-radio-group>
     </div>
 
-    <div class="panel-body">
+    <div ref="panelBodyRef" class="panel-body" @scroll="onPanelBodyScroll">
       <template v-if="tab === 'style'">
         <div v-if="isSlotOutletSelected" class="layout-form">
           <div class="node-brief">
             <div class="node-tag">Slot</div>
             <div class="node-id">{{ selectedId }}</div>
           </div>
-          <div class="section-title">插槽</div>
-          <el-form label-position="top" size="small">
-            <el-form-item label="插槽名称">
-              <el-input :model-value="slotOutletInfo?.slotName || 'default'" disabled />
-            </el-form-item>
-          </el-form>
-          <p class="hint">
-            在此选中插槽后添加控件，内容会注入到该插槽。也可从控件树将节点拖入插槽。
-          </p>
+          <section class="prop-section" data-section-id="slot">
+            <div class="section-title">插槽</div>
+            <el-form label-position="top" size="small">
+              <el-form-item label="插槽名称">
+                <el-input :model-value="slotOutletInfo?.slotName || 'default'" disabled />
+              </el-form-item>
+            </el-form>
+            <p class="hint">
+              在此选中插槽后添加控件，内容会注入到该插槽。也可从控件树将节点拖入插槽。
+            </p>
+          </section>
         </div>
         <div v-else-if="isStatusBarSelected" class="layout-form">
           <div class="node-brief">
@@ -1377,37 +1511,58 @@ function saveVisibilityConfig(config: VisibilityConditionConfig) {
             <div class="node-id">{{ selectedId }}</div>
           </div>
 
-          <div class="section-title">基本</div>
-          <el-form label-position="top" size="small">
-            <el-form-item v-if="isSlotNode" label="插槽名称">
-              <el-input
-                v-model="layoutForm.name"
-                clearable
-                placeholder="默认 default"
-                @change="commitSlotName"
-              />
-            </el-form-item>
-            <el-form-item v-else label="name">
-              <el-input
-                v-model="layoutForm.name"
-                clearable
-                placeholder="控件命名，显示在控件树"
-                @change="commitAttr('name', layoutForm.name)"
-              />
-            </el-form-item>
-            <el-form-item v-if="isSlotContentNode" label="注入插槽 slot">
-              <el-input
-                :model-value="selectedNode.attrs.slot || 'default'"
-                clearable
-                placeholder="默认 default"
-                @change="(v: string) => commitAttr('slot', (v ?? '').trim() || 'default')"
-              />
-              <p class="hint">对应组件内 Slot 的 name</p>
-            </el-form-item>
-          </el-form>
+          <nav
+            v-if="styleNavItems.length > 1"
+            ref="sectionNavRef"
+            class="prop-section-nav"
+            aria-label="属性分区"
+          >
+            <button
+              v-for="item in styleNavItems"
+              :key="item.id"
+              type="button"
+              class="prop-section-nav-item"
+              :class="{ active: activeSectionId === item.id }"
+              @click="scrollToSection(item.id)"
+            >
+              {{ item.label }}
+            </button>
+          </nav>
+
+          <section class="prop-section" data-section-id="basic">
+            <div class="section-title">基本</div>
+            <el-form label-position="top" size="small">
+              <el-form-item v-if="isSlotNode" label="插槽名称">
+                <el-input
+                  v-model="layoutForm.name"
+                  clearable
+                  placeholder="默认 default"
+                  @change="commitSlotName"
+                />
+              </el-form-item>
+              <el-form-item v-else label="name">
+                <el-input
+                  v-model="layoutForm.name"
+                  clearable
+                  placeholder="控件命名，显示在控件树"
+                  @change="commitAttr('name', layoutForm.name)"
+                />
+              </el-form-item>
+              <el-form-item v-if="isSlotContentNode" label="注入插槽 slot">
+                <el-input
+                  :model-value="selectedNode.attrs.slot || 'default'"
+                  clearable
+                  placeholder="默认 default"
+                  @change="(v: string) => commitAttr('slot', (v ?? '').trim() || 'default')"
+                />
+                <p class="hint">对应组件内 Slot 的 name</p>
+              </el-form-item>
+            </el-form>
+          </section>
 
           <template v-if="isSlotNode">
-            <div class="section-title">传参（作用域）</div>
+            <section class="prop-section" data-section-id="slot-params">
+              <div class="section-title">传参（作用域）</div>
             <el-form label-position="top" size="small">
               <div class="slot-param-list">
                 <div
@@ -1455,9 +1610,11 @@ function saveVisibilityConfig(config: VisibilityConditionConfig) {
                 </p>
               </div>
             </el-form>
+            </section>
           </template>
 
           <template v-if="showSizeProps">
+            <section class="prop-section" data-section-id="size">
             <div class="section-title">尺寸</div>
             <el-form label-position="top" size="small">
               <el-form-item label="宽度 width">
@@ -1498,8 +1655,10 @@ function saveVisibilityConfig(config: VisibilityConditionConfig) {
                 </div>
               </el-form-item>
             </el-form>
+            </section>
           </template>
 
+          <section class="prop-section" data-section-id="spacing">
           <div class="section-title">间距</div>
           <el-form label-position="top" size="small">
             <el-form-item label="padding">
@@ -1572,7 +1731,9 @@ function saveVisibilityConfig(config: VisibilityConditionConfig) {
               </div>
             </template>
           </el-form>
+          </section>
 
+          <section class="prop-section" data-section-id="appearance">
           <div class="section-title">外观</div>
           <el-form label-position="top" size="small">
             <el-form-item label="background">
@@ -1681,8 +1842,10 @@ function saveVisibilityConfig(config: VisibilityConditionConfig) {
               </el-select>
             </el-form-item>
           </el-form>
+          </section>
 
           <template v-if="showTextProps">
+            <section class="prop-section" data-section-id="text">
             <div class="section-title">内容</div>
             <el-form label-position="top" size="small">
               <el-form-item label="text">
@@ -1709,9 +1872,11 @@ function saveVisibilityConfig(config: VisibilityConditionConfig) {
                 />
               </el-form-item>
             </el-form>
+            </section>
           </template>
 
           <template v-if="showInputProps">
+            <section class="prop-section" data-section-id="input">
             <div class="section-title">输入</div>
             <el-form label-position="top" size="small">
               <el-form-item label="value">
@@ -1747,9 +1912,11 @@ function saveVisibilityConfig(config: VisibilityConditionConfig) {
                 />
               </el-form-item>
             </el-form>
+            </section>
           </template>
 
           <template v-if="showImageProps">
+            <section class="prop-section" data-section-id="image">
             <div class="section-title">图片</div>
             <el-form label-position="top" size="small">
               <el-form-item label="src">
@@ -1812,9 +1979,11 @@ function saveVisibilityConfig(config: VisibilityConditionConfig) {
                 </el-select>
               </el-form-item>
             </el-form>
+            </section>
           </template>
 
           <template v-if="showIconProps">
+            <section class="prop-section" data-section-id="icon">
             <div class="section-title">图标</div>
             <el-form label-position="top" size="small">
               <el-form-item label="iconId">
@@ -1861,9 +2030,11 @@ function saveVisibilityConfig(config: VisibilityConditionConfig) {
                 />
               </el-form-item>
             </el-form>
+            </section>
           </template>
 
           <template v-if="showRotateProps">
+            <section class="prop-section" data-section-id="rotate">
             <div class="section-title">旋转</div>
             <el-form label-position="top" size="small">
               <el-form-item label="rotateX（度）">
@@ -1894,9 +2065,11 @@ function saveVisibilityConfig(config: VisibilityConditionConfig) {
                 />
               </el-form-item>
             </el-form>
+            </section>
           </template>
 
           <template v-if="showLinearProps">
+            <section class="prop-section" data-section-id="linear">
             <div class="section-title">线性布局</div>
             <el-form label-position="top" size="small">
               <el-form-item label="orientation">
@@ -1920,9 +2093,11 @@ function saveVisibilityConfig(config: VisibilityConditionConfig) {
                 />
               </el-form-item>
             </el-form>
+            </section>
           </template>
 
           <template v-if="showSwiperProps">
+            <section class="prop-section" data-section-id="swiper">
             <div class="section-title">滑动窗口</div>
             <el-form label-position="top" size="small">
               <el-form-item label="autoplay 自动播放">
@@ -1988,9 +2163,11 @@ function saveVisibilityConfig(config: VisibilityConditionConfig) {
               </el-form-item>
               <p class="hint">每个直接子控件为一页；预览时可左右滑动切换。</p>
             </el-form>
+            </section>
           </template>
 
           <template v-if="showMultiWindowProps">
+            <section class="prop-section" data-section-id="multi-window">
             <div class="section-title">多窗口</div>
             <el-form label-position="top" size="small">
               <p class="hint">
@@ -1998,9 +2175,11 @@ function saveVisibilityConfig(config: VisibilityConditionConfig) {
                 <code>windowKey</code>。
               </p>
             </el-form>
+            </section>
           </template>
 
           <template v-if="isMultiWindowChild">
+            <section class="prop-section" data-section-id="window-key">
             <div class="section-title">窗口项名</div>
             <el-form label-position="top" size="small">
               <el-form-item label="windowKey">
@@ -2015,9 +2194,11 @@ function saveVisibilityConfig(config: VisibilityConditionConfig) {
                 当激活项等于该值时显示本窗口。支持字符串或数字（按字符串比较）。
               </p>
             </el-form>
+            </section>
           </template>
 
           <template v-if="showModalProps">
+            <section class="prop-section" data-section-id="modal">
             <div class="section-title">弹层 Modal</div>
             <el-form label-position="top" size="small">
               <el-form-item label="closeOnClick 点击空白关闭">
@@ -2034,9 +2215,11 @@ function saveVisibilityConfig(config: VisibilityConditionConfig) {
                 closeOnClick 后点击空白可关闭。
               </p>
             </el-form>
+            </section>
           </template>
 
           <template v-if="isRelativeChild">
+            <section class="prop-section" data-section-id="relative">
             <div class="section-title">相对布局定位</div>
             <el-form label-position="top" size="small">
               <p v-if="parentTag === 'Modal'" class="hint">
@@ -2081,6 +2264,7 @@ function saveVisibilityConfig(config: VisibilityConditionConfig) {
                 </el-form-item>
               </div>
             </el-form>
+            </section>
           </template>
         </div>
       </template>
@@ -2180,7 +2364,26 @@ function saveVisibilityConfig(config: VisibilityConditionConfig) {
             <div class="node-id">{{ selectedId }}</div>
           </div>
 
+          <nav
+            v-if="dynamicNavItems.length > 1"
+            ref="sectionNavRef"
+            class="prop-section-nav"
+            aria-label="动态分区"
+          >
+            <button
+              v-for="item in dynamicNavItems"
+              :key="item.id"
+              type="button"
+              class="prop-section-nav-item"
+              :class="{ active: activeSectionId === item.id }"
+              @click="scrollToSection(item.id)"
+            >
+              {{ item.label }}
+            </button>
+          </nav>
+
           <template v-if="isComponentNode">
+            <section class="prop-section" data-section-id="dyn-props">
             <div class="section-title">组件参数 · $props</div>
             <el-alert
               v-if="!selectedComponentDetail"
@@ -2218,6 +2421,9 @@ function saveVisibilityConfig(config: VisibilityConditionConfig) {
                     :project-path="projectPath || ''"
                     :api-params="def.apiParams"
                     :api-return-type="def.apiReturnType"
+                    :data-fields="dataFields"
+                    :page-query-params="pageQueryParams"
+                    :type-library="typeLibrary"
                     @change="commitComponentProp(def.name)"
                   />
                   <template v-else-if="def.type === 'color'">
@@ -2268,7 +2474,7 @@ function saveVisibilityConfig(config: VisibilityConditionConfig) {
                     @change="commitComponentProp(def.name)"
                   />
                   <p v-if="def.type === 'api'" class="hint">
-                    选择后端服务 → 控制器 → API。匹配：必填入参名/类型一致；可选入参可省略；出参类型须一致。组件内调用
+                    点击「配置」选择后端服务 → 控制器 → API，并可绑定额外入参。组件内调用
                     <code>$props.{{ def.name }}(args)</code>
                   </p>
                   <p v-if="def.remark" class="prop-remark">{{ def.remark }}</p>
@@ -2280,6 +2486,7 @@ function saveVisibilityConfig(config: VisibilityConditionConfig) {
                 读取。留空则使用组件默认值。
               </p>
             </template>
+            </section>
           </template>
 
           <el-alert
@@ -2291,6 +2498,7 @@ function saveVisibilityConfig(config: VisibilityConditionConfig) {
             style="margin-bottom: 12px"
           />
           <template v-else>
+            <section class="prop-section" data-section-id="dyn-repeat">
             <div class="section-title">列表渲染</div>
             <el-form label-position="top" size="small">
               <el-form-item label="重复">
@@ -2301,16 +2509,18 @@ function saveVisibilityConfig(config: VisibilityConditionConfig) {
               </el-form-item>
             </el-form>
             <p class="hint">
-              类似 Vue 的 v-for：预览时按绑定数组展开当前节点。可选数据池数组，或组件
+              预览时按绑定数组展开当前节点。可选数据池数组，或组件
               <code>$props</code>
               中的数组参数。文本中写
               <code>{'{item.字段名}'}</code>
               才会替换为列表项数据，其他内容原样显示；也可用
               <code>{'{index}'}</code>。
             </p>
+            </section>
           </template>
 
           <template v-if="showInputProps">
+            <section class="prop-section" data-section-id="dyn-model">
             <div class="section-title">双向绑定</div>
             <div class="visibility-row">
               <span class="visibility-summary">{{ modelSummary }}</span>
@@ -2323,9 +2533,11 @@ function saveVisibilityConfig(config: VisibilityConditionConfig) {
               <code>{'{字段名}'}</code>
               。预览时输入框与数据池互相同步。
             </p>
+            </section>
           </template>
 
           <template v-if="showMultiWindowProps">
+            <section class="prop-section" data-section-id="dyn-active">
             <div class="section-title">激活项</div>
             <div class="visibility-row">
               <span class="visibility-summary">{{ activeSummary }}</span>
@@ -2344,9 +2556,11 @@ function saveVisibilityConfig(config: VisibilityConditionConfig) {
               <code>windowKey</code>
               与激活值匹配的窗口。
             </p>
+            </section>
           </template>
 
-          <div class="section-title">显示条件 · v-show</div>
+          <section class="prop-section" data-section-id="dyn-vshow">
+          <div class="section-title">显示条件</div>
           <div class="visibility-row">
             <span class="visibility-summary">{{ showIfSummary }}</span>
             <el-button type="primary" link @click="openVisibilityDialog('show')">
@@ -2354,11 +2568,12 @@ function saveVisibilityConfig(config: VisibilityConditionConfig) {
             </el-button>
           </div>
           <p class="hint">
-            场景之间为「或」、场景内为「且」。不成立时隐藏但仍保留节点（类似
-            <code>v-show</code>）。
+            场景之间为「或」、场景内为「且」。不成立时隐藏节点，但仍保留在树中。
           </p>
+          </section>
 
-          <div class="section-title">挂载条件 · v-if</div>
+          <section class="prop-section" data-section-id="dyn-vif">
+          <div class="section-title">挂载条件</div>
           <div class="visibility-row">
             <span class="visibility-summary">{{ mountIfSummary }}</span>
             <el-button type="primary" link @click="openVisibilityDialog('mount')">
@@ -2366,10 +2581,11 @@ function saveVisibilityConfig(config: VisibilityConditionConfig) {
             </el-button>
           </div>
           <p class="hint">
-            场景之间为「或」、场景内为「且」。不成立时不渲染（类似
-            <code>v-if</code>）。
+            场景之间为「或」、场景内为「且」。不成立时不创建、不渲染该节点。
           </p>
+          </section>
 
+          <section class="prop-section" data-section-id="dyn-styles">
           <div class="section-title">动态样式</div>
           <div class="dyn-style-list">
             <div
@@ -2390,6 +2606,7 @@ function saveVisibilityConfig(config: VisibilityConditionConfig) {
           <p class="hint">
             按数据池字段与条件命中状态后，覆盖对应样式。样式编辑与「样式」页共用组件，仅填写需覆盖的属性。
           </p>
+          </section>
         </div>
       </template>
     </div>
@@ -2578,7 +2795,11 @@ function saveVisibilityConfig(config: VisibilityConditionConfig) {
   flex: 1;
   min-height: 0;
   overflow: auto;
-  padding: 12px;
+  padding: 0;
+}
+
+.panel-body > .el-empty {
+  padding: 24px 12px;
 }
 
 .layout-form,
@@ -2586,7 +2807,64 @@ function saveVisibilityConfig(config: VisibilityConditionConfig) {
 .dynamic-form {
   display: flex;
   flex-direction: column;
+  gap: 0;
+  padding: 12px;
+}
+
+.prop-section-nav {
+  position: sticky;
+  top: 0;
+  z-index: 6;
+  display: flex;
+  flex-wrap: wrap;
   gap: 4px;
+  margin: 0 -12px 8px;
+  padding: 8px 12px;
+  background: #fff;
+  border-bottom: 1px solid #ebeef5;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.9);
+}
+
+.prop-section-nav-item {
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: #606266;
+  font-size: 12px;
+  line-height: 24px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.prop-section-nav-item:hover {
+  color: #409eff;
+  background: #f5f9ff;
+}
+
+.prop-section-nav-item.active {
+  color: #409eff;
+  border-color: #c6e2ff;
+  background: #ecf5ff;
+  font-weight: 600;
+}
+
+.prop-section {
+  padding-top: 12px;
+  margin-top: 4px;
+  border-top: 1px solid #ebeef5;
+}
+
+.prop-section-nav + .prop-section,
+.node-brief + .prop-section {
+  margin-top: 0;
+  padding-top: 4px;
+  border-top: none;
+}
+
+.prop-section .section-title {
+  margin-top: 0;
 }
 
 .status-bar-tip {

@@ -13,6 +13,7 @@ import {
 } from './emit-types.js'
 import { safeIdent, toPascalCase } from './names.js'
 import { emitMethodSignature } from './emit-flow.js'
+import { methodJsDoc } from './js-comments.js'
 
 function resolveTableName(
   processor: ServiceProcessor,
@@ -88,11 +89,16 @@ function emitDataMethod(
     typeRef: method.output?.typeRef || '',
     itemType: method.output?.itemType || '',
     itemTypeRef: method.output?.itemTypeRef || '',
+    keyType: method.output?.keyType || '',
   }
 
-  const remark = method.remark?.trim()
-    ? `  /** ${method.remark.trim()} */\n`
-    : ''
+  const remark = methodJsDoc(
+    method.remark,
+    (method.params ?? []).map((p) => ({
+      name: safeIdent(p.name, 'param'),
+      remark: p.remark,
+    })),
+  )
 
   return `${remark}  async ${name}(${params}): Promise<${returnType}> {
     return runDataMethod({

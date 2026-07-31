@@ -33,6 +33,11 @@ function atomToTs(atom: TypeAtom, ctx: DataTypeTsContext): string {
     // 联合/交叉暂不支持；简单原子直接后缀 []
     return `${inner}[]`
   }
+  if (atom.kind === 'map') {
+    const key = atom.key === 'number' ? 'number' : 'string'
+    const value = atomToTs(atom.item ?? { kind: 'any' }, ctx)
+    return `Map<${key}, ${value}>`
+  }
   if (atom.kind === 'named') return resolveName(atom.ref, ctx)
   if (atom.kind === 'generic') return atom.ref || 'T'
   return atom.kind

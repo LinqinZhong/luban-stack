@@ -18,6 +18,7 @@ import {
   findDataTypeDef,
   typeExprToDataFieldType,
 } from '../../utils/named-type-fields'
+import { arrayTypeLabel } from '../../types/page-data'
 
 export type DataMethodDebugTarget = {
   projectPath: string
@@ -240,7 +241,7 @@ function namedTypeLabel(typeRef: string): string {
 
 function atomTypeLabel(type: string, typeRef: string): string {
   if (typeRef) return namedTypeLabel(typeRef)
-  if (type === 'json') return '对象'
+  if (type === 'json') return 'object'
   if (type === 'number') return 'number'
   if (type === 'boolean') return 'boolean'
   if (type === 'string' || !type) return 'string'
@@ -257,7 +258,7 @@ function resolveParamForm(param: ProcessorMethodParam): ParamFormModel {
       return {
         param,
         mode: 'json',
-        typeLabel: `数组 / 数组 / ${leaf}`,
+        typeLabel: arrayTypeLabel(leaf, 2),
         kind: 'array',
         enumOptions: [],
         fields: [],
@@ -273,7 +274,7 @@ function resolveParamForm(param: ProcessorMethodParam): ParamFormModel {
           return {
             param,
             mode: 'array',
-            typeLabel: `数组 / ${def.name || ref}`,
+            typeLabel: arrayTypeLabel(def.name || ref),
             kind: 'array',
             enumOptions: [],
             fields,
@@ -284,7 +285,7 @@ function resolveParamForm(param: ProcessorMethodParam): ParamFormModel {
         return {
           param,
           mode: 'array',
-          typeLabel: `数组 / ${def.name || ref}`,
+          typeLabel: arrayTypeLabel(def.name || ref),
           kind: 'array',
           enumOptions: [],
           fields: [],
@@ -306,7 +307,7 @@ function resolveParamForm(param: ProcessorMethodParam): ParamFormModel {
     return {
       param,
       mode: 'array',
-      typeLabel: `数组 / ${atomTypeLabel(itemType, ref)}`,
+      typeLabel: arrayTypeLabel(atomTypeLabel(itemType, ref)),
       kind: 'array',
       enumOptions: [],
       fields: [],
@@ -317,7 +318,7 @@ function resolveParamForm(param: ProcessorMethodParam): ParamFormModel {
 
   const typeLabel = (() => {
     if (expr.typeRef) return namedTypeLabel(expr.typeRef)
-    if (expr.type === 'json') return '对象'
+    if (expr.type === 'json') return 'object'
     if (expr.type === 'number') return 'number'
     if (expr.type === 'boolean') return 'boolean'
     return expr.type || 'string'

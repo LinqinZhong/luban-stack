@@ -287,7 +287,7 @@ function handleSave() {
       <el-form-item label="数据源类型" required>
         <el-radio-group v-model="draft.sourceKind">
           <el-radio value="page">分页</el-radio>
-          <el-radio value="array">数组</el-radio>
+          <el-radio value="array">[]</el-radio>
         </el-radio-group>
       </el-form-item>
 

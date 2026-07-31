@@ -7,7 +7,7 @@
     {
       "name": "loading",
       "type": "boolean",
-      "remark": "",
+      "remark": "是否正在加载",
       "defaultValue": true,
       "twoWay": false,
       "required": true
@@ -15,7 +15,7 @@
     {
       "name": "empty",
       "type": "boolean",
-      "remark": "",
+      "remark": "是否为空",
       "defaultValue": false,
       "twoWay": false,
       "required": false
@@ -23,7 +23,7 @@
     {
       "name": "loadingText",
       "type": "string",
-      "remark": "",
+      "remark": "加载中文案",
       "defaultValue": "加载中...",
       "twoWay": false,
       "required": false
@@ -31,7 +31,7 @@
     {
       "name": "emptyText",
       "type": "string",
-      "remark": "",
+      "remark": "空数据文案",
       "defaultValue": "暂无数据",
       "twoWay": false,
       "required": false

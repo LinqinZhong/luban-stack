@@ -1,0 +1,100 @@
+{
+  "name": "user",
+  "remark": "用户表",
+  "columns": [
+    {
+      "name": "id",
+      "type": "bigint",
+      "nullable": false,
+      "primaryKey": true,
+      "autoIncrement": true,
+      "defaultValue": "",
+      "comment": ""
+    },
+    {
+      "name": "username",
+      "type": "varchar(255)",
+      "nullable": true,
+      "primaryKey": false,
+      "autoIncrement": false,
+      "defaultValue": "",
+      "comment": ""
+    },
+    {
+      "name": "password",
+      "type": "varchar(255)",
+      "nullable": true,
+      "primaryKey": false,
+      "autoIncrement": false,
+      "defaultValue": "",
+      "comment": ""
+    },
+    {
+      "name": "salt",
+      "type": "varchar(255)",
+      "nullable": true,
+      "primaryKey": false,
+      "autoIncrement": false,
+      "defaultValue": "",
+      "comment": ""
+    },
+    {
+      "name": "avatar",
+      "type": "varchar(255)",
+      "nullable": true,
+      "primaryKey": false,
+      "autoIncrement": false,
+      "defaultValue": "",
+      "comment": "",
+      "resource": true
+    },
+    {
+      "name": "created_time",
+      "type": "datetime",
+      "nullable": true,
+      "primaryKey": false,
+      "autoIncrement": false,
+      "defaultValue": "",
+      "comment": ""
+    },
+    {
+      "name": "updated_time",
+      "type": "datetime",
+      "nullable": true,
+      "primaryKey": false,
+      "autoIncrement": false,
+      "defaultValue": "",
+      "comment": ""
+    },
+    {
+      "name": "is_deleted",
+      "type": "tinyint(1)",
+      "nullable": true,
+      "primaryKey": false,
+      "autoIncrement": false,
+      "defaultValue": "",
+      "comment": "",
+      "logicDelete": true
+    },
+    {
+      "name": "status",
+      "type": "tinyint(1)",
+      "nullable": true,
+      "primaryKey": false,
+      "autoIncrement": false,
+      "defaultValue": "",
+      "comment": ""
+    },
+    {
+      "name": "nickname",
+      "type": "varchar(255)",
+      "nullable": true,
+      "primaryKey": false,
+      "autoIncrement": false,
+      "defaultValue": "",
+      "comment": ""
+    }
+  ],
+  "indexes": [],
+  "syncedAt": 1785402227059
+}

@@ -209,6 +209,96 @@ export function evaluateBindingExpression(
   }
 }
 
+/**
+ * WXML `{{}}` 不支持 Number/String/Boolean/Array.isArray 等全局调用。
+ * 改写为 utils/util.wxs（module="util"）上的方法。
+ * 注意：不能用一元 `+`，属性绑定里会报 unexpected token '+'。
+ */
+export function rewriteWxmlGlobalCalls(expr: string): string {
+  const rewriters: Array<[string, (args: string) => string]> = [
+    ['Array.isArray', (a) => `util.isArray(${a})`],
+    ['Number', (a) => `util.n(${a})`],
+    ['String', (a) => `util.s(${a})`],
+    ['Boolean', (a) => `util.b(${a})`],
+  ]
+  let i = 0
+  let out = ''
+  while (i < expr.length) {
+    let matched = false
+    for (const [name, rw] of rewriters) {
+      if (!expr.startsWith(name, i)) continue
+      const prev = i > 0 ? expr[i - 1]! : ''
+      if (/[\w$]/.test(prev)) continue
+      let j = i + name.length
+      while (j < expr.length && /\s/.test(expr[j]!)) j++
+      if (expr[j] !== '(') continue
+      const close = findBalancedParenEnd(expr, j)
+      if (close < 0) continue
+      const args = rewriteWxmlGlobalCalls(expr.slice(j + 1, close))
+      out += rw(args)
+      i = close + 1
+      matched = true
+      break
+    }
+    if (!matched) {
+      out += expr[i]
+      i++
+    }
+  }
+  return out
+}
+
+/** 从 `expr[openIndex] === '('` 找到与之平衡的 `)` 下标；失败返回 -1 */
+function findBalancedParenEnd(expr: string, openIndex: number): number {
+  if (expr[openIndex] !== '(') return -1
+  let depth = 0
+  let inSingle = false
+  let inDouble = false
+  let inTick = false
+  let escape = false
+  for (let j = openIndex; j < expr.length; j++) {
+    const c = expr[j]!
+    if (escape) {
+      escape = false
+      continue
+    }
+    if ((inSingle || inDouble || inTick) && c === '\\') {
+      escape = true
+      continue
+    }
+    if (inSingle) {
+      if (c === "'") inSingle = false
+      continue
+    }
+    if (inDouble) {
+      if (c === '"') inDouble = false
+      continue
+    }
+    if (inTick) {
+      if (c === '`') inTick = false
+      continue
+    }
+    if (c === "'") {
+      inSingle = true
+      continue
+    }
+    if (c === '"') {
+      inDouble = true
+      continue
+    }
+    if (c === '`') {
+      inTick = true
+      continue
+    }
+    if (c === '(') depth++
+    else if (c === ')') {
+      depth--
+      if (depth === 0) return j
+    }
+  }
+  return -1
+}
+
 /** 把 `` `a${x}b` `` 转成 WXML 可用的拼接：('a'+(x)+'b') */
 export function templateLiteralsToConcat(expr: string): string {
   let out = ''

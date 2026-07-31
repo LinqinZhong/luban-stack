@@ -63,10 +63,33 @@ export const DM = {
   columnExpr: '\u5217 / \u8868\u8fbe\u5f0f',
   cancel: '\u53d6\u6d88',
   ok: '\u786e\u5b9a',
-  array: '\u6570\u7ec4',
+  array: '[]',
   element: '\u5143\u7d20',
   elementSelf: '\u5143\u7d20\u672c\u8eab',
   mid: ' \u00b7 ',
   /** 映射方向：源 → 目标（展示为左箭头：目标 ← 源） */
   arrow: '\u2190',
+  mapKey: '\u6620\u5c04\u952e',
+  mapValue: '\u6620\u5c04\u503c',
+  mapKeyType: '\u952e\u7c7b\u578b',
+  mapKeyField: '\u952e\u5b57\u6bb5',
+  mapValueType: '\u503c\u7c7b\u578b',
+  mapValueMapping: '\u503c\u6620\u5c04',
+  mapUniqueKey: '\u552f\u4e00\u5b57\u6bb5\uff08\u6620\u5c04\u952e\uff09',
+  mapIndexField: '\u7d22\u5f15\u5b57\u6bb5\uff08\u6620\u5c04\u952e\uff09',
+  mapKeyFieldPh: '\u9009\u62e9\u4e3b\u952e\u6216\u552f\u4e00\u5b57\u6bb5',
+  mapValueFieldPh: '\u9009\u62e9\u67e5\u8be2\u5b57\u6bb5',
+  mapNeedQueryFields:
+    '\u8bf7\u5148\u5728\u300c\u67e5\u8be2\u5b57\u6bb5\u300d\u4e2d\u52fe\u9009\u5217',
+  mapMappingHint:
+    '\u952e\uff1a\u4e3b\u952e/\u552f\u4e00\u5b57\u6bb5\uff1b\u503c\uff1a\u4ece\u5df2\u52fe\u9009\u7684\u67e5\u8be2\u5b57\u6bb5\u4e2d\u9009\u62e9',
+  mapKeyShort: '\u952e\uff1a',
+  mapValueShort: '\u503c\uff1a',
+  mapScalarValueHint:
+    '\u57fa\u672c\u7c7b\u578b\u8bf7\u5728\u51fa\u53c2\u884c\u9009\u62e9\u503c\u5b57\u6bb5',
+  mapNoUniqueKey:
+    '\u5b9e\u4f53\u6682\u65e0\u4e3b\u952e\u6216\u5355\u5217\u552f\u4e00\u7d22\u5f15',
+  mapNoTableColumns:
+    '\u672a\u52a0\u8f7d\u5230\u8868\u7ed3\u6784\uff0c\u8bf7\u5148\u4e3a\u5b9e\u4f53\u7ed1\u5b9a\u8868\u5e76\u540c\u6b65\u7ed3\u6784',
+  pickEntityField: '\u9009\u62e9\u8868\u5b57\u6bb5',
 } as const

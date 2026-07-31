@@ -13,7 +13,7 @@ const summary = computed(() => {
     typeof data.description === 'string' ? data.description.trim() : ''
   if (description) return description
   const sourceKind = data.sourceKind === 'array' ? 'array' : 'page'
-  const kindLabel = sourceKind === 'array' ? '数组' : '分页'
+  const kindLabel = sourceKind === 'array' ? '[]' : '分页'
   const sourcePath =
     typeof data.sourcePath === 'string' ? data.sourcePath.trim() : ''
   const targetVarName =

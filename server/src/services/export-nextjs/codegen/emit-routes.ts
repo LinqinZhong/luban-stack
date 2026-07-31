@@ -49,6 +49,37 @@ function parseInputExpr(inp: {
   return `(parseMaybeJson(${from}) as string)`
 }
 
+function requiredCheckLines(inp: {
+  varName: string
+  location: string
+  type: string
+  required: boolean
+}): string {
+  const name = safeIdent(inp.varName, 'input')
+  const loc = (inp.location || 'query').toLowerCase()
+  const from =
+    loc === 'body'
+      ? `body[${JSON.stringify(inp.varName)}]`
+      : `query[${JSON.stringify(inp.varName)}]`
+  const expr = parseInputExpr(inp)
+  if (inp.type === 'number') {
+    return `    const ${name} = ${expr}
+    if (${from} === undefined || ${from} === null || ${from} === '' || Number.isNaN(${name})) {
+      throw new HttpError(400, ${JSON.stringify(`${inp.varName}不能为空`)})
+    }`
+  }
+  if (inp.type === 'json') {
+    return `    const ${name} = ${expr}
+    if (${name} === undefined || ${name} === null) {
+      throw new HttpError(400, ${JSON.stringify(`${inp.varName}不能为空`)})
+    }`
+  }
+  return `    const ${name} = ${expr}
+    if (${name} === undefined || ${name} === null || ${name} === '') {
+      throw new HttpError(400, ${JSON.stringify(`${inp.varName}不能为空`)})
+    }`
+}
+
 export function emitRouteFile(route: RouteEmitInput): string {
   const method = route.httpMethod.toUpperCase()
   const exportName = method === 'DELETE' ? 'DELETE' : method
@@ -57,12 +88,7 @@ export function emitRouteFile(route: RouteEmitInput): string {
   const argLines = inputs.map((inp) => {
     const name = safeIdent(inp.varName, 'input')
     const expr = parseInputExpr(inp)
-    if (inp.required) {
-      return `    const ${name} = ${expr}
-    if (${name} === undefined || ${name} === null || ${name} === '') {
-      throw new HttpError(400, ${JSON.stringify(`${inp.varName}不能为空`)})
-    }`
-    }
+    if (inp.required) return requiredCheckLines(inp)
     return `    const ${name} = ${expr}`
   })
 
@@ -138,12 +164,7 @@ export function emitMergedRouteFiles(
       const argLines = inputs.map((inp) => {
         const name = safeIdent(inp.varName, 'input')
         const expr = parseInputExpr(inp)
-        if (inp.required) {
-          return `    const ${name} = ${expr}
-    if (${name} === undefined || ${name} === null || ${name} === '') {
-      throw new HttpError(400, ${JSON.stringify(`${inp.varName}不能为空`)})
-    }`
-        }
+        if (inp.required) return requiredCheckLines(inp)
         return `    const ${name} = ${expr}`
       })
       const callArgs = inputs

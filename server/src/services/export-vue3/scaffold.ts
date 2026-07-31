@@ -1,4 +1,6 @@
 ﻿import type { VoiderProjectConfig } from '../../types/voider-project.js'
+import type { ColorPalette } from '../../types/color-palette.js'
+import { buildPaletteCssVars } from '../../types/color-palette.js'
 import { pageIdToViewName } from './naming.js'
 
 export interface ScaffoldContext {
@@ -6,6 +8,7 @@ export interface ScaffoldContext {
   config: VoiderProjectConfig
   pages: Array<{ id: string; title: string }>
   componentIds: string[]
+  colorPalette?: ColorPalette
 }
 
 export function scaffoldFiles(ctx: ScaffoldContext): Record<string, string> {
@@ -251,7 +254,7 @@ const designScreenH = computed(() => vh.value / scale.value)
   files['src/style.css'] = `@tailwind base;
 @tailwind components;
 @tailwind utilities;
-
+${ctx.colorPalette?.colors.length ? `\n${buildPaletteCssVars(ctx.colorPalette)}` : ''}
 html, body, #app {
   width: 100%;
   height: 100%;

@@ -19,7 +19,12 @@ import {
   applyPageMap,
   readPageMapApplyConfig,
 } from '../../utils/page-map-flow.js'
+import {
+  applyObjectMap,
+  readObjectMapApplyConfig,
+} from '../../utils/object-map-flow.js'
 import { defaultEmptyReturnValue } from '../../utils/empty-return-value.js'
+import { coerceMapTypedOutput } from '../../utils/runtime-map.js'
 
 function asRecord(v: unknown): Record<string, unknown> {
   return v && typeof v === 'object' && !Array.isArray(v)
@@ -165,11 +170,53 @@ type RunnerCtx = {
   methodOutput?: ProcessorTypeExpr | null
 }
 
+function normalizeInputLayer(
+  raw: string,
+): 'business' | 'data' | 'request_header' {
+  if (raw === 'request_header') return 'request_header'
+  if (
+    raw === 'business' ||
+    raw === 'current_business' ||
+    raw === 'other_business'
+  ) {
+    return 'business'
+  }
+  return 'data'
+}
+
+async function resolveServiceRunnerSlice(
+  ctx: RunnerCtx,
+  targetServiceId: string,
+): Promise<{
+  serviceId: string
+  businessProcessors: ServiceProcessor[]
+  dataProcessors: ServiceProcessor[]
+}> {
+  const sid = targetServiceId.trim() || ctx.serviceId
+  if (sid === ctx.serviceId) {
+    return {
+      serviceId: ctx.serviceId,
+      businessProcessors: ctx.businessProcessors,
+      dataProcessors: ctx.dataProcessors,
+    }
+  }
+  const [businessProcessors, dataProcessors] = await Promise.all([
+    readServiceProcessors(ctx.projectPath, sid, 'business'),
+    readServiceProcessors(ctx.projectPath, sid, 'data'),
+  ])
+  return { serviceId: sid, businessProcessors, dataProcessors }
+}
+
 async function runBusinessMethod(
   ctx: RunnerCtx,
   processorId: string,
   methodId: string,
   params: Record<string, unknown>,
+  serviceSlice?: {
+    serviceId: string
+    businessProcessors: ServiceProcessor[]
+    dataProcessors: ServiceProcessor[]
+  },
 ): Promise<unknown> {
   const stackKey = `${processorId}::${methodId}`
   if (ctx.businessCallStack.includes(stackKey)) {
@@ -178,7 +225,9 @@ async function runBusinessMethod(
   if (ctx.businessCallStack.length >= 16) {
     throw new Error('业务方法调用嵌套过深')
   }
-  const method = findProcessorMethod(ctx.businessProcessors, processorId, methodId)
+  const businessProcessors =
+    serviceSlice?.businessProcessors ?? ctx.businessProcessors
+  const method = findProcessorMethod(businessProcessors, processorId, methodId)
   if (!method) throw new Error(`业务方法不存在：${stackKey}`)
   const flow = method.flow
   if (!flow?.nodes?.length) {
@@ -187,6 +236,9 @@ async function runBusinessMethod(
   return runFlowToEnd(
     {
       ...ctx,
+      serviceId: serviceSlice?.serviceId ?? ctx.serviceId,
+      businessProcessors,
+      dataProcessors: serviceSlice?.dataProcessors ?? ctx.dataProcessors,
       flow,
       businessCallStack: [...ctx.businessCallStack, stackKey],
       methodOutput: method.output,
@@ -223,37 +275,60 @@ async function executeNode(
   if (node.kind === 'input') {
     const varName = str(data, 'varName')
     if (!varName) throw new Error('输入节点未配置变量名')
-    const dataSource = str(data, 'dataSource') || 'other_data'
+    const dataSource = normalizeInputLayer(str(data, 'dataSource') || 'data')
     const bindingsRaw = asRecord(data.paramBindings)
     const bindings: Record<string, string> = {}
     for (const [k, v] of Object.entries(bindingsRaw)) {
       if (typeof v === 'string') bindings[k] = v
     }
     const params = resolveParamBindings(bindings, scope)
+    const targetServiceId = str(data, 'serviceId') || ctx.serviceId
 
     if (dataSource === 'request_header') {
       scope[varName] = ''
-    } else if (
-      dataSource === 'current_business' ||
-      dataSource === 'other_business'
-    ) {
+    } else if (dataSource === 'business') {
       const processorId = str(data, 'dataProcessorId')
       const methodId = str(data, 'dataMethodId')
       if (!processorId || !methodId) throw new Error('输入节点未配置业务方法')
-      scope[varName] = await runBusinessMethod(ctx, processorId, methodId, params)
+      const serviceSlice = await resolveServiceRunnerSlice(ctx, targetServiceId)
+      scope[varName] = await runBusinessMethod(
+        ctx,
+        processorId,
+        methodId,
+        params,
+        serviceSlice,
+      )
     } else {
       const processorId = str(data, 'dataProcessorId')
       const methodId = str(data, 'dataMethodId')
       if (!processorId || !methodId) throw new Error('输入节点未配置数据方法')
+      const serviceSlice = await resolveServiceRunnerSlice(ctx, targetServiceId)
       const apiResult = await debugDataLayerMethod({
         projectPath: ctx.projectPath,
-        serviceId: ctx.serviceId,
+        serviceId: targetServiceId,
         processorId,
         methodId,
         params,
         dryRun: ctx.dryRun,
       })
-      scope[varName] = apiResult.output
+      const method = findProcessorMethod(
+        serviceSlice.dataProcessors,
+        processorId,
+        methodId,
+      )
+      const savedOutput = data.outputTypeExpr
+      const outputExpr =
+        method?.output ??
+        (savedOutput &&
+        typeof savedOutput === 'object' &&
+        !Array.isArray(savedOutput)
+          ? (savedOutput as ProcessorTypeExpr)
+          : null)
+      scope[varName] = coerceMapTypedOutput(
+        apiResult.output,
+        outputExpr?.type,
+        outputExpr?.keyType,
+      )
     }
     return { scope, nextId: pickNext(ctx.flow, node, scope) }
   }
@@ -299,6 +374,15 @@ async function executeNode(
       throw new Error('分页映射节点未配置数据源或目标变量名')
     }
     applyPageMap(scope, config)
+    return { scope, nextId: pickNext(ctx.flow, node, scope) }
+  }
+
+  if (node.kind === 'objectMap') {
+    const config = readObjectMapApplyConfig(data)
+    if (!config) {
+      throw new Error('对象映射节点未配置数据源或目标变量名')
+    }
+    applyObjectMap(scope, config)
     return { scope, nextId: pickNext(ctx.flow, node, scope) }
   }
 

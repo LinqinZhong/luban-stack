@@ -16,6 +16,7 @@ export type MethodParamType =
   | 'boolean'
   | 'object'
   | 'array'
+  | 'map'
   | 'any'
 
 export type MethodReturnType = MethodParamType | 'void'
@@ -48,6 +49,8 @@ export function methodParamToDataFieldType(type: MethodParamType): DataFieldType
       return 'array'
     case 'object':
       return 'json'
+    case 'map':
+      return 'map'
     case 'any':
       return 'any'
     default:
@@ -136,6 +139,8 @@ export function dataFieldToMethodParamType(type: DataFieldType): MethodParamType
       return 'array'
     case 'json':
       return 'object'
+    case 'map':
+      return 'map'
     case 'any':
       return 'any'
     default:
@@ -165,6 +170,8 @@ function primitiveTsType(type: DataFieldType | undefined | null): string {
       return 'Record<string, any>'
     case 'array':
       return 'any[]'
+    case 'map':
+      return 'Record<string, any>'
     case 'any':
       return 'any'
     case 'icon':
@@ -266,6 +273,19 @@ export function processorTypeExprToTs(
 ): string {
   if (!expr) return 'any'
   const args = expr.genericArgs ?? {}
+  if (expr.type === 'map') {
+    const key = expr.keyType === 'number' ? 'number' : 'string'
+    if (expr.itemType === 'array') {
+      const leaf =
+        namedTypeWithGenerics(expr.itemItemTypeRef, args, library) ??
+        primitiveTsType((expr.itemItemType || 'string') as DataFieldType)
+      return `Map<${key}, ${leaf}[]>`
+    }
+    const leaf =
+      namedTypeWithGenerics(expr.itemTypeRef, args, library) ??
+      primitiveTsType((expr.itemType || 'string') as DataFieldType)
+    return `Map<${key}, ${leaf}>`
+  }
   if (expr.type === 'array') {
     if (expr.itemType === 'array') {
       const leaf =
@@ -294,6 +314,7 @@ export function processorTypeExprToMethodParamType(
 ): MethodParamType {
   if (!expr) return 'any'
   if (expr.type === 'array') return 'array'
+  if (expr.type === 'map') return 'map'
   if (expr.type === 'json' || expr.typeRef) return 'object'
   return dataFieldToMethodParamType((expr.type || 'any') as DataFieldType)
 }
@@ -309,12 +330,24 @@ export function dataFieldToProcessorTypeExpr(
     | 'itemTypeRef'
     | 'itemItemType'
     | 'itemItemTypeRef'
+    | 'keyType'
   >,
 ): ProcessorTypeExpr {
   const genericArgs = { ...(field.genericArgs ?? {}) }
   if (field.type === 'array') {
     return {
       ...createEmptyProcessorTypeExpr('array'),
+      itemType: field.itemType || 'any',
+      itemTypeRef: field.itemTypeRef || '',
+      itemItemType: field.itemItemType || '',
+      itemItemTypeRef: field.itemItemTypeRef || '',
+      genericArgs,
+    }
+  }
+  if (field.type === 'map') {
+    return {
+      ...createEmptyProcessorTypeExpr('map'),
+      keyType: field.keyType === 'number' ? 'number' : 'string',
       itemType: field.itemType || 'any',
       itemTypeRef: field.itemTypeRef || '',
       itemItemType: field.itemItemType || '',
@@ -386,8 +419,9 @@ export const METHOD_PARAM_TYPE_OPTIONS: Array<{
   { label: '字符串', value: 'string' },
   { label: '数字', value: 'number' },
   { label: '布尔值', value: 'boolean' },
-  { label: '对象', value: 'object' },
-  { label: '数组', value: 'array' },
+  { label: 'object', value: 'object' },
+  { label: '[]', value: 'array' },
+  { label: '映射', value: 'map' },
   { label: '任意', value: 'any' },
 ]
 
@@ -583,6 +617,7 @@ function normalizeParamType(value: unknown): MethodParamType {
     'boolean',
     'object',
     'array',
+    'map',
     'any',
   ]
   return allowed.includes(value as MethodParamType)
@@ -607,6 +642,8 @@ function mapAmbientTsType(type: string): string {
       return 'Record<string, unknown>'
     case 'array':
       return 'unknown[]'
+    case 'map':
+      return 'Map<string, unknown>'
     case 'void':
       return 'void'
     default:

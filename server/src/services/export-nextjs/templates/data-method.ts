@@ -26,6 +26,7 @@ export type DataMethodOutputMeta = {
   typeRef: string
   itemType: string
   itemTypeRef: string
+  keyType?: string
 }
 
 function quoteIdent(name: string): string {
@@ -160,6 +161,26 @@ function buildWhereClause(
         parts.push(`${col} BETWEEN ${sqlLiteral(v)} AND ${sqlLiteral(v2)}`)
         continue
       }
+      // 属于 / 不属于：空数组或未传参时不能丢掉条件（否则变成全表扫描）
+      if (op === 'in' || op === 'notIn') {
+        const list = Array.isArray(v)
+          ? v
+          : v === undefined || v === null || v === ''
+            ? []
+            : String(v)
+                .split(',')
+                .map((x) => x.trim())
+                .filter(Boolean)
+        if (!list.length) {
+          parts.push(op === 'in' ? '0=1' : '1=1')
+        } else {
+          const inner = list.map((x) => sqlLiteral(x)).join(', ')
+          parts.push(
+            op === 'in' ? `${col} IN (${inner})` : `${col} NOT IN (${inner})`,
+          )
+        }
+        continue
+      }
       if (v === undefined || v === null || v === '') continue
       if (op === 'eq') parts.push(`${col} = ${sqlLiteral(v)}`)
       else if (op === 'ne') parts.push(`${col} <> ${sqlLiteral(v)}`)
@@ -171,18 +192,6 @@ function buildWhereClause(
         parts.push(`${col} LIKE ${sqlLiteral(`%${String(v)}%`)}`)
       } else if (op === 'notLike') {
         parts.push(`${col} NOT LIKE ${sqlLiteral(`%${String(v)}%`)}`)
-      } else if (op === 'in' || op === 'notIn') {
-        const list = Array.isArray(v)
-          ? v
-          : String(v)
-              .split(',')
-              .map((x) => x.trim())
-              .filter(Boolean)
-        if (!list.length) continue
-        const inner = list.map((x) => sqlLiteral(x)).join(', ')
-        parts.push(
-          op === 'in' ? `${col} IN (${inner})` : `${col} NOT IN (${inner})`,
-        )
       }
     }
     if (parts.length) {
@@ -221,6 +230,22 @@ function evalMybatisIfAtom(
     }
     const empty = val == null || String(val) === ''
     return op === '!=' ? !empty : empty
+  }
+  const litCmp = atom.match(
+    /^([A-Za-z_][A-Za-z0-9_.]*)\s*(!=|==)\s*(?:'([^']*)'|"([^"]*)"|(-?\d+(?:\.\d+)?))\s*$/,
+  )
+  if (litCmp) {
+    const val = resolveParamValue(params, litCmp[1]!)
+    const op = litCmp[2]!
+    const rhsStr = litCmp[3] ?? litCmp[4]
+    const rhsNum = litCmp[5]
+    let eq: boolean
+    if (rhsNum != null) {
+      eq = Number(val) === Number(rhsNum)
+    } else {
+      eq = String(val ?? '') === String(rhsStr ?? '')
+    }
+    return op === '!=' ? !eq : eq
   }
   const nameOnly = atom.match(/^([A-Za-z_][A-Za-z0-9_.]*)$/)
   if (nameOnly) {
@@ -410,16 +435,54 @@ function wrapOutput(
   const named = (output.typeRef || '').trim()
   const scalar = new Set(['number', 'string', 'boolean'])
 
-  // 查询：按出参类型包装行集（非数组空结果为 null）
-  if (config.operation === 'query') {
+  // 查询：按出参包装；自定义 SELECT 仅数组/映射走此分支（标量走下方字段映射）
+  if (config.operation === 'query' || config.operation === 'custom') {
     if (output.type === 'array') return rows
-    if (output.type === 'number' && !named) return meta.total
-    if (output.type === 'boolean' && !named) return meta.total > 0
-    if (output.type === 'string' && !named) {
-      const single = rows.length ? rows[0] : null
-      return JSON.stringify(single)
+    if (output.type === 'map') {
+      const keyMap = mappings.find((m) => m.field === 'key')
+      if (!keyMap) return new Map()
+      const valueMaps = mappings.filter((m) => m.field !== 'key')
+      const valueIsArray = output.itemType === 'array'
+      const keyIsNumber = output.keyType === 'number'
+      const out = new Map<string | number, unknown>()
+      for (const row of rows) {
+        const rawKey = row[keyMap.column]
+        if (rawKey == null || rawKey === '') continue
+        const key: string | number = keyIsNumber
+          ? Number(rawKey)
+          : String(rawKey)
+        if (keyIsNumber && Number.isNaN(key)) continue
+        let entry: unknown
+        if (valueMaps.length === 1 && valueMaps[0]!.field === 'value') {
+          entry = row[valueMaps[0]!.column]
+        } else {
+          const obj: Record<string, unknown> = {}
+          for (const m of valueMaps) {
+            obj[m.field] = row[m.column]
+          }
+          entry = obj
+        }
+        if (valueIsArray) {
+          const list = (out.get(key) as unknown[] | undefined) ?? []
+          list.push(entry)
+          out.set(key, list)
+        } else {
+          out.set(key, entry)
+        }
+      }
+      return out
     }
-    return rows.length ? rows[0]! : null
+    if (config.operation === 'custom') {
+      // 自定义标量：交给下方 fieldMappings
+    } else {
+      if (output.type === 'number' && !named) return meta.total
+      if (output.type === 'boolean' && !named) return meta.total > 0
+      if (output.type === 'string' && !named) {
+        const single = rows.length ? rows[0] : null
+        return JSON.stringify(single)
+      }
+      return rows.length ? rows[0]! : null
+    }
   }
 
   if (scalar.has(output.type) && !named) {
@@ -485,7 +548,18 @@ export async function runDataMethod(options: {
   } else if (config.operation === 'custom') {
     if (!config.sql?.trim()) throw new Error('请先配置自定义 SQL')
     sql = applyCustomSql(config.sql, params, table)
-    if (isCustomWriteSql(sql)) isWrite = true
+    if (isCustomWriteSql(sql)) {
+      isWrite = true
+    } else {
+      const page = pickPageMeta(params, config.pageParam ?? '')
+      if (page.enabled) {
+        const offset = (page.current - 1) * page.pageSize
+        sql += ` LIMIT ${page.pageSize} OFFSET ${offset}`
+        current = page.current
+        pageSize = page.pageSize
+        paginated = true
+      }
+    }
   } else {
     throw new Error(`不支持的操作：${config.operation}`)
   }
@@ -519,11 +593,14 @@ export async function runDataMethod(options: {
   }
 
   const rows =
-    config.operation === 'query'
+    config.operation === 'query' || (config.operation === 'custom' && !isWrite)
       ? exec.rows.map((row) => mapRowKeysToCamel(row))
       : exec.rows
   let total = rows.length
-  if (config.operation === 'query' && paginated) {
+  if (
+    (config.operation === 'query' || config.operation === 'custom') &&
+    paginated
+  ) {
     if (rows.length < pageSize) {
       total = (current - 1) * pageSize + rows.length
     } else {

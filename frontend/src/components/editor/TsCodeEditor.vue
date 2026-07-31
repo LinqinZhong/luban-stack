@@ -65,6 +65,8 @@ function mapTsType(type: string): string {
       return 'Record<string, unknown>'
     case 'array':
       return 'unknown[]'
+    case 'map':
+      return 'Map<string, unknown>'
     case 'void':
       return 'void'
     default:

@@ -41,13 +41,17 @@ export type TypeAtomKind =
   | 'generic'
   | 'any'
   | 'array'
+  /** 映射 Map<K, T> */
+  | 'map'
 
 export interface TypeAtom {
   kind: TypeAtomKind
   /** named → 类型 id；generic → 泛型参数名 */
   ref?: string
-  /** array → 元素类型 */
+  /** array → 元素类型；map → 值类型 */
   item?: TypeAtom
+  /** map → 键类型（默认 string） */
+  key?: 'string' | 'number'
 }
 
 /** tabs = | 的各个分支 */
@@ -501,6 +505,7 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 function normalizeAtom(input: unknown): TypeAtom {
   if (!isPlainObject(input)) return createEmptyTypeAtom()
   let kind = String(input.kind ?? 'string') as TypeAtomKind | 'unknown'
+  if ((kind as string) === 'dict') kind = 'map'
   // 旧版 unknown → any；不再支持
   if (kind === 'unknown') kind = 'any'
   const allowed: TypeAtomKind[] = [
@@ -679,6 +684,10 @@ export function typeExprToSelectValue(expr: TypeExpr): string {
           ? `generic:${item.ref ?? ''}`
           : item.kind
     return `array:${inner}`
+  }
+  if (atom.kind === 'map') {
+    const key = atom.key === 'number' ? 'number' : 'string'
+    return `Map<${key}, ${formatAtomPreview(atom.item ?? { kind: 'any' }, namedLookup)}>`
   }
   if (atom.kind === 'named') return `named:${atom.ref ?? ''}`
   if (atom.kind === 'generic') return `generic:${atom.ref ?? ''}`

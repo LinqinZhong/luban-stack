@@ -14,6 +14,7 @@ const NODE_OPTIONS: {
   { kind: 'action', label: '操作', desc: '执行自定义代码片段' },
   { kind: 'output', label: '输出', desc: '调用数据层写入方法' },
   { kind: 'pageMap', label: '分页映射', desc: '分页或数组映射为 QueryPageVo<T>（只需选 T）' },
+  { kind: 'objectMap', label: '对象映射', desc: '对象字段映射为接口类型（同名自动填写）' },
   { kind: 'throw', label: '业务异常', desc: '中断流程并返回业务错误（400）' },
   { kind: 'end', label: '终止', desc: '结束流程并可返回结果' },
 ]

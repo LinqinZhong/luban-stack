@@ -6,11 +6,10 @@
 }
 */
 
-if(loading) return
+if($props.loading || refreshing) return
 setData('hasNext', true)
 setData('pagination',{
   current: 1,
   pageSize: 10
 })
-setData('refreshing', true)
-loadData()
+loadData(true)

@@ -8,6 +8,7 @@ import {
   patchProjectConfig,
 } from '../services/project.js'
 import { readIconLibrary, saveIconLibrary } from '../services/icons.js'
+import { readColorPalette, saveColorPalette } from '../services/palette.js'
 import {
   readDataTypeLibrary,
   saveDataTypeLibrary,
@@ -55,6 +56,7 @@ import {
   saveServiceProcessors,
 } from '../services/backend-services.js'
 import { debugDataLayerMethod } from '../services/data-method-debug.js'
+import { jsonSafeValue } from '../utils/runtime-map.js'
 import { exportVue3Project } from '../services/export-vue3.js'
 import { exportMpWxProject } from '../services/export-mp-wx.js'
 import { exportNestJsProject } from '../services/export-nextjs.js'
@@ -157,11 +159,25 @@ router.put('/config', async (req, res) => {
       res.status(400).json({ message: '请提供 projectPath' })
       return
     }
-    const patch: { wechatAppId?: string | null } = {}
+    const patch: {
+      wechatAppId?: string | null
+      canvasScene?: 'h5' | 'miniprogram' | null
+    } = {}
     if ('wechatAppId' in (req.body ?? {})) {
       const raw = req.body.wechatAppId
       patch.wechatAppId =
         raw === null || raw === undefined ? null : String(raw)
+    }
+    if ('canvasScene' in (req.body ?? {})) {
+      const raw = req.body.canvasScene
+      if (raw === null || raw === undefined || raw === '') {
+        patch.canvasScene = null
+      } else if (raw === 'h5' || raw === 'miniprogram') {
+        patch.canvasScene = raw
+      } else {
+        res.status(400).json({ message: 'canvasScene 须为 h5 或 miniprogram' })
+        return
+      }
     }
     const result = await patchProjectConfig(projectPath.trim(), patch)
     res.json(result)
@@ -178,6 +194,20 @@ router.get('/icons', async (req, res) => {
       return
     }
     const library = await readIconLibrary(projectPath.trim())
+    res.json(library)
+  } catch (err) {
+    handleError(res, err)
+  }
+})
+
+router.get('/palette', async (req, res) => {
+  try {
+    const projectPath = typeof req.query.projectPath === 'string' ? req.query.projectPath : ''
+    if (!projectPath.trim()) {
+      res.status(400).json({ message: '请提供 projectPath' })
+      return
+    }
+    const library = await readColorPalette(projectPath.trim())
     res.json(library)
   } catch (err) {
     handleError(res, err)
@@ -307,6 +337,20 @@ router.put('/icons', async (req, res) => {
       return
     }
     const library = await saveIconLibrary(projectPath.trim(), { icons })
+    res.json(library)
+  } catch (err) {
+    handleError(res, err)
+  }
+})
+
+router.put('/palette', async (req, res) => {
+  try {
+    const { projectPath, colors } = req.body ?? {}
+    if (!projectPath || typeof projectPath !== 'string' || !projectPath.trim()) {
+      res.status(400).json({ message: '请提供 projectPath' })
+      return
+    }
+    const library = await saveColorPalette(projectPath.trim(), { colors })
     res.json(library)
   } catch (err) {
     handleError(res, err)
@@ -538,7 +582,12 @@ router.post('/services/processors/debug', async (req, res) => {
           : {},
       dryRun: dryRun !== false,
     })
-    res.json(result)
+    // Map 无法经 JSON 传输，先摊成普通对象；前端再按出参类型还原为 Map
+    res.json({
+      ...result,
+      output: jsonSafeValue(result.output),
+      raw: jsonSafeValue(result.raw),
+    })
   } catch (err) {
     handleError(res, err)
   }

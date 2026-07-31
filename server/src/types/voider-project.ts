@@ -12,6 +12,8 @@ export interface VoiderProjectConfig {
   canvas: {
     /** 画布宽度（px） */
     width: number
+    /** 预览场景：H5 / 微信小程序 */
+    scene?: 'h5' | 'miniprogram'
   }
   /** 入口页面 id（pages/ 下目录名） */
   entryPage?: string
@@ -75,6 +77,14 @@ export function isValidProjectConfig(value: unknown): value is VoiderProjectConf
   if (
     config.entryPage !== undefined &&
     (typeof config.entryPage !== 'string' || !config.entryPage.trim())
+  ) {
+    return false
+  }
+
+  if (
+    canvas.scene !== undefined &&
+    canvas.scene !== 'h5' &&
+    canvas.scene !== 'miniprogram'
   ) {
     return false
   }

@@ -231,8 +231,8 @@ function typeLabel(schema: JsonSchema): string {
   if (t === 'string') return '字符串'
   if (t === 'number' || t === 'integer') return '数值'
   if (t === 'boolean') return '布尔值'
-  if (t === 'object') return '对象'
-  if (t === 'array') return '数组'
+  if (t === 'object') return 'object'
+  if (t === 'array') return '[]'
   if (t === 'null') return 'null'
   if (Array.isArray(t)) return t.join('|')
   return '任意'

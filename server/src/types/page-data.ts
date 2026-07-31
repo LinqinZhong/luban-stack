@@ -4,6 +4,8 @@ export type DataFieldType =
   | 'boolean'
   | 'json'
   | 'array'
+  /** 映射：Record<K, T>，K 为 string | number */
+  | 'map'
   | 'icon'
   | 'color'
   /** 任意类型（常用于 any[]：数组内每项可自选类型） */
@@ -14,6 +16,9 @@ export type DataFieldType =
   | 'api'
   /** 资源外链 URI（值类型等价 type URI = string） */
   | 'resource'
+
+/** 映射键类型 */
+export type MapKeyType = 'string' | 'number'
 
 export type DataFieldValue =
   | string
@@ -29,6 +34,7 @@ export interface ObjectSubField {
   value?: DataFieldValue
   typeRef?: string
   itemType?: DataFieldType
+  keyType?: MapKeyType
   itemTypeRef?: string
   arrayFields?: ArraySubField[]
   objectFields?: ObjectSubField[]

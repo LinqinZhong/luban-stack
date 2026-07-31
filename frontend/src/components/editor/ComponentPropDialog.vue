@@ -549,7 +549,7 @@ function handleSave() {
           <p class="hint">
             组件内调用
             <code>$props.{{ draft.name || 'fetchApi' }}(args)</code>
-            时传入这些字段。匹配规则：API 必填入参必须出现且类型一致；可选入参可省略。
+            时传入这些字段。匹配规则：组件声明的形参须出现在 API 入参中且类型一致；API 可有额外入参（由调用方补齐）。
           </p>
         </el-form-item>
 

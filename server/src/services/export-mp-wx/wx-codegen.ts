@@ -2,6 +2,11 @@
 import type { ComponentConfig } from '../../types/component.js'
 import type { LifecycleConfig } from '../../types/lifecycle.js'
 import type { PageMethod } from '../../types/page-method.js'
+import type { ColorPalette } from '../../types/color-palette.js'
+import {
+  findPaletteColor,
+  resolvePaletteColorForCss,
+} from '../../types/color-palette.js'
 import type { XmlNode } from '../export-vue3/xml-parser.js'
 import { DEFAULT_CANVAS_WIDTH } from '../../types/voider-project.js'
 import {
@@ -9,12 +14,15 @@ import {
   normalizeBindingOperators,
   scanBindingSpans,
   templateLiteralsToConcat,
+  rewriteWxmlGlobalCalls,
   unwrapWholeBinding,
 } from './binding-expr.js'
 import {
+  apiRefKey,
   parseApiPropBinding,
   type MpApiBinding,
 } from './api-runtime.js'
+import { codeUsesIdent, lineComment } from './js-comments.js'
 import {
   generateComponentAttached,
   generateComponentMethodFn,
@@ -36,6 +44,55 @@ import {
 } from './wx-refs.js'
 
 export { ClassRegistry } from './wx-tw.js'
+
+/** 当前 codegen 使用的调色板 */
+let activeColorPalette: ColorPalette | undefined
+
+export function withColorPalette<T>(
+  palette: ColorPalette | undefined,
+  fn: () => T,
+): T {
+  const prev = activeColorPalette
+  activeColorPalette = palette
+  try {
+    return fn()
+  } finally {
+    activeColorPalette = prev
+  }
+}
+
+function toCssColor(value: string): string {
+  return resolvePaletteColorForCss(value, activeColorPalette) ?? value
+}
+
+/** SVG tint / 导航栏等需要具体色值，不能用 var() */
+function toConcreteColor(value: string): string {
+  const trimmed = value.trim()
+  if (!trimmed) return trimmed
+  const varMatch = /^var\(--([a-zA-Z][a-zA-Z0-9_-]*)\)$/.exec(trimmed)
+  if (varMatch) {
+    const found = findPaletteColor(activeColorPalette, varMatch[1])
+    if (found) return found.value
+  }
+  const found = findPaletteColor(activeColorPalette, trimmed)
+  return found ? found.value : value
+}
+
+/** 绑定色 → WXS palette.color（CSS var） */
+function wrapCssColorExpr(expr: string): string {
+  return `palette.color(${expr})`
+}
+
+/** 绑定色 → WXS palette.value（具体色值） */
+function wrapConcreteColorExpr(expr: string): string {
+  return `palette.value(${expr})`
+}
+
+const PALETTE_WXS_IMPORT =
+  '<wxs src="../../utils/palette.wxs" module="palette" />\n'
+const UTIL_WXS_IMPORT =
+  '<wxs src="../../utils/util.wxs" module="util" />\n'
+const PAGE_WXS_IMPORTS = `${PALETTE_WXS_IMPORT}${UTIL_WXS_IMPORT}`
 
 function escapeXml(text: string): string {
   return text
@@ -293,19 +350,30 @@ function resolveDynamicStyleExpr(
   baseRaw: string | undefined,
   attrs: Record<string, string>,
   fallback: string,
+  options?: { concrete?: boolean },
 ): { static?: string; expr: string } {
+  const mapColor = options?.concrete ? toConcreteColor : toCssColor
   const base = baseRaw && baseRaw !== 'null' ? baseRaw.trim() : ''
-  const baseExpr = base
+  const baseCss =
+    base && !isBinding(base) ? mapColor(base) : base
+    const baseExpr = baseCss
     ? isBinding(base)
-      ? `(${normalizeExpr(base.replace(/^\{|\}$/g, ''))})`
-      : `'${escapeWxmlStr(base)}'`
+      ? `(${normalizeExpr(
+          templateLiteralsToConcat(
+            normalizeBindingOperators(
+              unwrapWholeBinding(base) ??
+                base.replace(/^\{/, '').replace(/\}$/, ''),
+            ),
+          ),
+        )})`
+      : `'${escapeWxmlStr(baseCss)}'`
     : `'${escapeWxmlStr(fallback)}'`
 
   const states = parseDynamicStylesStates(attrs.dynamicStyles).filter((s) =>
     s.styles[styleKey]?.trim(),
   )
   if (!states.length) {
-    if (base && !isBinding(base)) return { static: base, expr: baseExpr }
+    if (base && !isBinding(base)) return { static: baseCss, expr: baseExpr }
     return { expr: baseExpr }
   }
 
@@ -313,9 +381,17 @@ function resolveDynamicStyleExpr(
   for (let i = states.length - 1; i >= 0; i--) {
     const state = states[i]!
     const override = state.styles[styleKey]!.trim()
+    const overrideCss = isBinding(override) ? override : mapColor(override)
     const overrideExpr = isBinding(override)
-      ? `(${normalizeExpr(override.replace(/^\{|\}$/g, ''))})`
-      : `'${escapeWxmlStr(override)}'`
+      ? `(${normalizeExpr(
+          templateLiteralsToConcat(
+            normalizeBindingOperators(
+              unwrapWholeBinding(override) ??
+                override.replace(/^\{/, '').replace(/\}$/, ''),
+            ),
+          ),
+        )})`
+      : `'${escapeWxmlStr(overrideCss)}'`
     const when = compileScenariosOrExpr(state.scenarios) ?? 'true'
     expr = `(${when}) ? ${overrideExpr} : (${expr})`
   }
@@ -399,65 +475,90 @@ const WX_EVENT_BIND: Record<
 function buildEventHandlerPrelude(
   kind: 'scroll' | 'touch' | 'tap' | 'plain',
   ctx: RenderCtx,
+  body: string,
 ): string[] {
+  const uses = (ident: string) => codeUsesIdent(body, ident)
   const lines: string[] = []
   lines.push(`    var that = this`)
-  if (kind === 'scroll' || kind === 'touch') {
-    lines.push(`    var setData = function (prop, value) {`)
-    lines.push(`      if (that.data[prop] === value) return`)
-    lines.push(`      var patch = {}`)
-    lines.push(`      patch[prop] = value`)
-    lines.push(`      that.setData(patch)`)
-    // 滚动/触摸高频：不在 handler 末尾全量重算；仅在 setData 真正写入后重算依赖字段
-    lines.push(
-      `      if (typeof that.__recomputeComputed === 'function') that.__recomputeComputed()`,
-    )
-    lines.push(`    }`)
-  } else {
-    lines.push(`    var setData = function (prop, value) {`)
-    lines.push(`      var patch = {}`)
-    lines.push(`      patch[prop] = value`)
-    lines.push(`      that.setData(patch)`)
-    lines.push(`    }`)
+
+  const needSetData = uses('setData')
+  const needShowToast = uses('showToast')
+  const needNavigateTo = uses('navigateTo')
+  const needNavigateBack = uses('navigateBack')
+  const needRuntime =
+    needSetData || needShowToast || needNavigateTo || needNavigateBack
+  if (needRuntime) {
+    lines.push(`    var runtime = require('../../utils/runtime.js')`)
   }
-  lines.push(`    var showToast = function (message, duration) {`)
-  lines.push(
-    `      wx.showToast({ title: String(message == null ? '' : message), icon: 'none', duration: duration === 'long' ? 3000 : 1500 })`,
-  )
-  lines.push(`    }`)
+  if (needShowToast) {
+    lines.push(`    var showToast = runtime.showToast`)
+  }
+  if (needNavigateTo) {
+    lines.push(`    var navigateTo = runtime.navigateTo`)
+  }
+  if (needNavigateBack) {
+    lines.push(`    var navigateBack = runtime.navigateBack`)
+  }
+  if (needSetData) {
+    lines.push(`    var setData = runtime.createSetData(that)`)
+  }
   for (const name of ctx.siblingMethodNames) {
     if (!/^[A-Za-z_$][\w$]*$/.test(name)) continue
+    if (!uses(name)) continue
     lines.push(
       `    var ${name} = function () { return that.${name}.apply(that, arguments) }`,
     )
   }
-  const refNames = new Set((ctx.refFields ?? []).map((f) => f.name))
-  lines.push(...renderRefLocalVars(ctx.refFields ?? []))
+  const usedRefs = (ctx.refFields ?? []).filter((f) => uses(f.name))
+  const refNames = new Set(usedRefs.map((f) => f.name))
+  lines.push(...renderRefLocalVars(usedRefs))
   for (const field of ctx.dataFieldNames) {
     if (!/^[A-Za-z_$][\w$]*$/.test(field)) continue
     if (ctx.siblingMethodNames.includes(field)) continue
     if (refNames.has(field)) continue
+    if (!uses(field)) continue
     lines.push(`    var ${field} = that.data.${field}`)
   }
   if (kind === 'scroll') {
-    lines.push(
-      `    var scrollTop = e && e.detail && e.detail.scrollTop != null ? e.detail.scrollTop : 0`,
-    )
-    lines.push(
-      `    var scrollLeft = e && e.detail && e.detail.scrollLeft != null ? e.detail.scrollLeft : 0`,
-    )
-    lines.push(
-      `    var scrollHeight = e && e.detail && e.detail.scrollHeight != null ? e.detail.scrollHeight : 0`,
-    )
+    if (uses('scrollTop')) {
+      lines.push(
+        `    var scrollTop = e && e.detail && e.detail.scrollTop != null ? e.detail.scrollTop : 0`,
+      )
+    }
+    if (uses('scrollLeft')) {
+      lines.push(
+        `    var scrollLeft = e && e.detail && e.detail.scrollLeft != null ? e.detail.scrollLeft : 0`,
+      )
+    }
+    if (uses('scrollHeight')) {
+      lines.push(
+        `    var scrollHeight = e && e.detail && e.detail.scrollHeight != null ? e.detail.scrollHeight : 0`,
+      )
+    }
   }
   if (kind === 'touch') {
-    lines.push(
-      `    var __touch = (e && e.touches && e.touches[0]) || (e && e.changedTouches && e.changedTouches[0]) || {}`,
-    )
-    lines.push(`    var clientX = __touch.clientX || 0`)
-    lines.push(`    var clientY = __touch.clientY || 0`)
-    lines.push(`    var pageX = __touch.pageX || 0`)
-    lines.push(`    var pageY = __touch.pageY || 0`)
+    const needTouch =
+      uses('clientX') ||
+      uses('clientY') ||
+      uses('pageX') ||
+      uses('pageY')
+    if (needTouch) {
+      lines.push(
+        `    var __touch = (e && e.touches && e.touches[0]) || (e && e.changedTouches && e.changedTouches[0]) || {}`,
+      )
+      if (uses('clientX')) {
+        lines.push(`    var clientX = __touch.clientX || 0`)
+      }
+      if (uses('clientY')) {
+        lines.push(`    var clientY = __touch.clientY || 0`)
+      }
+      if (uses('pageX')) {
+        lines.push(`    var pageX = __touch.pageX || 0`)
+      }
+      if (uses('pageY')) {
+        lines.push(`    var pageY = __touch.pageY || 0`)
+      }
+    }
   }
   return lines
 }
@@ -466,6 +567,7 @@ function registerCustomEventHandler(
   eventKey: string,
   raw: string,
   ctx: RenderCtx,
+  eventParamNames: string[] = [],
 ): string | null {
   const meta = WX_EVENT_BIND[eventKey]
   if (!meta) return null
@@ -481,32 +583,22 @@ function registerCustomEventHandler(
       .join('\n')
     if (!body) return null
     const finalName = `__${eventKey}_${ctx.handlerSeq.n++}`
-    const prelude = buildEventHandlerPrelude(meta.kind, ctx)
+    const bodyIndented = body
+      .split('\n')
+      .map((line) => (line.trim() ? `    ${line}` : ''))
+      .join('\n')
+    // 滚动 / 触摸高频：不在末尾再全量重算；createSetData 写入时已按 prop 选择性重算
+    const prelude = buildEventHandlerPrelude(meta.kind, ctx, body)
+    const paramLocals = injectComponentEventParamLocals(body, eventParamNames)
     if (eventKey === 'onScrollToLower') {
       prelude.push(
         `    if (that.data.loading || that.data.refreshing) return`,
       )
       prelude.push(`    that.__voiderAtLower = true`)
     }
-    const bodyIndented = body
-      .split('\n')
-      .map((line) => (line.trim() ? `    ${line}` : ''))
-      .join('\n')
-    // 滚动 / 触摸属于高频事件：每次 setData + 重算计算字段会卡死滚动、拖垮触底
-    const skipRecompute =
-      eventKey === 'onScroll' ||
-      eventKey === 'onScrollToLower' ||
-      eventKey === 'onScrollToUpper' ||
-      eventKey === 'onTouchStart' ||
-      eventKey === 'onTouchMove' ||
-      eventKey === 'onTouchEnd' ||
-      eventKey === 'onTouchCancel'
-    const recomputeLine = skipRecompute
-      ? ''
-      : `\n    if (typeof that.__recomputeComputed === 'function') that.__recomputeComputed()`
     ctx.pageHandlers.push({
       name: finalName,
-      body: `${prelude.join('\n')}\n${bodyIndented}${recomputeLine}`,
+      body: `${[...prelude, ...paramLocals].join('\n')}\n${bodyIndented}`,
     })
     return `${meta.bind}="${finalName}"`
   }
@@ -524,6 +616,29 @@ function registerCustomEventHandler(
   }
 
   return null
+}
+
+/** 组件 emit → triggerEvent({ args })；自定义脚本里的 value 等事件形参 */
+function injectComponentEventParamLocals(
+  body: string,
+  paramNames: string[],
+): string[] {
+  const names = paramNames
+    .map((n) => n.trim())
+    .filter((n) => /^[A-Za-z_$][\w$]*$/.test(n) && codeUsesIdent(body, n))
+  if (!names.length) return []
+  const lines: string[] = [
+    `    var __payload = (e && e.detail) || {}`,
+    `    var __args = Array.isArray(__payload.args) ? __payload.args : []`,
+  ]
+  for (let i = 0; i < paramNames.length; i++) {
+    const name = paramNames[i]!.trim()
+    if (!names.includes(name)) continue
+    lines.push(
+      `    var ${name} = __args[${i}] !== undefined ? __args[${i}] : __payload[${JSON.stringify(name)}]`,
+    )
+  }
+  return lines
 }
 
 /**
@@ -547,6 +662,7 @@ function collectComponentCustomEventAttrs(
   eventName: string,
   raw: string | undefined,
   ctx: RenderCtx,
+  eventParamNames: string[] = [],
 ): string[] {
   const trimmed = raw?.trim()
   if (!trimmed || !isEventBindingValue(trimmed)) return []
@@ -555,6 +671,7 @@ function collectComponentCustomEventAttrs(
     bindName: `bind:${eventName}`,
     /** 子组件 triggerEvent 的 detail 作为 payload */
     payloadFromDetail: true,
+    eventParamNames,
   })
 }
 
@@ -569,6 +686,8 @@ function buildPresetEventBindAttrs(
     payloadFromDetail?: boolean
     /** onScroll 等：{scrollTop} → e.detail.scrollTop */
     isScroll?: boolean
+    /** 组件事件形参名（对应 emit 的 args / detail 字段） */
+    eventParamNames?: string[]
   },
 ): string[] {
   const bindings = parseEvtBindings(raw)
@@ -576,7 +695,12 @@ function buildPresetEventBindAttrs(
 
   if (bindings.every((b) => (b.method || '').trim() === '__custom__')) {
     // 自定义脚本：走 registerCustomEventHandler（仅 onClick 键名用于命名）
-    const a = registerCustomEventHandler('onClick', raw, ctx)
+    const a = registerCustomEventHandler(
+      'onClick',
+      raw,
+      ctx,
+      options.eventParamNames ?? [],
+    )
     if (!a) return []
     // registerCustomEventHandler 返回 bindtap="..."，替换 bind 名
     const m = a.match(/^(\w+(?::[\w.-]+)?)=(".*")$/)
@@ -800,10 +924,29 @@ function buildPresetEventBindAttrs(
 
   if (!stmts.length) return []
 
-  // Page 无 observers：setData 后主动重算计算字段（标题栏透明度等）
-  stmts.push(
-    `if (typeof this.__recomputeComputed === 'function') this.__recomputeComputed()`,
-  )
+  // 收集本 handler 写入的 data key，在 setData 回调里按依赖选择性重算
+  const changedKeys: string[] = []
+  for (const s of stmts) {
+    const m = s.match(/this\.setData\(\{\s*([A-Za-z_$][\w$]*)\s*:/)
+    if (m && m[1] && !changedKeys.includes(m[1])) changedKeys.push(m[1]!)
+  }
+  if (changedKeys.length) {
+    // 把最后一个 this.setData({...}) 改成带回调重算（避免 this.data 尚未刷新）
+    for (let i = stmts.length - 1; i >= 0; i--) {
+      const s = stmts[i]!
+      if (!/this\.setData\(\{/.test(s)) continue
+      if (s.includes('function')) break
+      const keysLit =
+        changedKeys.length === 1
+          ? `[${JSON.stringify(changedKeys[0])}]`
+          : JSON.stringify(changedKeys)
+      stmts[i] = s.replace(
+        /this\.setData\((\{[\s\S]*\})\)\s*$/,
+        `this.setData($1, function () { if (typeof this.__recomputeComputed === 'function') this.__recomputeComputed(${keysLit}) })`,
+      )
+      break
+    }
+  }
 
   const name = `__onEvt_${ctx.handlerSeq.n++}`
   ctx.pageHandlers.push({
@@ -1011,9 +1154,6 @@ function shouldUseNativeCustomRefresher(
 function ensureNativeCustomRefresherHandlers(ctx: RenderCtx): void {
   if (ctx.pageHandlers.some((h) => h.name === '__onRefresherPulling')) return
 
-  const recompute =
-    `    if (typeof that.__recomputeComputed === 'function') that.__recomputeComputed()`
-
   ctx.pageHandlers.push({
     name: '__onRefresherPulling',
     body: [
@@ -1025,7 +1165,7 @@ function ensureNativeCustomRefresherHandlers(ctx: RenderCtx): void {
       `    var t = Math.min(1, dy / 500)`,
       `    var h = maxPull * Math.sin(t * Math.PI * 0.5)`,
       `    that.setData({ pullHeight: h })`,
-      recompute,
+      `    if (typeof that.__recomputeComputed === 'function') that.__recomputeComputed(['pullHeight'])`,
     ].join('\n'),
   })
 
@@ -1035,11 +1175,11 @@ function ensureNativeCustomRefresherHandlers(ctx: RenderCtx): void {
       `    var that = this`,
       `    if (that.data.loading) {`,
       `      that.setData({ refreshing: false, pullHeight: 0 })`,
-      `      if (typeof that.__recomputeComputed === 'function') that.__recomputeComputed()`,
+      `      if (typeof that.__recomputeComputed === 'function') that.__recomputeComputed(['refreshing', 'pullHeight'])`,
       `      return`,
       `    }`,
       `    that.setData({ pullHeight: 40 })`,
-      `    if (typeof that.__recomputeComputed === 'function') that.__recomputeComputed()`,
+      `    if (typeof that.__recomputeComputed === 'function') that.__recomputeComputed(['pullHeight'])`,
       // Pager 等组件：实际逻辑在 pullRefresh；refresh 可能是空的对外方法
       `    if (typeof that.pullRefresh === 'function') that.pullRefresh()`,
       `    else if (typeof that.refresh === 'function') that.refresh()`,
@@ -1052,7 +1192,7 @@ function ensureNativeCustomRefresherHandlers(ctx: RenderCtx): void {
     body: [
       `    var that = this`,
       `    that.setData({ pullHeight: 0 })`,
-      recompute,
+      `    if (typeof that.__recomputeComputed === 'function') that.__recomputeComputed(['pullHeight'])`,
     ].join('\n'),
   })
 }
@@ -1062,7 +1202,9 @@ function toWxmlText(raw: string): string {
   if (!raw) return ''
   const whole = unwrapWholeBinding(raw)
   if (whole != null) {
-    const expr = templateLiteralsToConcat(normalizeBindingOperators(whole))
+    const expr = rewriteWxmlGlobalCalls(
+      templateLiteralsToConcat(normalizeBindingOperators(whole)),
+    )
     return `{{${normalizeExpr(expr)}}}`
   }
   const spans = scanBindingSpans(raw)
@@ -1072,7 +1214,9 @@ function toWxmlText(raw: string): string {
   for (const span of spans) {
     out += raw.slice(cursor, span.start)
     cursor = span.end
-    const expr = templateLiteralsToConcat(normalizeBindingOperators(span.expr))
+    const expr = rewriteWxmlGlobalCalls(
+      templateLiteralsToConcat(normalizeBindingOperators(span.expr)),
+    )
     out += `{{${normalizeExpr(expr)}}}`
   }
   out += raw.slice(cursor)
@@ -1080,28 +1224,53 @@ function toWxmlText(raw: string): string {
 }
 
 function normalizeExpr(expr: string): string {
-  // ????$props???? $props.x ??properties / data
-  if (expr === '$props' || expr === 'props') return '$props'
-  if (expr.startsWith('$props.')) return expr.slice('$props.'.length)
-  if (expr.startsWith('props.')) return expr.slice('props.'.length)
-  return expr
+  // WXML {{}} 统一出口：Number/String/Boolean/Array.isArray → util.*（WXS）
+  let e = rewriteWxmlGlobalCalls(expr)
+  if (e === '$props' || e === 'props') return '$props'
+  if (e.startsWith('$props.')) return e.slice('$props.'.length)
+  if (e.startsWith('props.')) return e.slice('props.'.length)
+  return e
 }
 
 /**
- * 组件 prop 可写入 WXML 的绑定：简单路径，或 ! / !! 取反（如 !goodsInfo）。
- * 避免把 `{!goodsInfo}` 误判成 JSON 对象而整段丢弃。
+ * 组件 prop 可写入 WXML 的绑定。
+ * 允许简单路径、! / !! 取反，以及 || / && / 比较 / .length 等复合表达式
+ *（如 empty="{!remarkList || displayList.length === 0}"）。
+ * 排除 JSON 对象字面量，避免与 api 绑定混淆。
  */
 function isWxmlComponentPropExpr(expr: string): boolean {
   const e = expr.trim()
   if (!e) return false
+  if (looksLikeJsonObjectLiteral(e)) return false
   if (isSimpleBindingPath(e)) return true
   const not = e.match(/^!{1,2}\s*(.+)$/)
-  return Boolean(not && isSimpleBindingPath(not[1]!))
+  if (not && isSimpleBindingPath(not[1]!.trim())) return true
+  // 复合布尔 / 比较 / 三元 / 成员（.length）等
+  if (
+    /(?:\|\||&&|===|!==|==|!=|<=|>=|<|>|\?|:|\.length\b)/.test(e) ||
+    /^!{1,2}\s*\(/.test(e)
+  ) {
+    return true
+  }
+  return false
+}
+
+function looksLikeJsonObjectLiteral(expr: string): boolean {
+  const t = expr.trim()
+  if (!t.startsWith('{')) return false
+  try {
+    const v = JSON.parse(t) as unknown
+    return v !== null && typeof v === 'object' && !Array.isArray(v)
+  } catch {
+    return false
+  }
 }
 
 /** 表达式内的 $props.x → x（页面/组件 WXML 数据域） */
 function normalizeWxmlPropExpr(expr: string): string {
-  const normalized = templateLiteralsToConcat(normalizeBindingOperators(expr.trim()))
+  const normalized = rewriteWxmlGlobalCalls(
+    templateLiteralsToConcat(normalizeBindingOperators(expr.trim())),
+  )
   if (isSimpleBindingPath(normalized)) return normalizeExpr(normalized)
   const not = normalized.match(/^(!{1,2})\s*(.+)$/)
   if (not && isSimpleBindingPath(not[2]!)) {
@@ -1212,7 +1381,14 @@ function attrLayout(
     classes.push(...reg.useMany(names))
   }
   const pushArb = (prefix: string, prop: string, value: string) => {
-    classes.push(reg.arb(prefix, prop, value))
+    const cssValue =
+      prop === 'background' ||
+      prop === 'color' ||
+      prop === 'border-color' ||
+      prop === 'background-color'
+        ? toCssColor(value)
+        : value
+    classes.push(reg.arb(prefix, prop, cssValue))
   }
 
   const wRaw = attrs.width?.trim()
@@ -1273,14 +1449,13 @@ function attrLayout(
   } else if (hRaw === 'match_parent' && options?.flexParent === 'column') {
     pushKnown('flex-1', 'min-h-0', 'h-0')
   } else if (
-    // 流式布局里组件外包用内容撑高；RelativeLayout 子项是 absolute，
-    // 必须给明确高度，否则 h-auto 塌成 0（LoadingPlaceholder 等看不见）
+    // match_parent 组件需拉满父级（如 LoadingPlaceholder 插槽）；h-auto 会导致内部 scroll-view 高度塌缩
     hRaw === 'match_parent' &&
     options?.isComponent &&
     !options?.flexParent &&
     !isRelativeChild
   ) {
-    pushKnown('h-auto')
+    pushKnown('h-full', 'min-h-0')
   } else if (hRaw === 'match_parent') {
     const size = matchParentSizeCss('height', attrs, designWidth)
     if (size === '100%') pushKnown('h-full', 'min-h-0')
@@ -1335,9 +1510,9 @@ function attrLayout(
       attrs,
       'transparent',
     )
-    parts.push(`background:{{${res.expr}}}`)
+    parts.push(`background:{{${wrapCssColorExpr(res.expr)}}}`)
   } else if (bgBind) {
-    parts.push(`background:{{${bgBind}}}`)
+    parts.push(`background:{{${wrapCssColorExpr(bgBind)}}}`)
   } else if (bg && bg !== 'transparent' && !isBinding(bg)) {
     pushArb('bg', 'background', bg)
   }
@@ -1396,16 +1571,25 @@ function attrLayout(
     if (res.static && !hasTextColorDyn) {
       pushArb('text', 'color', res.static)
     } else {
-      parts.push(`color:{{${res.expr}}}`)
+      parts.push(`color:{{${wrapCssColorExpr(res.expr)}}}`)
     }
   } else if (hasColorDyn) {
     const res = resolveDynamicStyleExpr('color', colorRaw, attrs, '#303133')
-    parts.push(`color:{{${res.expr}}}`)
+    parts.push(`color:{{${wrapCssColorExpr(res.expr)}}}`)
   } else {
     const color = textColorRaw || colorRaw
     const colorBind = styleBindingExpr(color)
     if (colorBind) {
-      parts.push(`color:{{${colorBind}}}`)
+      parts.push(`color:{{${wrapCssColorExpr(colorBind)}}}`)
+    } else if (color && color !== 'null' && isBinding(color)) {
+      // 复杂表达式（含 Number() 等）：走 normalizeExpr 统一改写
+      const whole =
+        unwrapWholeBinding(color) ??
+        color.trim().replace(/^\{/, '').replace(/\}$/, '')
+      const expr = normalizeExpr(
+        templateLiteralsToConcat(normalizeBindingOperators(whole)),
+      )
+      parts.push(`color:{{${wrapCssColorExpr(`(${expr})`)}}`)
     } else if (color && color !== 'null' && !isBinding(color)) {
       pushArb('text', 'color', color)
     }
@@ -1868,7 +2052,7 @@ export function renderNode(node: XmlNode, ctx: RenderCtx): string {
     ])
     // fixed 脱出零尺寸宿主；pointer-events 覆盖父级 none
     const overlayStyle = mergeStyle(
-      `position:fixed;top:0;left:0;right:0;bottom:0;z-index:1000;pointer-events:auto;background:${bg}`,
+      `position:fixed;top:0;left:0;right:0;bottom:0;z-index:1000;pointer-events:auto;background:${toCssColor(bg)}`,
     )
     const panelClasses = ctx.classRegistry.useMany([
       'relative',
@@ -2026,8 +2210,16 @@ export function renderNode(node: XmlNode, ctx: RenderCtx): string {
     for (const evt of config?.events ?? []) {
       const evtName = evt.name?.trim()
       if (!evtName) continue
+      const eventParamNames = (evt.params ?? [])
+        .map((p) => String(p.name ?? '').trim())
+        .filter(Boolean)
       propAttrs.push(
-        ...collectComponentCustomEventAttrs(evtName, attrs[evtName], ctx),
+        ...collectComponentCustomEventAttrs(
+          evtName,
+          attrs[evtName],
+          ctx,
+          eventParamNames,
+        ),
       )
     }
 
@@ -2123,9 +2315,12 @@ function renderWidget(
     const interval = attrs.interval?.trim() || '3000'
     const duration = attrs.duration?.trim() || '500'
     const current = attrs.current?.trim() || '0'
-    const indicatorColor = (attrs.indicatorColor || '').trim() || 'rgba(0,0,0,.3)'
-    const indicatorActiveColor =
-      (attrs.indicatorActiveColor || '').trim() || '#409eff'
+    const indicatorColor = toConcreteColor(
+      (attrs.indicatorColor || '').trim() || 'rgba(0,0,0,.3)',
+    )
+    const indicatorActiveColor = toConcreteColor(
+      (attrs.indicatorActiveColor || '').trim() || '#409eff',
+    )
     const clickAttrs = collectClickEventAttrs(attrs, ctx)
     const slides = node.children
       .filter((c) => c.tag !== '#text')
@@ -2324,7 +2519,14 @@ function renderWidget(
           ? 'scaleToFill'
           : 'aspectFill'
     const srcAttr = isBinding(src)
-      ? `src="{{${normalizeExpr(src.replace(/^\{|\}$/g, ''))}}}"`
+      ? `src="{{${normalizeExpr(
+          templateLiteralsToConcat(
+            normalizeBindingOperators(
+              unwrapWholeBinding(src) ??
+                src.replace(/^\{/, '').replace(/\}$/, ''),
+            ),
+          ),
+        )}}}"`
       : `src="${escapeXml(src)}"`
     const clickAttrs = collectClickEventAttrs(attrs, ctx).map((a) =>
       a.startsWith('bindtap=') ? a.replace(/^bindtap=/, 'catchtap=') : a,
@@ -2411,10 +2613,12 @@ function renderWidget(
       attrs.color?.trim() || undefined,
       attrs,
       '#333333',
+      { concrete: true },
     )
+    // Icon 走 SVG fill，必须用具体色值（不能 var()）；再经 palette.value 兜底绑定 key
     const colorAttr = colorRes.static
       ? `color="${escapeXml(colorRes.static)}"`
-      : `color="{{${colorRes.expr}}}"`
+      : `color="{{${wrapConcreteColorExpr(colorRes.expr)}}}"`
     const iconOpen = openTag(
       'app-icon',
       [nameAttr, colorAttr],
@@ -2621,6 +2825,41 @@ function pageDataObject(data: PageData | undefined): Record<string, unknown> {
   return out
 }
 
+/** data: { ... } 字面量；有 remark 的字段带 // 注释 */
+function formatPageDataLiteral(
+  data: PageData | undefined,
+  extras: Record<string, unknown>,
+  indent: string,
+): string {
+  const remarkByName = new Map<string, string>()
+  for (const field of data?.fields ?? []) {
+    const name = field.name.trim()
+    const remark = (field.remark || '').trim()
+    if (name && remark) remarkByName.set(name, remark)
+  }
+  const base = pageDataObject(data)
+  const merged: Record<string, unknown> = { ...base, ...extras }
+  const keys = Object.keys(merged)
+  if (!keys.length) return '{}'
+
+  const lines: string[] = ['{']
+  for (const key of keys) {
+    const remark = remarkByName.get(key)
+    if (remark) {
+      const c = lineComment(remark, `${indent}  `)
+      if (c) lines.push(c)
+    }
+    const raw = JSON.stringify(merged[key], null, 2)
+    const value = raw
+      .split('\n')
+      .map((l, i) => (i === 0 ? l : `${indent}  ${l}`))
+      .join('\n')
+    lines.push(`${indent}  ${JSON.stringify(key)}: ${value},`)
+  }
+  lines.push(`${indent}}`)
+  return lines.join('\n')
+}
+
 /** statusBar.textStyle="{statusBarColor}" → 字段名；静态 white/black 返回 null */
 function parseStatusBarTextStyleField(raw: string | undefined): string | null {
   if (!raw?.trim()) return null
@@ -2648,7 +2887,7 @@ export function generatePageFiles(options: {
     cover?: boolean | string
     navigationBar?: boolean | string
   } | null
-}): { wxml: string; wxss: string; js: string; json: string; usedComponents: Map<string, string> } {
+}): { wxml: string; wxss: string; js: string; json: string; usedComponents: Map<string, string>; usedApis: MpApiBinding[] } {
   const designWidth =
     options.designWidth && options.designWidth > 0
       ? options.designWidth
@@ -2699,11 +2938,18 @@ export function generatePageFiles(options: {
     fields: options.data?.fields ?? [],
     resolveApi: options.resolveApi,
   })
-  Object.assign(apiData, controllerLoad.apiData)
+  // 组件 api prop：data 里只存 apis 注册表 key（如 shop/goods.one），完整绑定在 apis/
+  const apiPropData: Record<string, string> = {}
+  for (const [key, binding] of Object.entries(apiData)) {
+    apiPropData[key] = apiRefKey(binding)
+  }
+  const usedApis: MpApiBinding[] = [
+    ...controllerLoad.usedApis,
+    ...Object.values(apiData),
+  ]
 
   const dataObj: Record<string, unknown> = {
-    ...pageDataObject(options.data),
-    ...apiData,
+    ...apiPropData,
   }
   for (const key of modalVisibleKeys) {
     dataObj[key] = false
@@ -2728,9 +2974,9 @@ export function generatePageFiles(options: {
   if (hasComputed && statusBarTextField) {
     // 在 setData(patch) 之后同步系统状态栏前景色（自定义导航仍生效）
     recomputeForPage = recomputeMethod.replace(
-      /    this\.setData\(patch\)\n  \}/,
+      /    if \(__hasPatch\) this\.setData\(patch\)\n  \}/,
       [
-        `    this.setData(patch)`,
+        `    if (__hasPatch) this.setData(patch)`,
         `    try {`,
         `      var __sb = patch[${JSON.stringify(statusBarTextField)}]`,
         `      if (__sb === undefined) __sb = that.data[${JSON.stringify(statusBarTextField)}]`,
@@ -2743,15 +2989,15 @@ export function generatePageFiles(options: {
   }
 
   const onLoadLines: string[] = []
-  if (controllerLoad.hasLoader) {
-    onLoadLines.push(
-      `    var that = this`,
-      `    this.__loadControllerBoundData(options).then(function () {`,
-      `      if (typeof that.__recomputeComputed === 'function') that.__recomputeComputed()`,
-      `    })`,
-    )
-  } else if (hasComputed) {
+  // 先写入路由 query，再重算依赖 $query 的计算字段，最后拉控制器（可引用重算后的字段）
+  if (hasComputed || controllerLoad.hasLoader) {
+    onLoadLines.push(`    this.__pageQuery = options || {}`)
+  }
+  if (hasComputed) {
     onLoadLines.push(`    this.__recomputeComputed()`)
+  }
+  if (controllerLoad.hasLoader) {
+    onLoadLines.push(`    this.__loadControllerBoundData(options)`)
   }
 
   const extraHandlers = [
@@ -2762,8 +3008,9 @@ export function generatePageFiles(options: {
   ]
     .filter(Boolean)
     .join(',\n')
+  const dataLiteral = formatPageDataLiteral(options.data, dataObj, '  ')
   const js = `Page({
-  data: ${JSON.stringify(dataObj, null, 2).replace(/\n/g, '\n  ')},
+  data: ${dataLiteral},
   onLoad(options) {${onLoadLines.length ? `\n${onLoadLines.join('\n')}` : ''}
   },
   onShow() {},
@@ -2777,10 +3024,12 @@ export function generatePageFiles(options: {
   }
 
   const sb = options.statusBar
-  const bg =
+  const bgRaw =
     typeof sb?.backgroundColor === 'string' && sb.backgroundColor.trim()
       ? sb.backgroundColor.trim()
       : ''
+  // 导航栏需要真实色值；调色板 key 解析为实际颜色
+  const bg = findPaletteColor(activeColorPalette, bgRaw)?.value.trim() || bgRaw
   // ???? hexColor?transparent / ??????????
   if (/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/.test(bg)) {
     json.navigationBarBackgroundColor = bg
@@ -2810,11 +3059,12 @@ export function generatePageFiles(options: {
   }
 
   return {
-    wxml: `${body}\n`,
+    wxml: `${PAGE_WXS_IMPORTS}${body}\n`,
     wxss: `/* pages/${options.pageId}/index.wxss — utilities live in app.wxss */\n`,
     js,
     json: `${JSON.stringify(json, null, 2)}\n`,
     usedComponents,
+    usedApis,
   }
 }
 
@@ -2879,12 +3129,6 @@ export function generateComponentFiles(options: {
     ? renderNode(options.root, ctx)
     : '<!-- empty component -->'
 
-  const dataObj: Record<string, unknown> = {
-    ...pageDataObject(options.data),
-  }
-  for (const key of modalVisibleKeys) {
-    dataObj[key] = false
-  }
   const propDefs = options.config.props ?? []
   const propNames = propDefs.map((p) => p.name.trim()).filter(Boolean)
   const apiPropNames = propDefs
@@ -2901,7 +3145,8 @@ export function generateComponentFiles(options: {
     const name = def.name.trim()
     if (!name) continue
     if (def.type === 'api') {
-      properties[name] = { type: Object, value: null }
+      // 父页传入 apis 注册表 key（string），如 shop/goods.page
+      properties[name] = { type: String, value: '' }
     } else if (def.type === 'array') {
       properties[name] = { type: Array, value: [] }
     } else if (def.type === 'boolean') {
@@ -2971,25 +3216,35 @@ export function generateComponentFiles(options: {
     : '{}'
 
   // properties ??type: Object/Array ?? JSON.stringify????
+  const propRemarkByName = new Map<string, string>()
+  for (const def of propDefs) {
+    const name = def.name.trim()
+    const remark = (def.remark || '').trim()
+    if (name && remark) propRemarkByName.set(name, remark)
+  }
+
   const propLines = Object.entries(properties)
     .map(([name, def]) => {
       const d = def as { type: unknown; value: unknown }
+      const remark = propRemarkByName.get(name)
+      const remarkLine = remark
+        ? `${lineComment(remark, '    ')}\n`
+        : ''
+      let body: string
       if (d.type === Object) {
-        return `    ${JSON.stringify(name)}: {\n      type: Object,\n      value: null\n    }`
+        body = `    ${JSON.stringify(name)}: {\n      type: Object,\n      value: null\n    }`
+      } else if (d.type === Array) {
+        body = `    ${JSON.stringify(name)}: {\n      type: Array,\n      value: []\n    }`
+      } else if (d.type === Boolean) {
+        body = `    ${JSON.stringify(name)}: {\n      type: Boolean,\n      value: ${d.value ? 'true' : 'false'}\n    }`
+      } else if (d.type === Number) {
+        body = `    ${JSON.stringify(name)}: {\n      type: Number,\n      value: ${Number(d.value) || 0}\n    }`
+      } else if (d.type === String) {
+        body = `    ${JSON.stringify(name)}: {\n      type: String,\n      value: ${JSON.stringify(String(d.value ?? ''))}\n    }`
+      } else {
+        body = `    ${JSON.stringify(name)}: {\n      type: null,\n      value: null\n    }`
       }
-      if (d.type === Array) {
-        return `    ${JSON.stringify(name)}: {\n      type: Array,\n      value: []\n    }`
-      }
-      if (d.type === Boolean) {
-        return `    ${JSON.stringify(name)}: {\n      type: Boolean,\n      value: ${d.value ? 'true' : 'false'}\n    }`
-      }
-      if (d.type === Number) {
-        return `    ${JSON.stringify(name)}: {\n      type: Number,\n      value: ${Number(d.value) || 0}\n    }`
-      }
-      if (d.type === String) {
-        return `    ${JSON.stringify(name)}: {\n      type: String,\n      value: ${JSON.stringify(String(d.value ?? ''))}\n    }`
-      }
-      return `    ${JSON.stringify(name)}: {\n      type: null,\n      value: null\n    }`
+      return `${remarkLine}${body}`
     })
     .join(',\n')
 
@@ -3002,6 +3257,13 @@ export function generateComponentFiles(options: {
     hostHeight === 'match_parent'
       ? '  height: 100%;\n  flex: 1;\n  min-height: 0;\n'
       : '  min-height: 0;\n'
+  const dataLiteral = formatPageDataLiteral(
+    options.data,
+    Object.fromEntries(
+      [...modalVisibleKeys].map((k) => [k, false] as const),
+    ),
+    '  ',
+  )
   const js = `Component({
   options: {
     multipleSlots: true,
@@ -3013,7 +3275,7 @@ export function generateComponentFiles(options: {
   properties: {
 ${propLines}
   },
-  data: ${JSON.stringify(dataObj, null, 2).replace(/\n/g, '\n  ')},
+  data: ${dataLiteral},
 ${observersJs ? `${observersJs}\n` : ''}  lifetimes: {
 ${attached}
   },
@@ -3022,7 +3284,7 @@ ${attached}
 `
 
   return {
-    wxml: `${body}\n`,
+    wxml: `${PAGE_WXS_IMPORTS}${body}\n`,
     wxss: `/* components/${options.componentId}/index.wxss */
 @import "../../styles/utilities.wxss";
 

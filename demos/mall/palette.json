@@ -1,0 +1,19 @@
+{
+  "colors": [
+    {
+      "name": "primary",
+      "description": "主色",
+      "value": "#003db0"
+    },
+    {
+      "name": "text",
+      "description": "主文字色",
+      "value": "#333333"
+    },
+    {
+      "name": "danger",
+      "description": "价格/强调红",
+      "value": "#ff4d4f"
+    }
+  ]
+}

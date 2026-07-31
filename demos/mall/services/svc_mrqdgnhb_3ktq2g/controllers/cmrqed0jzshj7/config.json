@@ -39,15 +39,17 @@
         "itemTypeRef": "",
         "itemItemType": "",
         "itemItemTypeRef": "",
+        "keyType": "",
         "genericArgs": {
           "T": "type_mrnx6ke8_4d7vry"
         }
       },
       "requireAuth": false,
+      "scope": "public",
       "debugParams": {
         "page": {
-          "current": 0,
-          "pageSize": 1
+          "current": 1,
+          "pageSize": 10
         },
         "keyword": null
       },
@@ -57,55 +59,68 @@
             "id": "start",
             "kind": "start",
             "position": {
-              "x": 293.5,
-              "y": -29
+              "x": 280,
+              "y": 40
             },
             "data": {}
           },
           {
-            "id": "input_mrrndwfq_bfnc",
+            "id": "input_api_biz",
             "kind": "input",
             "position": {
-              "x": 251.5,
-              "y": 98.81715732284962
+              "x": 245,
+              "y": 160
             },
             "data": {
-              "dataSource": "other_business",
+              "serviceId": "svc_mrqdgnhb_3ktq2g",
+              "dataSource": "business",
               "dataProcessorId": "pmrqfxkatf8jl",
               "dataMethodId": "method_mrqfxlh1_u651zc",
               "headerField": "",
-              "varName": "goodsPage",
+              "varName": "result",
               "methodLabel": "goods.page",
               "paramBindings": {
                 "page": "page",
                 "keyword": "keyword"
               },
-              "printExpr": ""
+              "printExpr": "",
+              "outputTypeExpr": {
+                "type": "json",
+                "typeRef": "type_common_QueryPageVo",
+                "itemType": "",
+                "itemTypeRef": "",
+                "itemItemType": "",
+                "itemItemTypeRef": "",
+                "keyType": "",
+                "genericArgs": {
+                  "T": "type_mrnx6ke8_4d7vry"
+                }
+              }
             }
           },
           {
-            "id": "end_mrro18yq_vwk1",
+            "id": "end_api_biz",
             "kind": "end",
             "position": {
-              "x": 286.5,
-              "y": 223.79641918900896
+              "x": 277,
+              "y": 300
             },
             "data": {
-              "returnExpr": "goodsPage",
+              "returnExpr": "result",
               "printExpr": ""
             }
           }
         ],
         "edges": [
           {
-            "id": "edge_mrrndwfr_vh1f",
+            "id": "edge_api_biz_1",
             "source": "start",
-            "target": "input_mrrndwfq_bfnc"
+            "target": "input_api_biz"
           },
           {
-            "id": "edge_mrro18yr_s23s",
-            "source": "input_mrrndwfq_bfnc",
-            "target": "end_mrro18yq_vwk1"
+            "id": "edge_api_biz_2",
+            "source": "input_api_biz",
+            "target": "end_api_biz"
           }
         ]
       }
@@ -121,7 +136,7 @@
           "id": "ain_ms4gtfbi_wwoesc",
           "varName": "id",
           "location": "query",
-          "type": "string",
+          "type": "number",
           "typeRef": "",
           "genericArgs": {},
           "required": true,
@@ -135,11 +150,13 @@
         "itemTypeRef": "",
         "itemItemType": "",
         "itemItemTypeRef": "",
+        "keyType": "",
         "genericArgs": {}
       },
       "requireAuth": false,
+      "scope": "public",
       "debugParams": {
-        "id": null
+        "id": 37
       },
       "flow": {
         "nodes": [
@@ -153,48 +170,59 @@
             "data": {}
           },
           {
-            "id": "input_ms4gu7fk_6q5x",
+            "id": "input_api_biz",
             "kind": "input",
             "position": {
-              "x": 245.5,
-              "y": 159.6116516898884
+              "x": 245,
+              "y": 160
             },
             "data": {
-              "dataSource": "other_business",
+              "serviceId": "svc_mrqdgnhb_3ktq2g",
+              "dataSource": "business",
               "dataProcessorId": "pmrqfxkatf8jl",
               "dataMethodId": "method_ms4esv8l_wj4x9p",
               "headerField": "",
-              "varName": "goodsInfo",
+              "varName": "result",
               "methodLabel": "goods.one",
               "paramBindings": {
                 "id": "id"
               },
-              "printExpr": ""
+              "printExpr": "",
+              "outputTypeExpr": {
+                "type": "json",
+                "typeRef": "type_mrnx6ke8_4d7vry",
+                "itemType": "",
+                "itemTypeRef": "",
+                "itemItemType": "",
+                "itemItemTypeRef": "",
+                "keyType": "",
+                "genericArgs": {}
+              }
             }
           },
           {
-            "id": "end_ms4guqsw_xkhv",
+            "id": "end_api_biz",
             "kind": "end",
             "position": {
               "x": 277,
-              "y": 302.7702923805644
+              "y": 300
             },
             "data": {
-              "returnExpr": "goodsInfo",
+              "returnExpr": "result",
               "printExpr": ""
             }
           }
         ],
         "edges": [
           {
-            "id": "edge_ms4gu7fk_c0sq",
+            "id": "edge_api_biz_1",
             "source": "start",
-            "target": "input_ms4gu7fk_6q5x"
+            "target": "input_api_biz"
           },
           {
-            "id": "e_input_ms4gu7fk_6q5x_default_end_ms4guqsw_xkhv_ms4guuxk",
-            "source": "input_ms4gu7fk_6q5x",
-            "target": "end_ms4guqsw_xkhv"
+            "id": "edge_api_biz_2",
+            "source": "input_api_biz",
+            "target": "end_api_biz"
           }
         ]
       }

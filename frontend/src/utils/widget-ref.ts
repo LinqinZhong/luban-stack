@@ -17,11 +17,15 @@ export interface RefResolveContext {
   modalStack?: ModalStackLike
   componentMap?: ComponentRenderMap
   componentMethodsMap?: ComponentMethodsMap
-  /** 执行组件暴露方法（在组件自己的数据池作用域内） */
+  /**
+   * 执行组件暴露方法（在组件自己的数据池作用域内）。
+   * hostAttrs：页面/父级 Component 节点属性，用于实例 $props 与 updateProps 回写。
+   */
   runComponentMethod?: (
     componentId: string,
     methodName: string,
     args: unknown[],
+    options?: { hostAttrs?: Record<string, string>; hostNodePath?: string },
   ) => void
 }
 
@@ -192,13 +196,15 @@ function createComponentRefHandle(
   componentId: string,
   exposed: string[],
   run?: RefResolveContext['runComponentMethod'],
+  hostAttrs?: Record<string, string>,
+  hostNodePath?: string,
 ): Record<string, (...args: unknown[]) => unknown> {
   const handle: Record<string, (...args: unknown[]) => unknown> = {}
   for (const raw of exposed) {
     const methodName = raw.trim()
     if (!methodName || !/^[A-Za-z_$][\w$]*$/.test(methodName)) continue
     handle[methodName] = (...args: unknown[]) => {
-      run?.(componentId, methodName, args)
+      run?.(componentId, methodName, args, { hostAttrs, hostNodePath })
     }
   }
   return handle
@@ -232,6 +238,8 @@ export function resolveRefFieldValue(
       componentId,
       exposed,
       ctx.runComponentMethod,
+      { ...target.node.attrs },
+      target.path,
     )
   }
 

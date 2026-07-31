@@ -52,9 +52,9 @@ export interface DynamicStylesConfig {
 
 export const DYNAMIC_STYLES_ATTR = 'dynamicStyles'
 
-/** 显示条件（类似 v-show），JSON：{ scenarios: StyleScenario[] } */
+/** 显示条件（不成立时隐藏但仍保留节点），JSON：{ scenarios: StyleScenario[] } */
 export const V_SHOW_ATTR = 'vShow'
-/** 挂载条件（类似 v-if），JSON：{ scenarios: StyleScenario[] } */
+/** 挂载条件（不成立时不创建节点），JSON：{ scenarios: StyleScenario[] } */
 export const V_IF_ATTR = 'vIf'
 
 export interface VisibilityConditionConfig {

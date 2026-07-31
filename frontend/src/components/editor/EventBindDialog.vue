@@ -37,6 +37,8 @@ import {
   type ComponentMethodsMap,
 } from '../../utils/widget-ref'
 import { buildDollarPropsAmbientDeclaration, buildUpdatePropsAmbientDeclarations } from '../../utils/component-props'
+import { buildDollarColorAmbientDeclaration } from '../../types/color-palette'
+import { colorPaletteState } from '../../composables/useColorPalette'
 
 const props = defineProps<{
   modelValue: boolean
@@ -209,6 +211,7 @@ const customAmbientExtra = computed(() => {
     'interface MenuButtonBoundingClientRect { width: number; height: number; top: number; right: number; bottom: number; left: number }',
     'interface DeviceInfo { statusBarHeight: number; userAgent: string; menuButton: MenuButtonBoundingClientRect | null; platform: \'h5\' | \'miniprogram\' }',
     'declare function getDeviceInfo(): DeviceInfo;',
+    buildDollarColorAmbientDeclaration(colorPaletteState.value),
   ]
   const typeLib = buildTypeLibraryAmbientDeclarations(props.typeLibrary)
   const propsAmbient = buildDollarPropsAmbientDeclaration(

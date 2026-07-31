@@ -79,6 +79,61 @@
       "value": "",
       "binding": "computed",
       "computeBody": "// 可直接使用同级数据池字段名作为变量（无需形参）\n// return 的值即为该字段的计算值\nreturn `rgba(100, 100, 100, ${(1-titleBarOpacity)*0.4})`\n"
+    },
+    {
+      "name": "remarkPage",
+      "type": "json",
+      "remark": "商品评价分页",
+      "value": null,
+      "binding": "controller",
+      "computeBody": "",
+      "controllerBinding": {
+        "serviceId": "svc_mrqdgnhb_3ktq2g",
+        "controllerId": "cms8ol9you9yc",
+        "apiId": "api_ms8q37of_2dcaq6",
+        "parseBody": "// data 为接口 Result.data\nreturn data\n",
+        "onLoading": "",
+        "onSuccess": "",
+        "onError": "",
+        "onFinally": "",
+        "inputs": {
+          "goodsId": {
+            "source": "binding",
+            "binding": "$query.id"
+          },
+          "page": {
+            "source": "literal",
+            "literal": {
+              "current": 1,
+              "pageSize": 3
+            }
+          },
+          "type": {
+            "source": "literal",
+            "literal": "all"
+          }
+        }
+      },
+      "typeRef": "type_common_QueryPageVo"
+    },
+    {
+      "name": "remarkList",
+      "type": "array",
+      "remark": "商品评价列表",
+      "value": [],
+      "binding": "computed",
+      "computeBody": "return remarkPage?.records ?? []\n",
+      "itemType": "json",
+      "itemTypeRef": "type_ms6gqu8j_vm3j3p",
+      "arrayFields": []
+    },
+    {
+      "name": "remarkTotal",
+      "type": "number",
+      "remark": "评价总数",
+      "value": 0,
+      "binding": "computed",
+      "computeBody": "return Number(remarkPage?.total) || 0\n"
     }
   ]
 }

@@ -9,6 +9,7 @@ import {
   type VoiderProjectConfig,
 } from '../types/voider-project.js'
 import { ensureIconLibraryFile } from './icons.js'
+import { ensureColorPaletteFile } from './palette.js'
 import { ensureDataTypeLibraryFile } from './data-types.js'
 import { ensureMysqlLibraryFile } from './mysql.js'
 import { ensureOssLibraryFile } from './oss.js'
@@ -96,6 +97,9 @@ async function readConfigFile(projectPath: string): Promise<VoiderProjectConfig>
     engineVersion: parsed.engineVersion,
     canvas: { width: parsed.canvas.width },
   }
+  if (parsed.canvas.scene === 'h5' || parsed.canvas.scene === 'miniprogram') {
+    config.canvas.scene = parsed.canvas.scene
+  }
   if (parsed.entryPage?.trim()) {
     config.entryPage = parsed.entryPage.trim()
   }
@@ -181,7 +185,10 @@ export async function getProjectEntryPage(
 /** 更新项目配置中的可编辑字段（写入 voider.json） */
 export async function patchProjectConfig(
   projectPathInput: string,
-  patch: { wechatAppId?: string | null },
+  patch: {
+    wechatAppId?: string | null
+    canvasScene?: 'h5' | 'miniprogram' | null
+  },
 ): Promise<ProjectResult> {
   const projectPath = normalizeProjectPath(projectPathInput)
   await assertDirectory(projectPath)
@@ -193,6 +200,17 @@ export async function patchProjectConfig(
       delete config.wechatAppId
     } else {
       config.wechatAppId = String(raw).trim()
+    }
+  }
+
+  if ('canvasScene' in patch) {
+    const raw = patch.canvasScene
+    if (raw === 'h5' || raw === 'miniprogram') {
+      config.canvas = { ...config.canvas, scene: raw }
+    } else if (raw == null) {
+      const { scene: _drop, ...rest } = config.canvas
+      config.canvas = rest
+      void _drop
     }
   }
 
@@ -252,6 +270,7 @@ export async function createProject(options: {
     await mkdir(path.join(projectPath, 'pages'), { recursive: true })
     await mkdir(path.join(projectPath, 'components'), { recursive: true })
     await ensureIconLibraryFile(projectPath)
+    await ensureColorPaletteFile(projectPath)
     await ensureDataTypeLibraryFile(projectPath)
     await ensureMysqlLibraryFile(projectPath)
     await ensureOssLibraryFile(projectPath)

@@ -65,16 +65,26 @@ function findInTree(
   return true
 }
 
-function onPathChange(val: string[] | null | undefined) {
-  if (!val?.length) {
+function normalizePathValue(
+  val: string | string[] | null | undefined,
+): string[] {
+  if (val == null || val === '') return []
+  if (Array.isArray(val)) return val.map(String).filter(Boolean)
+  if (typeof val === 'string') return splitBindingPath(val)
+  return []
+}
+
+function onPathChange(val: string | string[] | null | undefined) {
+  const segments = normalizePathValue(val)
+  if (!segments.length) {
     emit('update:modelValue', '')
     return
   }
-  if (!isSelectableBindingPath(rawOptions.value, val)) {
+  if (!isSelectableBindingPath(rawOptions.value, segments)) {
     // 未类型匹配的中间节点：忽略本次选择
     return
   }
-  emit('update:modelValue', joinBindingPath(val))
+  emit('update:modelValue', joinBindingPath(segments))
 }
 </script>
 

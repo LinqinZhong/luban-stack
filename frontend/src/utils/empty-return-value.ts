@@ -27,6 +27,7 @@ export function defaultEmptyReturnValue(
     return { total: 0, records: [] }
   }
   if (t === 'array') return []
+  if (t === 'map') return new Map()
   if (t === 'boolean') return false
   if (t === 'number') return 0
   if (t === 'string') return null
@@ -46,6 +47,7 @@ export function defaultEmptyReturnHint(
     return '留空 → { total: 0, records: [] }'
   }
   if (t === 'array') return '留空 → []'
+  if (t === 'map') return '留空 → new Map()'
   if (t === 'boolean') return '留空 → false'
   if (t === 'number') return '留空 → 0'
   if (t === 'string') return '留空 → null'
@@ -64,6 +66,7 @@ export function defaultEmptyReturnCode(
     return '{ total: 0, records: [] }'
   }
   if (t === 'array') return '[]'
+  if (t === 'map') return 'new Map()'
   if (t === 'boolean') return 'false'
   if (t === 'number') return '0'
   if (t === 'string') return 'null'

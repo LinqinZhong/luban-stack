@@ -17,14 +17,64 @@ import {
 import { invokeBoundControllerApi } from './controller-binding-runtime'
 
 /** 父级在 Component 节点上绑定的后端 API 引用（写入 XML 属性 JSON） */
+export type ApiPropParamBinding = {
+  source: 'binding' | 'literal'
+  /** source=binding：数据池 / $query 表达式 */
+  binding?: string
+  /** source=literal：常量（字符串存，调用时按入参类型转换） */
+  literal?: string
+}
+
 export interface ApiPropBinding {
   serviceId: string
   controllerId: string
   apiId: string
+  /**
+   * API 额外入参绑定（组件形参之外的 API inputs）。
+   * key = API 入参变量名
+   */
+  paramBindings?: Record<string, ApiPropParamBinding>
 }
 
+/** 下拉「常量」选项的哨兵值（不写入持久化） */
+export const API_PROP_LITERAL_SELECT = '__voider_literal__'
+
 export function createEmptyApiPropBinding(): ApiPropBinding {
-  return { serviceId: '', controllerId: '', apiId: '' }
+  return { serviceId: '', controllerId: '', apiId: '', paramBindings: {} }
+}
+
+export function normalizeApiPropParamBinding(
+  raw: unknown,
+): ApiPropParamBinding | null {
+  if (raw == null) return null
+  if (typeof raw === 'string') {
+    const s = raw.trim()
+    if (!s) return null
+    return { source: 'binding', binding: s }
+  }
+  if (typeof raw !== 'object' || Array.isArray(raw)) return null
+  const row = raw as Record<string, unknown>
+  if (row.source === 'literal') {
+    const literal =
+      typeof row.literal === 'string'
+        ? row.literal
+        : row.literal == null
+          ? ''
+          : String(row.literal)
+    return { source: 'literal', literal }
+  }
+  const binding =
+    typeof row.binding === 'string'
+      ? row.binding.trim()
+      : typeof row.binding === 'number' || typeof row.binding === 'boolean'
+        ? String(row.binding)
+        : ''
+  if (!binding && typeof row.source !== 'string') {
+    // 兼容误存成纯表达式对象
+    return null
+  }
+  if (!binding) return { source: 'binding', binding: '' }
+  return { source: 'binding', binding }
 }
 
 export function parseApiPropBinding(raw: string | undefined | null): ApiPropBinding | null {
@@ -38,18 +88,60 @@ export function parseApiPropBinding(raw: string | undefined | null): ApiPropBind
       typeof row.controllerId === 'string' ? row.controllerId.trim() : ''
     const apiId = typeof row.apiId === 'string' ? row.apiId.trim() : ''
     if (!serviceId || !controllerId || !apiId) return null
-    return { serviceId, controllerId, apiId }
+    const paramBindings: Record<string, ApiPropParamBinding> = {}
+    const rawBindings = row.paramBindings
+    if (rawBindings && typeof rawBindings === 'object' && !Array.isArray(rawBindings)) {
+      for (const [k, v] of Object.entries(rawBindings as Record<string, unknown>)) {
+        const key = k.trim()
+        if (!key) continue
+        const normalized = normalizeApiPropParamBinding(v)
+        if (!normalized) continue
+        if (
+          normalized.source === 'binding' &&
+          !(normalized.binding ?? '').trim()
+        ) {
+          continue
+        }
+        paramBindings[key] = normalized
+      }
+    }
+    return { serviceId, controllerId, apiId, paramBindings }
   } catch {
     return null
   }
 }
 
 export function serializeApiPropBinding(binding: ApiPropBinding): string {
+  const paramBindings: Record<string, ApiPropParamBinding> = {}
+  for (const [k, v] of Object.entries(binding.paramBindings ?? {})) {
+    const key = k.trim()
+    if (!key || !v) continue
+    if (v.source === 'literal') {
+      paramBindings[key] = {
+        source: 'literal',
+        literal: String(v.literal ?? ''),
+      }
+      continue
+    }
+    const expr = String(v.binding ?? '').trim()
+    if (!expr) continue
+    paramBindings[key] = { source: 'binding', binding: expr }
+  }
   return JSON.stringify({
     serviceId: binding.serviceId.trim(),
     controllerId: binding.controllerId.trim(),
     apiId: binding.apiId.trim(),
+    ...(Object.keys(paramBindings).length ? { paramBindings } : {}),
   })
+}
+
+/** 入参绑定是否已配置（必填校验） */
+export function isApiPropParamBoundConfigured(
+  cfg: ApiPropParamBinding | undefined | null,
+): boolean {
+  if (!cfg) return false
+  if (cfg.source === 'literal') return true
+  return Boolean((cfg.binding ?? '').trim())
 }
 
 function normalizeGenericArgs(
@@ -237,8 +329,8 @@ export type ApiPropConstraint = {
 
 /**
  * 组件 api 参数 ↔ 控制器 API 匹配：
- * 1. 必填入参：形参必须出现，且类型一致
- * 2. 可选入参：形参可省略；若出现则类型须一致
+ * 1. 组件声明的每个形参：API 上必须有同名入参，且类型一致
+ * 2. API 可有额外入参（含必填）——由页面通过通用 params 等在调用时补齐
  * 3. 出参类型须一致（双方均为 any/空则视为一致）
  */
 export function apiMatchesApiPropConstraint(
@@ -247,29 +339,41 @@ export function apiMatchesApiPropConstraint(
 ): boolean {
   if (!api) return false
   const params = normalizeApiParams(constraint.apiParams)
-  const byName = new Map(params.map((p) => [p.name.trim(), p]))
+  const apiByName = new Map(
+    (api.inputs ?? [])
+      .map((inp) => [(inp.varName ?? '').trim(), inp] as const)
+      .filter(([name]) => Boolean(name)),
+  )
 
-  for (const inp of api.inputs ?? []) {
-    const name = (inp.varName ?? '').trim()
+  for (const formal of params) {
+    const name = formal.name.trim()
     if (!name) continue
-    const formal = byName.get(name)
-    if (inp.required) {
-      if (!formal) return false
-      if (serviceApiParamFingerprint(inp) !== methodParamFingerprint(formal)) {
-        return false
-      }
-      continue
-    }
-    if (formal) {
-      if (serviceApiParamFingerprint(inp) !== methodParamFingerprint(formal)) {
-        return false
-      }
+    const inp = apiByName.get(name)
+    if (!inp) return false
+    if (serviceApiParamFingerprint(inp) !== methodParamFingerprint(formal)) {
+      return false
     }
   }
 
   const wantReturn = processorTypeExprFingerprint(constraint.apiReturnType)
   const apiReturn = processorTypeExprFingerprint(api.output)
-  return wantReturn === apiReturn
+  return returnTypesCompatible(wantReturn, apiReturn)
+}
+
+/** QueryPageVo 未锁定 T 时，接受任意 T；双方均为 any 也视为一致 */
+function returnTypesCompatible(want: string, apiReturn: string): boolean {
+  if (want === apiReturn) return true
+  if (want === 'any' && apiReturn === 'any') return true
+  const pageVo = /^named:type_common_QueryPageVo<(.*)>$/
+  const wm = pageVo.exec(want)
+  const am = pageVo.exec(apiReturn)
+  if (wm && am) {
+    const wArgs = (wm[1] || '').trim()
+    // 组件未声明 T（或 T=any）→ 任意分页元素类型均可
+    if (!wArgs || wArgs === 'T=any') return true
+    return wArgs === (am[1] || '').trim()
+  }
+  return false
 }
 
 /** @deprecated 使用 apiMatchesApiPropConstraint */
@@ -359,7 +463,11 @@ export function hydrateApiDollarProps(
   dollarProps: Record<string, unknown>,
   defs: ComponentPropDef[] | null | undefined,
   projectPath: string | null | undefined,
-  options?: { dryRun?: boolean },
+  options?: {
+    dryRun?: boolean
+    /** 解析 paramBindings 时的页面作用域（数据池 + $query 等） */
+    getPageScope?: () => Record<string, unknown>
+  },
 ): Record<string, unknown> {
   const list = defs ?? []
   if (!list.some((d) => d.type === 'api')) return dollarProps
@@ -390,6 +498,7 @@ export function hydrateApiDollarProps(
       return invokeBoundControllerApi(binding, args ?? {}, {
         projectPath: path,
         dryRun,
+        pageScope: options?.getPageScope?.() ?? {},
       })
     }
     invoker[API_PROP_BINDING_MARK] = mark

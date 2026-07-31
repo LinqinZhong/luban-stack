@@ -10,6 +10,7 @@ import {
   Document,
   EditPen,
   Lightning,
+  Brush,
   Picture,
   Plus,
   Timer,
@@ -52,16 +53,19 @@ import {
 } from '../api/components'
 import {
   getBackendServiceLibrary,
+  getColorPalette,
   getDataTypeLibrary,
   getIconLibrary,
   getMysqlLibrary,
   getOssLibrary,
   saveBackendServiceLibrary as saveBackendServiceLibraryApi,
+  saveColorPalette as saveColorPaletteApi,
   saveDataTypeLibrary as saveDataTypeLibraryApi,
   saveIconLibrary as saveIconLibraryApi,
   saveMysqlLibrary as saveMysqlLibraryApi,
   saveOssLibrary as saveOssLibraryApi,
   setProjectEntryPage,
+  patchProjectConfig,
 } from '../api/projects'
 import DataPoolPanel from '../components/editor/DataPoolPanel.vue'
 import DataTypesPanel from '../components/editor/DataTypesPanel.vue'
@@ -76,6 +80,14 @@ import type {
   ProcessorSelectionState,
 } from '../components/editor/ServiceProcessorPanel.vue'
 import IconLibraryPanel from '../components/editor/IconLibraryPanel.vue'
+import ColorPalettePanel from '../components/editor/ColorPalettePanel.vue'
+import { setColorPaletteState } from '../composables/useColorPalette'
+import {
+  createEmptyColorPalette,
+  resolvePaletteColorValue,
+  buildDollarColorAmbientDeclaration,
+  type ColorPalette,
+} from '../types/color-palette'
 import MethodEditDialog from '../components/editor/MethodEditDialog.vue'
 import MethodsPanel from '../components/editor/MethodsPanel.vue'
 import LifecyclePanel from '../components/editor/LifecyclePanel.vue'
@@ -88,6 +100,10 @@ import ComponentMetaPanel from '../components/editor/ComponentMetaPanel.vue'
 import PreviewDebugPanel, {
   type EmitLogEntry,
 } from '../components/editor/PreviewDebugPanel.vue'
+import PreviewRuntimeLog, {
+  type PreviewRuntimeLogEntry,
+  type PreviewRuntimeLogLevel,
+} from '../components/editor/PreviewRuntimeLog.vue'
 import PreviewCanvasToolbar from '../components/editor/PreviewCanvasToolbar.vue'
 import PropsPanel, { type PropsTab } from '../components/editor/PropsPanel.vue'
 import PageCanvas from '../components/xml/PageCanvas.vue'
@@ -106,7 +122,10 @@ import {
 } from '../types/page-method'
 import { runEventBindings } from '../utils/event-runtime'
 import { createComponentEmit } from '../utils/component-emit'
-import type { PreviewInteractPayload } from '../utils/event-runtime'
+import type {
+  ComponentEmitContext,
+  PreviewInteractPayload,
+} from '../utils/event-runtime'
 import { resolveComputedPageData, sameJson } from '../utils/compute-runtime'
 import {
   buildQueryObject,
@@ -123,6 +142,7 @@ import {
 } from '../utils/status-bar'
 import { buildDollarProps, buildDollarPropsAmbientDeclaration, buildUpdatePropsAmbientDeclarations, normalizePropDefaultValue } from '../utils/component-props'
 import { hydrateApiDollarProps } from '../utils/api-prop'
+import { resolveComponentInstanceDollarProps } from '../utils/instance-dollar-props'
 import { getDeviceInfo } from '../utils/device-info'
 import { clonePageData, type DataFieldValue } from '../types/page-data'
 import {
@@ -192,13 +212,14 @@ type WorkspaceMode =
   | 'mysql'
   | 'oss'
   | 'icons'
+  | 'palette'
   | 'methods'
   | 'lifecycle'
 
 const projectStore = useProjectStore()
 
 type ResourceKind = 'page' | 'component'
-type ProjectNav = 'datatypes' | 'mysql' | 'oss' | 'icons'
+type ProjectNav = 'datatypes' | 'mysql' | 'oss' | 'icons' | 'palette'
 /** 活动栏：前端 / 后端 / 项目级资源 */
 type TopNav = 'frontend' | 'backend' | ProjectNav
 
@@ -226,6 +247,14 @@ const addDialogTab = ref<'widget' | 'component'>('widget')
 /** 打开添加弹窗时是否写入当前插槽的调试子节点 */
 const addIntoSlotDebug = ref(false)
 const iconLibrary = ref<IconLibrary>(createEmptyIconLibrary())
+const colorPalette = ref<ColorPalette>(createEmptyColorPalette())
+watch(
+  colorPalette,
+  (value) => {
+    setColorPaletteState(value)
+  },
+  { immediate: true, deep: true },
+)
 const dataTypeLibrary = ref<DataTypeLibrary>(createEmptyDataTypeLibrary())
 const mysqlLibrary = ref<MysqlLibrary>(createEmptyMysqlLibrary())
 const ossLibrary = ref<OssLibrary>(createEmptyOssLibrary())
@@ -313,12 +342,48 @@ let previewToastTimer: ReturnType<typeof setTimeout> | null = null
 const previewPropOverrides = ref<Record<string, unknown>>({})
 const previewEmitLogs = ref<EmitLogEntry[]>([])
 let previewEmitLogSeq = 0
+/** 预览态左侧运行日志（错误/警告，含位置） */
+const previewRuntimeLogs = ref<PreviewRuntimeLogEntry[]>([])
+let previewRuntimeLogSeq = 0
 /** 画布平移 / 缩放（切页保持，重置按钮仍可归位） */
 const canvasPanX = ref(0)
 const canvasPanY = ref(0)
 const canvasZoom = ref(1)
-/** 画布场景：H5 / 小程序 */
-const canvasScene = ref<'h5' | 'miniprogram'>('h5')
+/** 画布场景：H5 / 小程序（持久化到 voider.json → canvas.scene） */
+const canvasScene = ref<'h5' | 'miniprogram'>(
+  projectStore.config?.canvas?.scene === 'miniprogram' ? 'miniprogram' : 'h5',
+)
+
+watch(
+  () => projectStore.config?.canvas?.scene,
+  (scene) => {
+    const next = scene === 'miniprogram' ? 'miniprogram' : 'h5'
+    if (canvasScene.value !== next) canvasScene.value = next
+  },
+)
+
+let canvasSceneSaveTimer: ReturnType<typeof setTimeout> | null = null
+watch(canvasScene, (scene) => {
+  const path = projectStore.path?.trim()
+  if (!path) return
+  if (projectStore.config?.canvas?.scene === scene) return
+  if (canvasSceneSaveTimer) clearTimeout(canvasSceneSaveTimer)
+  canvasSceneSaveTimer = setTimeout(() => {
+    canvasSceneSaveTimer = null
+    void (async () => {
+      try {
+        const result = await patchProjectConfig({
+          projectPath: path,
+          canvasScene: scene,
+        })
+        projectStore.setProject(result.path, result.config)
+      } catch (err) {
+        console.error(err)
+        ElMessage.error('保存画布场景失败')
+      }
+    })()
+  }, 200)
+})
 /** 预览态 Modal 堆栈（一屏仅栈顶可见） */
 const modalStack = createModalStack()
 
@@ -426,6 +491,7 @@ function resetPreviewRuntime() {
     previewComponentMap.value = null
     previewPropOverrides.value = {}
     previewEmitLogs.value = []
+    previewRuntimeLogs.value = []
     return
   }
   previewRuntimeData.value = clonePageData(activeDoc.value.data ?? { fields: [] })
@@ -435,6 +501,7 @@ function resetPreviewRuntime() {
     ? restoreComponentDebugProps()
     : {}
   previewEmitLogs.value = []
+  previewRuntimeLogs.value = []
 }
 
 function clearPreviewRuntime() {
@@ -444,6 +511,7 @@ function clearPreviewRuntime() {
     ? restoreComponentDebugProps()
     : {}
   previewEmitLogs.value = []
+  previewRuntimeLogs.value = []
 }
 
 /** 画布/预览运行时使用：预览走副本，编辑走数据池 */
@@ -455,6 +523,8 @@ const resolvedPageData = computed(() =>
     {
       getDeviceInfo: previewGetDeviceInfo,
       dollarProps: editorDollarProps.value ?? {},
+      dollarQuery: isPageResource.value ? routeParams.value : undefined,
+      colorPalette: colorPalette.value,
     },
   ),
 )
@@ -518,6 +588,60 @@ function pushPreviewEmitLog(event: string, args: Record<string, unknown>) {
     },
     ...previewEmitLogs.value,
   ].slice(0, 80)
+}
+
+function pushPreviewRuntimeLog(options: {
+  level: PreviewRuntimeLogLevel
+  message: string
+  location?: string
+}) {
+  const message = String(options.message ?? '').trim()
+  if (!message) return
+  previewRuntimeLogSeq += 1
+  previewRuntimeLogs.value = [
+    {
+      id: previewRuntimeLogSeq,
+      time: new Date().toLocaleTimeString(),
+      level: options.level,
+      message,
+      location: options.location?.trim() || undefined,
+    },
+    ...previewRuntimeLogs.value,
+  ].slice(0, 200)
+}
+
+/** 预览日志：页面/组件 + 时机（事件 / 生命周期 / 暴露方法等） */
+function formatPreviewLogLocation(options?: {
+  dataOwnerComponentId?: string
+  eventKey?: string
+  timing?: string
+}): string {
+  const ownerId = options?.dataOwnerComponentId?.trim() || ''
+  const info = ownerId ? canvasComponentMap.value[ownerId] : null
+  const base = ownerId
+    ? `组件 ${info?.config?.name?.trim() || ownerId}`
+    : '页面'
+  const timing =
+    options?.timing?.trim() ||
+    (options?.eventKey && !String(options.eventKey).startsWith('__')
+      ? `事件 ${options.eventKey}`
+      : '')
+  return timing ? `${base} · ${timing}` : base
+}
+
+/** updateProps 回写：跳过仅因 Slot 挂上的外层 */
+function resolveUpdatePropsHostDataOwnerId(
+  emitCtx: ComponentEmitContext | undefined,
+): string | undefined {
+  let layer = emitCtx?.outer
+  while (layer) {
+    if (!layer.slotHost) {
+      const id = layer.componentId?.trim()
+      if (id) return id
+    }
+    layer = layer.outer
+  }
+  return undefined
 }
 
 function createPreviewDebugEmit() {
@@ -682,6 +806,9 @@ function invokeActiveExposedMethod(methodName: string, args: unknown[]) {
     eventArgs,
     dollarProps: editorDollarProps.value,
     emitFn: createPreviewDebugEmit(),
+    logLocation: formatPreviewLogLocation({
+      timing: `调试 · 暴露方法 ${methodName}`,
+    }),
   })
 }
 
@@ -702,7 +829,8 @@ const methodAmbientExtra = computed(() => {
     'declare function setData(prop: string, value: any): void;',
     "declare function showToast(message: string, duration?: 'short' | 'long'): void;",
     'declare function getDeviceInfo(): DeviceInfo;',
-  ].join('\n')
+    buildDollarColorAmbientDeclaration(colorPalette.value),
+  ].filter(Boolean).join('\n')
   const propsAmbient = buildDollarPropsAmbientDeclaration(
     isComponentResource.value ? activeComponent.value?.config.props : null,
     dataTypeLibrary.value,
@@ -786,6 +914,7 @@ const isDataTypesMode = computed(() => workspaceMode.value === 'datatypes')
 const isMysqlMode = computed(() => workspaceMode.value === 'mysql')
 const isOssMode = computed(() => workspaceMode.value === 'oss')
 const isIconsMode = computed(() => workspaceMode.value === 'icons')
+const isPaletteMode = computed(() => workspaceMode.value === 'palette')
 const isMethodsMode = computed(() => workspaceMode.value === 'methods')
 const isLifecycleMode = computed(() => workspaceMode.value === 'lifecycle')
 const hideWidgetTree = computed(
@@ -795,6 +924,7 @@ const hideWidgetTree = computed(
     isMysqlMode.value ||
     isOssMode.value ||
     isIconsMode.value ||
+    isPaletteMode.value ||
     isMethodsMode.value ||
     isLifecycleMode.value,
 )
@@ -859,6 +989,7 @@ const projectNavItems: { key: ProjectNav; label: string; icon: unknown }[] = [
   { key: 'mysql', label: 'MySQL', icon: MysqlIcon },
   { key: 'oss', label: '对象存储', icon: OssIcon },
   { key: 'icons', label: '图标库', icon: Picture },
+  { key: 'palette', label: '调色板', icon: Brush },
 ]
 
 const isFrontendNav = computed(() => topNav.value === 'frontend')
@@ -868,7 +999,8 @@ const isProjectNav = computed(
     topNav.value === 'datatypes' ||
     topNav.value === 'mysql' ||
     topNav.value === 'oss' ||
-    topNav.value === 'icons',
+    topNav.value === 'icons' ||
+    topNav.value === 'palette',
 )
 const showModeTabs = computed(() => isFrontendNav.value)
 
@@ -877,6 +1009,13 @@ const activeBackendService = computed(
     backendServiceLibrary.value.services.find(
       (item) => item.id === activeServiceId.value,
     ) ?? null,
+)
+
+const backendModuleOptions = computed(() =>
+  backendServiceLibrary.value.services.map((s) => ({
+    id: s.id,
+    name: s.name || s.id,
+  })),
 )
 
 const showBackendLayerTabs = computed(
@@ -931,14 +1070,21 @@ function applyWorkspaceUiState(saved: WorkspaceUiState) {
     top === 'datatypes' ||
     top === 'mysql' ||
     top === 'oss' ||
-    top === 'icons'
+    top === 'icons' ||
+    top === 'palette'
   ) {
     topNav.value = top
   }
   if (saved.resourceKind === 'page' || saved.resourceKind === 'component') {
     resourceKind.value = saved.resourceKind
   }
-  if (top === 'datatypes' || top === 'mysql' || top === 'oss' || top === 'icons') {
+  if (
+    top === 'datatypes' ||
+    top === 'mysql' ||
+    top === 'oss' ||
+    top === 'icons' ||
+    top === 'palette'
+  ) {
     workspaceMode.value = top
   } else if (
     saved.workspaceMode === 'preview' ||
@@ -1062,9 +1208,11 @@ const propsPlaceholderText = computed(() => {
   if (isMysqlMode.value) return '在连接列表右键可配置或删除'
   if (isOssMode.value) return '在连接列表右键可配置或删除'
   if (isIconsMode.value) return '在图标上右键可编辑或删除'
+  if (isPaletteMode.value) return '在颜色上可编辑或删除'
   if (
     !activePage.value &&
     !isIconsMode.value &&
+    !isPaletteMode.value &&
     !isDataTypesMode.value &&
     !isMysqlMode.value &&
     !isOssMode.value
@@ -1087,6 +1235,7 @@ async function loadPages(selectId?: string) {
   try {
     await Promise.all([
       loadIconLibrary(),
+      loadColorPalette(),
       loadDataTypeLibrary(),
       loadMysqlLibrary(),
       loadOssLibrary(),
@@ -1139,6 +1288,16 @@ async function loadIconLibrary() {
     iconLibrary.value = await getIconLibrary(projectStore.path)
   } catch (err) {
     iconLibrary.value = createEmptyIconLibrary()
+    console.error(err)
+  }
+}
+
+async function loadColorPalette() {
+  if (!projectStore.path) return
+  try {
+    colorPalette.value = await getColorPalette(projectStore.path)
+  } catch (err) {
+    colorPalette.value = createEmptyColorPalette()
     console.error(err)
   }
 }
@@ -1225,6 +1384,7 @@ async function refreshComponentMap() {
         data: resolveComputedPageData(detail.data, {
           getDeviceInfo: previewGetDeviceInfo,
           dollarProps: buildDollarProps(detail.config),
+          colorPalette: colorPalette.value,
         }),
         lifecycle: lifecycleById[detail.id] ?? createEmptyLifecycleConfig(),
       }
@@ -1536,7 +1696,8 @@ function leaveProjectNav() {
     workspaceMode.value === 'datatypes' ||
     workspaceMode.value === 'mysql' ||
     workspaceMode.value === 'oss' ||
-    workspaceMode.value === 'icons'
+    workspaceMode.value === 'icons' ||
+    workspaceMode.value === 'palette'
   ) {
     workspaceMode.value = 'preview'
   }
@@ -1553,7 +1714,8 @@ function selectBackendNav() {
     workspaceMode.value === 'datatypes' ||
     workspaceMode.value === 'mysql' ||
     workspaceMode.value === 'oss' ||
-    workspaceMode.value === 'icons'
+    workspaceMode.value === 'icons' ||
+    workspaceMode.value === 'palette'
   ) {
     workspaceMode.value = 'preview'
   }
@@ -1974,12 +2136,19 @@ const pageStatusBarConfig = computed(() =>
 )
 
 /** 画布渲染：解析数据池绑定后的状态栏样式 */
-const resolvedPageStatusBar = computed(() =>
-  resolveStatusBarConfig(
+const resolvedPageStatusBar = computed(() => {
+  const bar = resolveStatusBarConfig(
     isPageResource.value ? activePage.value?.config.statusBar : null,
     resolvedPageData.value,
-  ),
-)
+  )
+  return {
+    ...bar,
+    backgroundColor: resolvePaletteColorValue(
+      bar.backgroundColor,
+      colorPalette.value,
+    ),
+  }
+})
 
 function applyComponentPreviewSetData(
   componentId: string,
@@ -1992,13 +2161,21 @@ function applyComponentPreviewSetData(
   if (!map) return
   const info = map[componentId]
   if (!info) {
-    ElMessage.warning(`组件不存在：${componentId}`)
+    pushPreviewRuntimeLog({
+      level: 'error',
+      message: `组件不存在：${componentId}`,
+      location: `组件 ${componentId} · setData`,
+    })
     return
   }
   const fields = [...(info.data.fields ?? [])]
   const index = fields.findIndex((item) => item.name.trim() === prop.trim())
   if (index < 0) {
-    ElMessage.warning(`组件数据池不存在字段：${prop}`)
+    pushPreviewRuntimeLog({
+      level: 'error',
+      message: `组件数据池不存在字段：${prop}`,
+      location: `组件 ${componentId} · setData('${prop}')`,
+    })
     return
   }
   const prev = fields[index]!
@@ -2029,6 +2206,7 @@ function applyComponentPreviewSetData(
         {
           getDeviceInfo: previewGetDeviceInfo,
           dollarProps: buildDollarProps(info.config),
+          colorPalette: colorPalette.value,
         },
       ),
     },
@@ -2067,15 +2245,33 @@ function applyPreviewUpdateProps(
     (isComponentResource.value ? activeComponent.value?.config : null)
   const def = config?.props?.find((item) => item.name.trim() === name)
   if (!def) {
-    ElMessage.warning(`组件参数不存在：${name}`)
+    pushPreviewRuntimeLog({
+      level: 'error',
+      message: `组件参数不存在：${name}`,
+      location: options?.componentId
+        ? `组件 ${options.componentId} · updateProps('${name}')`
+        : `updateProps('${name}')`,
+    })
     return
   }
   if (!def.twoWay) {
-    ElMessage.warning(`「${name}」未开启双向绑定，无法 updateProps`)
+    pushPreviewRuntimeLog({
+      level: 'warn',
+      message: `「${name}」未开启双向绑定，无法 updateProps`,
+      location: options?.componentId
+        ? `组件 ${options.componentId} · updateProps('${name}')`
+        : `updateProps('${name}')`,
+    })
     return
   }
   if (def.type === 'api') {
-    ElMessage.warning(`「${name}」为后端 API 参数，无法 updateProps`)
+    pushPreviewRuntimeLog({
+      level: 'warn',
+      message: `「${name}」为后端 API 参数，无法 updateProps`,
+      location: options?.componentId
+        ? `组件 ${options.componentId} · updateProps('${name}')`
+        : `updateProps('${name}')`,
+    })
     return
   }
 
@@ -2107,22 +2303,35 @@ function runComponentExposedMethod(
   componentId: string,
   methodName: string,
   args: unknown[],
+  options?: { hostAttrs?: Record<string, string>; hostNodePath?: string },
 ) {
   const info = canvasComponentMap.value[componentId]
   if (!info) {
-    ElMessage.warning(`组件不存在：${componentId}`)
+    pushPreviewRuntimeLog({
+      level: 'error',
+      message: `组件不存在：${componentId}`,
+      location: `调用暴露方法 · ${componentId}.${methodName}`,
+    })
     return
   }
   const exposed = info.config.exposedMethods ?? []
   if (!exposed.includes(methodName)) {
-    ElMessage.warning(`方法「${methodName}」未在组件中暴露`)
+    pushPreviewRuntimeLog({
+      level: 'warn',
+      message: `方法「${methodName}」未在组件中暴露`,
+      location: `组件 ${componentId}`,
+    })
     return
   }
   const method = (componentMethodsMap.value[componentId] ?? []).find(
     (item) => item.name === methodName && !item.builtin,
   )
   if (!method?.body?.trim()) {
-    ElMessage.warning(`找不到方法「${methodName}」的实现`)
+    pushPreviewRuntimeLog({
+      level: 'error',
+      message: `找不到方法「${methodName}」的实现`,
+      location: `组件 ${componentId}`,
+    })
     return
   }
 
@@ -2142,6 +2351,22 @@ function runComponentExposedMethod(
     },
   ])
 
+  const hostAttrs = options?.hostAttrs
+  // 必须用页面实例属性（含 fetchApi 绑定）+ 当前数据池求值，不能只用组件默认 $props
+  const instanceDollarProps = hostAttrs
+    ? resolveComponentInstanceDollarProps({
+        config: info.config,
+        hostAttrs,
+        pageData: resolvedPageData.value,
+        routeParams: routeParams.value,
+        projectPath: projectStore.path,
+      })
+    : hydrateApiDollarProps(
+        buildDollarProps(info.config),
+        info.config.props,
+        projectStore.path,
+      )
+
   void runEventBindings(raw, {
     pageData: info.data,
     getPageData: () =>
@@ -2159,13 +2384,21 @@ function runComponentExposedMethod(
       (item) => !item.builtin,
     ),
     eventArgs,
-    dollarProps: buildDollarProps(info.config),
+    dollarProps: instanceDollarProps,
     hasPage: (pageId) => pages.value.some((item) => item.id === pageId),
     navigateTo: async () => {
-      ElMessage.info('组件内暂不支持 navigateTo')
+      pushPreviewRuntimeLog({
+        level: 'info',
+        message: '组件内暂不支持 navigateTo',
+        location: `组件 ${componentId}`,
+      })
     },
     navigateBack: async () => {
-      ElMessage.info('组件内暂不支持 navigateBack')
+      pushPreviewRuntimeLog({
+        level: 'info',
+        message: '组件内暂不支持 navigateBack',
+        location: `组件 ${componentId}`,
+      })
     },
     setData: (prop, value) => {
       applyComponentPreviewSetData(componentId, prop, value)
@@ -2174,15 +2407,38 @@ function runComponentExposedMethod(
       applyPreviewUpdateProps(prop, value, {
         componentId,
         config: info.config,
+        hostAttrs,
       })
     },
     showToast: (message, duration) => {
       showPreviewToast(message, duration)
     },
     getDeviceInfo: previewGetDeviceInfo,
-    onUnknownMethod: (name) => {
-      if (name.startsWith('自定义方法')) ElMessage.error(name)
-      else if (name.startsWith('updateProps')) ElMessage.warning(name)
+    colorPalette: colorPalette.value,
+    logLocation: formatPreviewLogLocation({
+      dataOwnerComponentId: componentId,
+      timing: `暴露方法 ${methodName}`,
+    }),
+    onUnknownMethod: (name, detail) => {
+      const location =
+        detail?.location?.trim() ||
+        formatPreviewLogLocation({
+          dataOwnerComponentId: componentId,
+          timing: `暴露方法 ${methodName}`,
+        })
+      if (name.startsWith('自定义方法')) {
+        pushPreviewRuntimeLog({
+          level: 'error',
+          message: name,
+          location,
+        })
+      } else if (name.startsWith('updateProps')) {
+        pushPreviewRuntimeLog({
+          level: 'warn',
+          message: name,
+          location,
+        })
+      }
     },
   })
 }
@@ -2204,6 +2460,8 @@ async function runPreviewBindings(
     updatePropsHostAttrs?: Record<string, string>
     /** updateProps 回写父级数据池所属组件 id */
     updatePropsHostDataOwnerId?: string
+    /** 运行日志位置/时机，如「页面 · 事件 onClick」 */
+    logLocation?: string
   },
 ) {
   if (!activeDoc.value) return
@@ -2211,7 +2469,11 @@ async function runPreviewBindings(
   const ownerId = options?.dataOwnerComponentId?.trim() || ''
   const ownerInfo = ownerId ? canvasComponentMap.value[ownerId] : null
   if (ownerId && !ownerInfo) {
-    ElMessage.warning(`组件不存在：${ownerId}`)
+    pushPreviewRuntimeLog({
+      level: 'error',
+      message: `组件不存在：${ownerId}`,
+      location: '运行事件绑定',
+    })
     return
   }
 
@@ -2269,6 +2531,12 @@ async function runPreviewBindings(
     return previewRuntimeData.value ?? activeDoc.value!.data
   }
 
+  const boundLogLocation =
+    options?.logLocation?.trim() ||
+    formatPreviewLogLocation({
+      dataOwnerComponentId: ownerId || undefined,
+    })
+
   await runEventBindings(raw, {
     pageData: readLivePageData(),
     getPageData: readLivePageData,
@@ -2284,6 +2552,7 @@ async function runPreviewBindings(
     dollarProps: boundDollarProps,
     emit: debugEmit,
     emitWithArgs: debugEmitWithArgs,
+    logLocation: boundLogLocation,
     hasPage: (pageId) => pages.value.some((item) => item.id === pageId),
     navigateTo: async (pageId, params) => {
       if (!isPreviewSessionLive(sessionGen)) return
@@ -2335,14 +2604,28 @@ async function runPreviewBindings(
       showPreviewToast(message, duration)
     },
     getDeviceInfo: previewGetDeviceInfo,
-    onUnknownMethod: (name) => {
+    colorPalette: colorPalette.value,
+    onUnknownMethod: (name, detail) => {
       if (!isPreviewSessionLive(sessionGen)) return
+      const location = detail?.location?.trim() || boundLogLocation
       if (name.startsWith('navigateTo:')) {
-        ElMessage.warning(name.replace(/^navigateTo:\s*/, ''))
+        pushPreviewRuntimeLog({
+          level: 'warn',
+          message: name.replace(/^navigateTo:\s*/, ''),
+          location,
+        })
       } else if (name.startsWith('自定义方法')) {
-        ElMessage.error(name)
+        pushPreviewRuntimeLog({
+          level: 'error',
+          message: name,
+          location,
+        })
       } else if (name.startsWith('updateProps')) {
-        ElMessage.warning(name)
+        pushPreviewRuntimeLog({
+          level: 'warn',
+          message: name,
+          location,
+        })
       }
     },
   })
@@ -2361,6 +2644,7 @@ function commitPreviewRuntime(
     ? restoreComponentDebugProps()
     : {}
   previewEmitLogs.value = []
+  previewRuntimeLogs.value = []
 }
 
 /** 页面已展示后拉取控制器绑定并触发 onLoading / onSuccess / onError / onFinally */
@@ -2384,8 +2668,13 @@ async function hydratePreviewControllerBindings() {
         $query: { ...routeParams.value },
         $route: { ...routeParams.value },
       },
-      runEvents: (raw, eventArgs) =>
-        runPreviewBindings(raw, { eventArgs }),
+      runEvents: (raw, eventArgs, meta) =>
+        runPreviewBindings(raw, {
+          eventArgs,
+          logLocation: formatPreviewLogLocation({
+            timing: `控制器绑定 · ${meta?.hook || '钩子'}`,
+          }),
+        }),
     })
     if (seq !== previewControllerHydrateSeq) return
     if (!isPreviewSessionLive(sessionGen)) return
@@ -2416,6 +2705,8 @@ async function hydratePreviewControllerBindings() {
       {
         getDeviceInfo: previewGetDeviceInfo,
         dollarProps: editorDollarProps.value ?? {},
+        dollarQuery: isPageResource.value ? routeParams.value : undefined,
+        colorPalette: colorPalette.value,
       },
     )
   } catch (err) {
@@ -2469,6 +2760,9 @@ async function runLifecycleHook(key: LifecycleHookKey) {
   if (!raw?.trim()) return
   await runPreviewBindings(raw, {
     dollarProps: editorDollarProps.value,
+    logLocation: formatPreviewLogLocation({
+      timing: `生命周期 ${key}`,
+    }),
   })
 }
 
@@ -2500,8 +2794,13 @@ async function runNestedComponentLifecycle(
         dollarProps: payload.dollarProps,
         dataOwnerComponentId: componentId,
         updatePropsHostAttrs: payload.componentEmit?.hostAttrs,
-        updatePropsHostDataOwnerId:
-          payload.componentEmit?.outer?.componentId?.trim() || undefined,
+        updatePropsHostDataOwnerId: resolveUpdatePropsHostDataOwnerId(
+          payload.componentEmit,
+        ),
+        logLocation: formatPreviewLogLocation({
+          dataOwnerComponentId: componentId,
+          timing: `生命周期 ${key}`,
+        }),
       })
       continue
     }
@@ -2686,6 +2985,10 @@ async function handlePreviewInteract(payload: PreviewInteractPayload) {
         scope: layer.hostScope ?? payload.scope,
         eventArgs: packed,
         dataOwnerComponentId: hostDataOwner,
+        logLocation: formatPreviewLogLocation({
+          dataOwnerComponentId: hostDataOwner,
+          timing: `事件 ${eventName}`,
+        }),
         // 再 emit 时交给外层（GoodsCard → GoodsList → 页面）
         emitWithArgs: parent
           ? createLayerEmitWithArgs(parent)
@@ -2744,8 +3047,13 @@ async function handlePreviewInteract(payload: PreviewInteractPayload) {
     emitWithArgs,
     dataOwnerComponentId: payload.componentEmit?.componentId?.trim() || undefined,
     updatePropsHostAttrs: payload.componentEmit?.hostAttrs,
-    updatePropsHostDataOwnerId:
-      payload.componentEmit?.outer?.componentId?.trim() || undefined,
+    updatePropsHostDataOwnerId: resolveUpdatePropsHostDataOwnerId(
+      payload.componentEmit,
+    ),
+    logLocation: formatPreviewLogLocation({
+      dataOwnerComponentId: payload.componentEmit?.componentId?.trim() || undefined,
+      eventKey: payload.eventKey,
+    }),
   })
 }
 
@@ -2755,7 +3063,11 @@ function applyPreviewSetData(prop: string, value: import('../types/page-data').D
   const fields = [...(previewRuntimeData.value?.fields ?? [])]
   const index = fields.findIndex((item) => item.name.trim() === prop.trim())
   if (index < 0) {
-    ElMessage.warning(`数据池不存在字段：${prop}`)
+    pushPreviewRuntimeLog({
+      level: 'error',
+      message: `数据池不存在字段：${prop}`,
+      location: `页面 · setData('${prop}')`,
+    })
     return
   }
   const prev = fields[index]!
@@ -2784,6 +3096,8 @@ function applyPreviewSetData(prop: string, value: import('../types/page-data').D
     {
       getDeviceInfo: previewGetDeviceInfo,
       dollarProps: editorDollarProps.value ?? {},
+      dollarQuery: isPageResource.value ? routeParams.value : undefined,
+      colorPalette: colorPalette.value,
     },
   )
   scheduleLifecycleUpdate()
@@ -2865,6 +3179,7 @@ async function handleComponentConfigUpdate(config: ComponentConfig) {
 
 let dataSaveTimer: ReturnType<typeof setTimeout> | null = null
 let iconSaveTimer: ReturnType<typeof setTimeout> | null = null
+let paletteSaveTimer: ReturnType<typeof setTimeout> | null = null
 let dataTypeSaveTimer: ReturnType<typeof setTimeout> | null = null
 let xmlSaveTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -2882,6 +3197,24 @@ async function handleIconLibraryUpdate(library: IconLibrary) {
       })
     } catch (err) {
       ElMessage.error(err instanceof Error ? err.message : '保存图标库失败')
+    }
+  }, 400)
+}
+
+async function handleColorPaletteUpdate(library: ColorPalette) {
+  if (!projectStore.path) return
+  colorPalette.value = library
+
+  if (paletteSaveTimer) clearTimeout(paletteSaveTimer)
+  paletteSaveTimer = setTimeout(async () => {
+    if (!projectStore.path) return
+    try {
+      colorPalette.value = await saveColorPaletteApi({
+        projectPath: projectStore.path,
+        colors: colorPalette.value.colors,
+      })
+    } catch (err) {
+      ElMessage.error(err instanceof Error ? err.message : '保存调色板失败')
     }
   }, 400)
 }
@@ -3544,7 +3877,7 @@ watch(
       </div>
 
       <WidgetTree
-        v-if="activeDoc && !hideWidgetTree"
+        v-if="activeDoc && !hideWidgetTree && workspaceMode !== 'preview'"
         :xml="activeDoc.xml"
         :selected-id="selectedNodeId"
         :editable="isEditMode"
@@ -3556,6 +3889,11 @@ watch(
         @open-event="handleOpenEventConfig"
         @move="handleMoveWidget"
         @toggle-hidden="toggleEditorHidden"
+      />
+      <PreviewRuntimeLog
+        v-else-if="activeDoc && workspaceMode === 'preview'"
+        :logs="previewRuntimeLogs"
+        @clear="previewRuntimeLogs = []"
       />
     </aside>
 
@@ -3671,6 +4009,10 @@ watch(
           <span class="preview-title">图标库</span>
           <span class="preview-sub">icons</span>
         </template>
+        <template v-else-if="isPaletteMode">
+          <span class="preview-title">调色板</span>
+          <span class="preview-sub">palette</span>
+        </template>
         <template v-else-if="isDataTypesMode">
           <span class="preview-title">数据类型</span>
           <span class="preview-sub">types</span>
@@ -3729,6 +4071,7 @@ watch(
               :service-id="activeBackendService.id"
               :service-name="activeBackendService.name"
               :type-library="dataTypeLibrary"
+              :module-options="backendModuleOptions"
               :layer="backendServiceLayer"
               :restored-controller-id="activeBackendUi?.controllerId"
               :restored-business="activeBackendUi?.processors.business ?? null"
@@ -3760,6 +4103,11 @@ watch(
           :project-path="projectStore.path"
           @update:library="handleIconLibraryUpdate"
         />
+        <ColorPalettePanel
+          v-else-if="isPaletteMode"
+          :library="colorPalette"
+          @update:library="handleColorPaletteUpdate"
+        />
         <DataTypesPanel
           v-else-if="isDataTypesMode"
           :library="dataTypeLibrary"
@@ -3789,6 +4137,7 @@ watch(
           :xml="activeDoc.xml"
           :icon-options="iconOptions"
           :get-device-info="previewGetDeviceInfo"
+          :color-palette="colorPalette"
           :component-props="editorConditionComponentProps"
           :dollar-props="editorDollarProps"
           :type-library="dataTypeLibrary"
@@ -3800,6 +4149,7 @@ watch(
             isComponentResource ? activeComponent?.config.events : undefined
           "
           :page-query-params="isPageResource ? pageQueryParams : null"
+          :route-params="isPageResource ? routeParams : null"
           @update:data="handleDataUpdate"
         />
         <MethodsPanel

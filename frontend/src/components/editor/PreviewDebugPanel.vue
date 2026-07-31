@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
-import { Delete, EditPen, Plus, RefreshRight } from '@element-plus/icons-vue'
+import { ArrowDown, Connection, Delete, EditPen, Plus, RefreshRight } from '@element-plus/icons-vue'
 import type { ComponentConfig, ComponentPropDef } from '../../types/component'
 import type { DataField, DataFieldValue, PageData } from '../../types/page-data'
+import { arrayTypeLabel } from '../../types/page-data'
 import type {
   DataTypeLibrary,
   InterfaceField,
@@ -85,6 +86,10 @@ function isComputedField(field: DataField): boolean {
   return field.binding === 'computed'
 }
 
+function isApiBoundField(field: DataField): boolean {
+  return field.binding === 'controller' || field.type === 'api'
+}
+
 function isReadonlyDataField(field: DataField): boolean {
   return isComputedField(field) || field.type === 'ref' || field.type === 'api'
 }
@@ -152,11 +157,11 @@ function setDataFieldPresent(form: DataFieldFormModel, present: boolean) {
 }
 
 function dataFieldTypeLabel(field: DataField): string {
-  const parts: string[] = [field.type]
-  if (field.binding === 'computed') parts.push('计算')
-  else if (field.binding === 'controller') parts.push('控制器')
-  if (field.remark?.trim()) parts.push(field.remark.trim())
-  return parts.join(' · ')
+  return field.type
+}
+
+function dataFieldRemark(field: DataField): string {
+  return field.remark?.trim() || ''
 }
 
 function onDataFieldInput(field: DataField, raw: unknown) {
@@ -228,12 +233,6 @@ function resolveDataObjectFields(field: DataField): ObjectFieldForm[] {
 
 function resolveDataFieldForm(field: DataField): DataFieldFormModel {
   const readonly = isReadonlyDataField(field)
-  const bindingHint =
-    field.binding === 'computed'
-      ? ' · 计算'
-      : field.binding === 'controller'
-        ? ' · 控制器'
-        : ''
 
   if (field.type === 'array') {
     // 未加载（null）：整段显示 null，勿当成空数组展开
@@ -242,7 +241,7 @@ function resolveDataFieldForm(field: DataField): DataFieldFormModel {
       return {
         field,
         mode: 'json',
-        typeLabel: `数组${ref ? ` / ${namedTypeLabel(ref)}` : ''}${bindingHint}`,
+        typeLabel: arrayTypeLabel(ref ? namedTypeLabel(ref) : ''),
         fields: [],
         readonly,
       }
@@ -251,7 +250,10 @@ function resolveDataFieldForm(field: DataField): DataFieldFormModel {
       return {
         field,
         mode: 'json',
-        typeLabel: `数组 / 数组 / ${atomTypeLabel(field.itemItemType, field.itemItemTypeRef)}${bindingHint}`,
+        typeLabel: arrayTypeLabel(
+          atomTypeLabel(field.itemItemType, field.itemItemTypeRef),
+          2,
+        ),
         fields: [],
         readonly,
       }
@@ -263,7 +265,7 @@ function resolveDataFieldForm(field: DataField): DataFieldFormModel {
         return {
           field,
           mode: 'array',
-          typeLabel: `数组 / ${namedTypeLabel(ref)}${bindingHint}`,
+          typeLabel: arrayTypeLabel(namedTypeLabel(ref)),
           fields,
           readonly,
         }
@@ -273,7 +275,7 @@ function resolveDataFieldForm(field: DataField): DataFieldFormModel {
         return {
           field,
           mode: 'array',
-          typeLabel: `数组 / ${named.name || ref}${bindingHint}`,
+          typeLabel: arrayTypeLabel(named.name || ref),
           fields: [],
           itemKind: 'enum',
           itemEnumOptions: named.enumMembers.map((m) => m.name).filter(Boolean),
@@ -302,7 +304,7 @@ function resolveDataFieldForm(field: DataField): DataFieldFormModel {
     return {
       field,
       mode: 'array',
-      typeLabel: `数组 / ${atomTypeLabel(itemType, ref)}${bindingHint}`,
+      typeLabel: arrayTypeLabel(atomTypeLabel(itemType, ref)),
       fields: inferred,
       itemKind: inferred.length ? undefined : itemKind,
       itemEnumOptions: [],
@@ -317,7 +319,7 @@ function resolveDataFieldForm(field: DataField): DataFieldFormModel {
       return {
         field,
         mode: 'json',
-        typeLabel: (ref ? namedTypeLabel(ref) : '对象') + bindingHint,
+        typeLabel: (ref ? namedTypeLabel(ref) : 'object'),
         fields: [],
         readonly,
       }
@@ -327,7 +329,7 @@ function resolveDataFieldForm(field: DataField): DataFieldFormModel {
       return {
         field,
         mode: 'object',
-        typeLabel: (ref ? namedTypeLabel(ref) : '对象') + bindingHint,
+        typeLabel: (ref ? namedTypeLabel(ref) : 'object'),
         fields,
         readonly,
       }
@@ -335,7 +337,7 @@ function resolveDataFieldForm(field: DataField): DataFieldFormModel {
     return {
       field,
       mode: 'json',
-      typeLabel: (ref ? namedTypeLabel(ref) : '对象') + bindingHint,
+      typeLabel: (ref ? namedTypeLabel(ref) : 'object'),
       fields: [],
       readonly,
     }
@@ -354,9 +356,7 @@ function resolveDataFieldForm(field: DataField): DataFieldFormModel {
   return {
     field,
     mode: 'scalar',
-    typeLabel: (field.remark?.trim()
-      ? `${field.type} · ${field.remark.trim()}`
-      : field.type) + bindingHint,
+    typeLabel: field.type,
     fields: [],
     readonly,
   }
@@ -365,6 +365,24 @@ function resolveDataFieldForm(field: DataField): DataFieldFormModel {
 const dataFieldForms = computed(() =>
   dataFields.value.map(resolveDataFieldForm),
 )
+
+/** 数据池字段：行内展开编辑（同时最多一个） */
+const expandedInlineFieldName = ref('')
+
+function isInlineExpandableField(field: DataField): boolean {
+  return field.type !== 'boolean'
+}
+
+function toggleInlineExpand(form: DataFieldFormModel) {
+  const name = form.field.name.trim()
+  if (!name) return
+  expandedInlineFieldName.value =
+    expandedInlineFieldName.value === name ? '' : name
+}
+
+function isInlineExpanded(form: DataFieldFormModel): boolean {
+  return expandedInlineFieldName.value === form.field.name.trim()
+}
 
 /** 具名对象缺字段时写入类型默认值，使画布插值与调试面板数字框一致（如 deliveryFee → 0） */
 watch(
@@ -497,10 +515,10 @@ function namedTypeLabel(typeRef: string): string {
 
 function atomTypeLabel(type: string | undefined, typeRef?: string): string {
   if (typeRef) return namedTypeLabel(typeRef)
-  if (type === 'json') return '对象'
+  if (type === 'json') return 'object'
   if (type === 'number') return 'number'
   if (type === 'boolean') return 'boolean'
-  if (type === 'array') return '数组'
+  if (type === 'array') return '[]'
   return type || 'string'
 }
 
@@ -510,7 +528,10 @@ function resolvePropForm(def: ComponentPropDef): PropFormModel {
       return {
         def,
         mode: 'json',
-        typeLabel: `数组 / 数组 / ${atomTypeLabel(def.itemItemType, def.itemItemTypeRef)}`,
+        typeLabel: arrayTypeLabel(
+          atomTypeLabel(def.itemItemType, def.itemItemTypeRef),
+          2,
+        ),
         fields: [],
       }
     }
@@ -521,7 +542,7 @@ function resolvePropForm(def: ComponentPropDef): PropFormModel {
         return {
           def,
           mode: 'array',
-          typeLabel: `数组 / ${namedTypeLabel(ref)}`,
+          typeLabel: arrayTypeLabel(namedTypeLabel(ref)),
           fields,
         }
       }
@@ -530,7 +551,7 @@ function resolvePropForm(def: ComponentPropDef): PropFormModel {
         return {
           def,
           mode: 'array',
-          typeLabel: `数组 / ${named.name || ref}`,
+          typeLabel: arrayTypeLabel(named.name || ref),
           fields: [],
           itemKind: 'enum',
           itemEnumOptions: named.enumMembers.map((m) => m.name).filter(Boolean),
@@ -549,7 +570,7 @@ function resolvePropForm(def: ComponentPropDef): PropFormModel {
     return {
       def,
       mode: 'array',
-      typeLabel: `数组 / ${atomTypeLabel(itemType, ref)}`,
+      typeLabel: arrayTypeLabel(atomTypeLabel(itemType, ref)),
       fields: [],
       itemKind,
       itemEnumOptions: [],
@@ -572,7 +593,7 @@ function resolvePropForm(def: ComponentPropDef): PropFormModel {
     return {
       def,
       mode: 'json',
-      typeLabel: ref ? namedTypeLabel(ref) : '对象',
+      typeLabel: ref ? namedTypeLabel(ref) : 'object',
       fields: [],
     }
   }
@@ -957,6 +978,8 @@ watch(
               :project-path="projectPath || ''"
               :api-params="form.def.apiParams"
               :api-return-type="form.def.apiReturnType"
+              :data-fields="dataFields"
+              :type-library="typeLibrary"
               @update:model-value="onPropInput(form.def, $event)"
             />
             <el-input
@@ -1070,15 +1093,18 @@ watch(
                   />
                 </div>
               </div>
-              <el-button
-                class="array-add"
-                type="primary"
-                link
-                :icon="Plus"
+              <button
+                type="button"
+                class="array-item array-add-item"
                 @click="openAddArrayItem(form)"
               >
-                添加
-              </el-button>
+                <div class="array-item-main">
+                  <span class="array-index array-add-icon">
+                    <el-icon :size="12"><Plus /></el-icon>
+                  </span>
+                  <span class="array-summary array-add-label">添加</span>
+                </div>
+              </button>
             </div>
 
             <el-input
@@ -1157,214 +1183,308 @@ watch(
           <div
             v-for="form in dataFieldForms"
             :key="form.field.name"
-            class="param-block"
+            class="data-field-summary"
+            :class="{
+              'is-expanded': isInlineExpanded(form),
+              'has-remark': Boolean(dataFieldRemark(form.field)),
+            }"
           >
-            <div class="prop-label">
-              <el-checkbox
-                v-if="supportsNullToggle(form.field)"
-                :model-value="isDataFieldPresent(form.field)"
-                :disabled="form.readonly"
-                title="勾选=有值；不勾选=null"
-                @update:model-value="
-                  setDataFieldPresent(form, $event === true)
-                "
-              />
-              <span class="prop-name">{{ form.field.name }}</span>
-              <span class="prop-type">{{ form.typeLabel }}</span>
-            </div>
-
-            <div
-              v-if="supportsNullToggle(form.field) && !isDataFieldPresent(form.field)"
-              class="null-hint"
-            >
-              null
-            </div>
-
-            <!-- 标量 -->
-            <template v-else-if="form.mode === 'scalar'">
-              <el-switch
-                v-if="form.field.type === 'boolean'"
-                :model-value="form.field.value === true"
-                :disabled="form.readonly"
-                @update:model-value="onDataFieldInput(form.field, $event === true)"
-              />
-              <el-input-number
-                v-else-if="form.field.type === 'number'"
-                :model-value="Number(form.field.value ?? 0)"
-                :disabled="form.readonly"
-                controls-position="right"
-                style="width: 100%"
-                @update:model-value="onDataFieldInput(form.field, $event ?? 0)"
-              />
-              <ColorPicker
-                v-else-if="form.field.type === 'color' && !form.readonly"
-                :model-value="String(form.field.value ?? '')"
-                placeholder="#409eff / rgba(...)"
-                @update:model-value="onDataFieldInput(form.field, $event)"
-              />
-              <el-input
-                v-else-if="form.field.type === 'color'"
-                :model-value="String(form.field.value ?? '')"
-                readonly
-              />
-              <el-input
-                v-else
-                :model-value="
-                  form.field.value == null ? '' : String(form.field.value)
-                "
-                :readonly="form.readonly"
-                @update:model-value="onDataFieldInput(form.field, $event)"
-              />
-            </template>
-
-            <!-- 具名对象：展开字段 -->
-            <div v-else-if="form.mode === 'object'" class="object-fields">
-              <div
-                v-for="sub in form.fields"
-                :key="sub.name"
-                class="object-field"
-              >
-                <div class="object-field-label">
-                  <span class="prop-name">{{ sub.name }}</span>
-                  <span v-if="sub.remark" class="prop-type">{{ sub.remark }}</span>
-                </div>
-                <el-switch
-                  v-if="sub.kind === 'boolean'"
-                  :model-value="dataObjectFieldValue(form.field, sub.name) === true"
-                  :disabled="form.readonly"
-                  @update:model-value="
-                    setDataObjectField(form, sub.name, $event === true)
-                  "
-                />
-                <el-input-number
-                  v-else-if="sub.kind === 'number'"
-                  :model-value="
-                    Number(dataObjectFieldValue(form.field, sub.name) ?? 0)
-                  "
-                  :disabled="form.readonly"
-                  controls-position="right"
-                  style="width: 100%"
-                  @update:model-value="
-                    setDataObjectField(form, sub.name, $event ?? 0)
-                  "
-                />
-                <el-select
-                  v-else-if="sub.kind === 'enum'"
-                  :model-value="
-                    String(dataObjectFieldValue(form.field, sub.name) ?? '')
-                  "
-                  :disabled="form.readonly"
-                  clearable
-                  placeholder="选择"
-                  style="width: 100%"
-                  @update:model-value="
-                    setDataObjectField(form, sub.name, $event ?? '')
-                  "
+            <div class="data-field-summary-top">
+              <div class="data-field-summary-main">
+                <span
+                  v-if="isComputedField(form.field)"
+                  class="binding-field-icon is-computed"
+                  title="计算字段"
+                  aria-label="计算字段"
                 >
-                  <el-option
-                    v-for="opt in sub.enumOptions"
-                    :key="opt"
-                    :label="opt"
-                    :value="opt"
-                  />
-                </el-select>
-                <el-input
-                  v-else-if="sub.kind === 'json' || sub.kind === 'array'"
-                  type="textarea"
-                  :rows="2"
-                  :readonly="form.readonly"
-                  :model-value="
-                    formatJson(dataObjectFieldValue(form.field, sub.name))
-                  "
-                  @blur="
-                    form.readonly
-                      ? undefined
-                      : onDataObjectFieldJsonBlur(
-                          form,
-                          sub.name,
-                          ($event.target as HTMLTextAreaElement).value,
-                          sub.kind === 'array',
-                        )
-                  "
-                />
-                <el-input
-                  v-else
-                  :readonly="form.readonly"
-                  :model-value="
-                    String(dataObjectFieldValue(form.field, sub.name) ?? '')
-                  "
+                  <svg
+                    viewBox="0 0 16 16"
+                    width="14"
+                    height="14"
+                    fill="none"
+                    xmlns="http://www.w3.org/2000/svg"
+                    aria-hidden="true"
+                  >
+                    <rect
+                      x="2.25"
+                      y="1.25"
+                      width="11.5"
+                      height="13.5"
+                      rx="1.75"
+                      stroke="currentColor"
+                      stroke-width="1.25"
+                    />
+                    <rect
+                      x="4"
+                      y="3"
+                      width="8"
+                      height="2.5"
+                      rx="0.5"
+                      fill="currentColor"
+                      opacity="0.35"
+                    />
+                    <rect x="4" y="7" width="2" height="1.75" rx="0.35" fill="currentColor" />
+                    <rect x="7" y="7" width="2" height="1.75" rx="0.35" fill="currentColor" />
+                    <rect x="10" y="7" width="2" height="1.75" rx="0.35" fill="currentColor" />
+                    <rect x="4" y="9.75" width="2" height="1.75" rx="0.35" fill="currentColor" />
+                    <rect x="7" y="9.75" width="2" height="1.75" rx="0.35" fill="currentColor" />
+                    <rect x="10" y="9.75" width="2" height="1.75" rx="0.35" fill="currentColor" />
+                    <rect x="4" y="12.5" width="5" height="1.75" rx="0.35" fill="currentColor" />
+                    <rect x="10" y="12.5" width="2" height="1.75" rx="0.35" fill="currentColor" />
+                  </svg>
+                </span>
+                <span
+                  v-else-if="isApiBoundField(form.field)"
+                  class="binding-field-icon is-controller"
+                  title="控制器字段"
+                  aria-label="控制器字段"
+                >
+                  <el-icon :size="14"><Connection /></el-icon>
+                </span>
+                <el-checkbox
+                  v-else-if="form.field.type === 'boolean'"
+                  :model-value="form.field.value === true"
+                  :disabled="form.readonly"
+                  title="布尔值"
                   @update:model-value="
-                    setDataObjectField(form, sub.name, String($event ?? ''))
+                    onDataFieldInput(form.field, $event === true)
                   "
                 />
-              </div>
-            </div>
-
-            <!-- 数组：逐项列表 -->
-            <div v-else-if="form.mode === 'array'" class="array-list">
-              <div
-                v-if="!getDataArrayItems(form.field).length"
-                class="array-empty"
-              >
-                暂无数据{{ form.readonly ? '' : '，点击下方添加' }}
-              </div>
-              <div
-                v-for="(item, index) in getDataArrayItems(form.field)"
-                :key="`${form.field.name}-${index}`"
-                class="array-item"
-                @click="openEditDataArrayItem(form, index)"
-              >
-                <div class="array-item-main">
-                  <span class="array-index">{{ index + 1 }}</span>
-                  <span class="array-summary">{{
-                    summarizeItem(item, form.fields)
-                  }}</span>
-                </div>
-                <div class="array-item-actions" @click.stop>
-                  <el-button
-                    type="primary"
-                    link
-                    :icon="EditPen"
-                    @click="openEditDataArrayItem(form, index)"
-                  />
-                  <el-button
-                    v-if="!form.readonly"
-                    type="danger"
-                    link
-                    :icon="Delete"
-                    @click="removeDataArrayItem(form.field, index)"
-                  />
+                <el-checkbox
+                  v-else
+                  :model-value="
+                    supportsNullToggle(form.field)
+                      ? isDataFieldPresent(form.field)
+                      : true
+                  "
+                  :disabled="
+                    form.readonly || !supportsNullToggle(form.field)
+                  "
+                  title="勾选=有值；不勾选=null"
+                  @update:model-value="
+                    supportsNullToggle(form.field)
+                      ? setDataFieldPresent(form, $event === true)
+                      : undefined
+                  "
+                />
+                <div class="data-field-summary-text">
+                  <div class="data-field-summary-line">
+                    <span class="prop-name">{{ form.field.name }}</span>
+                    <span class="prop-type">: {{ form.typeLabel }}</span>
+                  </div>
+                  <div
+                    v-if="dataFieldRemark(form.field)"
+                    class="data-field-remark"
+                    :title="dataFieldRemark(form.field)"
+                  >
+                    {{ dataFieldRemark(form.field) }}
+                  </div>
                 </div>
               </div>
               <el-button
-                v-if="!form.readonly"
-                class="array-add"
+                v-if="isInlineExpandableField(form.field)"
                 type="primary"
                 link
-                :icon="Plus"
-                @click="openAddDataArrayItem(form)"
-              >
-                添加
-              </el-button>
+                class="expand-btn"
+                :class="{ 'is-open': isInlineExpanded(form) }"
+                :icon="ArrowDown"
+                @click="toggleInlineExpand(form)"
+              />
             </div>
+            <div
+              v-if="isInlineExpandableField(form.field) && isInlineExpanded(form)"
+              class="data-field-inline-editor"
+            >
+              <div
+                v-if="
+                  supportsNullToggle(form.field) && !isDataFieldPresent(form.field)
+                "
+                class="null-hint"
+              >
+                null（外侧不勾选时为空）
+              </div>
 
-            <!-- 无结构对象 / 嵌套数组：JSON -->
-            <pre
-              v-else-if="form.readonly"
-              class="data-readonly-json"
-            >{{ formatJson(form.field.value) }}</pre>
-            <el-input
-              v-else
-              type="textarea"
-              :rows="3"
-              :model-value="formatJson(form.field.value)"
-              @blur="
-                onDataJsonBlur(
-                  form.field,
-                  ($event.target as HTMLTextAreaElement).value,
-                )
-              "
-            />
+              <template v-else-if="form.mode === 'scalar'">
+                <el-input-number
+                  v-if="form.field.type === 'number'"
+                  :model-value="Number(form.field.value ?? 0)"
+                  :disabled="form.readonly"
+                  controls-position="right"
+                  style="width: 100%"
+                  @update:model-value="onDataFieldInput(form.field, $event ?? 0)"
+                />
+                <ColorPicker
+                  v-else-if="form.field.type === 'color'"
+                  class="data-field-color-picker"
+                  :class="{ 'is-readonly': form.readonly }"
+                  :model-value="String(form.field.value ?? '')"
+                  placeholder="#409eff / rgba(...)"
+                  @update:model-value="onDataFieldInput(form.field, $event)"
+                />
+                <el-input
+                  v-else
+                  :model-value="
+                    form.field.value == null ? '' : String(form.field.value)
+                  "
+                  :readonly="form.readonly"
+                  placeholder="输入字符串"
+                  @update:model-value="onDataFieldInput(form.field, $event)"
+                />
+              </template>
+
+              <div v-else-if="form.mode === 'object'" class="object-fields">
+                <div
+                  v-for="sub in form.fields"
+                  :key="sub.name"
+                  class="object-field"
+                >
+                  <div class="object-field-label">
+                    <span class="prop-name">{{ sub.name }}</span>
+                    <span v-if="sub.remark" class="prop-type">{{
+                      sub.remark
+                    }}</span>
+                  </div>
+                  <el-switch
+                    v-if="sub.kind === 'boolean'"
+                    :model-value="
+                      dataObjectFieldValue(form.field, sub.name) === true
+                    "
+                    :disabled="form.readonly"
+                    @update:model-value="
+                      setDataObjectField(form, sub.name, $event === true)
+                    "
+                  />
+                  <el-input-number
+                    v-else-if="sub.kind === 'number'"
+                    :model-value="
+                      Number(dataObjectFieldValue(form.field, sub.name) ?? 0)
+                    "
+                    :disabled="form.readonly"
+                    controls-position="right"
+                    style="width: 100%"
+                    @update:model-value="
+                      setDataObjectField(form, sub.name, $event ?? 0)
+                    "
+                  />
+                  <el-select
+                    v-else-if="sub.kind === 'enum'"
+                    :model-value="
+                      String(dataObjectFieldValue(form.field, sub.name) ?? '')
+                    "
+                    :disabled="form.readonly"
+                    clearable
+                    placeholder="选择"
+                    style="width: 100%"
+                    @update:model-value="
+                      setDataObjectField(form, sub.name, $event ?? '')
+                    "
+                  >
+                    <el-option
+                      v-for="opt in sub.enumOptions"
+                      :key="opt"
+                      :label="opt"
+                      :value="opt"
+                    />
+                  </el-select>
+                  <el-input
+                    v-else-if="sub.kind === 'json' || sub.kind === 'array'"
+                    type="textarea"
+                    :rows="2"
+                    :readonly="form.readonly"
+                    :model-value="
+                      formatJson(dataObjectFieldValue(form.field, sub.name))
+                    "
+                    @blur="
+                      form.readonly
+                        ? undefined
+                        : onDataObjectFieldJsonBlur(
+                            form,
+                            sub.name,
+                            ($event.target as HTMLTextAreaElement).value,
+                            sub.kind === 'array',
+                          )
+                    "
+                  />
+                  <el-input
+                    v-else
+                    :readonly="form.readonly"
+                    :model-value="
+                      String(dataObjectFieldValue(form.field, sub.name) ?? '')
+                    "
+                    @update:model-value="
+                      setDataObjectField(form, sub.name, String($event ?? ''))
+                    "
+                  />
+                </div>
+              </div>
+
+              <div v-else-if="form.mode === 'array'" class="array-list">
+                <div
+                  v-if="!getDataArrayItems(form.field).length"
+                  class="array-empty"
+                >
+                  暂无数据{{ form.readonly ? '' : '，点击下方添加' }}
+                </div>
+                <div
+                  v-for="(item, index) in getDataArrayItems(form.field)"
+                  :key="`${form.field.name}-${index}`"
+                  class="array-item"
+                  @click="openEditDataArrayItem(form, index)"
+                >
+                  <div class="array-item-main">
+                    <span class="array-index">{{ index + 1 }}</span>
+                    <span class="array-summary">{{
+                      summarizeItem(item, form.fields)
+                    }}</span>
+                  </div>
+                  <div class="array-item-actions" @click.stop>
+                    <el-button
+                      type="primary"
+                      link
+                      :icon="EditPen"
+                      @click="openEditDataArrayItem(form, index)"
+                    />
+                    <el-button
+                      v-if="!form.readonly"
+                      type="danger"
+                      link
+                      :icon="Delete"
+                      @click="removeDataArrayItem(form.field, index)"
+                    />
+                  </div>
+                </div>
+                <button
+                  v-if="!form.readonly"
+                  type="button"
+                  class="array-item array-add-item"
+                  @click="openAddDataArrayItem(form)"
+                >
+                  <div class="array-item-main">
+                    <span class="array-index array-add-icon">
+                      <el-icon :size="12"><Plus /></el-icon>
+                    </span>
+                    <span class="array-summary array-add-label">添加</span>
+                  </div>
+                </button>
+              </div>
+
+              <pre
+                v-else-if="form.readonly"
+                class="data-readonly-json"
+              >{{ formatJson(form.field.value) }}</pre>
+              <el-input
+                v-else
+                type="textarea"
+                :rows="6"
+                :model-value="formatJson(form.field.value)"
+                @blur="
+                  onDataJsonBlur(
+                    form.field,
+                    ($event.target as HTMLTextAreaElement).value,
+                  )
+                "
+              />
+            </div>
           </div>
         </div>
       </div>
@@ -1608,6 +1728,144 @@ watch(
   gap: 10px;
 }
 
+.data-field-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  padding: 4px 0;
+  border-bottom: 1px solid #f0f2f5;
+}
+
+.data-field-summary:last-child {
+  border-bottom: none;
+}
+
+.data-field-summary-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.data-field-summary.has-remark .data-field-summary-top,
+.data-field-summary.has-remark .data-field-summary-main {
+  align-items: flex-start;
+}
+
+.data-field-summary-main {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex: 1;
+}
+
+.data-field-summary-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.data-field-summary-line {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  min-width: 0;
+  line-height: 1.4;
+}
+
+.data-field-summary-line .prop-name,
+.data-field-summary-line .prop-type {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 1.4;
+}
+
+.data-field-summary-line .prop-name {
+  flex-shrink: 0;
+  max-width: 55%;
+}
+
+.data-field-summary-line .prop-type {
+  min-width: 0;
+}
+
+.data-field-remark {
+  font-size: 11px;
+  line-height: 1.35;
+  color: #94a3b8;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  word-break: break-word;
+}
+
+.data-field-summary.has-remark .binding-field-icon,
+.data-field-summary.has-remark .data-field-summary-main > .el-checkbox {
+  margin-top: 2px;
+}
+
+.data-field-summary.has-remark .expand-btn {
+  margin-top: 1px;
+}
+
+.binding-field-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+}
+
+.binding-field-icon.is-computed {
+  color: #8b5cf6;
+}
+
+.binding-field-icon.is-controller {
+  color: #f97316;
+}
+
+.expand-btn {
+  height: 22px;
+  padding: 0 2px;
+  margin: 0;
+}
+
+.expand-btn :deep(.el-icon) {
+  transition: transform 0.15s ease;
+}
+
+.expand-btn.is-open :deep(.el-icon) {
+  transform: rotate(180deg);
+}
+
+.data-field-inline-editor {
+  padding-left: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.data-field-inline-editor .object-fields,
+.data-field-inline-editor .array-list {
+  max-height: 280px;
+  overflow: auto;
+}
+
+.data-field-color-picker.is-readonly {
+  pointer-events: none;
+  opacity: 0.72;
+}
+
 .param-block {
   display: flex;
   flex-direction: column;
@@ -1748,10 +2006,28 @@ watch(
   gap: 2px;
 }
 
-.array-add {
-  align-self: flex-start;
+.array-add-item {
+  width: 100%;
   margin: 0;
-  padding: 0;
+  border-style: dashed;
+  background: transparent;
+  color: #409eff;
+  font: inherit;
+  text-align: left;
+}
+
+.array-add-item:hover {
+  border-color: #409eff;
+  background: #f5f9ff;
+}
+
+.array-add-icon {
+  background: #ecf5ff;
+  color: #409eff;
+}
+
+.array-add-label {
+  color: #409eff;
 }
 
 .item-form {

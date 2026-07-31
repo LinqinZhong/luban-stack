@@ -1,0 +1,113 @@
+{
+  "id": "pms7aggcz96ig",
+  "name": "user",
+  "remark": "",
+  "entityRef": "type_ms7aefzu_3taw2c",
+  "dataProcessorRef": "",
+  "methods": [
+    {
+      "id": "method_ms7b6u6v_h1agz5",
+      "name": "userMapByIds",
+      "remark": "",
+      "scope": "public",
+      "params": [
+        {
+          "id": "param_ms7b7mqm_vwltop",
+          "name": "ids",
+          "remark": "",
+          "typeExpr": {
+            "type": "array",
+            "typeRef": "",
+            "itemType": "number",
+            "itemTypeRef": "",
+            "itemItemType": "",
+            "itemItemTypeRef": "",
+            "keyType": "",
+            "genericArgs": {}
+          },
+          "required": false
+        }
+      ],
+      "output": {
+        "type": "map",
+        "typeRef": "",
+        "itemType": "json",
+        "itemTypeRef": "type_ms7af53o_7bwxrd",
+        "itemItemType": "",
+        "itemItemTypeRef": "",
+        "keyType": "number",
+        "genericArgs": {}
+      },
+      "dataConfig": {
+        "source": "mysql",
+        "operation": "query",
+        "queryFields": [
+          "id",
+          "avatar",
+          "nickname",
+          "username"
+        ],
+        "sql": "",
+        "fieldMappings": [
+          {
+            "field": "key",
+            "column": "id"
+          },
+          {
+            "field": "id",
+            "column": "id"
+          },
+          {
+            "field": "username",
+            "column": "username"
+          },
+          {
+            "field": "avatar",
+            "column": "avatar"
+          },
+          {
+            "field": "nickname",
+            "column": "nickname"
+          }
+        ],
+        "batchSourceParam": "",
+        "pageParam": "",
+        "conditionGroups": [
+          {
+            "id": "cg_ms7datsa_9x30ih",
+            "conditions": [
+              {
+                "id": "cond_ms7datsa_9ylf5i",
+                "field": "id",
+                "customField": "",
+                "op": "in",
+                "valueKind": "param",
+                "value": "ids",
+                "valueTo": ""
+              }
+            ]
+          }
+        ]
+      },
+      "debugParams": {
+        "ids": [
+          1
+        ]
+      },
+      "flow": {
+        "nodes": [
+          {
+            "id": "start",
+            "kind": "start",
+            "position": {
+              "x": 280,
+              "y": 40
+            },
+            "data": {}
+          }
+        ],
+        "edges": []
+      }
+    }
+  ]
+}

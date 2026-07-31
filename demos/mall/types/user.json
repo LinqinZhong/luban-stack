@@ -1,0 +1,357 @@
+{
+  "id": "group_ms7aecxn_665b0g",
+  "types": [
+    {
+      "id": "type_ms7aefzu_3taw2c",
+      "name": "UserEntity",
+      "kind": "interface",
+      "remark": "用户表",
+      "tableName": "user",
+      "category": "entity",
+      "generics": [],
+      "fields": [
+        {
+          "id": "field_ms7aefzu_1lo0gd",
+          "name": "id",
+          "type": {
+            "intersections": [
+              {
+                "alternatives": [
+                  {
+                    "kind": "number"
+                  }
+                ]
+              }
+            ]
+          },
+          "remark": "",
+          "optional": false
+        },
+        {
+          "id": "field_ms7aefzu_fqtka8",
+          "name": "username",
+          "type": {
+            "intersections": [
+              {
+                "alternatives": [
+                  {
+                    "kind": "string"
+                  }
+                ]
+              }
+            ]
+          },
+          "remark": "",
+          "optional": true
+        },
+        {
+          "id": "field_ms7aefzu_f70gl9",
+          "name": "password",
+          "type": {
+            "intersections": [
+              {
+                "alternatives": [
+                  {
+                    "kind": "string"
+                  }
+                ]
+              }
+            ]
+          },
+          "remark": "",
+          "optional": true
+        },
+        {
+          "id": "field_ms7aefzu_676e9g",
+          "name": "salt",
+          "type": {
+            "intersections": [
+              {
+                "alternatives": [
+                  {
+                    "kind": "string"
+                  }
+                ]
+              }
+            ]
+          },
+          "remark": "",
+          "optional": true
+        },
+        {
+          "id": "field_ms7aefzu_expem2",
+          "name": "avatar",
+          "type": {
+            "intersections": [
+              {
+                "alternatives": [
+                  {
+                    "kind": "string"
+                  }
+                ]
+              }
+            ]
+          },
+          "remark": "",
+          "optional": true
+        },
+        {
+          "id": "field_ms7aefzu_tbebtm",
+          "name": "createdTime",
+          "type": {
+            "intersections": [
+              {
+                "alternatives": [
+                  {
+                    "kind": "string"
+                  }
+                ]
+              }
+            ]
+          },
+          "remark": "",
+          "optional": true
+        },
+        {
+          "id": "field_ms7aefzu_r39toh",
+          "name": "updatedTime",
+          "type": {
+            "intersections": [
+              {
+                "alternatives": [
+                  {
+                    "kind": "string"
+                  }
+                ]
+              }
+            ]
+          },
+          "remark": "",
+          "optional": true
+        },
+        {
+          "id": "field_ms7aefzu_dn1dg9",
+          "name": "isDeleted",
+          "type": {
+            "intersections": [
+              {
+                "alternatives": [
+                  {
+                    "kind": "boolean"
+                  }
+                ]
+              }
+            ]
+          },
+          "remark": "",
+          "optional": true
+        },
+        {
+          "id": "field_ms7aefzu_0vmo5w",
+          "name": "status",
+          "type": {
+            "intersections": [
+              {
+                "alternatives": [
+                  {
+                    "kind": "boolean"
+                  }
+                ]
+              }
+            ]
+          },
+          "remark": "",
+          "optional": true
+        },
+        {
+          "id": "field_ms7aefzu_j9lzno",
+          "name": "nickname",
+          "type": {
+            "intersections": [
+              {
+                "alternatives": [
+                  {
+                    "kind": "string"
+                  }
+                ]
+              }
+            ]
+          },
+          "remark": "",
+          "optional": true
+        }
+      ],
+      "enumMembers": [],
+      "combination": {
+        "intersections": [
+          {
+            "alternatives": [
+              {
+                "kind": "string"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "type_ms7af53o_7bwxrd",
+      "name": "UserVo",
+      "kind": "interface",
+      "remark": "用户表",
+      "tableName": "",
+      "category": "other",
+      "generics": [],
+      "fields": [
+        {
+          "id": "field_ms7aficd_6b7gn6",
+          "name": "id",
+          "type": {
+            "intersections": [
+              {
+                "alternatives": [
+                  {
+                    "kind": "number"
+                  }
+                ]
+              }
+            ]
+          },
+          "remark": "",
+          "optional": false
+        },
+        {
+          "id": "field_ms7aficd_11li6z",
+          "name": "username",
+          "type": {
+            "intersections": [
+              {
+                "alternatives": [
+                  {
+                    "kind": "string"
+                  }
+                ]
+              }
+            ]
+          },
+          "remark": "",
+          "optional": true
+        },
+        {
+          "id": "field_ms7aficd_jtrto8",
+          "name": "avatar",
+          "type": {
+            "intersections": [
+              {
+                "alternatives": [
+                  {
+                    "kind": "string"
+                  }
+                ]
+              }
+            ]
+          },
+          "remark": "",
+          "optional": true
+        },
+        {
+          "id": "field_ms7aficd_3owtsm",
+          "name": "createdTime",
+          "type": {
+            "intersections": [
+              {
+                "alternatives": [
+                  {
+                    "kind": "string"
+                  }
+                ]
+              }
+            ]
+          },
+          "remark": "",
+          "optional": true
+        },
+        {
+          "id": "field_ms7aficd_oc0ocj",
+          "name": "updatedTime",
+          "type": {
+            "intersections": [
+              {
+                "alternatives": [
+                  {
+                    "kind": "string"
+                  }
+                ]
+              }
+            ]
+          },
+          "remark": "",
+          "optional": true
+        },
+        {
+          "id": "field_ms7aficd_7ah8z5",
+          "name": "isDeleted",
+          "type": {
+            "intersections": [
+              {
+                "alternatives": [
+                  {
+                    "kind": "boolean"
+                  }
+                ]
+              }
+            ]
+          },
+          "remark": "",
+          "optional": true
+        },
+        {
+          "id": "field_ms7aficd_rsnqmp",
+          "name": "status",
+          "type": {
+            "intersections": [
+              {
+                "alternatives": [
+                  {
+                    "kind": "boolean"
+                  }
+                ]
+              }
+            ]
+          },
+          "remark": "",
+          "optional": true
+        },
+        {
+          "id": "field_ms7aficd_4ted45",
+          "name": "nickname",
+          "type": {
+            "intersections": [
+              {
+                "alternatives": [
+                  {
+                    "kind": "string"
+                  }
+                ]
+              }
+            ]
+          },
+          "remark": "",
+          "optional": true
+        }
+      ],
+      "enumMembers": [],
+      "combination": {
+        "intersections": [
+          {
+            "alternatives": [
+              {
+                "kind": "string"
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

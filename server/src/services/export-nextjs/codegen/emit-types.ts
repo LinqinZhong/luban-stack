@@ -17,6 +17,10 @@ function atomToTs(atom: TypeAtom, idToName: IdToName): string {
   if (atom.kind === 'array') {
     return `${atomToTs(atom.item ?? { kind: 'any' }, idToName)}[]`
   }
+  if (atom.kind === 'map') {
+    const key = atom.key === 'number' ? 'number' : 'string'
+    return `Map<${key}, ${atomToTs(atom.item ?? { kind: 'any' }, idToName)}>`
+  }
   if (atom.kind === 'named') return idToName.get(atom.ref || '') || 'any'
   if (atom.kind === 'generic') return atom.ref || 'T'
   return atom.kind
@@ -33,6 +37,21 @@ export function processorTypeExprToTs(
   idToName: IdToName,
 ): string {
   if (!expr) return 'any'
+  if (expr.type === 'map') {
+    const key = expr.keyType === 'number' ? 'number' : 'string'
+    let value = 'any'
+    if (expr.itemType === 'array') {
+      const inner = expr.itemItemTypeRef
+        ? idToName.get(expr.itemItemTypeRef) || 'any'
+        : expr.itemItemType || 'any'
+      value = `${inner}[]`
+    } else {
+      value = expr.itemTypeRef
+        ? idToName.get(expr.itemTypeRef) || 'any'
+        : expr.itemType || 'any'
+    }
+    return `Map<${key}, ${value}>`
+  }
   if (expr.type === 'array') {
     if (expr.itemType === 'array') {
       const inner = expr.itemItemTypeRef

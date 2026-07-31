@@ -1,0 +1,14 @@
+{
+  "fields": [
+    {
+      "name": "tabs",
+      "type": "array",
+      "remark": "带选中态的标签列表",
+      "value": [],
+      "binding": "computed",
+      "computeBody": "var items = $props.items || []\nvar current = $props.value\nvar activeColor = $props.activeColor || $color.primary\nvar inactiveColor = $props.inactiveColor || '#606266'\nreturn items.map(function (it) {\n  var key = it == null ? '' : String(it.key != null ? it.key : '')\n  var active = key === String(current != null ? current : '')\n  var label = it == null || it.label == null ? '' : String(it.label)\n  if (it != null && it.count != null && it.count !== '') {\n    label = label + ' ' + it.count\n  }\n  return {\n    key: key,\n    label: label,\n    active: active,\n    textColor: active ? activeColor : inactiveColor\n  }\n})\n",
+      "itemType": "json",
+      "arrayFields": []
+    }
+  ]
+}

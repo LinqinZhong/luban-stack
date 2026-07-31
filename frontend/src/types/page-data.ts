@@ -4,6 +4,8 @@ export type DataFieldType =
   | 'boolean'
   | 'json'
   | 'array'
+  /** 映射：Map<K, T>，K 为 string | number */
+  | 'map'
   | 'icon'
   | 'color'
   /** 任意类型（常用于 any[]：数组内每项可自选类型） */
@@ -14,6 +16,9 @@ export type DataFieldType =
   | 'api'
   /** 资源外链 URI（值类型等价 type URI = string） */
   | 'resource'
+
+/** 映射键类型 */
+export type MapKeyType = 'string' | 'number'
 
 export type DataFieldValue =
   | string
@@ -31,6 +36,7 @@ export interface ObjectSubField {
   typeRef?: string
   itemType?: DataFieldType
   itemTypeRef?: string
+  keyType?: MapKeyType
   arrayFields?: ArraySubField[]
   objectFields?: ObjectSubField[]
 }
@@ -42,6 +48,7 @@ export interface ArraySubField {
   typeRef?: string
   itemType?: DataFieldType
   itemTypeRef?: string
+  keyType?: MapKeyType
   arrayFields?: ArraySubField[]
   objectFields?: ObjectSubField[]
 }
@@ -141,13 +148,15 @@ export interface DataField {
    * 未填时 ambient / 计算编辑器按 any（如 QueryPageVo<any>）。
    */
   genericArgs?: Record<string, string>
-  /** type === 'array' 时的元素类型 */
+  /** type === 'array' 时的元素类型；type === 'map' 时的值类型 */
   itemType?: DataFieldType
-  /** 元素类型的具名引用 */
+  /** 元素/值类型的具名引用 */
   itemTypeRef?: string
   /** itemType === 'array' 时，内层数组的元素类型 */
   itemItemType?: DataFieldType
   itemItemTypeRef?: string
+  /** type === 'map' 时的键类型（默认 string） */
+  keyType?: MapKeyType
   /** 数组结构（含嵌套类型，用于保留 icon 等元数据） */
   arrayFields?: ArraySubField[]
   /** 对象结构（含嵌套类型，用于保留 icon 等元数据） */
@@ -175,11 +184,17 @@ export const DATA_FIELD_TYPE_OPTIONS: { label: string; value: DataFieldType }[] 
   { label: '图标', value: 'icon' },
   { label: '颜色', value: 'color' },
   { label: '资源', value: 'resource' },
-  { label: '对象', value: 'json' },
-  { label: '数组', value: 'array' },
+  { label: 'object', value: 'json' },
+  { label: '[]', value: 'array' },
+  { label: '映射', value: 'map' },
   { label: '任意', value: 'any' },
   { label: '引用', value: 'ref' },
   { label: '后端API', value: 'api' },
+]
+
+export const MAP_KEY_TYPE_OPTIONS: { label: string; value: MapKeyType }[] = [
+  { label: '字符串', value: 'string' },
+  { label: '数值', value: 'number' },
 ]
 
 /** 组件参数 / 数组项等：不含「引用」（引用仅数据池顶层） */
@@ -200,7 +215,8 @@ export const NESTED_FIELD_TYPE_OPTIONS: { label: string; value: DataFieldType }[
   { label: '图标', value: 'icon' },
   { label: '颜色', value: 'color' },
   { label: '资源', value: 'resource' },
-  { label: '数组', value: 'array' },
+  { label: '[]', value: 'array' },
+  { label: '映射', value: 'map' },
 ]
 
 /** 数组项可选类型（含对象，不含引用） */
@@ -333,6 +349,7 @@ export function defaultValue(type: DataFieldType): DataFieldValue {
     case 'boolean':
       return false
     case 'json':
+    case 'map':
       return {}
     case 'array':
       return []
@@ -629,6 +646,14 @@ export function editorNodesToObjectFields(nodes: ObjectEditorNode[]): ObjectSubF
 
 export function typeLabel(type: DataFieldType): string {
   return DATA_FIELD_TYPE_OPTIONS.find((item) => item.value === type)?.label ?? type
+}
+
+/** 数组类型展示：GoodsRemarkVo[] / string[][]；无元素类型时为 [] / [][] */
+export function arrayTypeLabel(itemLabel?: string, depth = 1): string {
+  const n = Math.max(1, depth)
+  const leaf = (itemLabel ?? '').trim()
+  if (!leaf) return '[]'.repeat(n)
+  return `${leaf}${'[]'.repeat(n)}`
 }
 
 export function editorNodeTreeLabel(node: ObjectEditorNode, index: number): string {

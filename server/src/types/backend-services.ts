@@ -159,6 +159,8 @@ export interface ServiceApiHeader {
   remark: string
 }
 
+export type ProcessorMethodScope = 'private' | 'public'
+
 /** 控制器下的 API */
 export interface ServiceApi {
   id: string
@@ -171,9 +173,11 @@ export interface ServiceApi {
   /** 出参类型 */
   output: ProcessorTypeExpr
   requireAuth: boolean
+  /** 作用域：私有 / 公共 */
+  scope: ProcessorMethodScope
   /** 调试入参（按变量名持久化） */
   debugParams: Record<string, unknown>
-  /** API 编排工作流 */
+  /** API 编排工作流（直接绑定业务方法时自动生成） */
   flow: MethodFlow
 }
 
@@ -237,9 +241,11 @@ export function createEmptyServiceApi(name = ''): ServiceApi {
       itemTypeRef: '',
       itemItemType: '',
       itemItemTypeRef: '',
+      keyType: '',
       genericArgs: {},
     },
     requireAuth: false,
+    scope: 'public',
     debugParams: {},
     flow: createDefaultMethodFlow(),
   }
@@ -398,6 +404,7 @@ export function normalizeServiceApi(input: unknown): ServiceApi | null {
             genericArgs: {},
           },
     requireAuth: Boolean(input.requireAuth),
+    scope: normalizeProcessorMethodScope(input.scope),
     debugParams: normalizeDebugParams(input.debugParams),
     flow: normalizeMethodFlow(input.flow),
   }
@@ -465,6 +472,8 @@ export interface ProcessorTypeExpr {
   itemTypeRef: string
   itemItemType: string
   itemItemTypeRef: string
+  /** type === 'map' 时的键类型：string | number */
+  keyType: string
   /** 具名类型的泛型实参；空串表示 any */
   genericArgs: Record<string, string>
 }
@@ -735,8 +744,6 @@ export function normalizeDebugParams(input: unknown): Record<string, unknown> {
   return out
 }
 
-export type ProcessorMethodScope = 'private' | 'public'
-
 export const PROCESSOR_METHOD_SCOPE_OPTIONS: Array<{
   label: string
   value: ProcessorMethodScope
@@ -777,6 +784,7 @@ export type FlowNodeKind =
   | 'output'
   | 'define'
   | 'pageMap'
+  | 'objectMap'
   | 'throw'
   | 'end'
 
@@ -834,6 +842,7 @@ export function normalizeMethodFlow(input: unknown): MethodFlow {
       kind !== 'output' &&
       kind !== 'define' &&
       kind !== 'pageMap' &&
+      kind !== 'objectMap' &&
       kind !== 'throw' &&
       kind !== 'end'
     ) {
@@ -943,12 +952,15 @@ export function normalizeProcessorTypeExpr(
     }
   }
   if (isPlainObject(input)) {
-    const type =
+    let type =
       typeof input.type === 'string' && input.type.trim()
         ? input.type.trim()
         : input.typeRef || legacyRef
           ? 'json'
           : 'string'
+    if (type === 'dict') type = 'map'
+    const keyRaw =
+      typeof input.keyType === 'string' ? input.keyType.trim() : ''
     return {
       type,
       typeRef:
@@ -964,6 +976,7 @@ export function normalizeProcessorTypeExpr(
         typeof input.itemItemTypeRef === 'string'
           ? input.itemItemTypeRef.trim()
           : '',
+      keyType: keyRaw === 'number' ? 'number' : keyRaw === 'string' ? 'string' : type === 'map' ? 'string' : '',
       genericArgs: normalizeGenericArgs(
         input.genericArgs ?? input.outputGenericArgs,
       ),

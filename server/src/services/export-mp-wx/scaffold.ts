@@ -1,5 +1,5 @@
 ﻿import type { VoiderProjectConfig } from '../../types/voider-project.js'
-import { generateApiJs, generateDeviceJs } from './api-runtime.js'
+import { generateApiJs, generateDeviceJs, generateRuntimeJs } from './api-runtime.js'
 
 export function scaffoldMpWxFiles(options: {
   config: VoiderProjectConfig
@@ -110,6 +110,7 @@ view, text, image, button, scroll-view {
     )}\n`,
     'utils/api.js': generateApiJs(),
     'utils/device.js': generateDeviceJs(),
+    'utils/runtime.js': generateRuntimeJs(),
     'README.md': `# ${options.config.name || 'App'} · 微信小程序
 
 独立微信小程序工程（由设计器导出）。

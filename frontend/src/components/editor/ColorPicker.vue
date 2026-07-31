@@ -2,10 +2,17 @@
 import { computed, ref, watch } from 'vue'
 import { Aim } from '@element-plus/icons-vue'
 import { colorPickState } from '../../composables/useColorPick'
+import { colorPaletteState } from '../../composables/useColorPalette'
+import {
+  findPaletteColor,
+  type PaletteColor,
+} from '../../types/color-palette'
 
 const props = defineProps<{
   modelValue: string
   placeholder?: string
+  /** 为 true 时隐藏调色板选择（如调色板编辑对话框内） */
+  hidePalette?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -23,6 +30,11 @@ const PRESET_COLORS = [
 /** el-color-picker 预置（含透明） */
 const PREDEFINE = ['transparent', '#ffffff', '#000000', '#409eff', '#67c23a', '#e6a23c', '#f56c6c']
 
+const paletteColors = computed<PaletteColor[]>(() => {
+  if (props.hidePalette) return []
+  return colorPaletteState.value.colors
+})
+
 const localValue = ref(normalizeColor(props.modelValue))
 
 watch(
@@ -34,9 +46,21 @@ watch(
 
 const isBinding = computed(() => /\{[^{}]+\}/.test(localValue.value.trim()))
 
+const activePaletteColor = computed(() =>
+  findPaletteColor(
+    { colors: paletteColors.value },
+    localValue.value.trim(),
+  ),
+)
+
+const isPaletteKey = computed(() => Boolean(activePaletteColor.value))
+
 /** 供 el-color-picker 使用的可解析色值 */
 const pickerModel = computed({
   get() {
+    if (activePaletteColor.value) {
+      return toPickerColor(activePaletteColor.value.value)
+    }
     return toPickerColor(localValue.value)
   },
   set(value: string | null) {
@@ -140,6 +164,10 @@ function applyPreset(value: string) {
   commit(value)
 }
 
+function applyPalette(color: PaletteColor) {
+  commit(color.name)
+}
+
 function handleEyedropper() {
   void colorPickState.startPick((color) => {
     commit(color)
@@ -150,6 +178,15 @@ function isPresetActive(value: string): boolean {
   const cur = localValue.value.trim().toLowerCase()
   if (value === 'transparent') return !cur || cur === 'transparent'
   return cur === value.toLowerCase()
+}
+
+function isPaletteActive(name: string): boolean {
+  return localValue.value.trim() === name
+}
+
+function paletteTitle(color: PaletteColor): string {
+  const desc = color.description?.trim()
+  return desc ? `${color.name} · ${desc}` : color.name
 }
 </script>
 
@@ -162,14 +199,14 @@ function isPresetActive(value: string): boolean {
         size="small"
         show-alpha
         :predefine="PREDEFINE"
-        :disabled="isBinding"
+        :disabled="isBinding || isPaletteKey"
       />
 
       <el-input
         v-model="localValue"
         class="hex-input"
         size="small"
-        :placeholder="placeholder || '#ffffff / transparent / rgba()'"
+        :placeholder="placeholder || '#ffffff / transparent / rgba() / key'"
         clearable
         @change="handleTextChange"
       />
@@ -179,9 +216,37 @@ function isPresetActive(value: string): boolean {
           class="eyedropper-btn"
           size="small"
           :icon="Aim"
+          :disabled="isBinding"
           @click="handleEyedropper"
         />
       </el-tooltip>
+    </div>
+
+    <div
+      v-if="paletteColors.length"
+      class="preset-row"
+      role="list"
+      aria-label="调色板"
+    >
+      <button
+        v-for="item in paletteColors"
+        :key="item.name"
+        type="button"
+        class="preset-chip palette-chip"
+        :class="{ active: isPaletteActive(item.name) }"
+        :title="paletteTitle(item)"
+        role="listitem"
+        @click="applyPalette(item)"
+      >
+        <span
+          class="preset-swatch"
+          :class="{ checker: item.value === 'transparent' }"
+          :style="
+            item.value === 'transparent' ? undefined : { background: item.value }
+          "
+        />
+        <span class="preset-label">{{ item.name }}</span>
+      </button>
     </div>
 
     <div class="preset-row" role="list" aria-label="参考颜色">
@@ -272,6 +337,7 @@ function isPresetActive(value: string): boolean {
   line-height: 1;
   cursor: pointer;
   user-select: none;
+  max-width: 100%;
 }
 
 .preset-chip:hover {
@@ -311,5 +377,7 @@ function isPresetActive(value: string): boolean {
 
 .preset-label {
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 </style>

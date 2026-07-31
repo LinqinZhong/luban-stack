@@ -1,0 +1,22 @@
+{
+  "name": "商品评价",
+  "title": "商品评价",
+  "statusBar": {
+    "textStyle": "black",
+    "backgroundColor": "#ffffff",
+    "cover": false,
+    "navigationBar": false
+  },
+  "queryParams": [
+    {
+      "name": "id",
+      "type": "string",
+      "remark": "商品 ID",
+      "required": true,
+      "defaultValue": "1"
+    }
+  ],
+  "debugQuery": {
+    "id": "1"
+  }
+}

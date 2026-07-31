@@ -1,0 +1,241 @@
+{
+  "id": "cms8ol9you9yc",
+  "name": "goodsRemark",
+  "path": "/goodsRemark",
+  "remark": "",
+  "apis": [
+    {
+      "id": "api_ms8q37of_2dcaq6",
+      "name": "page",
+      "path": "/page",
+      "remark": "获取评论分页",
+      "method": "GET",
+      "inputs": [
+        {
+          "id": "ain_ms8q49nc_ge7zyy",
+          "varName": "goodsId",
+          "location": "query",
+          "type": "number",
+          "typeRef": "",
+          "genericArgs": {},
+          "required": false,
+          "remark": ""
+        },
+        {
+          "id": "ain_ms8q49nc_537eui",
+          "varName": "page",
+          "location": "query",
+          "type": "json",
+          "typeRef": "type_common_QueryPageDto",
+          "genericArgs": {},
+          "required": false,
+          "remark": ""
+        },
+        {
+          "id": "ain_ms8q49nc_v66s1l",
+          "varName": "type",
+          "location": "query",
+          "type": "string",
+          "typeRef": "",
+          "genericArgs": {},
+          "required": false,
+          "remark": "评价类型 all/good/mid/bad"
+        }
+      ],
+      "output": {
+        "type": "json",
+        "typeRef": "type_common_QueryPageVo",
+        "itemType": "",
+        "itemTypeRef": "",
+        "itemItemType": "",
+        "itemItemTypeRef": "",
+        "keyType": "",
+        "genericArgs": {
+          "T": "type_ms6gqu8j_vm3j3p"
+        }
+      },
+      "requireAuth": false,
+      "scope": "public",
+      "debugParams": {
+        "goodsId": 37,
+        "page": {
+          "current": 1,
+          "pageSize": 4
+        },
+        "type": ""
+      },
+      "flow": {
+        "nodes": [
+          {
+            "id": "start",
+            "kind": "start",
+            "position": {
+              "x": 280,
+              "y": 40
+            },
+            "data": {}
+          },
+          {
+            "id": "input_api_biz",
+            "kind": "input",
+            "position": {
+              "x": 245,
+              "y": 160
+            },
+            "data": {
+              "serviceId": "svc_mrqdgnhb_3ktq2g",
+              "dataSource": "business",
+              "dataProcessorId": "pms6nkri1xkju",
+              "dataMethodId": "method_ms6nkt2n_5f3g3k",
+              "headerField": "",
+              "varName": "result",
+              "methodLabel": "goodsRemark.page",
+              "paramBindings": {
+                "goodsId": "goodsId",
+                "page": "page",
+                "type": "type"
+              },
+              "printExpr": "",
+              "outputTypeExpr": {
+                "type": "json",
+                "typeRef": "type_common_QueryPageVo",
+                "itemType": "",
+                "itemTypeRef": "",
+                "itemItemType": "",
+                "itemItemTypeRef": "",
+                "keyType": "",
+                "genericArgs": {
+                  "T": "type_ms6gqu8j_vm3j3p"
+                }
+              }
+            }
+          },
+          {
+            "id": "end_api_biz",
+            "kind": "end",
+            "position": {
+              "x": 277,
+              "y": 300
+            },
+            "data": {
+              "returnExpr": "result",
+              "printExpr": ""
+            }
+          }
+        ],
+        "edges": [
+          {
+            "id": "edge_api_biz_1",
+            "source": "start",
+            "target": "input_api_biz"
+          },
+          {
+            "id": "edge_api_biz_2",
+            "source": "input_api_biz",
+            "target": "end_api_biz"
+          }
+        ]
+      }
+    },
+    {
+      "id": "api_ms8qizo4_2ab7bq",
+      "name": "countByType",
+      "path": "/countByType",
+      "remark": "",
+      "method": "GET",
+      "inputs": [
+        {
+          "id": "ain_ms8qjisz_6ebkf5",
+          "varName": "goodsId",
+          "location": "query",
+          "type": "number",
+          "typeRef": "",
+          "genericArgs": {},
+          "required": true,
+          "remark": "商品 ID"
+        }
+      ],
+      "output": {
+        "type": "json",
+        "typeRef": "type_ms7remark_count_vo",
+        "itemType": "",
+        "itemTypeRef": "",
+        "itemItemType": "",
+        "itemItemTypeRef": "",
+        "keyType": "",
+        "genericArgs": {}
+      },
+      "requireAuth": false,
+      "scope": "public",
+      "debugParams": {},
+      "flow": {
+        "nodes": [
+          {
+            "id": "start",
+            "kind": "start",
+            "position": {
+              "x": 280,
+              "y": 40
+            },
+            "data": {}
+          },
+          {
+            "id": "input_api_biz",
+            "kind": "input",
+            "position": {
+              "x": 245,
+              "y": 160
+            },
+            "data": {
+              "serviceId": "svc_mrqdgnhb_3ktq2g",
+              "dataSource": "business",
+              "dataProcessorId": "pms6nkri1xkju",
+              "dataMethodId": "method_ms7remark_biz_counts",
+              "headerField": "",
+              "varName": "result",
+              "methodLabel": "goodsRemark.counts",
+              "paramBindings": {
+                "goodsId": "goodsId"
+              },
+              "printExpr": "",
+              "outputTypeExpr": {
+                "type": "json",
+                "typeRef": "type_ms7remark_count_vo",
+                "itemType": "",
+                "itemTypeRef": "",
+                "itemItemType": "",
+                "itemItemTypeRef": "",
+                "keyType": "",
+                "genericArgs": {}
+              }
+            }
+          },
+          {
+            "id": "end_api_biz",
+            "kind": "end",
+            "position": {
+              "x": 277,
+              "y": 300
+            },
+            "data": {
+              "returnExpr": "result",
+              "printExpr": ""
+            }
+          }
+        ],
+        "edges": [
+          {
+            "id": "edge_api_biz_1",
+            "source": "start",
+            "target": "input_api_biz"
+          },
+          {
+            "id": "edge_api_biz_2",
+            "source": "input_api_biz",
+            "target": "end_api_biz"
+          }
+        ]
+      }
+    }
+  ]
+}

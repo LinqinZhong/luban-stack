@@ -234,6 +234,16 @@ function atomToProcessorTypeExpr(
       itemType: item.kind === 'any' ? 'any' : item.kind,
     }
   }
+  if (atom.kind === 'map') {
+    return {
+      ...createEmptyProcessorTypeExpr('map'),
+      keyType: atom.key === 'number' ? 'number' : 'string',
+      itemType: atom.item?.kind === 'array' ? 'array' : (atom.item?.kind === 'named' ? 'json' : (atom.item?.kind === 'number' || atom.item?.kind === 'boolean' || atom.item?.kind === 'any' || atom.item?.kind === 'string' ? atom.item.kind : 'any')),
+      itemTypeRef: atom.item?.kind === 'named' ? atom.item.ref || '' : '',
+      itemItemType: atom.item?.kind === 'array' && atom.item.item ? (atom.item.item.kind === 'named' ? 'json' : atom.item.item.kind === 'number' || atom.item.item.kind === 'boolean' || atom.item.item.kind === 'any' || atom.item.item.kind === 'string' ? atom.item.item.kind : 'any') : '',
+      itemItemTypeRef: atom.item?.kind === 'array' && atom.item.item?.kind === 'named' ? atom.item.item.ref || '' : '',
+    }
+  }
   if (atom.kind === 'any') return createEmptyProcessorTypeExpr('any')
   if (
     atom.kind === 'number' ||
@@ -457,9 +467,7 @@ export function buildQueryBindingRoot(
         : def.type === 'boolean'
           ? 'boolean'
           : 'string'
-    const source = createEmptyProcessorTypeExpr(ty)
-    const selectable = isTypeExprCompatible(source, targetExpr, library)
-    if (!selectable) continue
+    if (!isQueryParamCompatibleWithTarget(ty, targetExpr, library)) continue
     children.push({
       value: name,
       label: def.remark?.trim() ? `${name} · ${def.remark.trim()}` : name,
@@ -473,6 +481,54 @@ export function buildQueryBindingRoot(
     selectable: false,
     children,
   }
+}
+
+/**
+ * Query 定义常为 string（URL 字面量），目标 API 却是 number/boolean。
+ * 允许标量互通，运行时再按目标类型转换。
+ */
+function isQueryParamCompatibleWithTarget(
+  sourceType: 'string' | 'number' | 'boolean',
+  target: ProcessorTypeExpr,
+  library?: DataTypeLibrary | null,
+): boolean {
+  const source = createEmptyProcessorTypeExpr(sourceType)
+  if (isTypeExprCompatible(source, target, library)) return true
+  if (sourceType === 'string') {
+    if (
+      isTypeExprCompatible(
+        createEmptyProcessorTypeExpr('number'),
+        target,
+        library,
+      )
+    ) {
+      return true
+    }
+    if (
+      isTypeExprCompatible(
+        createEmptyProcessorTypeExpr('boolean'),
+        target,
+        library,
+      )
+    ) {
+      return true
+    }
+  }
+  if (sourceType === 'number') {
+    return isTypeExprCompatible(
+      createEmptyProcessorTypeExpr('string'),
+      target,
+      library,
+    )
+  }
+  if (sourceType === 'boolean') {
+    return isTypeExprCompatible(
+      createEmptyProcessorTypeExpr('string'),
+      target,
+      library,
+    )
+  }
+  return false
 }
 
 /** 表达式 → cascader 路径段 */
@@ -550,4 +606,40 @@ export function toElCascaderOptions(
       ...(children ? { children } : {}),
     }
   })
+}
+
+function flattenSelectableOptions(
+  nodes: TypedBindingCascaderOption[],
+  prefix: string[] = [],
+): Array<{ value: string; label: string }> {
+  const out: Array<{ value: string; label: string }> = []
+  for (const node of nodes) {
+    const path = [...prefix, node.value]
+    if (node.selectable) {
+      out.push({
+        value: joinBindingPath(path),
+        label: path.join('.').replace(/\.\[/g, '['),
+      })
+    }
+    if (node.children?.length) {
+      out.push(...flattenSelectableOptions(node.children, path))
+    }
+  }
+  return out
+}
+
+/** 扁平可选绑定路径（弹窗内用 el-select，避免 cascader 点选问题） */
+export function buildFlatSelectableBindingOptions(
+  ambientVars: MethodParam[],
+  targetType: ProcessorTypeExpr | null | undefined,
+  library?: DataTypeLibrary | null,
+  extraRoots?: TypedBindingCascaderOption[],
+): Array<{ value: string; label: string }> {
+  const tree = buildTypedBindingCascaderOptions(
+    ambientVars,
+    targetType,
+    library,
+    extraRoots,
+  )
+  return flattenSelectableOptions(tree)
 }

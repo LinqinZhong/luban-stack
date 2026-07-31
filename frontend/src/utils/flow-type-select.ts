@@ -13,6 +13,7 @@ export type FlowTypeSelectPayload = {
   itemTypeRef?: string
   itemItemType?: DataFieldType | 'generic'
   itemItemTypeRef?: string
+  keyType?: 'string' | 'number'
   cleared?: boolean
 }
 
@@ -48,7 +49,7 @@ export function methodTypeToDataField(
 }
 
 export function leafNamedRefFromPayload(payload: FlowTypeSelectPayload): string {
-  if (payload.type === 'array') {
+  if (payload.type === 'array' || payload.type === 'map') {
     if (payload.itemType === 'array') return payload.itemItemTypeRef || ''
     return payload.itemTypeRef || ''
   }
@@ -84,6 +85,21 @@ export function flowDraftToTypeExpr(fields: {
   genericArgs?: Record<string, string>
 }): ProcessorTypeExpr {
   if (fields.type === 'void') return createEmptyProcessorTypeExpr('any')
+  if (fields.type === 'map') {
+    return {
+      ...createEmptyProcessorTypeExpr('map'),
+      type: 'map',
+      keyType:
+        fields.keyType === 'number'
+          ? 'number'
+          : 'string',
+      itemType: fields.itemType ?? '',
+      itemTypeRef: fields.itemTypeRef ?? '',
+      itemItemType: fields.itemItemType ?? '',
+      itemItemTypeRef: fields.itemItemTypeRef ?? '',
+      genericArgs: { ...(fields.genericArgs ?? {}) },
+    }
+  }
   const type =
     fields.typeRef || fields.type === 'object'
       ? 'json'
@@ -110,7 +126,7 @@ export function leafNamedRefFromDraft(fields: {
   itemItemType?: string
   itemItemTypeRef?: string
 }): string {
-  if (fields.type === 'array') {
+  if (fields.type === 'array' || fields.type === 'map') {
     if (fields.itemType === 'array') return fields.itemItemTypeRef || ''
     return fields.itemTypeRef || ''
   }

@@ -22,6 +22,7 @@
             "itemTypeRef": "",
             "itemItemType": "",
             "itemItemTypeRef": "",
+            "keyType": "",
             "genericArgs": {}
           },
           "required": false
@@ -37,6 +38,7 @@
             "itemTypeRef": "",
             "itemItemType": "",
             "itemItemTypeRef": "",
+            "keyType": "",
             "genericArgs": {}
           },
           "required": false
@@ -49,6 +51,7 @@
         "itemTypeRef": "",
         "itemItemType": "",
         "itemItemTypeRef": "",
+        "keyType": "",
         "genericArgs": {
           "T": "type_mrnx6ke8_4d7vry"
         }
@@ -288,6 +291,7 @@
             "itemTypeRef": "",
             "itemItemType": "",
             "itemItemTypeRef": "",
+            "keyType": "",
             "genericArgs": {}
           },
           "required": false
@@ -300,6 +304,7 @@
         "itemTypeRef": "",
         "itemItemType": "",
         "itemItemTypeRef": "",
+        "keyType": "",
         "genericArgs": {}
       },
       "dataConfig": {

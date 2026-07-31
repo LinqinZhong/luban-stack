@@ -1,23 +1,37 @@
 /*@voider-method
 {
   "name": "loadData",
-  "params": [],
+  "params": [
+    {
+      "name": "isRefresh",
+      "type": "boolean"
+    }
+  ],
   "returnType": "void"
 }
 */
 
-if(loading || !hasNext) return
-setData('loading', true)
-$props.fetchApi({
-  page: pagination
-}).then((res) => {
+if($props.loading || !hasNext) return
+if(isRefresh) {
+  setData('refreshing', true)
+}else if($props.data && Array.isArray($props.data) && $props.data.length > 0){
+  setData('loadingMore', true)
+}else{
+  updateProps('loading', true)
+}
+const args = {
+  ...($props.params && typeof $props.params === 'object' ? $props.params : {}),
+  page: pagination,
+}
+$props.fetchApi(args).then((res) => {
   setData('hasNext', res.hasNext)
   setData('pagination',{
     current: res.current+1,
     pageSize: res.pageSize
   })
-  if(refreshing){
-    updateProps('data', res.records)
+  // 用入参 isRefresh，勿用闭包里的 refreshing（调用时尚未 setData）
+  if(isRefresh){
+    updateProps('data', res.records || [])
     showToast('刷新成功')
   }else{
     updateProps('data', [...$props.data ,...(res.records || [])])
@@ -26,5 +40,6 @@ $props.fetchApi({
   console.error(err)
 }).finally(() => {
   setData('refreshing', false)
-  setData('loading', false)
+  updateProps('loading', false)
+  setData('loadingMore', false)
 })

@@ -2,6 +2,8 @@
 import { computed, inject, onBeforeUnmount, onMounted, provide, ref, shallowRef, watch, type ComputedRef, type CSSProperties } from 'vue'
 import type { IconLibrary } from '../../types/icon-library'
 import { findIcon, iconSymbolId } from '../../types/icon-library'
+import { resolvePaletteColorValue } from '../../types/color-palette'
+import { colorPaletteState } from '../../composables/useColorPalette'
 import type { PageData } from '../../types/page-data'
 import type { ComponentRenderMap } from '../../types/component-render'
 import type { XmlNode } from '../../utils/xml'
@@ -22,11 +24,8 @@ import {
   rotateStyle,
 } from '../../utils/xml'
 import { resolveMatchingStyleOverrides, evaluateScenarios, interpolateDataBindings, resolveAttrBindingValue } from '../../utils/dynamic-style-runtime'
-import {
-  buildDollarProps,
-  interpolateDollarProps,
-} from '../../utils/component-props'
-import { hydrateApiDollarProps } from '../../utils/api-prop'
+import { interpolateDollarProps } from '../../utils/component-props'
+import { resolveComponentInstanceDollarProps } from '../../utils/instance-dollar-props'
 import { resolveComputedPageData, buildComputeDepsKey } from '../../utils/compute-runtime'
 import { buildRepeatExpandKey, expandRepeatTree } from '../../utils/repeat'
 import { CANVAS_RUNTIME_KEY } from '../../composables/useCanvasRuntime'
@@ -89,6 +88,11 @@ const props = defineProps<{
    * 而不是 min-height:100% 与父级同高导致溢出。
    */
   parentIsScrollPort?: boolean
+  /**
+   * 直接父级高度已确定（固定 px 或 match_parent）。
+   * 此时子节点 height=match_parent 应撑满父级，即使处在滚动列深处。
+   */
+  parentHeightDefinite?: boolean
   /** 页面根节点 */
   isRoot?: boolean
   /** RelativeLayout 子节点定位样式 */
@@ -278,7 +282,7 @@ const attrs = computed(() => {
     if (props.dollarProps) {
       resolved = interpolateDollarProps(resolved, props.dollarProps)
     }
-    next[key] = resolved
+    next[key] = resolvePaletteColorValue(resolved, colorPaletteState.value)
   }
   return next
 })
@@ -314,9 +318,15 @@ const fillRemainingHeight = computed(
   () =>
     height.value === 'match_parent' &&
     Boolean(props.parentVertical) &&
-    // 滚动列深处仍按内容堆叠；直接挂在滚动容器下时占满剩余视口
-    (!Boolean(props.parentScrollable) || Boolean(props.parentIsScrollPort)),
+    // 父级高度已确定（如 80px 容器）时必须撑满；
+    // 否则滚动列深处按内容堆叠，直接挂在滚动容器下时占满剩余视口
+    (Boolean(props.parentHeightDefinite) ||
+      !Boolean(props.parentScrollable) ||
+      Boolean(props.parentIsScrollPort)),
 )
+
+/** 本节点高度是否已确定，供子节点 match_parent 判断 */
+const heightIsDefinite = computed(() => height.value !== 'wrap_content')
 
 /**
  * 纵向父布局内、非 match_parent 的子项按内容堆叠；
@@ -382,6 +392,15 @@ const textContent = computed(() => {
   return interpolateDollarProps(raw, props.dollarProps)
 })
 
+/** 编辑态：text 含数据绑定则统一显示占位，避免画布铺开绑定语法或预览值 */
+const textDisplayContent = computed(() => {
+  if (props.selectable) {
+    const source = String(props.node.attrs.text ?? props.node.text ?? '').trim()
+    if (/\{[^{}]+\}/.test(source)) return '动态文本'
+  }
+  return textContent.value
+})
+
 const textStyle = computed(() => ({
   ...layoutStyle.value,
   color: attrs.value.textColor || '#303133',
@@ -396,47 +415,21 @@ const textStyle = computed(() => ({
   ...rotateStyle(attrs.value),
 }))
 
-const instanceDollarProps = computed(() => {
-  const config = componentDetail.value?.config
-  const source = props.node.attrs
-  const scope = {
-    ...(props.node.scope ?? {}),
-    $route: props.routeParams,
-    $query: props.routeParams,
-  }
-  const resolved: Record<string, unknown> = {}
-  const propDefs = config?.props ?? []
-  const propNames = new Set(
-    propDefs.map((p) => p.name.trim()).filter(Boolean),
-  )
-  for (const [key, value] of Object.entries(source)) {
-    if (!propNames.has(key)) {
-      // 非声明 prop：仍做字符串插值，供布局类同名属性使用
-      resolved[key] = interpolateDataBindings(value, props.pageData, scope)
-      continue
-    }
-    const def = propDefs.find((p) => p.name.trim() === key)
-    // boolean/number 也要原生求值：`{!goodsInfo}` 不能先 stringify 再 coerce（会变成 false）
-    if (
-      def &&
-      (def.type === 'array' ||
-        def.type === 'json' ||
-        def.type === 'boolean' ||
-        def.type === 'number')
-    ) {
-      const native = resolveAttrBindingValue(value, props.pageData, scope)
-      if (native !== undefined) resolved[key] = native
-      continue
-    }
-    resolved[key] = interpolateDataBindings(value, props.pageData, scope)
-  }
-  const built = buildDollarProps(config, resolved)
-  return hydrateApiDollarProps(
-    built,
-    propDefs,
-    canvasRuntime?.projectPath,
-  )
-})
+const instanceDollarProps = computed(() =>
+  resolveComponentInstanceDollarProps({
+    config: componentDetail.value?.config,
+    hostAttrs: props.node.attrs,
+    pageData: props.pageData,
+    routeParams: props.routeParams,
+    scope: props.node.scope
+      ? {
+          item: props.node.scope.item,
+          index: props.node.scope.index,
+        }
+      : null,
+    projectPath: canvasRuntime?.projectPath,
+  }),
+)
 
 /**
  * 仅当计算体真正用到的 $props / 设备信息变化时才变。
@@ -449,6 +442,8 @@ const componentComputeDepsKey = computed(() => {
     detail.data,
     instanceDollarProps.value,
     canvasRuntime?.getDeviceInfo() ?? null,
+    null,
+    colorPaletteState.value,
   )
 })
 
@@ -471,6 +466,7 @@ watch(
     componentPageData.value = resolveComputedPageData(detail.data, {
       getDeviceInfo: canvasRuntime?.getDeviceInfo,
       dollarProps: instanceDollarProps.value,
+      colorPalette: colorPaletteState.value,
     })
   },
   { immediate: true },
@@ -1595,7 +1591,10 @@ function forwardComponentInteract(payload: PreviewInteractPayload) {
     if (payload.componentEmit) {
       emit('interact', {
         ...payload,
-        componentEmit: appendOuter(payload.componentEmit, self),
+        componentEmit: appendOuter(payload.componentEmit, {
+          ...self,
+          slotHost: true,
+        }),
       })
     } else {
       emit('interact', payload)
@@ -1741,6 +1740,7 @@ onBeforeUnmount(() => {
       :parent-horizontal="false"
       :parent-vertical="true"
       :parent-scrollable="parentScrollable"
+      :parent-height-definite="heightIsDefinite"
       :icon-library="iconLibrary"
       :page-data="pageData"
       :hidden-node-ids="hiddenNodeIds"
@@ -1785,7 +1785,7 @@ onBeforeUnmount(() => {
     @open-event="handleOpenEvent"
   >
     <div class="widget text" :style="textStyle">
-      {{ textContent }}
+      {{ textDisplayContent }}
     </div>
   </WidgetSelectShell>
 
@@ -2016,6 +2016,7 @@ onBeforeUnmount(() => {
         :parent-horizontal="false"
         :parent-vertical="true"
         :parent-scrollable="inScrollColumn"
+        :parent-height-definite="heightIsDefinite"
         :icon-library="iconLibrary"
         :page-data="slotFillPageData"
         :hidden-node-ids="hiddenNodeIds"
@@ -2050,6 +2051,7 @@ onBeforeUnmount(() => {
         :parent-horizontal="false"
         :parent-vertical="true"
         :parent-scrollable="inScrollColumn"
+        :parent-height-definite="heightIsDefinite"
         :icon-library="iconLibrary"
         :page-data="pageData"
         :hidden-node-ids="hiddenNodeIds"
@@ -2108,6 +2110,7 @@ onBeforeUnmount(() => {
         :preview-lifecycle-gate="previewLifecycleGate"
         :parent-vertical="true"
         :parent-scrollable="inScrollColumn"
+        :parent-height-definite="heightIsDefinite"
         :icon-library="iconLibrary"
         :page-data="componentPageData ?? pageData"
         :hidden-node-ids="hiddenNodeIds"
@@ -2199,6 +2202,7 @@ onBeforeUnmount(() => {
             :parent-horizontal="false"
             :parent-vertical="true"
             :parent-scrollable="false"
+            :parent-height-definite="true"
             :icon-library="iconLibrary"
             :page-data="pageData"
             :hidden-node-ids="hiddenNodeIds"
@@ -2269,6 +2273,7 @@ onBeforeUnmount(() => {
             :parent-horizontal="false"
             :parent-vertical="true"
             :parent-scrollable="inScrollColumn"
+            :parent-height-definite="true"
             :icon-library="iconLibrary"
             :page-data="pageData"
             :hidden-node-ids="hiddenNodeIds"
@@ -2398,6 +2403,7 @@ onBeforeUnmount(() => {
         :parent-vertical="!isHorizontalLinear"
         :parent-scrollable="inScrollColumn"
         :parent-is-scroll-port="hasScrollAttr && !isHorizontalLinear"
+        :parent-height-definite="heightIsDefinite"
         :icon-library="iconLibrary"
         :page-data="pageData"
         :hidden-node-ids="hiddenNodeIds"
@@ -2474,6 +2480,7 @@ onBeforeUnmount(() => {
           :extra-style="childRelativeStyle(child)"
           :parent-scrollable="inScrollColumn"
           :parent-is-scroll-port="hasScrollAttr"
+          :parent-height-definite="heightIsDefinite"
           :icon-library="iconLibrary"
           :page-data="pageData"
           :hidden-node-ids="hiddenNodeIds"

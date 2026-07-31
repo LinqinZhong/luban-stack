@@ -2,6 +2,11 @@
 import type { LifecycleConfig } from '../../types/lifecycle.js'
 import type { DataField } from '../../types/page-data.js'
 import type { MpApiBinding } from './api-runtime.js'
+import {
+  apiMethodExportName,
+  apiModuleRelPath,
+} from './api-runtime.js'
+import { codeUsesIdent, lineComment } from './js-comments.js'
 
 function isValidIdent(name: string): boolean {
   return /^[A-Za-z_$][\w$]*$/.test(name)
@@ -43,54 +48,92 @@ export function generateComponentMethodFn(
     .filter((n) => isValidIdent(n))
   const paramList = params.join(', ')
 
+  let body = (method.body || '').trim()
+  // 小程序部分运行时无 Promise.finally；改成 then 收尾，失败也会关 loading
+  body = replacePromiseFinally(body)
+  // 刷新时 records 可能为空；保证始终是数组，避免 UI/展开报错
+  body = body.replace(
+    /updateProps\(\s*['"]data['"]\s*,\s*res\.records\s*\)/g,
+    `updateProps('data', res.records || [])`,
+  )
+  const uses = (ident: string) => codeUsesIdent(body, ident)
+
   const dataNames = options.dataFieldNames.filter(isValidIdent)
   const propNames = options.propNames.filter(isValidIdent)
   const apiProps = new Set(options.apiPropNames.filter(isValidIdent))
   const arrayProps = new Set((options.arrayPropNames ?? []).filter(isValidIdent))
   const siblings = options.siblingMethodNames.filter(
-    (n) => isValidIdent(n) && n !== name,
+    (n) => isValidIdent(n) && n !== name && uses(n),
   )
   const refNames = new Set(
     (options.refFields ?? []).map((f) => f.name).filter(isValidIdent),
   )
+  const usedRefs = (options.refFields ?? []).filter(
+    (f) => isValidIdent(f.name) && uses(f.name),
+  )
+
+  const needSetData = uses('setData')
+  const needShowToast = uses('showToast')
+  const needNavigateTo = uses('navigateTo')
+  const needNavigateBack = uses('navigateBack')
+  const needUpdateProps = uses('updateProps')
+  const needEmit = uses('emit')
+  const needRuntime =
+    needSetData || needShowToast || needNavigateTo || needNavigateBack
+  const needProps = uses('$props')
+  const needApi =
+    uses('api') ||
+    uses('getDeviceInfo') ||
+    (needProps && propNames.some((p) => apiProps.has(p)))
 
   const lines: string[] = []
   lines.push(`  ${name}(${paramList}) {`)
   lines.push(`    var that = this`)
-  lines.push(`    var api = require('../../utils/api.js')`)
-  if (/\bgetDeviceInfo\s*\(/.test(method.body || '')) {
+  if (needApi) {
+    lines.push(`    var api = require('../../utils/api.js')`)
+  }
+  if (needRuntime) {
+    lines.push(`    var runtime = require('../../utils/runtime.js')`)
+  }
+  if (uses('getDeviceInfo')) {
     lines.push(`    var getDeviceInfo = api.getDeviceInfo`)
   }
-  lines.push(`    var setData = function (prop, value) {`)
-  lines.push(`      var patch = {}`)
-  lines.push(`      patch[prop] = value`)
-  lines.push(`      that.setData(patch)`)
-  lines.push(`    }`)
-  lines.push(`    var updateProps = function (prop, value) {`)
-  lines.push(`      var patch = {}`)
-  lines.push(`      patch[prop] = value`)
-  lines.push(`      that.setData(patch)`)
-  lines.push(`      that.triggerEvent('update:' + String(prop), { value: value })`)
-  lines.push(`    }`)
-  lines.push(`    var showToast = function (message, duration) {`)
-  lines.push(
-    `      wx.showToast({ title: String(message == null ? '' : message), icon: 'none', duration: duration === 'long' ? 3000 : 1500 })`,
-  )
-  lines.push(`    }`)
-  lines.push(`    var emit = function (event) {`)
-  lines.push(
-    `      var args = Array.prototype.slice.call(arguments, 1)`,
-  )
-  lines.push(`      that.triggerEvent(String(event), { args: args })`)
-  lines.push(`    }`)
+  if (needSetData) {
+    lines.push(`    var setData = runtime.createSetData(that)`)
+  }
+  if (needShowToast) {
+    lines.push(`    var showToast = runtime.showToast`)
+  }
+  if (needNavigateTo) {
+    lines.push(`    var navigateTo = runtime.navigateTo`)
+  }
+  if (needNavigateBack) {
+    lines.push(`    var navigateBack = runtime.navigateBack`)
+  }
+  if (needUpdateProps) {
+    lines.push(`    var updateProps = function (prop, value) {`)
+    lines.push(`      var patch = {}`)
+    lines.push(`      patch[prop] = value`)
+    lines.push(`      that.setData(patch)`)
+    lines.push(`      if (typeof that.__recomputeComputed === 'function') that.__recomputeComputed([prop])`)
+    lines.push(`      that.triggerEvent('update:' + String(prop), { value: value })`)
+    lines.push(`    }`)
+  }
+  if (needEmit) {
+    lines.push(`    var emit = function (event) {`)
+    lines.push(
+      `      var args = Array.prototype.slice.call(arguments, 1)`,
+    )
+    lines.push(`      that.triggerEvent(String(event), { args: args })`)
+    lines.push(`    }`)
+  }
 
   for (const sib of siblings) {
     lines.push(`    var ${sib} = function () { return that.${sib}.apply(that, arguments) }`)
   }
 
   // ref 局部变量（优先于 data 字段同名）
-  for (const field of options.refFields ?? []) {
-    if (!isValidIdent(field.name)) continue
+  for (const field of usedRefs) {
     if (field.kind === 'modal' && field.modalName) {
       const key = `__modal_${String(field.modalName).replace(/[^a-zA-Z0-9_$]/g, '_')}`
       lines.push(`    var ${field.name} = {`)
@@ -129,38 +172,33 @@ export function generateComponentMethodFn(
   for (const field of dataNames) {
     if (propNames.includes(field) || params.includes(field)) continue
     if (refNames.has(field)) continue
+    if (!uses(field)) continue
     lines.push(`    var ${field} = that.data.${field}`)
   }
 
   // $props：普通 prop 读 properties；api prop 变成可调用（内部 wx.request）
-  lines.push(`    var $props = {}`)
-  for (const prop of propNames) {
-    if (apiProps.has(prop)) {
-      lines.push(`    $props.${prop} = function (args) {`)
-      lines.push(
-        `      return api.invoke(that.properties.${prop} || that.data.${prop}, args)`,
-      )
-      lines.push(`    }`)
-    } else if (arrayProps.has(prop)) {
-      // 数组 prop 避免 null 展开报错： [...$props.data, ...]
-      lines.push(
-        `    Object.defineProperty($props, '${prop}', { enumerable: true, get: function () { var v = that.properties.${prop} !== undefined ? that.properties.${prop} : that.data.${prop}; return Array.isArray(v) ? v : [] } })`,
-      )
-    } else {
-      lines.push(
-        `    Object.defineProperty($props, '${prop}', { enumerable: true, get: function () { return that.properties.${prop} !== undefined ? that.properties.${prop} : that.data.${prop} } })`,
-      )
+  if (needProps) {
+    lines.push(`    var $props = {}`)
+    for (const prop of propNames) {
+      if (apiProps.has(prop)) {
+        lines.push(`    $props.${prop} = function (args) {`)
+        lines.push(
+          `      return api.invoke(that.properties.${prop} || that.data.${prop}, args)`,
+        )
+        lines.push(`    }`)
+      } else if (arrayProps.has(prop)) {
+        // 数组 prop 避免 null 展开报错： [...$props.data, ...]
+        lines.push(
+          `    Object.defineProperty($props, '${prop}', { enumerable: true, get: function () { var v = that.properties.${prop} !== undefined ? that.properties.${prop} : that.data.${prop}; return Array.isArray(v) ? v : [] } })`,
+        )
+      } else {
+        lines.push(
+          `    Object.defineProperty($props, '${prop}', { enumerable: true, get: function () { return that.properties.${prop} !== undefined ? that.properties.${prop} : that.data.${prop} } })`,
+        )
+      }
     }
   }
 
-  let body = (method.body || '').trim()
-  // 小程序部分运行时无 Promise.finally；改成 then 收尾，失败也会关 loading
-  body = replacePromiseFinally(body)
-  // 刷新时 records 可能为空；保证始终是数组，避免 UI/展开报错
-  body = body.replace(
-    /updateProps\(\s*['"]data['"]\s*,\s*res\.records\s*\)/g,
-    `updateProps('data', res.records || [])`,
-  )
   if (body) {
     const indented = body
       .split('\n')
@@ -197,60 +235,52 @@ export function generateComputedObservers(options: {
     (options.fields ?? []).map((f) => f.name.trim()).filter(isValidIdent),
   )
   const computedNames = new Set(computed.map((c) => c.name.trim()))
-  // 只监听计算体真正用到的数据池字段，避免 onScroll 改 isReachTop 时无意义重算
-  const reserved = new Set([
-    'return',
-    'true',
-    'false',
-    'null',
-    'undefined',
-    'var',
-    'let',
-    'const',
-    'function',
-    'if',
-    'else',
-    'for',
-    'while',
-    'switch',
-    'case',
-    'break',
-    'continue',
-    'new',
-    'this',
-    'typeof',
-    'instanceof',
-    'Math',
-    'Number',
-    'String',
-    'Boolean',
-    'Array',
-    'Object',
-    'JSON',
-    'console',
-    'getDeviceInfo',
-    '$props',
-    'props',
-  ])
-  const dataDeps = new Set<string>()
+
+  const depsByComputed = new Map<string, string[]>()
+  const observeDeps = new Set<string>()
   for (const field of computed) {
-    const ids = (field.computeBody || '').match(/\b[A-Za-z_$][\w$]*\b/g) || []
-    for (const id of ids) {
-      if (reserved.has(id)) continue
-      if (propNames.includes(id)) continue
-      if (computedNames.has(id)) continue
-      if (allFieldNames.has(id)) dataDeps.add(id)
+    const name = field.name.trim()
+    const deps = collectComputeDeps(field.computeBody || '', {
+      propNames,
+      allFieldNames,
+      computedNames,
+    })
+    depsByComputed.set(name, deps)
+    for (const d of deps) {
+      if (d === '$query' || d === '$route') continue
+      if (computedNames.has(d)) continue
+      observeDeps.add(d)
     }
   }
-  const observeKey = [...propNames, ...dataDeps].join(', ')
 
   const recomputeMethod = buildRecomputeMethod(
     computed,
     propNames,
     options.fields ?? [],
+    depsByComputed,
   )
-  const observersJs = observeKey
-    ? `  observers: {\n    '${observeKey}': function () {\n      this.__recomputeComputed()\n    },\n  },`
+
+  const observerLines = [...observeDeps]
+    .sort()
+    .map(
+      (dep) =>
+        `    ${JSON.stringify(dep)}: function () {\n      this.__recomputeComputed([${JSON.stringify(dep)}])\n    },`,
+    )
+
+  // params 常由页面计算字段异步下发：attached 时可能仍是 {}，变化后需重新拉数
+  if (propNames.includes('params')) {
+    observerLines.push(`    "params": function (params) {
+      var key = JSON.stringify(params == null ? null : params)
+      if (this.__voiderParamsKey === key) return
+      var prev = this.__voiderParamsKey
+      this.__voiderParamsKey = key
+      if (prev === undefined) return
+      if (typeof this.reset === 'function') this.reset()
+    },`)
+  }
+
+  const observersJs = observerLines.length
+    ? `  observers: {\n${observerLines.join('\n')}\n  },`
     : ''
 
   return {
@@ -260,10 +290,93 @@ export function generateComputedObservers(options: {
   }
 }
 
+const COMPUTE_RESERVED = new Set([
+  'return',
+  'true',
+  'false',
+  'null',
+  'undefined',
+  'var',
+  'let',
+  'const',
+  'function',
+  'if',
+  'else',
+  'for',
+  'while',
+  'switch',
+  'case',
+  'break',
+  'continue',
+  'new',
+  'this',
+  'typeof',
+  'instanceof',
+  'Math',
+  'Number',
+  'String',
+  'Boolean',
+  'Array',
+  'Object',
+  'JSON',
+  'console',
+  'getDeviceInfo',
+  '$props',
+  'props',
+])
+
+/** 从计算体收集直接依赖（data / computed / props / $query|$route） */
+function collectComputeDeps(
+  body: string,
+  ctx: {
+    propNames: string[]
+    allFieldNames: Set<string>
+    computedNames: Set<string>
+  },
+): string[] {
+  const deps = new Set<string>()
+  const stripped = String(body)
+    .replace(/\/\*[\s\S]*?\*\//g, ' ')
+    .replace(/\/\/.*$/gm, ' ')
+    .replace(/'(?:\\.|[^'\\])*'/g, ' ')
+    .replace(/"(?:\\.|[^"\\])*"/g, ' ')
+    .replace(/`(?:\\.|[^`\\])*`/g, ' ')
+
+  for (const m of stripped.matchAll(/\$props\.([A-Za-z_$][\w$]*)/g)) {
+    const p = m[1]!
+    if (ctx.propNames.includes(p)) deps.add(p)
+  }
+
+  if (
+    /(?:^|[^A-Za-z0-9_$])(?:\$query|\$route|query|route)(?:[^A-Za-z0-9_]|$)/.test(
+      stripped,
+    )
+  ) {
+    deps.add('$query')
+  }
+
+  const ids = stripped.match(/[A-Za-z_$][\w$]*/g) || []
+  for (const id of ids) {
+    if (COMPUTE_RESERVED.has(id)) continue
+    if (id === '$query' || id === '$route' || id === 'query' || id === 'route') {
+      continue
+    }
+    if (ctx.propNames.includes(id)) {
+      deps.add(id)
+      continue
+    }
+    if (ctx.computedNames.has(id) || ctx.allFieldNames.has(id)) {
+      deps.add(id)
+    }
+  }
+  return [...deps]
+}
+
 function buildRecomputeMethod(
   computed: DataField[],
   propNames: string[],
   allFields: DataField[],
+  depsByComputed: Map<string, string[]>,
 ): string {
   const dataLocals = allFields
     .map((f) => f.name.trim())
@@ -275,8 +388,17 @@ function buildRecomputeMethod(
     )
 
   const lines: string[] = []
-  lines.push(`  __recomputeComputed: function () {`)
+  lines.push(`  __recomputeComputed: function (changedKeys) {`)
   lines.push(`    var that = this`)
+  lines.push(
+    `    var __force = !(changedKeys && changedKeys.length)`,
+  )
+  lines.push(`    var __dirty = {}`)
+  lines.push(`    if (!__force) {`)
+  lines.push(`      for (var __i = 0; __i < changedKeys.length; __i++) {`)
+  lines.push(`        __dirty[changedKeys[__i]] = true`)
+  lines.push(`      }`)
+  lines.push(`    }`)
   const needsDevice =
     computed.some((f) => /\bgetDeviceInfo\s*\(/.test(f.computeBody || '')) ||
     computed.some((f) => f.name.trim() === 'offsetTop')
@@ -286,6 +408,8 @@ function buildRecomputeMethod(
     )
   }
   lines.push(`    var $props = {}`)
+  lines.push(`    var $query = that.__pageQuery || {}`)
+  lines.push(`    var $route = $query`)
   for (const prop of propNames) {
     // 末尾加分号，避免 })( 被解析成调用（ASI）
     lines.push(
@@ -301,54 +425,83 @@ function buildRecomputeMethod(
     lines.push(`    var ${name} = that.data[${JSON.stringify(name)}]`)
   }
   lines.push(`    var patch = {}`)
-  const baseArgs = ['$props', ...dataLocals]
+  const baseArgs = ['$props', '$query', '$route', ...dataLocals]
   const computedNames = computed.map((f) => f.name.trim()).filter(isValidIdent)
   for (let i = 0; i < computed.length; i++) {
     const field = computed[i]!
     const name = field.name.trim()
     if (!isValidIdent(name)) continue
     const body = (field.computeBody || '').trim()
+    const deps = depsByComputed.get(name) ?? []
     // 后续计算字段可引用前面已算出的值（如 height 用 offsetTop）
     const prior = computedNames.slice(0, i)
     const argList = [...baseArgs, ...prior].join(', ')
     const callList = [
       ...baseArgs,
-      ...prior.map((n) => `patch[${JSON.stringify(n)}]`),
+      ...prior.map(
+        (n) =>
+          `(patch[${JSON.stringify(n)}] !== undefined ? patch[${JSON.stringify(n)}] : that.data[${JSON.stringify(n)}])`,
+      ),
     ].join(', ')
-    lines.push(`    try {`)
-    lines.push(`      patch[${JSON.stringify(name)}] = (function (${argList}) {`)
-    lines.push(`        "use strict";`)
+
+    lines.push(`    var __need_${name} = __force`)
+    lines.push(`    if (!__need_${name}) {`)
+    if (deps.length) {
+      lines.push(`      var __deps_${name} = ${JSON.stringify(deps)}`)
+      lines.push(
+        `      for (var __d = 0; __d < __deps_${name}.length; __d++) {`,
+      )
+      lines.push(
+        `        if (__dirty[__deps_${name}[__d]]) { __need_${name} = true; break }`,
+      )
+      lines.push(`      }`)
+    }
+    lines.push(`    }`)
+    lines.push(`    if (__need_${name}) {`)
+    lines.push(`      try {`)
+    const fieldRemark = lineComment(field.remark || '', '        ')
+    if (fieldRemark) lines.push(fieldRemark)
+    lines.push(
+      `        patch[${JSON.stringify(name)}] = (function (${argList}) {`,
+    )
+    lines.push(`          "use strict";`)
     for (const line of body.split('\n')) {
       // 小程序部分环境对 computed IIFE 里的 const/let 不友好，统一降成 var
-      lines.push(`        ${line.replace(/\bconst\b/g, 'var').replace(/\blet\b/g, 'var')}`)
+      lines.push(
+        `          ${line.replace(/\bconst\b/g, 'var').replace(/\blet\b/g, 'var')}`,
+      )
     }
-    lines.push(`      })(${callList})`)
-    lines.push(`    } catch (err) {`)
-    lines.push(`      console.error('computed ${name} failed', err)`)
+    lines.push(`        })(${callList})`)
+    lines.push(`        __dirty[${JSON.stringify(name)}] = true`)
+    lines.push(`      } catch (err) {`)
+    lines.push(`        console.error('computed ${name} failed', err)`)
     lines.push(
-      `      patch[${JSON.stringify(name)}] = that.data[${JSON.stringify(name)}]`,
+      `        patch[${JSON.stringify(name)}] = that.data[${JSON.stringify(name)}]`,
     )
-    lines.push(`    }`)
+    lines.push(`      }`)
     // 编辑器侧常用 isFillScreen=false 短路 offsetTop；真机 custom 导航仍须状态栏占位。
     // 导出层保底，避免项目计算体面向预览时把小程序顶栏顶飞。
     if (name === 'offsetTop') {
-      lines.push(`    try {`)
-      lines.push(`      var __diOff = getDeviceInfo()`)
+      lines.push(`      try {`)
+      lines.push(`        var __diOff = getDeviceInfo()`)
       lines.push(
-        `      var __sbOff = Number(__diOff && __diOff.statusBarHeight) || 0`,
+        `        var __sbOff = Number(__diOff && __diOff.statusBarHeight) || 0`,
       )
-      lines.push(`      if (__sbOff > 0) {`)
+      lines.push(`        if (__sbOff > 0) {`)
       lines.push(
-        `        var __curOff = Number(patch[${JSON.stringify(name)}]) || 0`,
+        `          var __curOff = Number(patch[${JSON.stringify(name)}]) || 0`,
       )
       lines.push(
-        `        if (__curOff < __sbOff) patch[${JSON.stringify(name)}] = __sbOff`,
+        `          if (__curOff < __sbOff) patch[${JSON.stringify(name)}] = __sbOff`,
       )
-      lines.push(`      }`)
-      lines.push(`    } catch (__eOff) {}`)
+      lines.push(`        }`)
+      lines.push(`      } catch (__eOff) {}`)
     }
+    lines.push(`    }`)
   }
-  lines.push(`    this.setData(patch)`)
+  lines.push(`    var __hasPatch = false`)
+  lines.push(`    for (var __k in patch) { if (Object.prototype.hasOwnProperty.call(patch, __k)) { __hasPatch = true; break } }`)
+  lines.push(`    if (__hasPatch) this.setData(patch)`)
   lines.push(`  }`)
   return lines.join('\n')
 }
@@ -456,7 +609,10 @@ export function generateComponentAttached(
     }
 
     if (methodSet.has(method)) {
-      stmts.push(`    this.${method}()`)
+      // 延后到下一宏任务，确保页面 onLoad 里 setData 的 props（如 params）已下发
+      stmts.push(
+        `    ;(function (that) { setTimeout(function () { that.${method}() }, 0) })(this)`,
+      )
       continue
     }
   }
@@ -478,6 +634,7 @@ export function generatePageSyncHandlers(
       ({ handlerName, fieldName }) => `  ${handlerName}(e) {
     var value = e && e.detail ? e.detail.value : undefined
     this.setData({ ${fieldName}: value })
+    if (typeof this.__recomputeComputed === 'function') this.__recomputeComputed([${JSON.stringify(fieldName)}])
   }`,
     )
     .join(',\n')
@@ -534,11 +691,13 @@ export function generateControllerBoundPageLoad(options: {
   resolveApi: (raw: string) => MpApiBinding | null
 }): {
   methods: string
-  apiData: Record<string, MpApiBinding>
+  /** 本页用到的 API（写入 apis/，不再塞进 data） */
+  usedApis: MpApiBinding[]
   hasLoader: boolean
 } {
-  const apiData: Record<string, MpApiBinding> = {}
+  const usedApis: MpApiBinding[] = []
   const loadBlocks: string[] = []
+  const moduleVars = new Map<string, string>()
 
   for (const field of options.fields ?? []) {
     if (field.binding !== 'controller') continue
@@ -550,12 +709,19 @@ export function generateControllerBoundPageLoad(options: {
     const apiId = cfg.apiId?.trim() ?? ''
     if (!serviceId || !controllerId || !apiId) continue
 
-    const bindingKey = `__ctrl_${name}`
     const resolved = options.resolveApi(
       JSON.stringify({ serviceId, controllerId, apiId }),
     )
     if (!resolved || !resolved.path) continue
-    apiData[bindingKey] = resolved
+    usedApis.push(resolved)
+
+    const moduleRel = apiModuleRelPath(resolved)
+    const exportName = apiMethodExportName(resolved)
+    let moduleVar = moduleVars.get(moduleRel)
+    if (!moduleVar) {
+      moduleVar = `__apiMod${moduleVars.size}`
+      moduleVars.set(moduleRel, moduleVar)
+    }
 
     const argLines: string[] = [`          var args = {}`]
     for (const [varName, inp] of Object.entries(cfg.inputs ?? {})) {
@@ -583,17 +749,21 @@ export function generateControllerBoundPageLoad(options: {
     const errorStmts = generateControllerHookStmts(cfg.onError, '          ', 'that')
     const finallyStmts = generateControllerHookStmts(cfg.onFinally, '          ', 'that')
 
-    loadBlocks.push(`    tasks.push(
+    const fieldRemark = lineComment(field.remark || '', '    ')
+    const remarkPrefix = fieldRemark ? `${fieldRemark}\n` : ''
+
+    loadBlocks.push(`${remarkPrefix}    tasks.push(
       Promise.resolve()
         .then(function () {
 ${loadingStmts.length ? `${loadingStmts.join('\n')}\n` : ''}${argLines.join('\n')}
-          return api.invoke(that.data[${JSON.stringify(bindingKey)}], args)
+          return ${moduleVar}.${exportName}(args)
         })
         .then(function (data) {
           var parsed = ${parseCall}
           var patch = {}
           patch[${JSON.stringify(name)}] = parsed
           that.setData(patch)
+          if (typeof that.__recomputeComputed === 'function') that.__recomputeComputed([${JSON.stringify(name)}])
 ${successStmts.length ? `${successStmts.join('\n')}\n` : ''}        })
         .catch(function (err) {
           console.error(${JSON.stringify(`[voider] controller ${name}`)}, err)
@@ -604,8 +774,15 @@ ${finallyStmts.length ? `${finallyStmts.join('\n')}\n` : ''}        })
   }
 
   if (!loadBlocks.length) {
-    return { methods: '', apiData: {}, hasLoader: false }
+    return { methods: '', usedApis: [], hasLoader: false }
   }
+
+  const requireLines = [...moduleVars.entries()]
+    .map(
+      ([moduleRel, varName]) =>
+        `    var ${varName} = require(${JSON.stringify('../../' + moduleRel)})`,
+    )
+    .join('\n')
 
   const methods = `  __resolveCtrlBinding(path, query) {
     var p = String(path == null ? '' : path).trim()
@@ -642,12 +819,12 @@ ${finallyStmts.length ? `${finallyStmts.join('\n')}\n` : ''}        })
   },
   __loadControllerBoundData(options) {
     var that = this
-    var api = require('../../utils/api.js')
+${requireLines}
     var query = options || {}
     var tasks = []
 ${loadBlocks.join('\n')}
     return Promise.all(tasks)
   }`
 
-  return { methods, apiData, hasLoader: true }
+  return { methods, usedApis, hasLoader: true }
 }

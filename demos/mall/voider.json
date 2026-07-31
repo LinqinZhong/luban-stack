@@ -4,7 +4,8 @@
   "author": "",
   "engineVersion": "1.0.0",
   "canvas": {
-    "width": 375
+    "width": 375,
+    "scene": "miniprogram"
   },
   "entryPage": "home",
   "wechatAppId": "wx063d4987d9089a28",

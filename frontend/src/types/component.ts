@@ -21,7 +21,7 @@ export interface ComponentPropDef {
   itemItemTypeRef?: string
   /**
    * type === 'api'：组件调用该参数时传入的形参约束。
-   * 匹配规则：API 必填入参必须出现且类型一致；可选入参可省略；出参须一致。
+   * 匹配规则：组件声明的形参须出现在 API 入参中且类型一致；API 可有额外入参（调用方补齐）；出参须一致。
    */
   apiParams?: MethodParam[]
   /** type === 'api'：期望的出参类型（含泛型实参） */

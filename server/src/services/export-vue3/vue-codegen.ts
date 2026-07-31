@@ -1,5 +1,7 @@
 ﻿import type { ComponentConfig, ComponentEventDef } from '../../types/component.js'
 import type { PageData } from '../../types/page-data.js'
+import type { ColorPalette } from '../../types/color-palette.js'
+import { resolvePaletteColorForCss } from '../../types/color-palette.js'
 import type { XmlNode } from './xml-parser.js'
 import { escapeHtmlAttr, escapeHtmlText, escapeTsString, escapeVueExprAttr } from './escape.js'
 import {
@@ -91,6 +93,19 @@ const NON_SCROLL_INTERACTION_ATTRS = [
 
 const TEXT_STYLE_ATTRS = new Set(['textSize', 'textColor', 'color'])
 
+/** 当前 codegen 使用的调色板（generate* 入口设置） */
+let activeColorPalette: ColorPalette | undefined
+
+function withColorPalette<T>(palette: ColorPalette | undefined, fn: () => T): T {
+  const prev = activeColorPalette
+  activeColorPalette = palette
+  try {
+    return fn()
+  } finally {
+    activeColorPalette = prev
+  }
+}
+
 export interface PageRefField {
   name: string
   nodePath: string
@@ -131,6 +146,8 @@ export interface CodegenContext {
   needsAppIcon: boolean
   /** 是否使用导出的 AppSwiper 组件 */
   needsAppSwiper: boolean
+  /** 项目调色板（颜色 key → CSS var） */
+  colorPalette?: ColorPalette
 }
 
 /** 与编辑器 isOutOfFlowTree 一致：仅 Modal / 全 Modal Fragment 不占文档流 */
@@ -256,11 +273,17 @@ function pxClass(prefix: string, value: string | undefined): string | undefined 
   return `${prefix}-[${n}px]`
 }
 
-function colorClass(prefix: string, value: string | undefined): string | undefined {
+function colorClass(
+  prefix: string,
+  value: string | undefined,
+  palette?: ColorPalette,
+): string | undefined {
   if (!value || value === 'null') return undefined
   if (value.includes('{')) return undefined
+  const cssValue =
+    resolvePaletteColorForCss(value, palette ?? activeColorPalette) ?? value
   // Tailwind 任意值里空格/逗号用下划线
-  const normalized = value.trim().replace(/\s+/g, '_').replace(/,/g, '_')
+  const normalized = cssValue.trim().replace(/\s+/g, '_').replace(/,/g, '_')
   return `${prefix}-[${normalized}]`
 }
 
@@ -366,6 +389,7 @@ function buildTwClasses(
     /** 父级 LinearLayout 的 orientation */
     parentOrientation?: string
     parentTag?: string
+    colorPalette?: ColorPalette
   },
 ): string {
   const classes: string[] = [...(options?.extra ?? [])]
@@ -488,7 +512,7 @@ function buildTwClasses(
     if (cls) classes.push(cls)
   }
 
-  const bg = colorClass('bg', attrs.background)
+  const bg = colorClass('bg', attrs.background, options?.colorPalette)
   if (bg) classes.push(bg)
 
   const br = pxClass('rounded', attrs.borderRadius)
@@ -821,9 +845,13 @@ function resolveColorExpr(
   fallback = '#333',
 ): { static?: string; expr: string } {
   const base = baseRaw && baseRaw !== 'null' ? baseRaw.trim() : ''
-  const baseExpr = base
+  const baseCss =
+    base && isStaticBinding(base)
+      ? resolvePaletteColorForCss(base, activeColorPalette) ?? base
+      : base
+  const baseExpr = baseCss
     ? isStaticBinding(base)
-      ? `'${escapeTsString(base)}'`
+      ? `'${escapeTsString(baseCss)}'`
       : `String(${bindingToExpr(base, ctx, inRepeat)} ?? '')`
     : `'${escapeTsString(fallback)}'`
 
@@ -831,7 +859,7 @@ function resolveColorExpr(
     (s) => s.styles[attrName]?.trim(),
   )
   if (!states.length) {
-    if (base && isStaticBinding(base)) return { static: base, expr: baseExpr }
+    if (base && isStaticBinding(base)) return { static: baseCss, expr: baseExpr }
     return { expr: baseExpr }
   }
 
@@ -839,8 +867,12 @@ function resolveColorExpr(
   for (let i = states.length - 1; i >= 0; i--) {
     const state = states[i]!
     const override = state.styles[attrName]!.trim()
+    const overrideCss =
+      isStaticBinding(override)
+        ? resolvePaletteColorForCss(override, activeColorPalette) ?? override
+        : override
     const overrideExpr = isStaticBinding(override)
-      ? `'${escapeTsString(override)}'`
+      ? `'${escapeTsString(overrideCss)}'`
       : `String(${bindingToExpr(override, ctx, inRepeat)} ?? '')`
     const when = compileScenariosOrExpr(state.scenarios, ctx, inRepeat)
     expr = `(${when}) ? ${overrideExpr} : (${expr})`
@@ -2452,6 +2484,22 @@ export function generateViewSfc(options: {
   pageRefFields: PageRefField[]
   rootNodes: XmlNode[]
   resolveApi?: (raw: string) => VueApiBinding | null
+  colorPalette?: ColorPalette
+}): string {
+  return withColorPalette(options.colorPalette, () =>
+    generateViewSfcInner(options),
+  )
+}
+
+function generateViewSfcInner(options: {
+  pageId: string
+  xml: string
+  data: PageData
+  componentConfigs: Map<string, ComponentConfig>
+  componentRoots?: Map<string, XmlNode>
+  pageRefFields: PageRefField[]
+  rootNodes: XmlNode[]
+  resolveApi?: (raw: string) => VueApiBinding | null
 }): string {
   const storeName = pageIdToStoreName(options.pageId)
   const pageData = generatePageDataSource(options.data.fields)
@@ -2614,6 +2662,21 @@ ${templateBody}
 }
 
 export function generateComponentSfc(options: {
+  componentId: string
+  config: ComponentConfig
+  xml: string
+  data: PageData
+  componentConfigs: Map<string, ComponentConfig>
+  componentRoots?: Map<string, XmlNode>
+  rootNodes: XmlNode[]
+  colorPalette?: ColorPalette
+}): string {
+  return withColorPalette(options.colorPalette, () =>
+    generateComponentSfcInner(options),
+  )
+}
+
+function generateComponentSfcInner(options: {
   componentId: string
   config: ComponentConfig
   xml: string

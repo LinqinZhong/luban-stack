@@ -187,6 +187,27 @@ function buildWhereClause(
         parts.push(`${col} BETWEEN ${sqlLiteral(v)} AND ${sqlLiteral(v2)}`)
         continue
       }
+      // 属于 / 不属于：空数组或未传参时不能丢掉条件（否则变成全表扫描）
+      if (op === 'in' || op === 'notIn') {
+        const list = Array.isArray(v)
+          ? v
+          : v === undefined || v === null || v === ''
+            ? []
+            : String(v)
+                .split(',')
+                .map((x) => x.trim())
+                .filter(Boolean)
+        if (!list.length) {
+          // IN () → 永不匹配；NOT IN () → 全部匹配
+          parts.push(op === 'in' ? '0=1' : '1=1')
+        } else {
+          const inner = list.map((x) => sqlLiteral(x)).join(', ')
+          parts.push(
+            op === 'in' ? `${col} IN (${inner})` : `${col} NOT IN (${inner})`,
+          )
+        }
+        continue
+      }
       if (v === undefined || v === null || v === '') continue
 
       if (op === 'eq') parts.push(`${col} = ${sqlLiteral(v)}`)
@@ -201,18 +222,6 @@ function buildWhereClause(
       } else if (op === 'notLike') {
         const s = String(v)
         parts.push(`${col} NOT LIKE ${sqlLiteral(`%${s}%`)}`)
-      } else if (op === 'in' || op === 'notIn') {
-        const list = Array.isArray(v)
-          ? v
-          : String(v)
-              .split(',')
-              .map((x) => x.trim())
-              .filter(Boolean)
-        if (!list.length) continue
-        const inner = list.map((x) => sqlLiteral(x)).join(', ')
-        parts.push(
-          op === 'in' ? `${col} IN (${inner})` : `${col} NOT IN (${inner})`,
-        )
       }
     }
     if (parts.length) {
@@ -319,6 +328,23 @@ function evalMybatisIfAtom(
     }
     const empty = val == null || String(val) === ''
     return op === '!=' ? !empty : empty
+  }
+  // type == 'good' / status != "x" / n == 1
+  const litCmp = atom.match(
+    /^([A-Za-z_][A-Za-z0-9_.]*)\s*(!=|==)\s*(?:'([^']*)'|"([^"]*)"|(-?\d+(?:\.\d+)?))\s*$/,
+  )
+  if (litCmp) {
+    const val = resolveParamValue(params, litCmp[1]!)
+    const op = litCmp[2]!
+    const rhsStr = litCmp[3] ?? litCmp[4]
+    const rhsNum = litCmp[5]
+    let eq: boolean
+    if (rhsNum != null) {
+      eq = Number(val) === Number(rhsNum)
+    } else {
+      eq = String(val ?? '') === String(rhsStr ?? '')
+    }
+    return op === '!=' ? !eq : eq
   }
   const nameOnly = atom.match(/^([A-Za-z_][A-Za-z0-9_.]*)$/)
   if (nameOnly) {
@@ -505,35 +531,73 @@ function wrapOutput(
     .filter((m) => m.field && m.column)
   const operation = method.dataConfig?.operation
 
-  // 查询：按出参类型包装行集（非数组空结果为 null）
-  if (operation === 'query') {
+  // 查询：按出参类型包装行集；自定义 SELECT 仅数组/映射走此分支（标量仍走下方字段映射）
+  if (operation === 'query' || operation === 'custom') {
     if (method.output.type === 'array') {
       return rows
     }
-    if (def?.kind === 'interface') {
-      const hasRecords = def.fields.some((f) => f.name === 'records')
-      if (hasRecords) {
-        return {
-          current: meta.current,
-          pageSize: meta.pageSize,
-          hasNext: meta.current * meta.pageSize < meta.total,
-          total: meta.total,
-          records: rows,
+    if (method.output.type === 'map') {
+      const keyMap = mappings.find((m) => m.field === 'key')
+      if (!keyMap) return new Map()
+      const valueMaps = mappings.filter((m) => m.field !== 'key')
+      const valueIsArray = method.output.itemType === 'array'
+      const keyIsNumber = method.output.keyType === 'number'
+      const out = new Map<string | number, unknown>()
+      for (const row of rows) {
+        const rawKey = row[keyMap.column]
+        if (rawKey == null || rawKey === '') continue
+        const key: string | number = keyIsNumber
+          ? Number(rawKey)
+          : String(rawKey)
+        if (keyIsNumber && Number.isNaN(key)) continue
+        let entry: unknown
+        if (valueMaps.length === 1 && valueMaps[0]!.field === 'value') {
+          entry = row[valueMaps[0]!.column]
+        } else {
+          const obj: Record<string, unknown> = {}
+          for (const m of valueMaps) {
+            obj[m.field] = row[m.column]
+          }
+          entry = obj
+        }
+        if (valueIsArray) {
+          const list = (out.get(key) as unknown[] | undefined) ?? []
+          list.push(entry)
+          out.set(key, list)
+        } else {
+          out.set(key, entry)
         }
       }
+      return out
     }
-    if (method.output.type === 'number' && !named) {
-      return meta.total
+    if (operation === 'custom') {
+      // 自定义标量 COUNT 等：交给下方 fieldMappings
+    } else {
+      if (def?.kind === 'interface') {
+        const hasRecords = def.fields.some((f) => f.name === 'records')
+        if (hasRecords) {
+          return {
+            current: meta.current,
+            pageSize: meta.pageSize,
+            hasNext: meta.current * meta.pageSize < meta.total,
+            total: meta.total,
+            records: rows,
+          }
+        }
+      }
+      if (method.output.type === 'number' && !named) {
+        return meta.total
+      }
+      if (method.output.type === 'boolean' && !named) {
+        return meta.total > 0
+      }
+      if (method.output.type === 'string' && !named) {
+        const single = rows.length ? rows[0] : null
+        return JSON.stringify(single)
+      }
+      // 对象 / 具名类型：单条或 null，不出数组
+      return rows.length ? rows[0]! : null
     }
-    if (method.output.type === 'boolean' && !named) {
-      return meta.total > 0
-    }
-    if (method.output.type === 'string' && !named) {
-      const single = rows.length ? rows[0] : null
-      return JSON.stringify(single)
-    }
-    // 对象 / 具名类型：单条或 null，不出数组
-    return rows.length ? rows[0]! : null
   }
 
   // 标量出参：按字段映射取列，或取首行首列
@@ -694,7 +758,18 @@ export async function debugDataLayerMethod(payload: {
   } else if (config.operation === 'custom') {
     if (!config.sql.trim()) throw new ProjectError('请先配置自定义 SQL', 400)
     sql = applyCustomSql(config.sql, params, table)
-    if (isCustomWriteSql(sql)) isWrite = true
+    if (isCustomWriteSql(sql)) {
+      isWrite = true
+    } else {
+      const page = pickPageMeta(params, config.pageParam ?? '')
+      if (page.enabled) {
+        const offset = (page.current - 1) * page.pageSize
+        sql += ` LIMIT ${page.pageSize} OFFSET ${offset}`
+        current = page.current
+        pageSize = page.pageSize
+        paginated = true
+      }
+    }
   } else {
     throw new ProjectError(
       `操作「${config.operation}」调试稍后实现，请先使用查询、插入、删除、修改或自定义`,
@@ -751,11 +826,14 @@ export async function debugDataLayerMethod(payload: {
   }
 
   const rows =
-    config.operation === 'query'
+    config.operation === 'query' || (config.operation === 'custom' && !isWrite)
       ? exec.rows.map((row) => mapRowKeysToCamel(row))
       : exec.rows
   let total = rows.length
-  if (config.operation === 'query' && paginated) {
+  if (
+    (config.operation === 'query' || config.operation === 'custom') &&
+    paginated
+  ) {
     if (rows.length < pageSize) {
       total = (current - 1) * pageSize + rows.length
     } else {

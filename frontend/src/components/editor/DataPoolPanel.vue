@@ -33,6 +33,7 @@ import {
 } from '../../types/page-data'
 import { resolveComputedPageData } from '../../utils/compute-runtime'
 import type { DeviceInfo } from '../../utils/device-info'
+import type { ColorPalette } from '../../types/color-palette'
 import { isReservedDataFieldName } from '../../utils/component-props'
 import type { ComponentPropDef, ComponentEventDef } from '../../types/component'
 import type { DataTypeLibrary } from '../../types/data-types'
@@ -54,6 +55,8 @@ const props = defineProps<{
   iconOptions?: Array<{ id: string; label: string }>
   /** 计算字段求值时的 getDeviceInfo（与画布场景对齐） */
   getDeviceInfo?: () => DeviceInfo
+  /** 画板颜色（计算字段 $color.xxx） */
+  colorPalette?: ColorPalette | null
   /** 编辑组件时的参数定义（$props 提示与求值） */
   componentProps?: ComponentPropDef[] | null
   /** 计算字段求值时的 $props */
@@ -67,8 +70,10 @@ const props = defineProps<{
   componentMap?: ComponentRenderMap
   componentMethodsMap?: ComponentMethodsMap
   emitEvents?: ComponentEventDef[]
-  /** 页面 Query 入参（控制器绑定可选 $query） */
+  /** 页面 Query 入参（控制器绑定 / 计算字段 $query） */
   pageQueryParams?: PageQueryParamDef[] | null
+  /** 当前页面路由参数（计算字段求值 $query / $route） */
+  routeParams?: Record<string, unknown> | null
 }>()
 
 const emit = defineEmits<{
@@ -346,6 +351,8 @@ const resolvedData = computed(() =>
   resolveComputedPageData(props.data, {
     getDeviceInfo: props.getDeviceInfo,
     dollarProps: props.dollarProps,
+    dollarQuery: props.routeParams ?? undefined,
+    colorPalette: props.colorPalette,
   }),
 )
 
@@ -744,7 +751,9 @@ function saveOssBinding(config: OssBindingConfig) {
       :field="editingField"
       :sibling-fields="siblingFieldsForCompute"
       :component-props="componentProps"
+      :page-query-params="pageQueryParams"
       :type-library="typeLibrary"
+      :color-palette="colorPalette"
       @save="saveComputeBody"
     />
     <ControllerBindingDialog

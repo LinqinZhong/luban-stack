@@ -7,6 +7,7 @@ import ActionNode from './nodes/ActionNode.vue'
 import OutputNode from './nodes/OutputNode.vue'
 import DefineNode from './nodes/DefineNode.vue'
 import PageMapNode from './nodes/PageMapNode.vue'
+import ObjectMapNode from './nodes/ObjectMapNode.vue'
 import ThrowNode from './nodes/ThrowNode.vue'
 import EndNode from './nodes/EndNode.vue'
 
@@ -19,6 +20,7 @@ const methodFlowNodeTypes = markRaw({
   output: markRaw(OutputNode),
   define: markRaw(DefineNode),
   pageMap: markRaw(PageMapNode),
+  objectMap: markRaw(ObjectMapNode),
   throw: markRaw(ThrowNode),
   end: markRaw(EndNode),
 })
@@ -72,9 +74,11 @@ import {
 } from '../../../utils/page-map-flow'
 import { coarseToProcessorTypeExpr } from '../../../utils/typed-binding-paths'
 import InputNodeDialog from './dialogs/InputNodeDialog.vue'
-import type {
-  InputDataSource,
-  InputNodeForm,
+import {
+  createEmptyInputNodeForm,
+  normalizeInputDataSource,
+  type InputModuleOption,
+  type InputNodeForm,
 } from './dialogs/input-node'
 import BranchNodeDialog from './dialogs/BranchNodeDialog.vue'
 import ActionNodeDialog, {
@@ -99,6 +103,7 @@ import { FLOW_DEBUG_KEY } from './flow-debug-inject'
 import FlowHelperLines from './FlowHelperLines.vue'
 import { getHelperLines } from './helper-lines'
 import BackLink from '../BackLink.vue'
+import { getServiceProcessors } from '../../../api/projects'
 
 const nodeTypes = methodFlowNodeTypes
 const FLOW_ID = 'method-flow-editor'
@@ -110,6 +115,11 @@ const { applyNodeChanges, applyEdgeChanges, getNodes } = useVueFlow({
 const helperLineHorizontal = ref<number | undefined>(undefined)
 const helperLineVertical = ref<number | undefined>(undefined)
 
+/** 跨模块输入节点：缓存其它服务的处理器列表 */
+const remoteProcessorsByService = ref(
+  new Map<string, { data: ServiceProcessor[]; business: ServiceProcessor[] }>(),
+)
+
 const props = defineProps<{
   methodName: string
   /** 工具栏标题前缀，默认「方法」 */
@@ -118,12 +128,17 @@ const props = defineProps<{
   methodParams: ProcessorMethodParam[]
   methodOutput: ProcessorTypeExpr
   dataProcessors: ServiceProcessor[]
-  /** 业务层处理器列表（输入节点「当前/其它业务」） */
+  /** 业务层处理器列表 */
   businessProcessors?: ServiceProcessor[]
   currentProcessorId?: string
   currentMethodId?: string
   /** 当前业务绑定的数据层 id */
   boundDataProcessorId?: string
+  /** 当前模块（服务）id */
+  currentServiceId?: string
+  /** 全部模块选项 */
+  moduleOptions?: InputModuleOption[]
+  projectPath?: string
   /**
    * 输入节点数据来源：
    * - all：业务方法流默认
@@ -522,12 +537,9 @@ function defaultDataForKind(kind: Exclude<FlowNodeKind, 'start'>): Record<string
   switch (kind) {
     case 'input':
       return {
+        serviceId: props.currentServiceId ?? '',
         dataSource:
-          props.inputSourceMode === 'business'
-            ? 'other_business'
-            : props.boundDataProcessorId
-              ? 'current_data'
-              : 'other_data',
+          props.inputSourceMode === 'business' ? 'business' : 'data',
         dataProcessorId: '',
         dataMethodId: '',
         headerField: '',
@@ -585,6 +597,16 @@ function defaultDataForKind(kind: Exclude<FlowNodeKind, 'start'>): Record<string
         totalExpr: '',
         hasNextExpr: '',
         targetTypeRef: QUERY_PAGE_VO_TYPE_ID,
+        targetGenericArgs: {},
+        targetVarName: '',
+        fieldMappings: [],
+        description: '',
+        printExpr: '',
+      }
+    case 'objectMap':
+      return {
+        sourcePath: '',
+        targetTypeRef: '',
         targetGenericArgs: {},
         targetVarName: '',
         fieldMappings: [],
@@ -659,16 +681,12 @@ const endDialogVisible = ref(false)
 const startDialogVisible = ref(false)
 const editingNodeId = ref('')
 
-const editingInputForm = ref<InputNodeForm>({
-  dataSource: 'other_business',
-  dataProcessorId: '',
-  dataMethodId: '',
-  headerField: '',
-  varName: '',
-  methodLabel: '',
-  paramBindings: {},
-  printExpr: '',
-})
+const editingInputForm = ref<InputNodeForm>(
+  createEmptyInputNodeForm({
+    serviceId: '',
+    dataSource: 'data',
+  }),
+)
 const editingExpression = ref('')
 const editingBranchPrintExpr = ref('')
 const editingStartPrintExpr = ref('')
@@ -834,7 +852,7 @@ const reservedNames = computed(() => {
       const varName =
         typeof data.resultVarName === 'string' ? data.resultVarName.trim() : ''
       if (varName) names.push(varName)
-    } else if (n.type === 'pageMap') {
+    } else if (n.type === 'pageMap' || n.type === 'objectMap') {
       const varName =
         (typeof data.targetVarName === 'string'
           ? data.targetVarName.trim()
@@ -852,13 +870,122 @@ function findDataMethod(processorId: string, methodId: string) {
   return proc?.methods.find((m) => m.id === methodId) ?? null
 }
 
+function findProcessorMethodIn(
+  processors: ServiceProcessor[],
+  processorId: string,
+  methodId: string,
+) {
+  if (!processorId || !methodId) return null
+  const proc = processors.find((p) => p.id === processorId)
+  return proc?.methods.find((m) => m.id === methodId) ?? null
+}
+
+function processorsForService(serviceId: string): {
+  data: ServiceProcessor[]
+  business: ServiceProcessor[]
+} {
+  const sid = serviceId.trim()
+  if (!sid || sid === (props.currentServiceId ?? '')) {
+    return {
+      data: props.dataProcessors,
+      business: props.businessProcessors ?? [],
+    }
+  }
+  return (
+    remoteProcessorsByService.value.get(sid) ?? { data: [], business: [] }
+  )
+}
+
+watch(
+  () => {
+    const ids: string[] = []
+    for (const n of nodes.value) {
+      if (n.type !== 'input') continue
+      const d = (n.data ?? {}) as Record<string, unknown>
+      const sid = typeof d.serviceId === 'string' ? d.serviceId.trim() : ''
+      if (sid && sid !== props.currentServiceId) ids.push(sid)
+    }
+    return [props.projectPath, props.currentServiceId, ids.sort().join('|')] as const
+  },
+  async ([projectPath]) => {
+    const path = typeof projectPath === 'string' ? projectPath.trim() : ''
+    if (!path) return
+    const needed = new Set<string>()
+    for (const n of nodes.value) {
+      if (n.type !== 'input') continue
+      const d = (n.data ?? {}) as Record<string, unknown>
+      const sid = typeof d.serviceId === 'string' ? d.serviceId.trim() : ''
+      if (sid && sid !== props.currentServiceId) needed.add(sid)
+    }
+    let changed = false
+    const next = new Map(remoteProcessorsByService.value)
+    await Promise.all(
+      [...needed].map(async (sid) => {
+        if (next.has(sid)) return
+        try {
+          const [biz, data] = await Promise.all([
+            getServiceProcessors(path, sid, 'business'),
+            getServiceProcessors(path, sid, 'data'),
+          ])
+          next.set(sid, {
+            business: biz.processors ?? [],
+            data: data.processors ?? [],
+          })
+          changed = true
+        } catch {
+          /* ignore */
+        }
+      }),
+    )
+    if (changed) remoteProcessorsByService.value = next
+  },
+  { immediate: true },
+)
+
+function readSavedOutputTypeExpr(
+  data: Record<string, unknown>,
+): ProcessorTypeExpr | null {
+  const raw = data.outputTypeExpr
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
+  const type = (raw as { type?: unknown }).type
+  if (typeof type !== 'string' || !type.trim()) return null
+  return raw as ProcessorTypeExpr
+}
+
 function inputNodeToParam(data: Record<string, unknown>): MethodParam | null {
   const varName = typeof data.varName === 'string' ? data.varName.trim() : ''
   if (!varName) return null
+  const dataSource = typeof data.dataSource === 'string' ? data.dataSource : ''
+  if (
+    dataSource === 'request_header' ||
+    (typeof data.headerField === 'string' &&
+      data.headerField.trim() &&
+      !data.dataProcessorId)
+  ) {
+    return { name: varName, type: 'string', tsType: 'string' }
+  }
+  const saved = readSavedOutputTypeExpr(data)
+  if (saved) {
+    return {
+      name: varName,
+      type: processorTypeExprToMethodParamType(saved),
+      tsType: processorTypeExprToTs(saved, props.typeLibrary),
+      typeExpr: saved,
+    }
+  }
   const processorId =
     typeof data.dataProcessorId === 'string' ? data.dataProcessorId : ''
   const methodId = typeof data.dataMethodId === 'string' ? data.dataMethodId : ''
-  const method = findDataMethod(processorId, methodId)
+  const serviceId =
+    (typeof data.serviceId === 'string' ? data.serviceId.trim() : '') ||
+    props.currentServiceId ||
+    ''
+  // 依赖 remoteProcessorsByService，跨模块拉取后触发 ambient 重算
+  void remoteProcessorsByService.value
+  const { data: dataList, business: bizList } = processorsForService(serviceId)
+  const method =
+    findProcessorMethodIn(dataList, processorId, methodId) ??
+    findProcessorMethodIn(bizList, processorId, methodId)
   if (method?.output) {
     return {
       name: varName,
@@ -971,50 +1098,24 @@ function readParamBindings(data: Record<string, unknown>): Record<string, string
 
 function inferInputDataSource(
   data: Record<string, unknown>,
-): InputDataSource {
+): ReturnType<typeof normalizeInputDataSource> {
   const businessOnly = props.inputSourceMode === 'business'
-  const raw = data.dataSource
-  const allowed: InputDataSource[] = [
-    'current_business',
-    'other_business',
-    'current_data',
-    'other_data',
-    'request_header',
-  ]
-  if (typeof raw === 'string' && allowed.includes(raw as InputDataSource)) {
-    const src = raw as InputDataSource
-    if (businessOnly) {
-      if (src === 'current_business' && props.currentProcessorId) {
-        return 'current_business'
-      }
-      return 'other_business'
-    }
-    if (src === 'current_data' && !props.boundDataProcessorId) {
-      return 'other_data'
-    }
-    if (src === 'current_business' && !props.currentProcessorId) {
-      return 'other_business'
-    }
-    return src
-  }
-  if (businessOnly) return 'other_business'
-  if (typeof data.headerField === 'string' && data.headerField.trim()) {
+  if (data.dataSource === 'request_header') return 'request_header'
+  if (
+    typeof data.headerField === 'string' &&
+    data.headerField.trim() &&
+    !data.dataSource
+  ) {
     return 'request_header'
   }
-  const pid =
-    typeof data.dataProcessorId === 'string' ? data.dataProcessorId : ''
-  const bound = props.boundDataProcessorId ?? ''
-  if (pid && bound && pid === bound) return 'current_data'
-  if (pid) {
-    const inBusiness = (props.businessProcessors ?? []).some((p) => p.id === pid)
-    if (inBusiness) {
-      return pid === props.currentProcessorId
-        ? 'current_business'
-        : 'other_business'
-    }
-    return 'other_data'
+  return normalizeInputDataSource(data.dataSource, { businessOnly })
+}
+
+function inferInputServiceId(data: Record<string, unknown>): string {
+  if (typeof data.serviceId === 'string' && data.serviceId.trim()) {
+    return data.serviceId.trim()
   }
-  return bound ? 'current_data' : 'other_data'
+  return props.currentServiceId ?? ''
 }
 
 function openNodeEditor(node: Node) {
@@ -1051,6 +1152,7 @@ function openNodeEditor(node: Node) {
   const data = (node.data ?? {}) as Record<string, unknown>
   if (node.type === 'input') {
     editingInputForm.value = {
+      serviceId: inferInputServiceId(data),
       dataSource: inferInputDataSource(data),
       dataProcessorId:
         typeof data.dataProcessorId === 'string' ? data.dataProcessorId : '',
@@ -1183,6 +1285,24 @@ function openNodeEditor(node: Node) {
       printExpr: typeof data.printExpr === 'string' ? data.printExpr : '',
     }
     pageMapDialogVisible.value = true
+  } else if (node.type === 'objectMap') {
+    editingObjectMapForm.value = {
+      sourcePath: typeof data.sourcePath === 'string' ? data.sourcePath : '',
+      targetTypeRef:
+        typeof data.targetTypeRef === 'string' ? data.targetTypeRef : '',
+      targetGenericArgs: readGenericArgs(data.targetGenericArgs),
+      targetVarName:
+        typeof data.targetVarName === 'string'
+          ? data.targetVarName
+          : typeof data.targetPath === 'string'
+            ? data.targetPath
+            : '',
+      fieldMappings: readFieldMappings(data.fieldMappings),
+      description:
+        typeof data.description === 'string' ? data.description : '',
+      printExpr: typeof data.printExpr === 'string' ? data.printExpr : '',
+    }
+    objectMapDialogVisible.value = true
   }
 }
 
@@ -1235,6 +1355,11 @@ function saveDefineNode(form: DefineNodeForm) {
 }
 
 function savePageMapNode(form: PageMapNodeForm) {
+  if (!editingNodeId.value) return
+  patchNodeData(editingNodeId.value, { ...form })
+}
+
+function saveObjectMapNode(form: ObjectMapNodeForm) {
   if (!editingNodeId.value) return
   patchNodeData(editingNodeId.value, { ...form })
 }
@@ -1366,11 +1491,13 @@ onUnmounted(() => {
     <InputNodeDialog
       v-model="inputDialogVisible"
       :form="editingInputForm"
+      :project-path="projectPath ?? ''"
+      :current-service-id="currentServiceId ?? ''"
+      :module-options="moduleOptions ?? []"
       :business-processors="businessProcessors ?? []"
       :data-processors="dataProcessors"
       :current-processor-id="currentProcessorId ?? ''"
       :current-method-id="currentMethodId ?? ''"
-      :bound-data-processor-id="boundDataProcessorId ?? ''"
       :source-mode="inputSourceMode ?? 'all'"
       :reserved-names="reservedNames"
       :ambient-vars="ambientVars"
@@ -1421,6 +1548,13 @@ onUnmounted(() => {
       :ambient-vars="ambientVars"
       :type-library="typeLibrary"
       @save="savePageMapNode"
+    />
+    <ObjectMapNodeDialog
+      v-model="objectMapDialogVisible"
+      :form="editingObjectMapForm"
+      :ambient-vars="ambientVars"
+      :type-library="typeLibrary"
+      @save="saveObjectMapNode"
     />
     <ThrowNodeDialog
       v-model="throwDialogVisible"

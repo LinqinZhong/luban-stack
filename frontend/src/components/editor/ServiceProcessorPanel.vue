@@ -21,7 +21,7 @@ import {
 } from '../../types/backend-services'
 import type { DataTypeDef, DataTypeLibrary } from '../../types/data-types'
 import type { MysqlColumnDef, MysqlIndexDef } from '../../types/mysql'
-import { typeLabel, type DataFieldType } from '../../types/page-data'
+import { typeLabel, arrayTypeLabel, type DataFieldType } from '../../types/page-data'
 import {
   buildPresetMethods,
   findMethodIncludingPresets,
@@ -45,6 +45,8 @@ const props = defineProps<{
   serviceId: string
   layer: ProcessorLayerKind
   typeLibrary: DataTypeLibrary | null
+  /** 全部模块选项（输入节点选模块） */
+  moduleOptions?: Array<{ id: string; name: string }>
   /** 刷新 / 切层后恢复选中 */
   restored?: {
     processorId: string
@@ -223,6 +225,18 @@ const dataMethodReservedNames = computed(() => {
   ].filter((n) => !selfName || n.toLowerCase() !== selfName.toLowerCase())
 })
 
+const activeEntitySchema = computed(() => {
+  const entity = findEntityDef(activeProcessor.value?.entityRef || '')
+  const table = entity?.tableName?.trim() || ''
+  if (!table) return null
+  return tableSchemaCache.value[table] ?? null
+})
+
+const activeEntityTableName = computed(() => {
+  const entity = findEntityDef(activeProcessor.value?.entityRef || '')
+  return entity?.tableName?.trim() || ''
+})
+
 /** 展示用：预置 + 自定义（同名自定义覆盖预置） */
 const methods = computed(() =>
   isDataLayer.value
@@ -363,7 +377,7 @@ function formatTypeWithGenerics(
 }
 
 function leafNamedRef(expr: ProcessorTypeExpr): string {
-  if (expr.type === 'array') {
+  if (expr.type === 'array' || expr.type === 'map') {
     if (expr.itemType === 'array') return expr.itemItemTypeRef || ''
     return expr.itemTypeRef || ''
   }
@@ -375,16 +389,28 @@ function formatTypeExpr(expr: ProcessorTypeExpr): string {
   const namedLabel = named
     ? formatTypeWithGenerics(named, expr.genericArgs ?? {})
     : ''
+  if (expr.type === 'map') {
+    const keyLabel = expr.keyType === 'number' ? '数值' : '字符串'
+    if (expr.itemType === 'array') {
+      const leaf =
+        namedLabel ||
+        typeLabel((expr.itemItemType || 'string') as DataFieldType)
+      return `映射 / ${keyLabel} → ${arrayTypeLabel(leaf)}`
+    }
+    const leaf =
+      namedLabel || typeLabel((expr.itemType || 'string') as DataFieldType)
+    return `映射 / ${keyLabel} → ${leaf}`
+  }
   if (expr.type === 'array') {
     if (expr.itemType === 'array') {
       const leaf =
         namedLabel ||
         typeLabel((expr.itemItemType || 'string') as DataFieldType)
-      return `数组 / 数组 / ${leaf}`
+      return arrayTypeLabel(leaf, 2)
     }
     const leaf =
       namedLabel || typeLabel((expr.itemType || 'string') as DataFieldType)
-    return `数组 / ${leaf}`
+    return arrayTypeLabel(leaf)
   }
   if (named) return namedLabel
   return typeLabel((expr.type || 'string') as DataFieldType)
@@ -956,6 +982,8 @@ function openDataMethodDialog(row: ProcessorMethod) {
   if (index < 0) return
   dataMethodEditIndex.value = index
   selectedMethodId.value = row.id
+  const table = activeEntityTableName.value
+  if (table) void loadTableSchema(table)
   dataMethodDialogVisible.value = true
 }
 
@@ -1019,6 +1047,9 @@ defineExpose({
       processors.find((p) => p.id === flowEditing!.processorId)
         ?.dataProcessorRef ?? ''
     "
+    :current-service-id="serviceId"
+    :module-options="moduleOptions ?? []"
+    :project-path="projectPath"
     :type-library="typeLibrary"
     :debug-cursor-id="flowDebugCursorId"
     :debug-visited-ids="flowDebugVisitedIds"
@@ -1285,6 +1316,9 @@ defineExpose({
       :type-library="typeLibrary"
       :type-options="typeOptions"
       :entity-ref="activeProcessor?.entityRef"
+      :entity-table-name="activeEntityTableName"
+      :entity-columns="activeEntitySchema?.columns"
+      :entity-indexes="activeEntitySchema?.indexes"
       :reserved-names="dataMethodReservedNames"
       @save="saveDataMethodEdit"
     />

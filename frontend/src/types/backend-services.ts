@@ -176,6 +176,16 @@ export interface ServiceApiHeader {
   remark: string
 }
 
+export type ProcessorMethodScope = 'private' | 'public'
+
+export const PROCESSOR_METHOD_SCOPE_OPTIONS: Array<{
+  label: string
+  value: ProcessorMethodScope
+}> = [
+  { label: '私有', value: 'private' },
+  { label: '公共', value: 'public' },
+]
+
 /** 控制器下的 API（先落模型，后续完善编辑） */
 export interface ServiceApi {
   id: string
@@ -188,9 +198,13 @@ export interface ServiceApi {
   /** 出参类型（组件 api 参数匹配用） */
   output: ProcessorTypeExpr
   requireAuth: boolean
+  /** 作用域：私有 / 公共 */
+  scope: ProcessorMethodScope
   /** 调试入参（按变量名持久化） */
   debugParams: Record<string, unknown>
-  /** API 编排工作流（与业务方法 flow 同结构） */
+  /**
+   * API 编排（现由「直接绑定业务方法」自动生成：start → business input → end）
+   */
   flow: MethodFlow
 }
 
@@ -254,9 +268,11 @@ export function createEmptyServiceApi(name = ''): ServiceApi {
       itemTypeRef: '',
       itemItemType: '',
       itemItemTypeRef: '',
+      keyType: '',
       genericArgs: {},
     },
     requireAuth: false,
+    scope: 'public',
     debugParams: {},
     flow: createDefaultMethodFlow(),
   }
@@ -415,6 +431,7 @@ export function normalizeServiceApi(input: unknown): ServiceApi | null {
             genericArgs: {},
           },
     requireAuth: Boolean(input.requireAuth),
+    scope: normalizeProcessorMethodScope(input.scope),
     debugParams: normalizeDebugParams(input.debugParams),
     flow: normalizeMethodFlow(input.flow),
   }
@@ -482,6 +499,8 @@ export interface ProcessorTypeExpr {
   itemTypeRef: string
   itemItemType: string
   itemItemTypeRef: string
+  /** type === 'map' 时的键类型：string | number */
+  keyType: string
   /** 具名类型的泛型实参；空串表示 any */
   genericArgs: Record<string, string>
 }
@@ -758,16 +777,6 @@ export function normalizeDebugParams(input: unknown): Record<string, unknown> {
   return out
 }
 
-export type ProcessorMethodScope = 'private' | 'public'
-
-export const PROCESSOR_METHOD_SCOPE_OPTIONS: Array<{
-  label: string
-  value: ProcessorMethodScope
-}> = [
-  { label: '私有', value: 'private' },
-  { label: '公共', value: 'public' },
-]
-
 export interface ProcessorMethod {
   id: string
   name: string
@@ -801,6 +810,7 @@ export type FlowNodeKind =
   | 'output'
   | 'define'
   | 'pageMap'
+  | 'objectMap'
   | 'throw'
   | 'end'
 
@@ -860,6 +870,7 @@ export function normalizeMethodFlow(input: unknown): MethodFlow {
       kind !== 'output' &&
       kind !== 'define' &&
       kind !== 'pageMap' &&
+      kind !== 'objectMap' &&
       kind !== 'throw' &&
       kind !== 'end'
     ) {
@@ -969,12 +980,15 @@ export function normalizeProcessorTypeExpr(
     }
   }
   if (isPlainObject(input)) {
-    const type =
+    let type =
       typeof input.type === 'string' && input.type.trim()
         ? input.type.trim()
         : input.typeRef || legacyRef
           ? 'json'
           : 'string'
+    if (type === 'dict') type = 'map'
+    const keyRaw =
+      typeof input.keyType === 'string' ? input.keyType.trim() : ''
     return {
       type,
       typeRef:
@@ -990,6 +1004,7 @@ export function normalizeProcessorTypeExpr(
         typeof input.itemItemTypeRef === 'string'
           ? input.itemItemTypeRef.trim()
           : '',
+      keyType: keyRaw === 'number' ? 'number' : keyRaw === 'string' ? 'string' : type === 'map' ? 'string' : '',
       genericArgs: normalizeGenericArgs(
         input.genericArgs ?? input.outputGenericArgs,
       ),

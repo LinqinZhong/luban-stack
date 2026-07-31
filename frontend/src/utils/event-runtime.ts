@@ -22,6 +22,8 @@ import {
   type ModalStackLike,
 } from './widget-ref'
 import { getDeviceInfo as defaultGetDeviceInfo, type DeviceInfo } from './device-info'
+import type { ColorPalette } from '../types/color-palette'
+import { buildDollarColor } from '../types/color-palette'
 
 export type PreviewEventKey =
   | 'onClick'
@@ -66,6 +68,11 @@ export interface ComponentEmitContext {
   events: import('../types/component').ComponentEventDef[]
   hostAttrs: Record<string, string>
   hostScope?: { item: unknown; index: number }
+  /**
+   * 仅因 Slot 投影挂上的外层（供 emit 链）；
+   * updateProps 回写数据池时须跳过，避免写到插槽宿主组件。
+   */
+  slotHost?: boolean
   /** 外层 Component（GoodsCard → Pager → GoodsList） */
   outer?: ComponentEmitContext
 }
@@ -88,11 +95,13 @@ export interface RunEventBindingsContext {
   /**
    * 执行组件暴露方法（父页/组件引用 xxx.open()）。
    * 应在目标组件自身数据池与方法作用域内运行。
+   * hostAttrs：页面上该 Component 实例属性（fetchApi / data 绑定等）。
    */
   runComponentMethod?: (
     componentId: string,
     methodName: string,
     args: unknown[],
+    options?: { hostAttrs?: Record<string, string>; hostNodePath?: string },
   ) => void
   /** 查找页面/组件自定义方法（按方法名） */
   resolveMethod?: (name: string) => PageMethod | undefined
@@ -119,6 +128,8 @@ export interface RunEventBindingsContext {
   showToast?: (message: string, duration: 'short' | 'long') => void
   /** 设备信息（状态栏高度 / UA / 小程序胶囊） */
   getDeviceInfo?: () => DeviceInfo
+  /** 画板颜色（$color.xxx） */
+  colorPalette?: ColorPalette | null
   /** 组件内向父级抛事件（自定义方法体里的 emit(...)） */
   emit?: (event: string, ...args: unknown[]) => void
   /**
@@ -127,8 +138,15 @@ export interface RunEventBindingsContext {
    * 值为原生类型（对象/数组不再被 stringify）。
    */
   emitWithArgs?: (event: string, args: Record<string, unknown>) => void
+  /**
+   * 运行日志用的位置/时机前缀，如「页面 · 事件 onClick」「组件 Pager · 暴露方法 refresh」
+   */
+  logLocation?: string
   /** 未实现的自定义方法回调（可选提示） */
-  onUnknownMethod?: (name: string) => void
+  onUnknownMethod?: (
+    message: string,
+    detail?: { location?: string },
+  ) => void
 }
 
 function looksLikeTemplate(value: string): boolean {
@@ -478,6 +496,7 @@ function buildCustomScope(ctx: RunEventBindingsContext): Record<string, unknown>
     },
     getDeviceInfo: (): DeviceInfo =>
       ctx.getDeviceInfo?.() ?? defaultGetDeviceInfo(),
+    $color: buildDollarColor(ctx.colorPalette),
   }
 
   if (ctx.emit) {
@@ -517,10 +536,39 @@ function buildCustomScope(ctx: RunEventBindingsContext): Record<string, unknown>
   return scope
 }
 
+function extractCustomBodyLine(err: unknown): string {
+  if (!(err instanceof Error) || !err.stack) return ''
+  // new Function('__env', `with (__env) {\n${body}\n}`) → 正文从第 2 行起
+  const m = err.stack.match(/<anonymous>:(\d+)(?::\d+)?/)
+  if (!m) return ''
+  const line = Number(m[1]) - 1
+  if (!Number.isFinite(line) || line < 1) return ''
+  return `第 ${line} 行`
+}
+
+function reportCustomBodyError(
+  err: unknown,
+  ctx: RunEventBindingsContext,
+  methodLabel?: string,
+): void {
+  const msg = err instanceof Error ? err.message : String(err)
+  const parts = [
+    ctx.logLocation?.trim() || '',
+    methodLabel?.trim()
+      ? `方法 ${methodLabel.trim()}`
+      : '内联自定义',
+    extractCustomBodyLine(err),
+  ].filter(Boolean)
+  ctx.onUnknownMethod?.(`自定义方法执行失败：${msg}`, {
+    location: parts.join(' · ') || undefined,
+  })
+}
+
 function runCustomBody(
   body: string,
   ctx: RunEventBindingsContext,
   extraScope?: Record<string, unknown>,
+  methodLabel?: string,
 ): void {
   const trimmed = body.trim()
   if (!trimmed) return
@@ -562,8 +610,7 @@ function runCustomBody(
     const fn = new Function('__env', `with (__env) {\n${trimmed}\n}`)
     fn(env)
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err)
-    ctx.onUnknownMethod?.(`自定义方法执行失败：${msg}`)
+    reportCustomBodyError(err, ctx, methodLabel)
   }
 }
 
@@ -578,7 +625,7 @@ function runPageMethod(
     if (!name || name.startsWith('...')) continue
     extra[name] = args[name] ?? ''
   }
-  runCustomBody(method.body ?? '', ctx, extra)
+  runCustomBody(method.body ?? '', ctx, extra, method.name)
 }
 
 /** 按顺序执行事件绑定：预置方法 + 页面方法 + 内联自定义方法体 */
@@ -589,7 +636,7 @@ export async function runEventBindings(
   const list = parseEventBindings(raw)
   for (const binding of list) {
     if (isCustomEventMethod(binding.method)) {
-      runCustomBody(binding.body ?? '', ctx)
+      runCustomBody(binding.body ?? '', ctx, undefined, '内联')
       continue
     }
     const args =
@@ -619,7 +666,9 @@ export async function runEventBindings(
       )
       continue
     }
-    ctx.onUnknownMethod?.(binding.method)
+    ctx.onUnknownMethod?.(binding.method, {
+      location: ctx.logLocation?.trim() || undefined,
+    })
   }
 }
 

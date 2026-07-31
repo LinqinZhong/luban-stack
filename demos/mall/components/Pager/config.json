@@ -7,7 +7,7 @@
     {
       "name": "bottomText",
       "type": "string",
-      "remark": "",
+      "remark": "全部加载完成底部文案",
       "defaultValue": "没有更多了~",
       "twoWay": false,
       "required": false
@@ -15,7 +15,7 @@
     {
       "name": "fetchApi",
       "type": "api",
-      "remark": "",
+      "remark": "获取数据的API",
       "defaultValue": "",
       "twoWay": false,
       "required": true,
@@ -31,6 +31,7 @@
             "itemTypeRef": "",
             "itemItemType": "",
             "itemItemTypeRef": "",
+            "keyType": "",
             "genericArgs": {}
           }
         }
@@ -42,10 +43,17 @@
         "itemTypeRef": "",
         "itemItemType": "",
         "itemItemTypeRef": "",
-        "genericArgs": {
-          "T": "type_mrnx6ke8_4d7vry"
-        }
+        "keyType": "",
+        "genericArgs": {}
       }
+    },
+    {
+      "name": "params",
+      "type": "json",
+      "remark": "额外请求参数（与 page 合并后传给 fetchApi）",
+      "defaultValue": {},
+      "twoWay": false,
+      "required": false
     },
     {
       "name": "data",
@@ -55,14 +63,23 @@
       "twoWay": true,
       "required": true,
       "itemType": "json"
+    },
+    {
+      "name": "loading",
+      "type": "boolean",
+      "remark": "加载中",
+      "defaultValue": false,
+      "twoWay": true,
+      "required": false
     }
   ],
   "events": [],
   "exposedMethods": [
-    "refresh"
+    "reset"
   ],
   "debugProps": {
     "fetchApi": "{\"serviceId\":\"svc_mrqdgnhb_3ktq2g\",\"controllerId\":\"cmrqed0jzshj7\",\"apiId\":\"api_mrqedc08_9iml1r\"}",
+    "params": {},
     "data": [
       {
         "name": "菠萝",

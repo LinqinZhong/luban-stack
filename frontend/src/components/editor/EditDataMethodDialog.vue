@@ -29,13 +29,17 @@ import {
   type TypeExpr,
 } from '../../types/data-types'
 import {
+  MAP_KEY_TYPE_OPTIONS,
   typeLabel,
+  arrayTypeLabel,
   type DataFieldType,
+  type MapKeyType,
 } from '../../types/page-data'
 import {
   findDataTypeDef,
   typeExprToDataFieldType,
 } from '../../utils/named-type-fields'
+import type { MysqlColumnDef, MysqlIndexDef } from '../../types/mysql'
 import {
   processorTypeExprToMethodParamType,
   processorTypeExprToTs,
@@ -51,6 +55,11 @@ import TypedBindingCascader from './method-flow/TypedBindingCascader.vue'
 import { DM } from './edit-data-method-copy'
 
 const PROCESSOR_EXCLUDE_TYPES: DataFieldType[] = ['color', 'ref', 'icon', 'resource']
+/** 映射值类型不可再嵌套映射 */
+const MAP_VALUE_EXCLUDE_TYPES: DataFieldType[] = [
+  ...PROCESSOR_EXCLUDE_TYPES,
+  'map',
+]
 
 export type OutputFieldOption = {
   name: string
@@ -72,6 +81,12 @@ const props = defineProps<{
   typeOptions: Array<{ id: string; label: string }>
   /** 绑定实体类型 id */
   entityRef?: string
+  /** 实体对应表列（查询字段 / 主键识别） */
+  entityColumns?: MysqlColumnDef[]
+  /** 实体对应表索引（单列索引视为唯一可查字段） */
+  entityIndexes?: MysqlIndexDef[]
+  /** 实体绑定的表名 */
+  entityTableName?: string
   /** 禁止使用的方法名（预置方法名等） */
   reservedNames?: string[]
 }>()
@@ -99,8 +114,11 @@ const visible = computed({
   set: (value: boolean) => emit('update:modelValue', value),
 })
 
+/** 映射键在 fieldMappings / 出参字段列表中的占位名 */
+const MAP_KEY_FIELD = 'key'
+
 function leafNamedRef(expr: ProcessorTypeExpr): string {
-  if (expr.type === 'array') {
+  if (expr.type === 'array' || expr.type === 'map') {
     if (expr.itemType === 'array') return expr.itemItemTypeRef || ''
     return expr.itemTypeRef || ''
   }
@@ -121,11 +139,58 @@ function fieldsOf(def: { fields: InterfaceField[] } | null | undefined): OutputF
     .filter((f) => f.name)
 }
 
-/** ????????????????????? QueryPageVo<T> ? T????????????? */
+/** 出参可绑定字段；映射类型须优先于值侧接口展开，否则会丢掉 key 行 */
 function resolveOutputFields(
   output: ProcessorTypeExpr,
   library: DataTypeLibrary | null,
 ): OutputFieldOption[] {
+  const t = (output.type || '').trim()
+
+  // 映射：key（唯一/索引）+ value（基本类型一列 / 接口展开）
+  if (t === 'map') {
+    const valueIsArray = output.itemType === 'array'
+    const leafType = (
+      valueIsArray ? output.itemItemType || 'string' : output.itemType || 'string'
+    ) as DataFieldType
+    const leafRef = (
+      valueIsArray ? output.itemItemTypeRef || '' : output.itemTypeRef || ''
+    ).trim()
+    const leafDef = findDataTypeDef(library, leafRef)
+    const keyRemark = valueIsArray ? DM.mapIndexField : DM.mapUniqueKey
+    const keyRow: OutputFieldOption = {
+      name: MAP_KEY_FIELD,
+      remark: keyRemark,
+      sourceLabel: keyRemark,
+    }
+
+    // 值元类型为接口 → 展开字段绑定
+    if (leafDef?.kind === 'interface') {
+      return [
+        keyRow,
+        ...fieldsOf(leafDef).map((f) => ({
+          ...f,
+          sourceLabel: leafDef.name,
+        })),
+      ]
+    }
+
+    // 基本数据类型（含 URI 等别名）→ 单列 value
+    let valueLabel =
+      leafDef?.name?.trim() ||
+      typeLabel(leafType) ||
+      leafType ||
+      'any'
+    if (valueIsArray) valueLabel = arrayTypeLabel(valueLabel)
+    return [
+      keyRow,
+      {
+        name: 'value',
+        remark: `${DM.mapValue} · ${valueLabel}`,
+        sourceLabel: valueLabel,
+      },
+    ]
+  }
+
   const named = leafNamedRef(output)
   const def = findDataTypeDef(library, named)
   if (def && def.kind === 'interface') {
@@ -154,8 +219,6 @@ function resolveOutputFields(
     }))
   }
 
-  // ?? / ??? / ?? / ??????????????
-  const t = (output.type || '').trim()
   if (!t) return []
 
   let label = ''
@@ -166,8 +229,8 @@ function resolveOutputFields(
     const item =
       typeLabel((output.itemType || 'string') as DataFieldType) ||
       output.itemType ||
-      '??'
-    label = `?? / ${item}`
+      'any'
+    label = arrayTypeLabel(item)
   } else {
     label = typeLabel(t as DataFieldType) || t
   }
@@ -195,13 +258,133 @@ const outputFieldNames = computed(() => outputFields.value.map((f) => f.name))
 
 const isQuery = computed(() => draft.operation === 'query')
 const isCustom = computed(() => draft.operation === 'custom')
+const isMapOutput = computed(() => draftOutput.value.type === 'map')
 const isInsert = computed(
   () => draft.operation === 'insert' || draft.operation === 'batchInsert',
 )
 const isBatchInsert = computed(() => draft.operation === 'batchInsert')
-/** ?????????? */
+/** 非插入 / 自定义时展示条件 */
 const showConditions = computed(() => !isInsert.value && !isCustom.value)
 const isMysql = computed(() => draft.source === 'mysql')
+
+/** 已勾选的查询字段（映射值从此选） */
+const selectedQueryFieldOptions = computed(() => {
+  const selected = new Set(draft.queryFields)
+  return tableFields.value.filter((f) => selected.has(f.name))
+})
+
+const mapKeyType = computed<MapKeyType>(() =>
+  draftOutput.value.keyType === 'number' ? 'number' : 'string',
+)
+
+const mapValueIsInterface = computed(() => {
+  const out = draftOutput.value
+  if (out.type !== 'map') return false
+  const ref = (
+    out.itemType === 'array' ? out.itemItemTypeRef : out.itemTypeRef
+  ).trim()
+  const def = findDataTypeDef(props.typeLibrary, ref)
+  return def?.kind === 'interface'
+})
+
+/** 主键 + 名为 id 的列 + 单列索引：表列名 */
+const uniqueOrPrimaryFieldNames = computed(() => {
+  const names = new Set<string>()
+  const cols = props.entityColumns ?? []
+  for (const c of cols) {
+    const col = c.name.trim()
+    if (!col) continue
+    // 主键，或惯用 id 列，均可作映射键
+    if (c.primaryKey || col.toLowerCase() === 'id') names.add(col)
+  }
+  for (const idx of props.entityIndexes ?? []) {
+    if (idx.columns.length !== 1) continue
+    const col = idx.columns[0]?.trim()
+    if (!col) continue
+    names.add(col)
+  }
+  return names
+})
+
+function tableColumnValueUi(columnName: string): ConditionValueUi {
+  const col = (props.entityColumns ?? []).find(
+    (c) => c.name.trim() === columnName,
+  )
+  if (col) {
+    const t = col.type.trim().toLowerCase()
+    if (
+      t.includes('date') ||
+      t.includes('time') ||
+      t === 'year' ||
+      t === 'timestamp'
+    ) {
+      return 'datetime'
+    }
+    if (
+      /^(tiny|small|medium|big)?int|decimal|numeric|float|double|real|bit/.test(
+        t,
+      )
+    ) {
+      return 'number'
+    }
+    if (t === 'bool' || t === 'boolean' || t.startsWith('tinyint(1)')) {
+      return 'boolean'
+    }
+    return 'string'
+  }
+  return (
+    conditionFieldOptions.value.find((o) => o.value === columnName)?.valueUi ??
+    'string'
+  )
+}
+
+/** 键字段候选项：主键/唯一/id 优先；否则已勾选查询字段；再否则全部表列 */
+const mapKeyFieldOptions = computed(() => {
+  const unique = uniqueOrPrimaryFieldNames.value
+  const preferred = tableFields.value.filter((f) => unique.has(f.name))
+  if (preferred.length) return preferred
+  const selected = new Set(draft.queryFields)
+  const fromQuery = tableFields.value.filter((f) => selected.has(f.name))
+  if (fromQuery.length) return fromQuery
+  return tableFields.value
+})
+
+const hasUniqueOrPrimaryKeys = computed(
+  () => uniqueOrPrimaryFieldNames.value.size > 0,
+)
+
+const mapKeyColumn = computed(
+  () =>
+    draft.fieldMappings.find((m) => m.field === MAP_KEY_FIELD)?.column ?? '',
+)
+
+const mapValueMappingRows = computed(() =>
+  mappingRows.value.filter((r) => r.field !== MAP_KEY_FIELD),
+)
+
+/** 值类型选择器：把 map 的 value 侧当作顶层类型展示 */
+const mapValueSelectType = computed((): DataFieldType => {
+  const out = draftOutput.value
+  if (out.itemType === 'array') return 'array'
+  return ((out.itemType || 'string') as DataFieldType) || 'string'
+})
+const mapValueSelectTypeRef = computed(() =>
+  draftOutput.value.itemType === 'array'
+    ? ''
+    : draftOutput.value.itemTypeRef || '',
+)
+const mapValueSelectItemType = computed(
+  (): DataFieldType | undefined => {
+    const out = draftOutput.value
+    if (out.itemType !== 'array') return undefined
+    return (out.itemItemType || 'string') as DataFieldType
+  },
+)
+const mapValueSelectItemTypeRef = computed(() =>
+  draftOutput.value.itemType === 'array'
+    ? draftOutput.value.itemItemTypeRef || ''
+    : '',
+)
 
 type ConditionValueUi = 'string' | 'number' | 'boolean' | 'datetime'
 
@@ -284,9 +467,20 @@ const conditionAmbientVars = computed((): MethodParam[] =>
 
 function conditionTargetType(cond: DataMethodCondition): ProcessorTypeExpr {
   const ui = conditionValueUi(cond)
-  if (ui === 'number') return createEmptyProcessorTypeExpr('number')
-  if (ui === 'boolean') return createEmptyProcessorTypeExpr('boolean')
-  return createEmptyProcessorTypeExpr('string')
+  const leaf =
+    ui === 'number'
+      ? createEmptyProcessorTypeExpr('number')
+      : ui === 'boolean'
+        ? createEmptyProcessorTypeExpr('boolean')
+        : createEmptyProcessorTypeExpr('string')
+  // 「属于 / 不属于」→ IN / NOT IN，需要数组入参（如 number[]），不能只匹配元素
+  if (cond.op === 'in' || cond.op === 'notIn') {
+    return {
+      ...createEmptyProcessorTypeExpr('array'),
+      itemType: leaf.type || 'string',
+    }
+  }
+  return leaf
 }
 
 function conditionOpMeta(op: DataMethodConditionOp) {
@@ -318,6 +512,38 @@ const entityFields = computed(() => {
     ...f,
     sourceLabel: def.name,
   }))
+})
+
+/** 查询字段候选：当前实体绑定表的列名 */
+const tableFields = computed((): OutputFieldOption[] => {
+  const cols = props.entityColumns ?? []
+  const table = props.entityTableName?.trim() || ''
+  const list: OutputFieldOption[] = []
+  const seen = new Set<string>()
+  for (const c of cols) {
+    const col = c.name.trim()
+    if (!col || seen.has(col)) continue
+    seen.add(col)
+    list.push({
+      name: col,
+      remark: c.comment?.trim() || '',
+      sourceLabel: table || col,
+    })
+  }
+  return list
+})
+
+const tableFieldNames = computed(
+  () => new Set(tableFields.value.map((f) => f.name)),
+)
+
+/** 查询字段勾选池：表列 */
+const queryFieldPool = computed(() => tableFields.value)
+
+const queryFieldsSourceHint = computed(() => {
+  const table = props.entityTableName?.trim()
+  if (table) return `${DM.target}${DM.mid}${table}`
+  return DM.queryFields
 })
 
 /** ????????????? */
@@ -428,11 +654,12 @@ const insertMappingRows = computed(() => {
 })
 
 const selectedCount = computed(() => draft.queryFields.length)
-const allSelected = computed(
-  () =>
-    outputFieldNames.value.length > 0 &&
-    outputFieldNames.value.every((n) => draft.queryFields.includes(n)),
-)
+const allSelected = computed(() => {
+  const pool = queryFieldPool.value
+  return (
+    pool.length > 0 && pool.every((f) => draft.queryFields.includes(f.name))
+  )
+})
 
 const mappingRows = computed(() => {
   const map = new Map(
@@ -492,11 +719,23 @@ function formatTypeExpr(expr: ProcessorTypeExpr): string {
       const leaf =
         namedLabel ||
         typeLabel((expr.itemItemType || 'string') as DataFieldType)
-      return `${DM.array} / ${DM.array} / ${leaf}`
+      return arrayTypeLabel(leaf, 2)
     }
     const leaf =
       namedLabel || typeLabel((expr.itemType || 'string') as DataFieldType)
-    return `${DM.array} / ${leaf}`
+    return arrayTypeLabel(leaf)
+  }
+  if (expr.type === 'map') {
+    const keyLabel = expr.keyType === 'number' ? 'number' : 'string'
+    if (expr.itemType === 'array') {
+      const leaf =
+        namedLabel ||
+        typeLabel((expr.itemItemType || 'string') as DataFieldType)
+      return `${typeLabel('map')} / ${keyLabel} / ${arrayTypeLabel(leaf)}`
+    }
+    const leaf =
+      namedLabel || typeLabel((expr.itemType || 'string') as DataFieldType)
+    return `${typeLabel('map')} / ${keyLabel} / ${leaf}`
   }
   if (named) return namedLabel
   return typeLabel((expr.type || 'string') as DataFieldType)
@@ -530,6 +769,12 @@ function payloadToTypeExpr(
         ? 'any'
         : (payload.itemItemType ?? ''),
     itemItemTypeRef: payload.itemItemTypeRef ?? '',
+    keyType:
+      fieldType === 'map'
+        ? payload.keyType === 'number'
+          ? 'number'
+          : 'string'
+        : '',
     genericArgs: {},
   }
   const named = leafNamedOf(next)
@@ -548,8 +793,32 @@ function syncQueryFieldsForOutput() {
     props.typeLibrary,
   ).map((f) => f.name)
   if (draft.operation === 'query') {
-    const kept = draft.queryFields.filter((n) => names.includes(n))
-    draft.queryFields = kept.length ? kept : [...names]
+    const tableNames = tableFieldNames.value
+    if (draftOutput.value.type === 'map') {
+      const map = new Map(
+        draft.fieldMappings.map((m) => [m.field, m.column] as const),
+      )
+      draft.fieldMappings = names.map((name) => ({
+        field: name,
+        column: map.get(name) ?? '',
+      }))
+      let next = draft.queryFields.filter((n) => tableNames.has(n))
+      if (!next.length) {
+        next = [
+          ...new Set(
+            draft.fieldMappings
+              .map((m) => m.column.trim())
+              .filter((c) => tableNames.has(c)),
+          ),
+        ]
+      }
+      draft.queryFields = next
+      return
+    }
+    const kept = draft.queryFields.filter((n) => tableNames.has(n))
+    draft.queryFields = kept.length
+      ? kept
+      : tableFields.value.map((f) => f.name)
   }
   if (draft.operation === 'custom' && names.length) {
     const map = new Map(
@@ -594,6 +863,19 @@ watch(
     }
     Object.assign(draft, next)
     syncQueryFieldsForOutput()
+    if (
+      draft.operation === 'query' &&
+      draftOutput.value.type === 'map'
+    ) {
+      const allowed = new Set(mapKeyFieldOptions.value.map((f) => f.name))
+      const cur =
+        draft.fieldMappings.find((m) => m.field === MAP_KEY_FIELD)?.column ??
+        ''
+      if (cur && !allowed.has(cur)) {
+        updateMappingColumn(MAP_KEY_FIELD, '')
+      }
+      ensureMapKeyField()
+    }
     if (draft.operation === 'batchInsert') {
       const stillValid = arrayParamOptions.value.some(
         (o) => o.value === draft.batchSourceParam,
@@ -640,7 +922,16 @@ watch(
     ) {
       ensureInsertMappings({ preferEnabled: null })
     }
+    if (op === 'query') ensureMapKeyField()
   },
+)
+
+watch(
+  mapKeyFieldOptions,
+  () => {
+    ensureMapKeyField()
+  },
+  { deep: true },
 )
 
 function ensureInsertMappings(options?: { preferEnabled: string[] | null }) {
@@ -787,6 +1078,88 @@ function handleOutputChange(payload: TypeSelectPayload) {
   if (genericNamesOf(named).length) openOutputGenerics()
 }
 
+function handleMapKeyTypeChange(
+  value: MapKeyType | string | number | boolean | undefined,
+) {
+  const keyType: MapKeyType = value === 'number' ? 'number' : 'string'
+  draftOutput.value = { ...draftOutput.value, type: 'map', keyType }
+}
+
+function onMapKeyFieldChange(
+  value: string | number | boolean | undefined,
+) {
+  const column = String(value ?? '')
+  updateMappingColumn(MAP_KEY_FIELD, column)
+  if (column && !draft.queryFields.includes(column)) {
+    draft.queryFields = [...draft.queryFields, column]
+  }
+  if (!column) return
+  const ui = tableColumnValueUi(column)
+  draftOutput.value = {
+    ...draftOutput.value,
+    type: 'map',
+    keyType: ui === 'number' ? 'number' : 'string',
+  }
+}
+
+/** 映射出参且尚未绑键时，自动选中首选键字段（如主键 id） */
+function ensureMapKeyField() {
+  if (draft.operation !== 'query' || draftOutput.value.type !== 'map') return
+  const cur =
+    draft.fieldMappings.find((m) => m.field === MAP_KEY_FIELD)?.column?.trim() ??
+    ''
+  if (cur) return
+  const first = mapKeyFieldOptions.value[0]
+  if (!first?.name) return
+  onMapKeyFieldChange(first.name)
+}
+
+function handleMapValueTypeChange(payload: TypeSelectPayload) {
+  const prev = draftOutput.value
+  const keyType: MapKeyType =
+    prev.keyType === 'number' ? 'number' : 'string'
+  if (payload.cleared) {
+    draftOutput.value = {
+      ...prev,
+      type: 'map',
+      keyType,
+      itemType: 'string',
+      itemTypeRef: '',
+      itemItemType: '',
+      itemItemTypeRef: '',
+      genericArgs: {},
+    }
+  } else if (payload.type === 'array') {
+    draftOutput.value = {
+      ...prev,
+      type: 'map',
+      keyType,
+      itemType: 'array',
+      itemTypeRef: '',
+      itemItemType:
+        payload.itemType === 'generic' ? 'any' : (payload.itemType ?? 'string'),
+      itemItemTypeRef: payload.itemTypeRef ?? '',
+      genericArgs: {},
+    }
+  } else {
+    const fieldType =
+      payload.type === 'generic' ? 'any' : (payload.type as DataFieldType)
+    draftOutput.value = {
+      ...prev,
+      type: 'map',
+      keyType,
+      itemType: fieldType,
+      itemTypeRef: payload.typeRef ?? '',
+      itemItemType: '',
+      itemItemTypeRef: '',
+      genericArgs: {},
+    }
+  }
+  syncQueryFieldsForOutput()
+  const named = leafNamedOf(draftOutput.value)
+  if (genericNamesOf(named).length) openOutputGenerics()
+}
+
 function openOutputGenerics() {
   const named = leafNamedOf(draftOutput.value)
   const names = genericNamesOf(named)
@@ -839,7 +1212,7 @@ function onOperationChange(
 }
 
 function selectAllFields() {
-  draft.queryFields = [...outputFieldNames.value]
+  draft.queryFields = queryFieldPool.value.map((f) => f.name)
 }
 
 function clearFields() {
@@ -851,6 +1224,16 @@ function toggleField(name: string) {
     draft.queryFields = draft.queryFields.filter((n) => n !== name)
   } else {
     draft.queryFields = [...draft.queryFields, name]
+  }
+  // 勾选主键/id 且尚未绑键时，自动用作映射键
+  if (
+    draft.operation === 'query' &&
+    draftOutput.value.type === 'map' &&
+    !mapKeyColumn.value &&
+    uniqueOrPrimaryFieldNames.value.has(name) &&
+    draft.queryFields.includes(name)
+  ) {
+    onMapKeyFieldChange(name)
   }
 }
 
@@ -888,36 +1271,70 @@ function handleSave() {
     return
   }
   const names = new Set(outputFieldNames.value)
+  const tableNames = tableFieldNames.value
   const entityNames = new Set(entityFields.value.map((f) => f.name))
+  const mapQuery = draft.operation === 'query' && draftOutput.value.type === 'map'
+  const mapMappings = mapQuery
+    ? draft.fieldMappings
+        .filter((m) => names.has(m.field) && m.column.trim())
+        .map((m) => ({
+          field: m.field,
+          column: m.column.trim(),
+        }))
+    : []
+  if (mapQuery) {
+    const keyBound = mapMappings.some((m) => m.field === MAP_KEY_FIELD)
+    if (!keyBound) {
+      ElMessage.warning(
+        draftOutput.value.itemType === 'array'
+          ? '请绑定映射键（索引字段）'
+          : '请绑定映射键（唯一字段）',
+      )
+      return
+    }
+    if (mapMappings.length < 2) {
+      ElMessage.warning('请绑定映射值字段')
+      return
+    }
+  }
   const config: DataMethodConfig = {
     source: draft.source,
     operation: draft.operation,
     queryFields:
       draft.operation === 'query'
-        ? draft.queryFields.filter((n) => names.has(n))
+        ? mapQuery
+          ? [
+              ...new Set([
+                ...draft.queryFields.filter((n) => tableNames.has(n)),
+                ...mapMappings.map((m) => m.column),
+              ]),
+            ]
+          : draft.queryFields.filter((n) => tableNames.has(n))
         : [],
     sql: draft.operation === 'custom' ? draft.sql : '',
     fieldMappings:
-      draft.operation === 'custom'
-        ? draft.fieldMappings
-            .filter((m) => names.has(m.field))
-            .map((m) => ({
-              field: m.field,
-              column: m.column.trim(),
-            }))
-        : draft.operation === 'insert' || draft.operation === 'batchInsert'
+      mapQuery
+        ? mapMappings
+        : draft.operation === 'custom'
           ? draft.fieldMappings
-              .filter(
-                (m) =>
-                  entityNames.has(m.field) &&
-                  m.column.trim() &&
-                  insertEnabled.value.includes(m.field),
-              )
+              .filter((m) => names.has(m.field))
               .map((m) => ({
                 field: m.field,
                 column: m.column.trim(),
               }))
-          : [],
+          : draft.operation === 'insert' || draft.operation === 'batchInsert'
+            ? draft.fieldMappings
+                .filter(
+                  (m) =>
+                    entityNames.has(m.field) &&
+                    m.column.trim() &&
+                    insertEnabled.value.includes(m.field),
+                )
+                .map((m) => ({
+                  field: m.field,
+                  column: m.column.trim(),
+                }))
+            : [],
     batchSourceParam:
       draft.operation === 'batchInsert' ? draft.batchSourceParam.trim() : '',
     pageParam: draft.operation === 'query' ? draft.pageParam.trim() : '',
@@ -969,12 +1386,16 @@ function handleSave() {
         </div>
       </section>
 
-      <section v-if="!isQuery && !isCustom" class="dlg-section">
+      <section class="dlg-section">
         <div class="section-label">{{ DM.output }}</div>
         <div class="section-control">
-          <div class="output-row">
+          <div
+            class="output-row"
+            :class="{ 'output-row--map': isMapOutput && isQuery }"
+          >
             <DataFieldTypeTreeSelect
               class="output-select"
+              :class="{ 'output-select--map': isMapOutput && isQuery }"
               :type="(draftOutput.type || 'string') as DataFieldType"
               :type-ref="draftOutput.typeRef"
               :item-type="
@@ -987,14 +1408,53 @@ function handleSave() {
                   | undefined
               "
               :item-item-type-ref="draftOutput.itemItemTypeRef"
+              :key-type="
+                draftOutput.keyType === 'number' ||
+                draftOutput.keyType === 'string'
+                  ? draftOutput.keyType
+                  : undefined
+              "
               :library="typeLibrary"
               :exclude-types="PROCESSOR_EXCLUDE_TYPES"
               :allow-ref="false"
+              map-leaf
               clearable
               size="small"
               :placeholder="DM.outputPh"
               @change="handleOutputChange"
             />
+            <template v-if="isMapOutput && isQuery">
+              <span class="map-inline-label">{{ DM.mapKeyShort }}</span>
+              <el-select
+                :model-value="mapKeyType"
+                size="small"
+                class="map-inline-select map-inline-select--type"
+                :placeholder="DM.mapKeyType"
+                @update:model-value="handleMapKeyTypeChange"
+              >
+                <el-option
+                  v-for="opt in MAP_KEY_TYPE_OPTIONS"
+                  :key="opt.value"
+                  :label="opt.label"
+                  :value="opt.value"
+                />
+              </el-select>
+              <span class="map-inline-label">{{ DM.mapValueShort }}</span>
+              <DataFieldTypeTreeSelect
+                class="map-inline-select"
+                :type="mapValueSelectType"
+                :type-ref="mapValueSelectTypeRef"
+                :item-type="mapValueSelectItemType"
+                :item-type-ref="mapValueSelectItemTypeRef"
+                :library="typeLibrary"
+                :exclude-types="MAP_VALUE_EXCLUDE_TYPES"
+                :allow-ref="false"
+                clearable
+                size="small"
+                :placeholder="DM.mapValueType"
+                @change="handleMapValueTypeChange"
+              />
+            </template>
             <el-button
               v-if="genericNamesOf(leafNamedOf(draftOutput)).length"
               type="primary"
@@ -1008,7 +1468,7 @@ function handleSave() {
         </div>
       </section>
 
-      <section class="dlg-section">
+<section class="dlg-section">
         <div class="section-label">{{ DM.source }}</div>
         <div class="section-control">
           <el-radio-group
@@ -1053,45 +1513,13 @@ function handleSave() {
         <div class="section-control">
           <div class="field-panel">
             <div class="field-panel-head">
-              <div class="field-panel-type">
-                <DataFieldTypeTreeSelect
-                  class="output-select-mini"
-                  :type="(draftOutput.type || 'string') as DataFieldType"
-                  :type-ref="draftOutput.typeRef"
-                  :item-type="
-                    (draftOutput.itemType || undefined) as
-                      | DataFieldType
-                      | undefined
-                  "
-                  :item-type-ref="draftOutput.itemTypeRef"
-                  :item-item-type="
-                    (draftOutput.itemItemType || undefined) as
-                      | DataFieldType
-                      | undefined
-                  "
-                  :item-item-type-ref="draftOutput.itemItemTypeRef"
-                  :library="typeLibrary"
-                  :exclude-types="PROCESSOR_EXCLUDE_TYPES"
-                  :allow-ref="false"
-                  clearable
-                  size="small"
-                  :placeholder="DM.outputPh"
-                  @change="handleOutputChange"
-                />
-                <el-button
-                  v-if="genericNamesOf(leafNamedOf(draftOutput)).length"
-                  type="primary"
-                  link
-                  size="small"
-                  @click="openOutputGenerics"
-                >
-                  {{ DM.generics }}
-                </el-button>
-                <span class="source-hint">{{ DM.outputFieldsHint }}</span>
-              </div>
-              <div v-if="outputFields.length" class="field-panel-actions">
+              <span class="source-hint">{{ queryFieldsSourceHint }}</span>
+              <div
+                v-if="queryFieldPool.length"
+                class="field-panel-actions"
+              >
                 <span class="count">
-                  {{ selectedCount }} / {{ outputFields.length }}
+                  {{ selectedCount }} / {{ queryFieldPool.length }}
                 </span>
                 <button
                   type="button"
@@ -1102,12 +1530,17 @@ function handleSave() {
                 </button>
               </div>
             </div>
-            <div v-if="!outputFields.length" class="empty-box empty-box--inset">
-              {{ DM.queryFieldsEmpty }}
+            <div
+              v-if="!queryFieldPool.length"
+              class="empty-box empty-box--inset"
+            >
+              {{
+                entityTableName?.trim() ? DM.mapNoTableColumns : DM.noEntity
+              }}
             </div>
             <ul v-else class="field-list">
               <li
-                v-for="f in outputFields"
+                v-for="f in queryFieldPool"
                 :key="f.name"
                 class="field-row"
                 :class="{ selected: isFieldSelected(f.name) }"
@@ -1129,6 +1562,108 @@ function handleSave() {
                 </div>
               </li>
             </ul>
+          </div>
+        </div>
+      </section>
+
+      <section
+        v-if="isQuery && isMapOutput"
+        class="dlg-section dlg-section--block"
+      >
+        <div class="section-label">{{ DM.fieldMapping }}</div>
+        <div class="section-control">
+          <p class="page-param-hint map-hint">{{ DM.mapMappingHint }}</p>
+
+          <div class="map-bind-row">
+            <span class="map-bind-label">{{ DM.mapKeyField }}</span>
+            <el-select
+              :model-value="mapKeyColumn"
+              clearable
+              filterable
+              size="small"
+              class="map-bind-select"
+              :placeholder="DM.mapKeyFieldPh"
+              :disabled="!mapKeyFieldOptions.length"
+              teleported
+              @update:model-value="onMapKeyFieldChange"
+            >
+              <el-option
+                v-for="ef in mapKeyFieldOptions"
+                :key="ef.name"
+                :label="
+                  ef.remark ? `${ef.name}${DM.mid}${ef.remark}` : ef.name
+                "
+                :value="ef.name"
+              />
+            </el-select>
+          </div>
+          <p
+            v-if="!hasUniqueOrPrimaryKeys"
+            class="page-param-hint map-hint"
+          >
+            {{ DM.mapNoUniqueKey }}
+          </p>
+
+          <div class="map-bind-block">
+            <span class="map-bind-label">{{ DM.mapValueMapping }}</span>
+            <div
+              v-if="!selectedQueryFieldOptions.length"
+              class="empty-box empty-box--inset"
+            >
+              {{ DM.mapNeedQueryFields }}
+            </div>
+            <div
+              v-else-if="!mapValueMappingRows.length"
+              class="empty-box empty-box--inset"
+            >
+              {{ DM.mapNeedQueryFields }}
+            </div>
+            <div v-else class="mapping-panel mapping-panel--inset">
+              <div
+                v-for="row in mapValueMappingRows"
+                :key="row.field"
+                class="mapping-row"
+              >
+                <div class="mapping-field">
+                  <code class="field-code">{{
+                    mapValueIsInterface ? row.field : DM.mapValue
+                  }}</code>
+                  <span
+                    v-if="
+                      mapValueIsInterface &&
+                      displayRemark(row.field, row.remark)
+                    "
+                    class="field-desc"
+                  >
+                    {{ displayRemark(row.field, row.remark) }}
+                  </span>
+                </div>
+                <span class="mapping-arrow">{{ DM.arrow }}</span>
+                <el-select
+                  :model-value="row.column"
+                  clearable
+                  filterable
+                  size="small"
+                  class="mapping-input"
+                  :placeholder="DM.mapValueFieldPh"
+                  teleported
+                  @update:model-value="
+                    updateMappingColumn(row.field, String($event ?? ''))
+                  "
+                >
+                  <el-option
+                    v-for="ef in selectedQueryFieldOptions"
+                    :key="ef.name"
+                    :label="
+                      ef.remark
+                        ? `${ef.name}${DM.mid}${ef.remark}`
+                        : ef.name
+                    "
+                    :value="ef.name"
+                  />
+                </el-select>
+              </div>
+            </div>
           </div>
         </div>
       </section>
@@ -1558,8 +2093,14 @@ function handleSave() {
                         | DataFieldType
                         | undefined
                     "
-                    :item-item-type-ref="draftOutput.itemItemTypeRef"
-                    :library="typeLibrary"
+                  :item-item-type-ref="draftOutput.itemItemTypeRef"
+                  :key-type="
+                    draftOutput.keyType === 'number' ||
+                    draftOutput.keyType === 'string'
+                      ? draftOutput.keyType
+                      : undefined
+                  "
+                  :library="typeLibrary"
                     :exclude-types="PROCESSOR_EXCLUDE_TYPES"
                     :allow-ref="false"
                     clearable
@@ -1984,6 +2525,15 @@ function handleSave() {
   color: #94a3b8;
 }
 
+.mapping-head--map {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 24px minmax(0, 1.2fr);
+  gap: 8px;
+  padding: 0 2px 6px;
+  font-size: 12px;
+  color: #94a3b8;
+}
+
 .params-trigger {
   display: flex;
   align-items: center;
@@ -2015,10 +2565,71 @@ function handleSave() {
   height: 32px;
 }
 
+.output-row--map {
+  height: auto;
+  min-height: 32px;
+  flex-wrap: wrap;
+}
+
 .output-select {
   flex: 1;
   min-width: 0;
   height: 32px;
+}
+
+.output-select--map {
+  flex: 0 1 140px;
+  max-width: 160px;
+}
+
+.map-inline-label {
+  flex: 0 0 auto;
+  font-size: 12px;
+  color: #606266;
+  line-height: 32px;
+  white-space: nowrap;
+}
+
+.map-inline-select {
+  flex: 1;
+  min-width: 100px;
+  max-width: 200px;
+}
+
+.map-inline-select--type {
+  flex: 0 0 100px;
+  max-width: 100px;
+}
+
+.map-hint {
+  margin: 0;
+}
+
+.map-bind-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 32px;
+}
+
+.map-bind-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+}
+
+.map-bind-label {
+  flex: 0 0 64px;
+  font-size: 12px;
+  color: #606266;
+  line-height: 32px;
+}
+
+.map-bind-select {
+  flex: 1;
+  min-width: 0;
 }
 
 .cond-toolbar {

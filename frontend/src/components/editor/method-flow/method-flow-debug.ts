@@ -1,4 +1,7 @@
-import { debugDataLayerMethod } from '../../../api/projects'
+import {
+  debugDataLayerMethod,
+  getServiceProcessors,
+} from '../../../api/projects'
 import type {
   FlowEdge,
   FlowNode,
@@ -15,11 +18,16 @@ import {
 } from '../../../types/page-method'
 import type { MethodParam, MethodParamType, MethodReturnType } from '../../../types/page-method'
 import { defaultEmptyReturnValue } from '../../../utils/empty-return-value'
+import { coerceMapTypedOutput } from '../../../utils/runtime-map'
 import { flowDraftToTypeExpr } from '../../../utils/flow-type-select'
 import {
   applyPageMap,
   readPageMapApplyConfig,
 } from '../../../utils/page-map-flow'
+import {
+  applyObjectMap,
+  readObjectMapApplyConfig,
+} from '../../../utils/object-map-flow'
 
 export type FlowDebugSnapshot = {
   cursorNodeId: string
@@ -132,6 +140,21 @@ function varFromNode(
     if (dataSource === 'request_header') {
       return { name: varName, type: 'string', tsType: 'string' }
     }
+    const savedOutput = data.outputTypeExpr
+    if (
+      savedOutput &&
+      typeof savedOutput === 'object' &&
+      !Array.isArray(savedOutput) &&
+      typeof (savedOutput as { type?: unknown }).type === 'string'
+    ) {
+      const typeExpr = savedOutput as ProcessorTypeExpr
+      return {
+        name: varName,
+        type: processorTypeExprToMethodParamType(typeExpr),
+        tsType: processorTypeExprToTs(typeExpr, library),
+        typeExpr,
+      }
+    }
     const method =
       findProcessorMethod(
         dataProcessors,
@@ -228,6 +251,29 @@ function varFromNode(
     return { name: varName, type: 'any' }
   }
   if (node.kind === 'pageMap') {
+    const varName =
+      str(data, 'targetVarName') || str(data, 'targetPath')
+    if (!varName) return null
+    const typeRef = str(data, 'targetTypeRef')
+    const genericArgsRaw = asRecord(data.targetGenericArgs)
+    const genericArgs: Record<string, string> = {}
+    for (const [k, v] of Object.entries(genericArgsRaw)) {
+      if (typeof v === 'string') genericArgs[k] = v
+    }
+    const typeExpr = flowDraftToTypeExpr({
+      type: 'object',
+      typeRef,
+      genericArgs,
+    })
+    const tsType = processorTypeExprToTs(typeExpr, library)
+    return {
+      name: varName,
+      type: 'object',
+      typeExpr,
+      ...(tsType ? { tsType } : {}),
+    }
+  }
+  if (node.kind === 'objectMap') {
     const varName =
       str(data, 'targetVarName') || str(data, 'targetPath')
     if (!varName) return null
@@ -500,12 +546,60 @@ export function extractFlowReturnValue(
   }
 }
 
+/** 归一输入节点层（兼容旧 current_/other_ 枚举） */
+function normalizeInputLayer(
+  raw: string,
+): 'business' | 'data' | 'request_header' {
+  if (raw === 'request_header') return 'request_header'
+  if (
+    raw === 'business' ||
+    raw === 'current_business' ||
+    raw === 'other_business'
+  ) {
+    return 'business'
+  }
+  return 'data'
+}
+
+/** 解析目标模块的处理器列表（跨模块时拉取） */
+async function resolveServiceDebugSlice(
+  ctx: FlowStepContext,
+  targetServiceId: string,
+): Promise<{
+  serviceId: string
+  businessProcessors: ServiceProcessor[]
+  dataProcessors: ServiceProcessor[]
+}> {
+  const sid = targetServiceId.trim() || ctx.serviceId
+  if (sid === ctx.serviceId) {
+    return {
+      serviceId: ctx.serviceId,
+      businessProcessors: ctx.businessProcessors ?? [],
+      dataProcessors: ctx.dataProcessors,
+    }
+  }
+  const [biz, data] = await Promise.all([
+    getServiceProcessors(ctx.projectPath, sid, 'business'),
+    getServiceProcessors(ctx.projectPath, sid, 'data'),
+  ])
+  return {
+    serviceId: sid,
+    businessProcessors: biz.processors ?? [],
+    dataProcessors: data.processors ?? [],
+  }
+}
+
 /** 调试执行业务方法工作流，返回终止节点配置的返回值 */
 async function debugRunBusinessMethod(
   ctx: FlowStepContext,
   processorId: string,
   methodId: string,
   params: Record<string, unknown>,
+  serviceSlice?: {
+    serviceId: string
+    businessProcessors: ServiceProcessor[]
+    dataProcessors: ServiceProcessor[]
+  },
 ): Promise<unknown> {
   const stackKey = `${processorId}::${methodId}`
   const stack = ctx.businessCallStack ?? []
@@ -515,8 +609,10 @@ async function debugRunBusinessMethod(
   if (stack.length >= 16) {
     throw new Error('业务方法调用嵌套过深')
   }
+  const businessProcessors =
+    serviceSlice?.businessProcessors ?? ctx.businessProcessors ?? []
   const method = findProcessorMethod(
-    ctx.businessProcessors ?? [],
+    businessProcessors,
     processorId,
     methodId,
   )
@@ -532,6 +628,9 @@ async function debugRunBusinessMethod(
   const snap = await runFlowToEnd(
     {
       ...ctx,
+      serviceId: serviceSlice?.serviceId ?? ctx.serviceId,
+      businessProcessors,
+      dataProcessors: serviceSlice?.dataProcessors ?? ctx.dataProcessors,
       flow,
       businessCallStack: [...stack, stackKey],
     },
@@ -654,7 +753,7 @@ export async function executeFlowNode(
     result = { scope, nextNodeId: next.nextId, log: next.log }
   } else if (node.kind === 'input') {
     const varName = str(data, 'varName')
-    const dataSource = str(data, 'dataSource') || 'other_data'
+    const dataSource = normalizeInputLayer(str(data, 'dataSource') || 'data')
     if (!varName) throw new Error('输入节点未配置变量名')
 
     if (dataSource === 'request_header') {
@@ -667,10 +766,7 @@ export async function executeFlowNode(
       scope[varName] = headerVal != null ? headerVal : ''
       const next = pickNext(ctx.flow, node, scope)
       result = { scope, nextNodeId: next.nextId, log: next.log }
-    } else if (
-      dataSource === 'current_business' ||
-      dataSource === 'other_business'
-    ) {
+    } else if (dataSource === 'business') {
       const processorId = str(data, 'dataProcessorId')
       const methodId = str(data, 'dataMethodId')
       if (!processorId || !methodId) {
@@ -682,11 +778,14 @@ export async function executeFlowNode(
         if (typeof v === 'string') bindings[k] = v
       }
       const params = resolveParamBindings(bindings, scope)
+      const targetServiceId = str(data, 'serviceId') || ctx.serviceId
+      const serviceSlice = await resolveServiceDebugSlice(ctx, targetServiceId)
       scope[varName] = await debugRunBusinessMethod(
         ctx,
         processorId,
         methodId,
         params,
+        serviceSlice,
       )
       const next = pickNext(ctx.flow, node, scope)
       result = { scope, nextNodeId: next.nextId, log: next.log }
@@ -701,15 +800,34 @@ export async function executeFlowNode(
         if (typeof v === 'string') bindings[k] = v
       }
       const params = resolveParamBindings(bindings, scope)
+      const targetServiceId = str(data, 'serviceId') || ctx.serviceId
+      const serviceSlice = await resolveServiceDebugSlice(ctx, targetServiceId)
+      const method = findProcessorMethod(
+        serviceSlice.dataProcessors,
+        processorId,
+        methodId,
+      )
+      const savedOutput = data.outputTypeExpr
+      const outputExpr =
+        method?.output ??
+        (savedOutput &&
+        typeof savedOutput === 'object' &&
+        !Array.isArray(savedOutput)
+          ? (savedOutput as ProcessorTypeExpr)
+          : null)
       const apiResult = await debugDataLayerMethod({
         projectPath: ctx.projectPath,
-        serviceId: ctx.serviceId,
+        serviceId: targetServiceId,
         processorId,
         methodId,
         params,
         dryRun: ctx.dryRun,
       })
-      scope[varName] = apiResult.output
+      scope[varName] = coerceMapTypedOutput(
+        apiResult.output,
+        outputExpr?.type,
+        outputExpr?.keyType,
+      )
       const next = pickNext(ctx.flow, node, scope)
       result = { scope, nextNodeId: next.nextId, log: next.log }
     }
@@ -749,7 +867,18 @@ export async function executeFlowNode(
       dryRun: ctx.dryRun,
     })
     const resultVar = str(data, 'resultVarName')
-    if (resultVar) scope[resultVar] = apiResult.output
+    if (resultVar) {
+      const method = findProcessorMethod(
+        ctx.dataProcessors,
+        processorId,
+        methodId,
+      )
+      scope[resultVar] = coerceMapTypedOutput(
+        apiResult.output,
+        method?.output?.type,
+        method?.output?.keyType,
+      )
+    }
     const next = pickNext(ctx.flow, node, scope)
     result = { scope, nextNodeId: next.nextId, log: next.log }
   } else if (node.kind === 'pageMap') {
@@ -758,6 +887,14 @@ export async function executeFlowNode(
       throw new Error('分页映射节点未配置数据源或目标变量名')
     }
     applyPageMap(scope, config)
+    const next = pickNext(ctx.flow, node, scope)
+    result = { scope, nextNodeId: next.nextId, log: next.log }
+  } else if (node.kind === 'objectMap') {
+    const config = readObjectMapApplyConfig(data)
+    if (!config) {
+      throw new Error('对象映射节点未配置数据源或目标变量名')
+    }
+    applyObjectMap(scope, config)
     const next = pickNext(ctx.flow, node, scope)
     result = { scope, nextNodeId: next.nextId, log: next.log }
   } else if (node.kind === 'end') {
@@ -991,6 +1128,9 @@ export function ambientTypeLabel(v: FlowAmbientVar): string {
 export function formatAmbientValue(value: unknown): string {
   if (value === undefined) return '—'
   try {
+    if (value instanceof Map) {
+      return JSON.stringify(Object.fromEntries(value.entries()), null, 2)
+    }
     return JSON.stringify(value, null, 2)
   } catch {
     return String(value)

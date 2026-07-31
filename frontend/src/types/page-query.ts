@@ -100,3 +100,33 @@ export function buildQueryObject(
   }
   return out
 }
+
+/** Monaco ambient：页面计算字段可用的 $query / $route */
+export function buildDollarQueryAmbientDeclaration(
+  defs: PageQueryParamDef[] | null | undefined,
+): string {
+  const fields = (defs ?? [])
+    .map((d) => {
+      const name = d.name.trim()
+      if (!name || !/^[A-Za-z_][\w]*$/.test(name)) return null
+      const ts =
+        d.type === 'number' ? 'number' : d.type === 'boolean' ? 'boolean' : 'string'
+      const remark = d.remark?.trim()
+      const doc = remark ? `  /** ${remark.replace(/\*\//g, '* /')} */\n` : ''
+      return `${doc}  ${name}: ${ts};`
+    })
+    .filter(Boolean)
+  if (!fields.length) {
+    return [
+      'declare const $query: Record<string, string | number | boolean>;',
+      'declare const $route: typeof $query;',
+    ].join('\n')
+  }
+  return [
+    'interface VoiderPageQuery {',
+    ...fields,
+    '}',
+    'declare const $query: VoiderPageQuery;',
+    'declare const $route: VoiderPageQuery;',
+  ].join('\n')
+}

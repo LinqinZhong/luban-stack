@@ -2,8 +2,7 @@
 
 export function generateApiJs(): string {
   return `/**
- * runtime: wx.request API + getDeviceInfo
- * binding: { serviceId, serviceName?, controllerId, apiId, method, path }
+ * 网络请求：wx.request 封装
  * base: getApp().globalData.apiBaseUrls[serviceName|default]
  */
 
@@ -35,11 +34,11 @@ function serializeQuery(data) {
   return out
 }
 
-function resolveApiBase(serviceId, serviceName) {
+function resolveApiBase(serviceName) {
   var app = typeof getApp === 'function' ? getApp() : null
   var g = (app && app.globalData) || {}
   var map = g.apiBaseUrls && typeof g.apiBaseUrls === 'object' ? g.apiBaseUrls : {}
-  var keys = [serviceName, serviceId, 'default', 'oss']
+  var keys = [serviceName, 'default', 'oss']
   for (var i = 0; i < keys.length; i++) {
     var k = keys[i]
     if (!k || typeof k !== 'string') continue
@@ -58,53 +57,39 @@ function resolveApiBase(serviceId, serviceName) {
 }
 
 /**
- * @param {object|null|undefined} binding
- * @param {object} [args]
- * @returns {Promise<any>}
+ * @param {string} method GET|POST|...
+ * @param {string} path 如 /goodsRemark/page
+ * @param {object} [args] 请求参数
+ * @param {string} [serviceName] 对应 apiBaseUrls 的 key，默认 default
  */
-function invoke(binding, args) {
-  if (!binding || typeof binding !== 'object') {
-    return Promise.reject(new Error('API binding missing'))
+function request(method, path, args, serviceName) {
+  var p = typeof path === 'string' ? path.trim() : ''
+  if (!p) {
+    return Promise.reject(new Error('API path missing'))
   }
-  var path = typeof binding.path === 'string' ? binding.path.trim() : ''
-  if (!path) {
+  var base = resolveApiBase(serviceName)
+  if (!base && p.indexOf('http://') !== 0 && p.indexOf('https://') !== 0) {
     return Promise.reject(
       new Error(
-        'API missing path (serviceId=' +
-          (binding.serviceId || '') +
-          ', apiId=' +
-          (binding.apiId || '') +
-          ')',
-      ),
-    )
-  }
-
-  var base = resolveApiBase(binding.serviceId, binding.serviceName)
-  if (!base) {
-    return Promise.reject(
-      new Error(
-        'API baseUrl missing for serviceId=' +
-          (binding.serviceId || '') +
+        'API baseUrl missing' +
+          (serviceName ? ' for ' + serviceName : '') +
           '（请在 app.js globalData.apiBaseUrls 配置）',
       ),
     )
   }
-  var url = path.indexOf('http://') === 0 || path.indexOf('https://') === 0
-    ? path
-    : base + (path.charAt(0) === '/' ? path : '/' + path)
+  var url =
+    p.indexOf('http://') === 0 || p.indexOf('https://') === 0
+      ? p
+      : base + (p.charAt(0) === '/' ? p : '/' + p)
 
-  var method = String(binding.method || 'GET').toUpperCase()
+  var m = String(method || 'GET').toUpperCase()
   var payload = args && typeof args === 'object' ? args : {}
-
-  var header = {
-    'content-type': 'application/json',
-  }
 
   return new Promise(function (resolve, reject) {
     var opts = {
-      url,
-      method,
-      header,
+      url: url,
+      method: m,
+      header: { 'content-type': 'application/json' },
       success: function (res) {
         if (res.statusCode >= 200 && res.statusCode < 300) {
           resolve(unwrapResult(res.data))
@@ -119,7 +104,7 @@ function invoke(binding, args) {
         reject(err || new Error('network error'))
       },
     }
-    if (method === 'GET' || method === 'DELETE') {
+    if (m === 'GET' || m === 'DELETE') {
       opts.data = serializeQuery(payload)
     } else {
       opts.data = payload
@@ -128,12 +113,38 @@ function invoke(binding, args) {
   })
 }
 
+/** 组件 api prop：传入注册表 key（如 shop/goods.page）时走 apis/index */
+function invoke(keyOrFn, args) {
+  if (typeof keyOrFn === 'function') {
+    return keyOrFn(args)
+  }
+  if (typeof keyOrFn === 'string') {
+    var key = keyOrFn.trim()
+    if (!key) {
+      return Promise.reject(new Error('API key missing'))
+    }
+    var registry
+    try {
+      registry = require('../apis/index.js')
+    } catch (e) {
+      return Promise.reject(new Error('apis/index.js missing'))
+    }
+    var fn = registry && registry[key]
+    if (typeof fn !== 'function') {
+      return Promise.reject(new Error('API not found: ' + key))
+    }
+    return fn(args)
+  }
+  return Promise.reject(new Error('API invoke target invalid'))
+}
+
 ${getDeviceInfoFnSource()}
 
 module.exports = {
-  invoke,
-  resolveApiBase,
-  getDeviceInfo,
+  request: request,
+  invoke: invoke,
+  resolveApiBase: resolveApiBase,
+  getDeviceInfo: getDeviceInfo,
 }
 `
 }
@@ -208,14 +219,249 @@ module.exports = {
 `
 }
 
+/** 页面/组件事件与自定义方法共用的预置能力 */
+export function generateRuntimeJs(): string {
+  return `/**
+ * 设计器预置方法（navigateTo / showToast 等）
+ * 页面与组件通过 require('../../utils/runtime.js') 引用，勿在各 handler 内复制。
+ */
+
+function showToast(message, duration) {
+  wx.showToast({
+    title: String(message == null ? '' : message),
+    icon: 'none',
+    duration: duration === 'long' ? 3000 : 1500,
+  })
+}
+
+function navigateTo(to, params) {
+  var url =
+    '/pages/' + String(to == null ? '' : to).replace(/^\\/+/, '') + '/index'
+  if (params && typeof params === 'object') {
+    var qs = []
+    for (var k in params) {
+      if (!Object.prototype.hasOwnProperty.call(params, k)) continue
+      var v = params[k]
+      if (v == null || v === '') continue
+      qs.push(encodeURIComponent(k) + '=' + encodeURIComponent(String(v)))
+    }
+    if (qs.length) url += '?' + qs.join('&')
+  }
+  wx.navigateTo({ url: url })
+}
+
+function navigateBack() {
+  wx.navigateBack()
+}
+
+/** 绑定页面/组件实例的 setData(prop, value)；写入后按 prop 选择性重算 */
+function createSetData(that, opts) {
+  return function setData(prop, value) {
+    if (that.data[prop] === value) return
+    var patch = {}
+    patch[prop] = value
+    // this.data 同步更新；先重算依赖字段（如 pagerParams），再交给视图层
+    that.setData(patch)
+    if (typeof that.__recomputeComputed === 'function') {
+      that.__recomputeComputed([prop])
+    }
+  }
+}
+
+module.exports = {
+  showToast: showToast,
+  navigateTo: navigateTo,
+  navigateBack: navigateBack,
+  createSetData: createSetData,
+}
+`
+}
+
 export type MpApiBinding = {
   serviceId: string
   /** 服务名，便于 apiBaseUrls 用可读 key */
   serviceName?: string
   controllerId: string
+  /** 控制器名，用于 apis/{service}/{controller}.js */
+  controllerName?: string
   apiId: string
+  /** API 方法名，导出为同名函数 */
+  apiName?: string
+  /** 接口说明（导出为注释） */
+  remark?: string
+  /** 入参说明：varName → remark */
+  inputRemarks?: Array<{ name: string; remark: string }>
   method: string
   path: string
+}
+
+/** shop / goods-remark */
+export function slugifyApiSegment(name: string, fallback: string): string {
+  const raw = String(name || '').trim()
+  if (!raw) return fallback
+  const kebab = raw
+    .replace(/([a-z0-9])([A-Z])/g, '$1-$2')
+    .replace(/[^a-zA-Z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .toLowerCase()
+  return kebab || fallback
+}
+
+/** 合法 JS 导出名 */
+export function apiMethodExportName(binding: MpApiBinding): string {
+  const raw = String(binding.apiName || '').trim()
+  if (/^[A-Za-z_$][\w$]*$/.test(raw)) return raw
+  const fromId = String(binding.apiId || '')
+    .replace(/^api[_-]?/i, '')
+    .replace(/[^A-Za-z0-9_$]+/g, '_')
+  if (/^[A-Za-z_$][\w$]*$/.test(fromId)) return fromId
+  return 'request'
+}
+
+export function apiServiceSlug(binding: MpApiBinding): string {
+  return slugifyApiSegment(
+    binding.serviceName || binding.serviceId,
+    'service',
+  )
+}
+
+export function apiControllerSlug(binding: MpApiBinding): string {
+  return slugifyApiSegment(
+    binding.controllerName || binding.controllerId,
+    'resource',
+  )
+}
+
+/** apis/shop/goods.js */
+export function apiModuleRelPath(binding: MpApiBinding): string {
+  return `apis/${apiServiceSlug(binding)}/${apiControllerSlug(binding)}.js`
+}
+
+/** shop/goods.one — 组件 api prop / invoke 注册表 key */
+export function apiRefKey(binding: MpApiBinding): string {
+  return `${apiServiceSlug(binding)}/${apiControllerSlug(binding)}.${apiMethodExportName(binding)}`
+}
+
+/** 转义注释内容，避免提前结束块注释 */
+function escapeJsComment(text: string): string {
+  return String(text || '')
+    .replace(/\*\//g, '*\\/')
+    .replace(/\r\n/g, '\n')
+    .trim()
+}
+
+function buildApiMethodJsDoc(binding: MpApiBinding): string[] {
+  const method = String(binding.method || 'GET').toUpperCase()
+  const path = binding.path || ''
+  const remark = escapeJsComment(binding.remark || '')
+  const lines: string[] = ['/**']
+  if (remark) {
+    for (const line of remark.split('\n')) {
+      lines.push(` * ${line}`)
+    }
+  }
+  lines.push(` * ${method} ${path}`)
+  const inputs = binding.inputRemarks ?? []
+  if (inputs.length) {
+    lines.push(` *`)
+    lines.push(` * @param {object} [args]`)
+    for (const inp of inputs) {
+      const r = escapeJsComment(inp.remark)
+      lines.push(` * @param {*} [args.${inp.name}] ${r}`)
+    }
+  }
+  lines.push(` */`)
+  return lines
+}
+
+/**
+ * 生成 apis/{service}/{controller}.js 与 apis/index.js
+ */
+export function generateApisFiles(
+  bindings: MpApiBinding[],
+): Record<string, string> {
+  const byModule = new Map<string, Map<string, MpApiBinding>>()
+  const registry: Array<{ key: string; moduleRel: string; exportName: string }> =
+    []
+
+  for (const b of bindings) {
+    if (!b?.path?.trim()) continue
+    const moduleRel = apiModuleRelPath(b)
+    const exportName = apiMethodExportName(b)
+    const key = apiRefKey(b)
+    if (!byModule.has(moduleRel)) byModule.set(moduleRel, new Map())
+    const methods = byModule.get(moduleRel)!
+    // 同名方法保留首次（同一 apiId 通常一致）
+    if (!methods.has(exportName)) methods.set(exportName, b)
+    if (!registry.some((r) => r.key === key)) {
+      registry.push({ key, moduleRel, exportName })
+    }
+  }
+
+  const files: Record<string, string> = {}
+  for (const [moduleRel, methods] of byModule) {
+    const lines: string[] = [
+      `/** ${moduleRel} — 由设计器导出 */`,
+      `var api = require('../../utils/api.js')`,
+      ``,
+    ]
+    // 同一模块内服务名通常一致，取第一个有值的
+    let serviceName = ''
+    for (const b of methods.values()) {
+      if (b.serviceName?.trim()) {
+        serviceName = b.serviceName.trim()
+        break
+      }
+    }
+    for (const [exportName, b] of methods) {
+      const method = JSON.stringify(String(b.method || 'GET').toUpperCase())
+      const pathLit = JSON.stringify(b.path)
+      const svcLit = JSON.stringify(serviceName || apiServiceSlug(b))
+      lines.push(...buildApiMethodJsDoc(b))
+      lines.push(`function ${exportName}(args) {`)
+      lines.push(
+        `  return api.request(${method}, ${pathLit}, args, ${svcLit})`,
+      )
+      lines.push(`}`)
+      lines.push(``)
+    }
+    lines.push(`module.exports = {`)
+    for (const exportName of methods.keys()) {
+      lines.push(`  ${exportName}: ${exportName},`)
+    }
+    lines.push(`}`)
+    lines.push(``)
+    files[moduleRel] = lines.join('\n')
+  }
+
+  const indexLines: string[] = [
+    `/** API 注册表：key → 方法（组件 api prop / api.invoke(key)） */`,
+    ``,
+  ]
+  const imported = new Map<string, string>()
+  let i = 0
+  for (const row of registry) {
+    if (!imported.has(row.moduleRel)) {
+      const varName = `__m${i++}`
+      imported.set(row.moduleRel, varName)
+      indexLines.push(
+        `var ${varName} = require(${JSON.stringify('./' + row.moduleRel.replace(/^apis\//, ''))})`,
+      )
+    }
+  }
+  indexLines.push(``)
+  indexLines.push(`module.exports = {`)
+  for (const row of registry) {
+    const varName = imported.get(row.moduleRel)!
+    indexLines.push(
+      `  ${JSON.stringify(row.key)}: ${varName}.${row.exportName},`,
+    )
+  }
+  indexLines.push(`}`)
+  indexLines.push(``)
+  files['apis/index.js'] = indexLines.join('\n')
+
+  return files
 }
 
 export type ApiPropBindingIds = {

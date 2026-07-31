@@ -3,7 +3,7 @@
     {
       "name": "messagList",
       "type": "array",
-      "remark": "",
+      "remark": "消息列表",
       "value": [
         {
           "id": "1",
@@ -47,7 +47,7 @@
     {
       "name": "navs",
       "type": "array",
-      "remark": "",
+      "remark": "导航栏项",
       "value": [
         {
           "label": "首页",
@@ -150,20 +150,28 @@
     {
       "name": "currentNav",
       "type": "string",
-      "remark": "",
+      "remark": "当前窗口",
       "value": "home",
       "binding": ""
     },
     {
       "name": "goodsList",
       "type": "array",
-      "remark": "",
+      "remark": "商品列表",
       "value": [],
       "binding": "",
       "computeBody": "",
       "itemType": "json",
       "itemTypeRef": "type_mrnx6ke8_4d7vry",
       "arrayFields": []
+    },
+    {
+      "name": "goodsListLoading",
+      "type": "boolean",
+      "remark": "商品列表加载状态",
+      "value": false,
+      "binding": "",
+      "computeBody": ""
     }
   ]
 }

@@ -37,6 +37,27 @@ function leafAtomFromPayload(
 }
 
 function atomFromPayload(payload: TypeSelectPayload): TypeAtom {
+  if (payload.type === 'map') {
+    const key = payload.keyType === 'number' ? 'number' : 'string'
+    if (payload.itemType === 'array') {
+      return {
+        kind: 'map',
+        key,
+        item: {
+          kind: 'array',
+          item: leafAtomFromPayload(
+            payload.itemItemType,
+            payload.itemItemTypeRef,
+          ),
+        },
+      }
+    }
+    return {
+      kind: 'map',
+      key,
+      item: leafAtomFromPayload(payload.itemType, payload.itemTypeRef),
+    }
+  }
   if (payload.type === 'array') {
     if (payload.itemType === 'array') {
       return {
@@ -94,6 +115,27 @@ export function typeExprToSelectPayload(
     return { type: 'string', cleared: true }
   }
   const atom = expr.intersections[0]!.alternatives[0]!
+  if (atom.kind === 'map') {
+    const keyType = atom.key === 'number' ? 'number' : 'string'
+    const item = atom.item ?? { kind: 'any' as const }
+    if (item.kind === 'array') {
+      const leaf = leafPayloadFromAtom(item.item ?? { kind: 'any' })
+      return {
+        type: 'map',
+        keyType,
+        itemType: 'array',
+        itemItemType: leaf.type,
+        itemItemTypeRef: leaf.typeRef,
+      }
+    }
+    const leaf = leafPayloadFromAtom(item)
+    return {
+      type: 'map',
+      keyType,
+      itemType: leaf.type,
+      itemTypeRef: leaf.typeRef,
+    }
+  }
   if (atom.kind === 'array') {
     const item = atom.item ?? { kind: 'any' as const }
     if (item.kind === 'array') {

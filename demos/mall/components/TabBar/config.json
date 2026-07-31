@@ -1,0 +1,89 @@
+{
+  "name": "标签栏",
+  "title": "标签栏",
+  "width": "match_parent",
+  "height": "wrap_content",
+  "props": [
+    {
+      "name": "items",
+      "type": "array",
+      "remark": "标签项：{ key, label, count? }",
+      "defaultValue": [],
+      "twoWay": false,
+      "required": true,
+      "itemType": "json"
+    },
+    {
+      "name": "value",
+      "type": "string",
+      "remark": "当前选中 key",
+      "defaultValue": "",
+      "twoWay": false,
+      "required": true
+    },
+    {
+      "name": "activeColor",
+      "type": "color",
+      "remark": "选中色（文字与下划线）",
+      "defaultValue": "#e6a23c",
+      "twoWay": false,
+      "required": false
+    },
+    {
+      "name": "inactiveColor",
+      "type": "color",
+      "remark": "未选中文字色",
+      "defaultValue": "#606266",
+      "twoWay": false,
+      "required": false
+    },
+    {
+      "name": "background",
+      "type": "color",
+      "remark": "背景色",
+      "defaultValue": "#ffffff",
+      "twoWay": false,
+      "required": false
+    }
+  ],
+  "events": [
+    {
+      "name": "change",
+      "params": [
+        {
+          "name": "value",
+          "type": "string"
+        }
+      ]
+    }
+  ],
+  "exposedMethods": [],
+  "debugProps": {
+    "items": [
+      {
+        "key": "all",
+        "label": "全部",
+        "count": 12
+      },
+      {
+        "key": "good",
+        "label": "好评",
+        "count": 8
+      },
+      {
+        "key": "mid",
+        "label": "中评",
+        "count": 3
+      },
+      {
+        "key": "bad",
+        "label": "差评",
+        "count": 1
+      }
+    ],
+    "value": "all",
+    "activeColor": "primary",
+    "inactiveColor": "#606266",
+    "background": "#ffffff"
+  }
+}

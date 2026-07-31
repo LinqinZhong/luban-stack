@@ -30,9 +30,15 @@
           "remark": "商品评价",
           "engine": "InnoDB",
           "rows": 0
+        },
+        {
+          "name": "user",
+          "remark": "用户表",
+          "engine": "InnoDB",
+          "rows": 0
         }
       ],
-      "lastTestedAt": 1785369888281
+      "lastTestedAt": 1785402227066
     }
   ]
 }

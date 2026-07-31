@@ -23,7 +23,8 @@
           "pageIds": [
             "home",
             "chat",
-            "goods-detail"
+            "goods-detail",
+            "goods-remarks"
           ],
           "entryPage": "home",
           "wechatAppId": "wx063d4987d9089a28"
