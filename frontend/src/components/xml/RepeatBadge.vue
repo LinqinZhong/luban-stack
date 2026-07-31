@@ -7,7 +7,7 @@ withDefaults(
   }>(),
   {
     title: '已配置重复',
-    size: 16,
+    size: 15,
     clickable: false,
   },
 )
@@ -27,7 +27,12 @@ function handleClick(event: MouseEvent) {
     class="repeat-badge"
     :class="{ clickable }"
     :title="title"
-    :style="{ width: `${size}px`, height: `${size}px` }"
+    :style="{
+      width: `calc(${size}px / max(var(--canvas-zoom, 1), 1))`,
+      height: `calc(${size}px / max(var(--canvas-zoom, 1), 1))`,
+      fontSize: `calc(${size}px / max(var(--canvas-zoom, 1), 1))`,
+      borderRadius: `calc(4px / max(var(--canvas-zoom, 1), 1))`,
+    }"
     role="button"
     @click="clickable ? handleClick($event) : undefined"
   >
@@ -42,13 +47,15 @@ function handleClick(event: MouseEvent) {
 
 <style scoped>
 .repeat-badge {
+  box-sizing: border-box;
   flex-shrink: 0;
-  border-radius: 4px;
   background: #7c3aed;
   color: #fff;
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  line-height: 0;
+  overflow: hidden;
   pointer-events: none;
   box-shadow: 0 1px 3px rgba(15, 23, 42, 0.2);
 }
@@ -63,8 +70,9 @@ function handleClick(event: MouseEvent) {
 }
 
 .repeat-badge-icon {
-  width: 68%;
-  height: 68%;
+  width: 0.68em;
+  height: 0.68em;
   display: block;
+  flex-shrink: 0;
 }
 </style>

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?><LinearLayout orientation="horizontal" width="wrap_content" height="wrap_content" gravity="center_vertical" gap="{$props.gap}">
+  <RelativeLayout width="{$props.size}" height="{$props.size}" repeat="stars">
+    <Text text="★" textSize="{$props.size}" textColor="{item.inactiveColor}" width="wrap_content" height="wrap_content" layout_centerInParent="true"/>
+    <RelativeLayout width="{item.clipWidth}" height="{$props.size}" overflow="hidden" layout_alignParentLeft="true" layout_alignParentTop="true">
+      <RelativeLayout width="{$props.size}" height="{$props.size}" layout_alignParentLeft="true" layout_alignParentTop="true">
+        <Text text="★" textSize="{$props.size}" textColor="{item.activeColor}" width="wrap_content" height="wrap_content" layout_centerInParent="true"/>
+      </RelativeLayout>
+    </RelativeLayout>
+    <LinearLayout orientation="horizontal" width="match_parent" height="match_parent" layout_alignParentLeft="true" layout_alignParentTop="true" layout_alignParentRight="true" layout_alignParentBottom="true" vIf="{&quot;scenarios&quot;:[{&quot;id&quot;:&quot;scene_starrate_edit&quot;,&quot;name&quot;:&quot;编辑&quot;,&quot;conditions&quot;:[{&quot;field&quot;:&quot;$props.readonly&quot;,&quot;op&quot;:&quot;eq&quot;,&quot;value&quot;:&quot;false&quot;}]}]}">
+      <RelativeLayout width="{item.halfSize}" height="match_parent" onClick="[{&quot;id&quot;:&quot;bind_starrate_left&quot;,&quot;method&quot;:&quot;updateProps&quot;,&quot;args&quot;:{&quot;prop&quot;:&quot;value&quot;,&quot;value&quot;:&quot;{item.leftValue}&quot;}},{&quot;id&quot;:&quot;bind_starrate_left_emit&quot;,&quot;method&quot;:&quot;emit&quot;,&quot;args&quot;:{&quot;event&quot;:&quot;change&quot;,&quot;value&quot;:&quot;{item.leftValue}&quot;}}]"/>
+      <RelativeLayout width="{item.halfSize}" height="match_parent" onClick="[{&quot;id&quot;:&quot;bind_starrate_right&quot;,&quot;method&quot;:&quot;updateProps&quot;,&quot;args&quot;:{&quot;prop&quot;:&quot;value&quot;,&quot;value&quot;:&quot;{item.rightValue}&quot;}},{&quot;id&quot;:&quot;bind_starrate_right_emit&quot;,&quot;method&quot;:&quot;emit&quot;,&quot;args&quot;:{&quot;event&quot;:&quot;change&quot;,&quot;value&quot;:&quot;{item.rightValue}&quot;}}]"/>
+    </LinearLayout>
+  </RelativeLayout>
+</LinearLayout>

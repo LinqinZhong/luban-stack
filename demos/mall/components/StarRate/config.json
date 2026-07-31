@@ -1,0 +1,85 @@
+{
+  "name": "星级评分",
+  "title": "星级评分",
+  "width": "wrap_content",
+  "height": "wrap_content",
+  "props": [
+    {
+      "name": "value",
+      "type": "number",
+      "remark": "当前分值 0~10（半星步进为 1）",
+      "defaultValue": 0,
+      "twoWay": true,
+      "required": false
+    },
+    {
+      "name": "readonly",
+      "type": "boolean",
+      "remark": "只读模式（true 不可点选；false 为编辑）",
+      "defaultValue": false,
+      "twoWay": false,
+      "required": false
+    },
+    {
+      "name": "allowHalf",
+      "type": "boolean",
+      "remark": "是否允许半星（关闭时仅整星：2/4/6/8/10）",
+      "defaultValue": true,
+      "twoWay": false,
+      "required": false
+    },
+    {
+      "name": "size",
+      "type": "number",
+      "remark": "星星尺寸（px）",
+      "defaultValue": 22,
+      "twoWay": false,
+      "required": false
+    },
+    {
+      "name": "gap",
+      "type": "number",
+      "remark": "星星间距（px）",
+      "defaultValue": 4,
+      "twoWay": false,
+      "required": false
+    },
+    {
+      "name": "activeColor",
+      "type": "color",
+      "remark": "已选星星颜色",
+      "defaultValue": "#f7ba2a",
+      "twoWay": false,
+      "required": false
+    },
+    {
+      "name": "inactiveColor",
+      "type": "color",
+      "remark": "未选星星颜色",
+      "defaultValue": "#c0c4cc",
+      "twoWay": false,
+      "required": false
+    }
+  ],
+  "events": [
+    {
+      "name": "change",
+      "params": [
+        {
+          "name": "value",
+          "type": "number"
+        }
+      ]
+    }
+  ],
+  "exposedMethods": [],
+  "debugProps": {
+    "value": 10,
+    "readonly": false,
+    "allowHalf": true,
+    "size": 32,
+    "gap": -1,
+    "activeColor": "#f7ba2a",
+    "inactiveColor": "#c0c4cc"
+  }
+}

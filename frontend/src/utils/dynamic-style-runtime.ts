@@ -316,10 +316,15 @@ function conditionNeedsRepeatScope(field: string): boolean {
   return raw === 'index' || raw === 'item' || raw.startsWith('item.')
 }
 
+/** scope 是否带有可解析的 repeat 项（仅有 $props/$route 不算） */
+function hasRepeatItemScope(scope?: DynamicStyleScope): boolean {
+  return scope != null && scope.item !== undefined
+}
+
 /**
  * 条件列表：全部 AND。
  * 无有效条件 → true。
- * 编辑态缺 scope 时，依赖 index/item 的条件跳过（视为 true），避免误藏模板节点。
+ * 缺 repeat item 时，依赖 index/item 的条件跳过（视为 true），避免误藏模板节点。
  */
 export function evaluateConditionList(
   conditions: StyleCondition[] | undefined,
@@ -329,7 +334,9 @@ export function evaluateConditionList(
   const active = (conditions ?? []).filter((cond) => cond.field.trim())
   if (!active.length) return true
   return active.every((cond) => {
-    if (!scope && conditionNeedsRepeatScope(cond.field)) return true
+    if (conditionNeedsRepeatScope(cond.field) && !hasRepeatItemScope(scope)) {
+      return true
+    }
     return evaluateCondition(cond, pageData, scope)
   })
 }

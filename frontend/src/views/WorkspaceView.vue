@@ -815,7 +815,7 @@ function invokeActiveExposedMethod(methodName: string, args: unknown[]) {
 function previewGetDeviceInfo() {
   return getDeviceInfo({
     platform: canvasScene.value,
-    windowWidth: canvasFrameWidth.value,
+    windowWidth: canvasWidth.value,
   })
 }
 
@@ -887,13 +887,21 @@ function parseFrameSize(
   return Number.isFinite(n) && n > 0 ? n : fallback
 }
 
+/** 组件 config.width=wrap_content：画布框宽随内容，上限为屏宽 */
+const phoneWidthFitContent = computed(() => {
+  if (!isComponentResource.value || !activeComponent.value) return false
+  const w = activeComponent.value.config.width
+  return !w || w === 'wrap_content'
+})
+
 const canvasFrameWidth = computed(() => {
   if (isComponentResource.value && activeComponent.value) {
     const parsed = parseFrameSize(
       activeComponent.value.config.width,
       canvasWidth.value,
     )
-    return parsed === 'auto' ? Math.min(canvasWidth.value, 320) : parsed
+    // wrap：传屏宽作 maxWidth 参照；实际框宽由 phoneWidthFitContent 收束
+    return parsed === 'auto' ? canvasWidth.value : parsed
   }
   return canvasWidth.value
 })
@@ -4183,6 +4191,7 @@ watch(
           :xml="activeDoc.xml"
           :canvas-width="canvasFrameWidth"
           :canvas-height="canvasFrameHeight === undefined ? undefined : canvasFrameHeight"
+          :phone-width-fit-content="phoneWidthFitContent"
           :phone-screen-width="canvasWidth"
           :phone-screen-height="667"
           :selected-id="selectedNodeId"

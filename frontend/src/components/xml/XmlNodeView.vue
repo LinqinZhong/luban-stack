@@ -27,7 +27,7 @@ import { resolveMatchingStyleOverrides, evaluateScenarios, interpolateDataBindin
 import { interpolateDollarProps } from '../../utils/component-props'
 import { resolveComponentInstanceDollarProps } from '../../utils/instance-dollar-props'
 import { resolveComputedPageData, buildComputeDepsKey } from '../../utils/compute-runtime'
-import { buildRepeatExpandKey, expandRepeatTree } from '../../utils/repeat'
+import { buildRepeatExpandKey, expandRepeatTree, applyEditRepeatPreviewScope } from '../../utils/repeat'
 import { CANVAS_RUNTIME_KEY } from '../../composables/useCanvasRuntime'
 import {
   DYNAMIC_STYLES_ATTR,
@@ -186,8 +186,24 @@ const isEditorHidden = computed(() =>
   (props.hiddenNodeIds ?? []).includes(props.nodeId),
 )
 
+/**
+ * 编辑态未展开 repeat 时，用列表首项注入 scope，
+ * 让 {item.size} 等绑定能参与布局（预览展开仍走 expandRepeatTree）。
+ */
+const displayNode = computed(() => {
+  if (!props.selectable || props.expandRepeat) return props.node
+  return applyEditRepeatPreviewScope(
+    props.node,
+    props.pageData,
+    props.dollarProps,
+  )
+})
+
+/** 模板用：编辑态 repeat 节点带首项 scope，使 {item.xxx} 布局生效 */
+const node = displayNode
+
 const runtimeScope = computed(() => ({
-  ...(props.node.scope ?? {}),
+  ...(displayNode.value.scope ?? {}),
   $props: props.dollarProps,
   $route: props.routeParams,
   $query: props.routeParams,
@@ -486,9 +502,8 @@ const componentRoot = computed(() => {
   try {
     const data = componentPageData.value ?? detail.data
     const dollarProps = instanceDollarProps.value
-    if (!props.expandRepeat) {
-      return parsePageXml(detail.xml)
-    }
+    // 组件内部 repeat 始终展开（含编辑态）：否则 stars 等只有模板一行，
+    // 且无 item scope，填充层 vShow / {item.clipWidth} 会失效。
     const expandKey = `${detail.xml}\0${buildRepeatExpandKey(data, dollarProps)}`
     if (expandKey === cachedComponentExpandKey && cachedComponentRoot) {
       return cachedComponentRoot
@@ -825,8 +840,11 @@ provide(
 )
 
 const layoutOverflowStyle = computed(() => {
-  // 编辑态始终 visible，避免选中框 / 平铺的 Swiper·多窗体被裁切
-  if (!props.interactEnabled) return { overflow: 'visible' as const }
+  const strategy = parseOverflow(attrs.value.overflow, 'visible')
+  // 编辑态默认 visible，避免选中框 / 平铺 Swiper 被裁；显式 overflow=hidden 仍裁切（半星等）
+  if (!props.interactEnabled && strategy !== 'hidden') {
+    return { overflow: 'visible' as const }
+  }
   return overflowStyle(attrs.value, 'visible')
 })
 

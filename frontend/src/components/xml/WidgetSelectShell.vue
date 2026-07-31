@@ -164,19 +164,33 @@ const shellStyle = computed<CSSProperties>(() => {
   }
 
   if (props.fillParent) {
-    style.flex = '1 1 auto'
-    style.alignSelf = 'stretch'
     style.minHeight = 0
     style.minWidth = 0
+    const wrapW = props.width === 'wrap_content'
+    const wrapH = props.height === 'wrap_content'
+    // wrap_content：按内容收缩，不超过画布；勿 stretch 拉满
+    if (wrapW || wrapH) {
+      style.flex = '0 0 auto'
+      style.alignSelf = wrapW ? 'flex-start' : 'stretch'
+    } else {
+      style.flex = '1 1 auto'
+      style.alignSelf = 'stretch'
+    }
     if (matchParentWidth.value || props.width === undefined) {
       style.width = matchParentAxisSize('width', props.marginAttrs)
     } else if (typeof props.width === 'number') {
       style.width = `${props.width}px`
+    } else if (wrapW) {
+      style.width = 'fit-content'
+      style.maxWidth = '100%'
     }
     if (matchParentHeight.value || props.height === undefined) {
       style.height = matchParentAxisSize('height', props.marginAttrs)
     } else if (typeof props.height === 'number') {
       style.height = `${props.height}px`
+    } else if (wrapH) {
+      style.height = 'fit-content'
+      style.maxHeight = '100%'
     }
     if (scrollPortClip.value) style.overflow = 'hidden'
     else if (props.scrollPort) style.overflow = 'visible'
@@ -537,7 +551,7 @@ onBeforeUnmount(() => {
   transform: translate(50%, -50%);
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: calc(4px / max(var(--canvas-zoom, 1), 1));
   pointer-events: none;
 }
 

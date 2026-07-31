@@ -59,7 +59,7 @@
     "showBack": true,
     "background": "#ffffff",
     "color": "#000000",
-    "isFillScreen": true,
+    "isFillScreen": false,
     "backBackground": "#ffffff",
     "backBorderColor": "#ffffff"
   }

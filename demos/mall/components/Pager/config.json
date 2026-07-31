@@ -48,14 +48,6 @@
       }
     },
     {
-      "name": "params",
-      "type": "json",
-      "remark": "额外请求参数（与 page 合并后传给 fetchApi）",
-      "defaultValue": {},
-      "twoWay": false,
-      "required": false
-    },
-    {
       "name": "data",
       "type": "array",
       "remark": "",

@@ -1,0 +1,14 @@
+{
+  "fields": [
+    {
+      "name": "stars",
+      "type": "array",
+      "remark": "五星展示态（满分 10，半星步进 1）",
+      "value": [],
+      "binding": "computed",
+      "computeBody": "var score = Number($props.value)\nif (!(score >= 0)) score = 0\nif (score > 10) score = 10\nvar size = Number($props.size)\nif (!(size > 0)) size = 22\nvar allowHalf = $props.allowHalf !== false\nvar activeColor = $props.activeColor || '#f7ba2a'\nif (typeof $color !== 'undefined' && $color && $color[activeColor]) activeColor = $color[activeColor]\nvar inactiveColor = $props.inactiveColor || '#c0c4cc'\nif (typeof $color !== 'undefined' && $color && $color[inactiveColor]) inactiveColor = $color[inactiveColor]\nvar list = []\nfor (var i = 1; i <= 5; i++) {\n  var full = i * 2\n  var half = full - 1\n  var fill = 'empty'\n  if (score >= full) fill = 'full'\n  else if (score >= half) fill = 'half'\n  var clipWidth = fill === 'full' ? size : fill === 'half' ? size / 2 : 0\n  list.push({\n    index: i,\n    fill: fill,\n    clipWidth: clipWidth,\n    halfSize: size / 2,\n    size: size,\n    leftValue: allowHalf ? half : full,\n    rightValue: full,\n    activeColor: activeColor,\n    inactiveColor: inactiveColor\n  })\n}\nreturn list\n",
+      "itemType": "json",
+      "arrayFields": []
+    }
+  ]
+}

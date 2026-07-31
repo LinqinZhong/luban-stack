@@ -8,7 +8,7 @@ withDefaults(
   }>(),
   {
     title: '已绑定事件方法',
-    size: 16,
+    size: 15,
     count: 0,
     clickable: false,
   },
@@ -29,7 +29,12 @@ function handleClick(event: MouseEvent) {
     class="event-badge"
     :class="{ clickable }"
     :title="count > 0 ? `${title}（${count}）` : title"
-    :style="{ width: `${size}px`, height: `${size}px` }"
+    :style="{
+      width: `calc(${size}px / max(var(--canvas-zoom, 1), 1))`,
+      height: `calc(${size}px / max(var(--canvas-zoom, 1), 1))`,
+      fontSize: `calc(${size}px / max(var(--canvas-zoom, 1), 1))`,
+      borderRadius: `calc(4px / max(var(--canvas-zoom, 1), 1))`,
+    }"
     role="button"
     @click="clickable ? handleClick($event) : undefined"
   >
@@ -44,13 +49,15 @@ function handleClick(event: MouseEvent) {
 
 <style scoped>
 .event-badge {
+  box-sizing: border-box;
   flex-shrink: 0;
-  border-radius: 4px;
   background: #f97316;
   color: #fff;
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  line-height: 0;
+  overflow: hidden;
   pointer-events: none;
   box-shadow: 0 1px 3px rgba(15, 23, 42, 0.2);
 }
@@ -65,8 +72,9 @@ function handleClick(event: MouseEvent) {
 }
 
 .event-badge-icon {
-  width: 70%;
-  height: 70%;
+  width: 0.68em;
+  height: 0.68em;
   display: block;
+  flex-shrink: 0;
 }
 </style>

@@ -5,6 +5,7 @@ import {
   V_SHOW_ATTR,
 } from '../types/dynamic-styles'
 import { INTERACTION_EVENT_KEYS } from '../types/page-method'
+import { isSimpleBindingPath } from './binding-expr'
 import type { XmlNode } from './xml'
 
 const SKIP_INTERPOLATE_ATTRS = new Set<string>([
@@ -38,7 +39,8 @@ function getByPath(source: unknown, path: string): unknown {
 }
 
 /**
- * 仅替换 {item.xxx} / {item} / {index}；其他文本原样保留。
+ * 仅替换简单 {item.xxx} / {item} / {index}；带 || / 三元等表达式原样保留，
+ * 交给运行时 interpolateDataBindings 求值（展开期误当成路径会变成空串）。
  */
 export function interpolateTemplate(
   template: string,
@@ -56,7 +58,7 @@ export function interpolateTemplate(
           ? JSON.stringify(item)
           : String(item)
     }
-    if (expr.startsWith('item.')) {
+    if (expr.startsWith('item.') && isSimpleBindingPath(expr)) {
       const value = getByPath(item, expr.slice('item.'.length))
       return value == null ? '' : String(value)
     }
@@ -67,6 +69,9 @@ export function interpolateTemplate(
 /**
  * 属性插值：整段 `{item}` 且值为对象时保留占位符，交给运行时按 scope 取原生对象
  *（避免 stringify 后再被误当成绑定表达式）。
+ * 整段 `{item.xxx}` 若值为 number/boolean，也保留占位符，供 Component 的 number/boolean
+ * props 走 resolveAttrBindingValue 取原生值（避免先烤成字符串再丢精度/空串）。
+ * 非整段简单路径的表达式（如 `{item.nickname || '匿名用户'}`）原样保留。
  */
 function interpolateAttrTemplate(
   template: string,
@@ -80,6 +85,20 @@ function interpolateAttrTemplate(
     typeof item === 'object'
   ) {
     return '{item}'
+  }
+  const whole = trimmed.match(/^\{([^{}]+)\}$/)
+  if (whole) {
+    const expr = whole[1]!.trim()
+    // 复杂表达式：展开期不动，留给运行时求值
+    if (!isSimpleBindingPath(expr) && expr !== 'item' && expr !== 'index') {
+      return trimmed
+    }
+    if (expr.startsWith('item.')) {
+      const value = getByPath(item, expr.slice('item.'.length))
+      if (typeof value === 'number' || typeof value === 'boolean') {
+        return trimmed
+      }
+    }
   }
   return interpolateTemplate(template, item, index)
 }
@@ -108,6 +127,38 @@ function applyItemScope(node: XmlNode, item: unknown, index: number): XmlNode {
     scope: { item, index },
     children: node.children.map((child) => applyItemScope(child, item, index)),
   }
+}
+
+/**
+ * 编辑态未展开 repeat：挂上列表首项 scope，保留 repeat 属性（徽章 / 选中路径）。
+ * 不把 {item.xxx} 烤成字面量，交给 XmlNodeView 实时插值。
+ */
+function withRepeatItemScope(
+  node: XmlNode,
+  item: unknown,
+  index: number,
+): XmlNode {
+  return {
+    tag: node.tag,
+    attrs: { ...node.attrs },
+    text: node.text,
+    scope: { item, index },
+    children: node.children.map((child) => withRepeatItemScope(child, item, index)),
+  }
+}
+
+/** 编辑态：对带 repeat 的模板节点注入首项，使 {item.size} 等布局绑定生效 */
+export function applyEditRepeatPreviewScope(
+  node: XmlNode,
+  pageData: PageData | undefined,
+  dollarProps?: Record<string, unknown>,
+): XmlNode {
+  const listName = node.attrs.repeat?.trim()
+  if (!listName) return node
+  if (node.scope?.item !== undefined) return node
+  const items = resolveArrayValue(pageData, listName, dollarProps)
+  if (!items.length) return node
+  return withRepeatItemScope(node, items[0], 0)
 }
 
 function resolveArrayValue(

@@ -765,6 +765,50 @@ function buildPresetEventBindAttrs(
       continue
     }
 
+    if (method === 'updateProps') {
+      const prop = String(args.prop ?? '').trim()
+      if (!prop || !/^[A-Za-z_$][\w$]*$/.test(prop)) continue
+      const valueRaw = String(args.value ?? '').trim()
+      const bindMatch = valueRaw.match(/^\{([A-Za-z_$][\w.$]*)\}$/)
+      let valueExpr: string
+      if (bindMatch) {
+        const path = bindMatch[1]!
+        if (fromDetail) {
+          valueExpr = detailPathExpr(path)
+        } else {
+          const expr = normalizeExpr(path)
+          if (expr === 'item' || expr === 'index' || expr.startsWith('item.')) {
+            const i = dataIdx++
+            dataAttrs.push(`data-val${i}="{{${expr}}}"`)
+            valueExpr = `e.currentTarget.dataset.val${i}`
+          } else {
+            valueExpr = runtimePropExpr(expr)
+          }
+        }
+      } else {
+        try {
+          valueExpr = JSON.stringify(JSON.parse(valueRaw))
+        } catch {
+          valueExpr = JSON.stringify(valueRaw)
+        }
+      }
+      const vVar = `__up${dataIdx++}`
+      stmts.push(`var ${vVar} = ${valueExpr}`)
+      stmts.push(
+        `if (typeof ${vVar} === 'string' && ${vVar} !== '' && !isNaN(Number(${vVar}))) ${vVar} = Number(${vVar})`,
+      )
+      stmts.push(`var __upPatch${dataIdx} = {}`)
+      stmts.push(`__upPatch${dataIdx}[${JSON.stringify(prop)}] = ${vVar}`)
+      stmts.push(`this.setData(__upPatch${dataIdx})`)
+      stmts.push(
+        `if (typeof this.__recomputeComputed === 'function') this.__recomputeComputed([${JSON.stringify(prop)}])`,
+      )
+      stmts.push(
+        `this.triggerEvent('update:' + ${JSON.stringify(prop)}, { value: ${vVar} })`,
+      )
+      continue
+    }
+
     if (method === 'navigateTo') {
       const to = String(args.to ?? '').trim()
       if (!to) continue

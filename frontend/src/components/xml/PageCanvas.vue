@@ -41,6 +41,8 @@ const props = defineProps<{
   componentMap?: ComponentRenderMap
   /** ?????????? min 667?? auto ?????? */
   canvasHeight?: number | 'auto'
+  /** 组件 width=wrap_content：手机框宽随内容，上限 phoneScreenWidth/canvasWidth */
+  phoneWidthFitContent?: boolean
   /** ??/????????? $props????? */
   dollarProps?: Record<string, unknown>
   /** ????????$route? */
@@ -155,9 +157,19 @@ const hoveredNodeId = ref('')
 
 const phoneFrameStyle = computed(() => {
   const style: Record<string, string> = {
-    width: `${props.canvasWidth}px`,
     // 辅助边框/标注反缩放用（与 transform scale 配套）
     '--canvas-zoom': String(zoom.value || 1),
+  }
+  if (props.phoneWidthFitContent) {
+    const maxW =
+      (typeof props.phoneScreenWidth === 'number' && props.phoneScreenWidth > 0
+        ? props.phoneScreenWidth
+        : props.canvasWidth) || 375
+    style.width = 'fit-content'
+    style.maxWidth = `${maxW}px`
+    style.minWidth = '0'
+  } else {
+    style.width = `${props.canvasWidth}px`
   }
   if (typeof props.canvasHeight === 'number' && Number.isFinite(props.canvasHeight)) {
     style.height = `${props.canvasHeight}px`
@@ -483,6 +495,7 @@ const phoneScreenH = computed(
 
 const centerPhoneX = computed(() => {
   if (!phoneFitContent.value) return false
+  if (props.phoneWidthFitContent) return true
   return props.canvasWidth < phoneScreenW.value
 })
 
@@ -928,6 +941,7 @@ watch(
           :class="{
             'is-picking': colorPickState.picking.value,
             'is-fit-content': phoneFitContent,
+            'is-width-fit-content': Boolean(phoneWidthFitContent),
             'is-edit': selectable,
             'is-preview': showTouchCursor,
             'is-miniprogram': showDeviceChrome && scene === 'miniprogram',
@@ -1887,10 +1901,18 @@ watch(
 .phone.is-fit-content {
   height: auto;
   min-height: 0;
-  /* ?????????????????? */
+  /* 组件画布：去掉整机边框，只保留内容框 */
   background: transparent;
   border-color: transparent;
   box-shadow: none;
+}
+
+/* width=wrap_content：框随内容，避免 flex 子项 stretch 把宽度撑回屏宽 */
+.phone.is-width-fit-content > .phone-page-layer {
+  flex: 0 0 auto;
+  align-self: flex-start;
+  width: fit-content;
+  max-width: 100%;
 }
 
 .phone.is-picking {
