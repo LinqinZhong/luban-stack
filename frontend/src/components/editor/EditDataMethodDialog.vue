@@ -567,7 +567,7 @@ const arrayParamOptions = computed((): SourceOption[] => {
   return opts
 })
 
-/** 查询分页：可选入参（对象 / 具名类型，如 QueryPageDto） */
+/** 查询 / 自定义分页：可选入参（对象 / 具名类型，如 QueryPageDto） */
 const pageParamOptions = computed((): SourceOption[] => {
   const opts: SourceOption[] = []
   for (const p of draftParams.value) {
@@ -1337,7 +1337,10 @@ function handleSave() {
             : [],
     batchSourceParam:
       draft.operation === 'batchInsert' ? draft.batchSourceParam.trim() : '',
-    pageParam: draft.operation === 'query' ? draft.pageParam.trim() : '',
+    pageParam:
+      draft.operation === 'query' || draft.operation === 'custom'
+        ? draft.pageParam.trim()
+        : '',
     conditionGroups: showConditions.value ? serializeConditionGroups() : [],
   }
   emit('save', {
@@ -2070,6 +2073,27 @@ function handleSave() {
               :placeholder="DM.sqlPh"
               :param-names="draftParams.map((p) => p.name).filter(Boolean)"
             />
+          </div>
+        </section>
+        <section class="dlg-section">
+          <div class="section-label">{{ DM.pageParam }}</div>
+          <div class="section-control">
+            <el-select
+              :model-value="draft.pageParam"
+              clearable
+              filterable
+              :placeholder="DM.pageParamPh"
+              class="page-param-select"
+              @update:model-value="onPageParamChange"
+            >
+              <el-option
+                v-for="opt in pageParamOptions"
+                :key="opt.value"
+                :label="opt.label"
+                :value="opt.value"
+              />
+            </el-select>
+            <p class="page-param-hint">{{ DM.pageParamHint }}</p>
           </div>
         </section>
         <section class="dlg-section dlg-section--block">

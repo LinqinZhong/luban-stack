@@ -88,7 +88,12 @@ function emitTypeOrmMethod(
   table: string,
   idToName: IdToName,
   commaArrayFields: string[],
-): { code: string; imports: string[]; needsCommaArrayHelper: boolean } {
+): {
+  code: string
+  imports: string[]
+  needsCommaArrayHelper: boolean
+  needsSqlBuilder: boolean
+} {
   const name = safeIdent(method.name, 'method')
   const { params, returnType } = emitMethodSignature(method, idToName)
   const compiled = compileTypeOrmMethodBody(method, table, {
@@ -112,6 +117,7 @@ ${compiled.body}
     code,
     imports: compiled.imports,
     needsCommaArrayHelper: compiled.needsCommaArrayHelper,
+    needsSqlBuilder: compiled.needsSqlBuilder,
   }
 }
 
@@ -188,6 +194,7 @@ export function emitRepositoryFile(options: {
   const allTypeOrmImports = new Set<string>()
   const methodBlocks: string[] = []
   let needsCommaArrayHelper = false
+  let needsSqlBuilder = false
 
   // 出参/实体中数组字段（varchar 逗号串）合并，供 raw query / map 组装后拆分
   const entityArrayFields = listCommaArrayFieldNames(entity)
@@ -213,6 +220,7 @@ export function emitRepositoryFile(options: {
     methodBlocks.push(emitted.code)
     for (const imp of emitted.imports) allTypeOrmImports.add(imp)
     if (emitted.needsCommaArrayHelper) needsCommaArrayHelper = true
+    if (emitted.needsSqlBuilder) needsSqlBuilder = true
   }
 
   const methods = methodBlocks.join('\n\n')
@@ -234,12 +242,15 @@ export function emitRepositoryFile(options: {
   const commaArrayImport = needsCommaArrayHelper
     ? `import { coerceCommaArrayFields, coerceCommaArrayRows } from '../../../common/comma-array'\n`
     : ''
+  const sqlBuilderImport = needsSqlBuilder
+    ? `import { SqlBuilder } from '../../../common/sql-builder'\n`
+    : ''
 
   return `/** 数据处理器「${processor.name}」 */
 import { Injectable } from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
 ${typeormImportLine}
-${commaArrayImport}import { ${entityClassName} } from './${resourceSlug}.entity'
+${commaArrayImport}${sqlBuilderImport}import { ${entityClassName} } from './${resourceSlug}.entity'
 ${typeImports ? typeImports + '\n' : ''}
 @Injectable()
 export class ${className} {

@@ -50,6 +50,30 @@ function indent(level: number): string {
   return '  '.repeat(level)
 }
 
+/** 节点「说明」→ 行注释；多行说明逐行加 // */
+function emitDescriptionComment(
+  pad: string,
+  data: Record<string, unknown>,
+): string {
+  const desc = str(data, 'description').trim()
+  if (!desc) return ''
+  return desc
+    .replace(/\r\n/g, '\n')
+    .split('\n')
+    .map((line) => `${pad}// ${line}`)
+    .join('\n')
+    .concat('\n')
+}
+
+/** 当前节点代码与后续节点之间空一行 */
+function joinNodeCode(block: string, next: string): string {
+  if (!block) return next
+  const body = block.endsWith('\n') ? block : `${block}\n`
+  if (!next) return body
+  if (next.startsWith('\n')) return body + next
+  return `${body}\n${next}`
+}
+
 function findStart(flow: MethodFlow): FlowNode | null {
   return flow.nodes.find((n) => n.kind === 'start') ?? null
 }
@@ -200,25 +224,39 @@ function emitNodeBlock(
   const data = asRecord(node.data)
   const pad = indent(level)
 
-  if (node.kind === 'start') {
-    return emitNodeBlock(
+  const comment = emitDescriptionComment(pad, data)
+  const emitNext = () =>
+    emitNodeBlock(
       flow,
       pickDefaultNext(flow, node.id),
       ctx,
       level,
       nextStack,
     )
+
+  if (node.kind === 'start') {
+    return emitNext()
   }
 
   if (node.kind === 'end') {
     const returnExpr = str(data, 'returnExpr').trim()
     const fallback = defaultEmptyReturnCode(ctx.methodOutput)
-    return `${pad}return ${returnExpr || fallback};\n`
+    const expr = returnExpr || fallback
+    // 数据层实体与 types 接口同名时结构常不一致（可空等），按方法出参断言
+    const retTs = processorTypeExprToTs(ctx.methodOutput, ctx.idToName)
+    const cast =
+      retTs && retTs !== 'any' && retTs !== 'void'
+        ? ` as unknown as ${retTs}`
+        : ''
+    return joinNodeCode(`${comment}${pad}return ${expr}${cast};\n`, '')
   }
 
   if (node.kind === 'throw') {
     const messageExpr = str(data, 'messageExpr').trim() || "'业务异常'"
-    return `${pad}throw Object.assign(new Error(String(${messageExpr})), { statusCode: 400 })\n`
+    return joinNodeCode(
+      `${comment}${pad}throw Object.assign(new Error(String(${messageExpr})), { statusCode: 400 })\n`,
+      '',
+    )
   }
 
   if (node.kind === 'define') {
@@ -235,16 +273,7 @@ function emitNodeBlock(
     } else {
       line = `${pad}let ${varName}: any = null;\n`
     }
-    return (
-      line +
-      emitNodeBlock(
-        flow,
-        pickDefaultNext(flow, node.id),
-        ctx,
-        level,
-        nextStack,
-      )
-    )
+    return joinNodeCode(`${comment}${line}`, emitNext())
   }
 
   if (node.kind === 'input') {
@@ -267,16 +296,7 @@ function emitNodeBlock(
       })
       assign = `${pad}const ${varName} = ${call};\n`
     }
-    return (
-      assign +
-      emitNodeBlock(
-        flow,
-        pickDefaultNext(flow, node.id),
-        ctx,
-        level,
-        nextStack,
-      )
-    )
+    return joinNodeCode(`${comment}${assign}`, emitNext())
   }
 
   if (node.kind === 'output') {
@@ -292,15 +312,9 @@ function emitNodeBlock(
       '_writeResult',
     )
     const call = emitMethodCall(ctx, processorId, methodId, bindings)
-    return (
-      `${pad}const ${resultVar} = ${call};\n` +
-      emitNodeBlock(
-        flow,
-        pickDefaultNext(flow, node.id),
-        ctx,
-        level,
-        nextStack,
-      )
+    return joinNodeCode(
+      `${comment}${pad}const ${resultVar} = ${call};\n`,
+      emitNext(),
     )
   }
 
@@ -353,32 +367,27 @@ function emitNodeBlock(
       }
     }
 
-    block += `${pad}  _pageOut.${PAGE_RECORDS_FIELD} = _srcRecords.map((_item) => {\n` +
-      `${pad}    const _row: Record<string, unknown> = {};\n`
-    for (const m of mappings) {
-      const targetField = m.targetField.trim()
-      const sourceField = m.sourceField.trim()
-      if (!targetField || !sourceField) continue
-      block +=
-        `${pad}    if (_item && typeof _item === 'object' && ${JSON.stringify(sourceField)} in (_item as object)) {\n` +
-        `${pad}      _row[${JSON.stringify(targetField)}] = (_item as unknown as Record<string, unknown>)[${JSON.stringify(sourceField)}];\n` +
-        `${pad}    }\n`
-    }
+    const mappingEntries = mappings
+      .map((m) => {
+        const targetField = m.targetField.trim()
+        const sourceField = m.sourceField.trim()
+        if (!targetField || !sourceField) return ''
+        if (targetField === sourceField) {
+          return JSON.stringify(targetField)
+        }
+        return `[${JSON.stringify(targetField)}, ${JSON.stringify(sourceField)}]`
+      })
+      .filter(Boolean)
+      .join(`,\n${pad}    `)
     block +=
-      `${pad}    return _row;\n` +
-      `${pad}  });\n` +
+      `${pad}  _pageOut.${PAGE_RECORDS_FIELD} = _srcRecords.map((_item) =>\n` +
+      `${pad}    mapObjectFields(_item, [\n` +
+      `${pad}    ${mappingEntries}\n` +
+      `${pad}    ]),\n` +
+      `${pad}  );\n` +
       `${pad}  ${targetVarName} = _pageOut;\n` +
       `${pad}}\n`
-    return (
-      block +
-      emitNodeBlock(
-        flow,
-        pickDefaultNext(flow, node.id),
-        ctx,
-        level,
-        nextStack,
-      )
-    )
+    return joinNodeCode(`${comment}${block}`, emitNext())
   }
 
   if (node.kind === 'objectMap') {
@@ -404,16 +413,7 @@ function emitNodeBlock(
       `${pad}let ${targetVarName}: any = mapObjectFields(${sourcePath || 'undefined'}, [\n` +
       `${pad}  ${mappingEntries}\n` +
       `${pad}]);\n`
-    return (
-      block +
-      emitNodeBlock(
-        flow,
-        pickDefaultNext(flow, node.id),
-        ctx,
-        level,
-        nextStack,
-      )
-    )
+    return joinNodeCode(`${comment}${block}`, emitNext())
   }
 
   if (node.kind === 'action') {
@@ -440,47 +440,40 @@ function emitNodeBlock(
     } else if (outputVar) {
       block = `${pad}const ${outputVar}: any = undefined;\n`
     }
-    return (
-      block +
-      emitNodeBlock(
-        flow,
-        pickDefaultNext(flow, node.id),
-        ctx,
-        level,
-        nextStack,
-      )
-    )
+    return joinNodeCode(`${comment}${block}`, emitNext())
   }
 
   if (node.kind === 'branch') {
     const expression = str(data, 'expression').trim() || 'false'
     const trueNext = pickBranchNext(flow, node.id, 'true')
     const falseNext = pickBranchNext(flow, node.id, 'false')
-    return (
+    const block =
       `${pad}if (${expression}) {\n` +
       emitNodeBlock(flow, trueNext, ctx, level + 1, nextStack) +
       `${pad}} else {\n` +
       emitNodeBlock(flow, falseNext, ctx, level + 1, nextStack) +
       `${pad}}\n`
-    )
+    return joinNodeCode(`${comment}${block}`, '')
   }
 
-  return emitNodeBlock(
-    flow,
-    pickDefaultNext(flow, node.id),
-    ctx,
-    level,
-    nextStack,
-  )
+  return emitNext()
 }
 
-/** 工作流是否包含对象映射节点（用于按需 import mapObjectFields） */
+/** 工作流是否需要 mapObjectFields（objectMap / pageMap 记录映射） */
 export function collectFlowUsesObjectMap(
   flows: Array<MethodFlow | null | undefined>,
 ): boolean {
   for (const flow of flows) {
     for (const node of flow?.nodes ?? []) {
       if (node.kind === 'objectMap') return true
+      if (node.kind === 'pageMap') {
+        const mappings = readPageMapFieldMappings(
+          (node.data as Record<string, unknown> | undefined)?.fieldMappings,
+        )
+        if (mappings.some((m) => m.targetField.trim() && m.sourceField.trim())) {
+          return true
+        }
+      }
     }
   }
   return false

@@ -685,7 +685,7 @@ export interface DataMethodConfig {
   fieldMappings: DataMethodFieldMapping[]
   /** 批量插入：选用的数组入参名 */
   batchSourceParam: string
-  /** 查询：分页入参名（如 pageDto）；未绑定则不分页 */
+  /** 查询 / 自定义：分页入参名（如 pageDto）；未绑定则不分页 */
   pageParam: string
   /** 非插入操作的查询条件（组内 AND，组间 OR） */
   conditionGroups: DataMethodConditionGroup[]

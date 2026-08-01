@@ -170,7 +170,7 @@ dist
 src/
   main.ts / app.module.ts
   modules/{服务}/{资源}/
-  common/                  # db、result、oss、object-map
+  common/                  # db、result、oss、object-map、sql-builder
   types/
 config/
   routes-manifest.json     # 路由清单（非密钥）
@@ -335,6 +335,70 @@ export function mapObjectFields(
     }
   }
   return out
+}
+`
+
+  files['src/common/sql-builder.ts'] = `/** 自定义 SQL 拼接：基础语句 + 条件片段 + 绑定参数 */
+function dedentSql(raw: string): string {
+  const text = String(raw ?? '')
+    .replace(/\\r\\n/g, '\\n')
+    .replace(/^\\n/, '')
+    .replace(/\\n$/, '')
+  const lines = text.split('\\n')
+  const indents = lines
+    .filter((l) => l.trim().length)
+    .map((l) => l.match(/^\\s*/)?.[0].length ?? 0)
+  const min = indents.length ? Math.min(...indents) : 0
+  return lines
+    .map((l) => l.slice(min))
+    .join('\\n')
+    .trim()
+}
+
+export class SqlBuilder {
+  private readonly chunks: string[] = []
+  private readonly bound: unknown[] = []
+
+  constructor(sql = '', ...params: unknown[]) {
+    const base = dedentSql(sql)
+    if (base) this.chunks.push(base)
+    this.bound.push(...params)
+  }
+
+  /** 条件为真时追加片段（对应 MyBatis \`<if test>\`） */
+  test(condition: unknown, fragment: string, ...params: unknown[]): this {
+    if (condition) this.append(fragment, ...params)
+    return this
+  }
+
+  append(fragment: string, ...params: unknown[]): this {
+    const part = dedentSql(fragment)
+    if (!part) return this
+    if (
+      /^(ORDER\\s+BY|GROUP\\s+BY|HAVING|LIMIT|OFFSET|UNION|RETURNING)\\b/i.test(
+        part,
+      )
+    ) {
+      this.chunks.push('\\n' + part)
+    } else {
+      this.chunks.push(' ' + part)
+    }
+    this.bound.push(...params)
+    return this
+  }
+
+  limit(pageSize: number, offset: number): this {
+    const ps = Math.max(0, Math.floor(Number(pageSize) || 0))
+    const off = Math.max(0, Math.floor(Number(offset) || 0))
+    return this.append(\`LIMIT \${ps} OFFSET \${off}\`)
+  }
+
+  build(): { sql: string; params: unknown[] } {
+    return {
+      sql: this.chunks.join('').trim(),
+      params: this.bound.slice(),
+    }
+  }
 }
 `
 

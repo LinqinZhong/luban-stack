@@ -23,6 +23,8 @@ export type CompileMethodResult = {
   imports: TypeOrmImport[]
   /** 是否需要从 common/comma-array 引入 coerce 辅助 */
   needsCommaArrayHelper: boolean
+  /** 是否需要从 common/sql-builder 引入 SqlBuilder */
+  needsSqlBuilder: boolean
 }
 
 export type CompileMethodOptions = {
@@ -272,14 +274,20 @@ function wrapMapOutput(
   ]
 
   lines.push(`      const rawKey = row.${keyField}`)
-  lines.push(`      if (rawKey == null || rawKey === '') continue`)
+  // 主键可能是 number / string，统一用空串判断避免 TS2367
+  lines.push(`      if (rawKey == null || String(rawKey) === '') continue`)
   lines.push(
     `      const key = ${keyIsNumber ? 'Number(rawKey)' : 'String(rawKey)'}`,
   )
   if (keyIsNumber) lines.push(`      if (Number.isNaN(key)) continue`)
 
+  // Map 值类型常为 VO；实体字段可空，需双重断言
+  const mapValueType = mapValueTypeFromReturnType(returnType)
+
   if (valueMaps.length === 1 && valueMaps[0]!.field === 'value') {
-    lines.push(`      out.set(key, row.${valueMaps[0]!.column})`)
+    lines.push(
+      `      out.set(key, row.${valueMaps[0]!.column} as unknown as ${mapValueType})`,
+    )
   } else {
     lines.push(`      const entry = {`)
     for (const m of valueMaps) {
@@ -289,10 +297,10 @@ function wrapMapOutput(
     lines.push(`      }`)
     if (mappedArrayFields.length) {
       lines.push(
-        `      out.set(key, coerceCommaArrayFields(entry, ${JSON.stringify(mappedArrayFields)}))`,
+        `      out.set(key, coerceCommaArrayFields(entry, ${JSON.stringify(mappedArrayFields)}) as unknown as ${mapValueType})`,
       )
     } else {
-      lines.push(`      out.set(key, entry)`)
+      lines.push(`      out.set(key, entry as unknown as ${mapValueType})`)
     }
   }
 
@@ -323,7 +331,7 @@ function tryCompilePresetCustom(
   if (name === 'count') {
     const softField = softDeleteFieldFromSql(sql)
     if (softField) {
-      return `    return this.repo.count({ where: { ${softField}: 0 } })`
+      return `    return this.repo.count({ where: { ${softField}: 0 } as any })`
     }
     return `    return this.repo.count()`
   }
@@ -336,7 +344,7 @@ function tryCompilePresetCustom(
     const softField = softDeleteFieldFromSql(sql)
     if (softField) whereParts.push(`${softField}: 0`)
     if (whereParts.length) {
-      return `    return this.repo.count({ where: { ${whereParts.join(', ')} } })`
+      return `    return this.repo.count({ where: { ${whereParts.join(', ')} } as any })`
     }
   }
 
@@ -346,12 +354,12 @@ function tryCompilePresetCustom(
     const pk = safeIdent(pkParam, 'id')
     const setMatch = sql.match(/SET\s+`([^`]+)`\s*=\s*1/i)
     const logicField = setMatch?.[1] ? snakeToCamel(setMatch[1]) : 'isDeleted'
-    return `    const result = await this.repo.update({ id: ${pk} }, { ${logicField}: 1 })
+    return `    const result = await this.repo.update({ id: ${pk} } as any, { ${logicField}: 1 } as any)
     return result.affected ?? 0`
   }
 
   if (name === 'hardDeleteById') {
-    const where = emitWhereClause(config.conditionGroups, imports)
+    const where = whereAsAny(emitWhereClause(config.conditionGroups, imports))
     if (where) {
       return `    const result = await this.repo.delete(${where})
     return result.affected ?? 0`
@@ -367,6 +375,18 @@ function emitFindOptions(parts: string[]): string {
   return `{\n      ${parts.join(',\n      ')},\n    }`
 }
 
+/** where 字面量与实体字段类型常不一致（如 softDelete: 0 vs boolean），放宽断言 */
+function whereAsAny(where: string | null): string | null {
+  if (!where) return null
+  return `${where} as any`
+}
+
+/** `Map<K, V>` → V；解析失败时回退 any */
+function mapValueTypeFromReturnType(returnType: string): string {
+  const m = returnType.match(/^Map\s*<\s*[^,>]+,\s*([\s\S]+)>$/)
+  return m?.[1]?.trim() || 'any'
+}
+
 function compileQueryMethod(
   method: ProcessorMethod,
   imports: Set<TypeOrmImport>,
@@ -376,7 +396,7 @@ function compileQueryMethod(
   const config = method.dataConfig
   const output = outputMeta(method)
   const guard = emptyInGuard(method, returnType)
-  const where = emitWhereClause(config.conditionGroups, imports)
+  const where = whereAsAny(emitWhereClause(config.conditionGroups, imports))
   const pageParam = (config.pageParam || '').trim()
   const pageExpr = pageParam ? paramAccess(pageParam) : ''
   const fields = (config.queryFields || []).filter(Boolean)
@@ -393,11 +413,9 @@ function compileQueryMethod(
         'take: pageSize',
       ]
       return {
-        body: `${guard || ''}    const pageMeta = ${pageExpr}
-    const current = Math.max(1, Number(pageMeta?.current ?? pageMeta?.page ?? 1) || 1)
-    const pageSize = Math.max(1, Math.min(200, Number(pageMeta?.pageSize ?? pageMeta?.size ?? 10) || 10))
+        body: `${guard || ''}${emitPageMetaLocals(pageExpr)}
     const [rows] = await this.repo.findAndCount(${emitFindOptions(pageParts)})
-    return rows`,
+    return rows as unknown as ${returnType}`,
         needsHelper: false,
       }
     }
@@ -414,13 +432,14 @@ ${mapped.code}`,
 
   if (output.type === 'array') {
     return {
-      body: `${guard || ''}    return this.repo.find(${emitFindOptions(baseParts)})`,
+      body: `${guard || ''}    return this.repo.find(${emitFindOptions(baseParts)}) as unknown as ${returnType}`,
       needsHelper: false,
     }
   }
 
+  // findOne 实际为 T | null；与出参/实体可空差异一并双重断言
   return {
-    body: `${guard || ''}    return this.repo.findOne(${emitFindOptions(baseParts)})`,
+    body: `${guard || ''}    return this.repo.findOne(${emitFindOptions(baseParts)}) as unknown as ${returnType}`,
     needsHelper: false,
   }
 }
@@ -487,7 +506,7 @@ function compileUpdateMethod(
 ): string {
   const config = method.dataConfig
   const output = outputMeta(method)
-  const where = emitWhereClause(config.conditionGroups, imports)
+  const where = whereAsAny(emitWhereClause(config.conditionGroups, imports))
   const sets = (config.fieldMappings || [])
     .map((m) => `${m.field.trim()}: ${mappingSourceExpr(m.column.trim())}`)
     .filter(Boolean)
@@ -497,7 +516,7 @@ function compileUpdateMethod(
     output.type === 'boolean'
       ? '(result.affected ?? 0) > 0'
       : 'result.affected ?? 0'
-  return `    const result = await this.repo.update(${whereExpr}, { ${sets} })
+  return `    const result = await this.repo.update(${whereExpr}, { ${sets} } as any)
     return ${ret}`
 }
 
@@ -507,7 +526,7 @@ function compileDeleteMethod(
 ): string {
   const config = method.dataConfig
   const output = outputMeta(method)
-  const where = emitWhereClause(config.conditionGroups, imports)
+  const where = whereAsAny(emitWhereClause(config.conditionGroups, imports))
   const whereExpr = where || '{}'
   const ret =
     output.type === 'boolean'
@@ -571,24 +590,62 @@ function compileMybatisIfTest(test: string): string {
     .join(' || ')
 }
 
-/** 将 SQL 片段中的 #{param} 换成 ?，并收集 params.push 代码 */
-function emitSqlFragmentWithParams(
-  fragment: string,
-  indent: string,
-): { sqlCode: string; pushLines: string[] } {
-  const pushLines: string[] = []
-  let sqlCode = ''
+/** pageParam 局部变量；兼容 page/size，宽类型避免 QueryPageDto 报错 */
+function emitPageMetaLocals(pageExpr: string, indent = '    '): string {
+  return (
+    `${indent}const pageMeta = ${pageExpr} as { current?: unknown; page?: unknown; pageSize?: unknown; size?: unknown }\n` +
+    `${indent}const current = Math.max(1, Number(pageMeta.current ?? pageMeta.page ?? 1) || 1)\n` +
+    `${indent}const pageSize = Math.max(1, Math.min(200, Number(pageMeta.pageSize ?? pageMeta.size ?? 10) || 10))`
+  )
+}
+
+/** 将片段中 #{param} → ?，并收集入参表达式 */
+function fragmentToSqlAndParams(fragment: string): {
+  sql: string
+  paramExprs: string[]
+} {
+  const paramExprs: string[] = []
+  let sql = ''
   const re = /#\{\s*([A-Za-z_][A-Za-z0-9_.]*)\s*\}/g
   let last = 0
   let m: RegExpExecArray | null
   while ((m = re.exec(fragment))) {
-    sqlCode += fragment.slice(last, m.index).replace(/\\/g, '\\\\').replace(/`/g, '\\`')
-    sqlCode += '?'
-    pushLines.push(`${indent}params.push(${paramAccess(m[1]!)})`)
+    sql += fragment.slice(last, m.index)
+    sql += '?'
+    paramExprs.push(paramAccess(m[1]!))
     last = m.index + m[0].length
   }
-  sqlCode += fragment.slice(last).replace(/\\/g, '\\\\').replace(/`/g, '\\`')
-  return { sqlCode, pushLines }
+  sql += fragment.slice(last)
+  return { sql: sql.replace(/\r\n/g, '\n').trim(), paramExprs }
+}
+
+/** 生成可嵌入源码的 SQL 字符串字面量 */
+function emitSqlSourceLiteral(sql: string, indent: string): string {
+  if (!sql.includes('\n') && !sql.includes('`') && !sql.includes('${')) {
+    return JSON.stringify(sql)
+  }
+  const escaped = sql.replace(/\\/g, '\\\\').replace(/`/g, '\\`').replace(/\$\{/g, '\\${')
+  const innerIndent = `${indent}  `
+  const body = escaped
+    .split('\n')
+    .map((line) => `${innerIndent}${line}`)
+    .join('\n')
+  return `\`${'\n'}${body}\n${indent}\``
+}
+
+function emitSqlBuilderCall(
+  methodName: 'test' | 'append',
+  args: { condition?: string; sql: string; paramExprs: string[] },
+  indent: string,
+): string {
+  const lit = emitSqlSourceLiteral(args.sql, indent)
+  const paramTail = args.paramExprs.length
+    ? `, ${args.paramExprs.join(', ')}`
+    : ''
+  if (methodName === 'test') {
+    return `${indent}sqlBuilder.test(${args.condition}, ${lit}${paramTail})`
+  }
+  return `${indent}sqlBuilder.append(${lit}${paramTail})`
 }
 
 function wrapCustomSqlResult(
@@ -605,11 +662,14 @@ function wrapCustomSqlResult(
   if (output.type === 'array') {
     if (commaArrayFields.length) {
       return {
-        code: `    return coerceCommaArrayRows(rows as Record<string, unknown>[], ${fieldsLit}) as ${returnType}`,
+        code: `    return coerceCommaArrayRows(rows as Record<string, unknown>[], ${fieldsLit}) as unknown as ${returnType}`,
         needsHelper: true,
       }
     }
-    return { code: `    return rows as ${returnType}`, needsHelper: false }
+    return {
+      code: `    return rows as unknown as ${returnType}`,
+      needsHelper: false,
+    }
   }
   if (output.type === 'number') {
     const col = mappings.find((m) => m.field === 'value')?.column
@@ -646,12 +706,12 @@ function wrapCustomSqlResult(
   if (commaArrayFields.length) {
     return {
       code: `    const row = (rows[0] ?? null) as Record<string, unknown> | null
-    return (row ? coerceCommaArrayFields(row, ${fieldsLit}) : null) as ${returnType}`,
+    return (row ? coerceCommaArrayFields(row, ${fieldsLit}) : null) as unknown as ${returnType}`,
       needsHelper: true,
     }
   }
   return {
-    code: `    return (rows[0] ?? null) as ${returnType}`,
+    code: `    return (rows[0] ?? null) as unknown as ${returnType}`,
     needsHelper: false,
   }
 }
@@ -661,12 +721,13 @@ function compileCustomSqlToTypeOrm(
   table: string,
   returnType: string,
   commaArrayFields: string[],
-): { body: string; needsHelper: boolean } {
+): { body: string; needsHelper: boolean; needsSqlBuilder: boolean } {
   const raw = method.dataConfig.sql?.trim()
   if (!raw) {
     return {
       body: `    throw new Error('未配置自定义 SQL')`,
       needsHelper: false,
+      needsSqlBuilder: false,
     }
   }
 
@@ -675,41 +736,100 @@ function compileCustomSqlToTypeOrm(
     .replace(/\{\s*TABLE_NAME\s*\}/gi, `\`${table}\``)
     .replace(/\r\n/g, '\n')
 
-  const lines: string[] = [
-    '    let sql = ``',
-    '    const params: unknown[] = []',
-  ]
+  type SqlPart =
+    | { kind: 'base' | 'append'; fragment: string }
+    | { kind: 'test'; test: string; fragment: string }
 
+  const parts: SqlPart[] = []
   const ifRe = /<if\s+test\s*=\s*"([^"]*)"\s*>([\s\S]*?)<\/if>/gi
   let last = 0
   let match: RegExpExecArray | null
+  let sawIf = false
   while ((match = ifRe.exec(sql))) {
-    const before = sql.slice(last, match.index)
-    if (before) {
-      const frag = emitSqlFragmentWithParams(before, '    ')
-      lines.push(`    sql += \`${frag.sqlCode}\``)
-      lines.push(...frag.pushLines)
+    const before = sql.slice(last, match.index).replace(/\s+$/, '')
+    if (before.trim()) {
+      parts.push({ kind: sawIf ? 'append' : 'base', fragment: before })
     }
-    const testExpr = compileMybatisIfTest(match[1] || '')
-    const body = match[2] || ''
-    const frag = emitSqlFragmentWithParams(body, '      ')
-    lines.push(`    if (${testExpr}) {`)
-    lines.push(`      sql += \`${frag.sqlCode}\``)
-    lines.push(...frag.pushLines)
-    lines.push(`    }`)
+    const body = (match[2] || '').trim()
+    if (body) {
+      parts.push({
+        kind: 'test',
+        test: compileMybatisIfTest(match[1] || ''),
+        fragment: body,
+      })
+    }
+    sawIf = true
     last = match.index + match[0].length
   }
-  const tail = sql.slice(last)
+  const tail = sql.slice(last).trim()
   if (tail) {
-    const frag = emitSqlFragmentWithParams(tail, '    ')
-    lines.push(`    sql += \`${frag.sqlCode}\``)
-    lines.push(...frag.pushLines)
+    parts.push({ kind: sawIf ? 'append' : 'base', fragment: tail })
+  }
+  if (!parts.length) {
+    parts.push({ kind: 'base', fragment: sql.trim() })
   }
 
-  lines.push(`    const rows = await this.repo.query(sql, params)`)
+  // 第一个非空片段作为构造参数；若以 test 开头则空 base
+  const lines: string[] = []
+  const indent = '    '
+  let baseEmitted = false
+  for (const part of parts) {
+    if (part.kind === 'base' && !baseEmitted) {
+      const { sql: baseSql, paramExprs } = fragmentToSqlAndParams(part.fragment)
+      const lit = emitSqlSourceLiteral(baseSql, indent)
+      const paramTail = paramExprs.length ? `, ${paramExprs.join(', ')}` : ''
+      lines.push(`${indent}const sqlBuilder = new SqlBuilder(${lit}${paramTail})`)
+      baseEmitted = true
+      continue
+    }
+    if (!baseEmitted) {
+      lines.push(`${indent}const sqlBuilder = new SqlBuilder()`)
+      baseEmitted = true
+    }
+    if (part.kind === 'test') {
+      const { sql: fragSql, paramExprs } = fragmentToSqlAndParams(part.fragment)
+      if (!fragSql) continue
+      lines.push(
+        emitSqlBuilderCall(
+          'test',
+          { condition: part.test, sql: fragSql, paramExprs },
+          indent,
+        ),
+      )
+      continue
+    }
+    const { sql: fragSql, paramExprs } = fragmentToSqlAndParams(part.fragment)
+    if (!fragSql) continue
+    lines.push(
+      emitSqlBuilderCall('append', { sql: fragSql, paramExprs }, indent),
+    )
+  }
+  if (!baseEmitted) {
+    lines.push(`${indent}const sqlBuilder = new SqlBuilder()`)
+  }
+
+  // 读查询一致：绑定 pageParam 后对只读 SQL 追加 LIMIT/OFFSET
+  const pageParam = (method.dataConfig.pageParam || '').trim()
+  const looksWrite = /^\s*(INSERT|UPDATE|DELETE|REPLACE)\b/i.test(
+    raw.replace(/<if[\s\S]*?<\/if>/gi, ' '),
+  )
+  if (pageParam && !looksWrite) {
+    const pageExpr = paramAccess(pageParam)
+    lines.push(...emitPageMetaLocals(pageExpr).split('\n'))
+    lines.push(
+      `${indent}sqlBuilder.limit(pageSize, (current - 1) * pageSize)`,
+    )
+  }
+
+  lines.push(`${indent}const { sql, params } = sqlBuilder.build()`)
+  lines.push(`${indent}const rows = await this.repo.query(sql, params)`)
   const wrapped = wrapCustomSqlResult(method, returnType, commaArrayFields)
   lines.push(wrapped.code)
-  return { body: lines.join('\n'), needsHelper: wrapped.needsHelper }
+  return {
+    body: lines.join('\n'),
+    needsHelper: wrapped.needsHelper,
+    needsSqlBuilder: true,
+  }
 }
 
 function compileCustomMethod(
@@ -718,9 +838,11 @@ function compileCustomMethod(
   imports: Set<TypeOrmImport>,
   returnType: string,
   commaArrayFields: string[],
-): { body: string; needsHelper: boolean } {
+): { body: string; needsHelper: boolean; needsSqlBuilder: boolean } {
   const preset = tryCompilePresetCustom(method, imports)
-  if (preset) return { body: preset, needsHelper: false }
+  if (preset) {
+    return { body: preset, needsHelper: false, needsSqlBuilder: false }
+  }
   return compileCustomSqlToTypeOrm(method, table, returnType, commaArrayFields)
 }
 
@@ -737,6 +859,7 @@ export function compileTypeOrmMethodBody(
   const config = method.dataConfig
   let body: string
   let needsCommaArrayHelper = false
+  let needsSqlBuilder = false
 
   if (config.source !== 'mysql') {
     body = `    throw new Error('暂不支持的数据源：${config.source}')`
@@ -767,6 +890,7 @@ export function compileTypeOrmMethodBody(
     )
     body = compiled.body
     needsCommaArrayHelper = compiled.needsHelper
+    needsSqlBuilder = compiled.needsSqlBuilder
   } else {
     body = `    throw new Error('不支持的操作：${config.operation}')`
   }
@@ -775,5 +899,6 @@ export function compileTypeOrmMethodBody(
     body,
     imports: [...imports],
     needsCommaArrayHelper,
+    needsSqlBuilder,
   }
 }
