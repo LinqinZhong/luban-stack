@@ -113,7 +113,7 @@ export function createDefaultPageXml(): string {
   height="match_parent"
   padding="16">
   <Text
-    text="Hello Voider"
+    text="Hello LubanStack"
     textSize="18"
     textColor="#303133"
     width="wrap_content"

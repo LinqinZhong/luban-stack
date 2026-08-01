@@ -13,6 +13,8 @@ import WorkspaceSettingsButton from '../components/editor/WorkspaceSettingsButto
 import BuildSchemeDialog from '../components/editor/BuildSchemeDialog.vue'
 import BuildSchemeIcon from '../components/icons/BuildSchemeIcon.vue'
 import HammerIcon from '../components/icons/HammerIcon.vue'
+import LubanStackLogo from '../components/icons/LubanStackLogo.vue'
+import { PRODUCT_NAME } from '../constants/brand'
 
 type BuildTargetKind = 'backend' | 'frontend'
 
@@ -183,7 +185,8 @@ function onDialogClosed() {
   <div class="layout">
     <header class="header">
       <div class="brand">
-        <span class="logo">Voider</span>
+        <LubanStackLogo class="brand-mark" :size="28" />
+        <span class="logo">{{ PRODUCT_NAME }}</span>
         <span class="title">{{ pageTitle }}</span>
       </div>
       <div class="header-actions">
@@ -318,14 +321,20 @@ function onDialogClosed() {
 .brand {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   min-width: 0;
+}
+
+.brand-mark {
+  flex-shrink: 0;
 }
 
 .logo {
   font-weight: 700;
-  font-size: 18px;
+  font-size: 17px;
+  letter-spacing: 0.01em;
   color: #303133;
+  flex-shrink: 0;
 }
 
 .title {
@@ -334,6 +343,9 @@ function onDialogClosed() {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  border-left: 1px solid #e4e7ed;
+  padding-left: 10px;
+  margin-left: 2px;
 }
 
 .header-actions {

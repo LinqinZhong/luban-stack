@@ -12,6 +12,8 @@ import {
   type ProjectMeta,
 } from '../api/projects'
 import { useProjectStore } from '../stores/project'
+import LubanStackLogo from '../components/icons/LubanStackLogo.vue'
+import { PRODUCT_NAME } from '../constants/brand'
 
 const router = useRouter()
 const projectStore = useProjectStore()
@@ -161,8 +163,11 @@ onMounted(() => {
   <div class="welcome">
     <div class="panel">
       <div class="brand">
-        <h1>Voider</h1>
-        <p>H5 低代码开发工具</p>
+        <LubanStackLogo class="brand-mark" :size="56" />
+        <div class="brand-text">
+          <h1>{{ PRODUCT_NAME }}</h1>
+          <p>H5 低代码开发工具</p>
+        </div>
       </div>
 
       <div class="actions">
@@ -288,16 +293,27 @@ onMounted(() => {
   border: 1px solid #e5e7eb;
 }
 
-.brand h1 {
-  margin: 0;
-  font-size: 42px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  color: #0f172a;
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 16px;
 }
 
-.brand p {
-  margin: 8px 0 0;
+.brand-mark {
+  flex-shrink: 0;
+}
+
+.brand-text h1 {
+  margin: 0;
+  font-size: 36px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: #0f172a;
+  line-height: 1.15;
+}
+
+.brand-text p {
+  margin: 6px 0 0;
   color: #64748b;
   font-size: 15px;
 }

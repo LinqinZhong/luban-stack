@@ -166,7 +166,7 @@ export function getDeviceInfo(options?: GetDeviceInfoOptions): DeviceInfo {
   if (explicit === 'h5') {
     return {
       statusBarHeight: EDITOR_STATUS_BAR_HEIGHT,
-      userAgent: ua || 'VoiderEditor/H5',
+      userAgent: ua || 'LubanStackEditor/H5',
       menuButton: null,
       platform: 'h5',
     }
@@ -175,7 +175,7 @@ export function getDeviceInfo(options?: GetDeviceInfoOptions): DeviceInfo {
   if (explicit === 'miniprogram') {
     return {
       statusBarHeight: EDITOR_STATUS_BAR_HEIGHT,
-      userAgent: ua || 'VoiderEditor/MiniProgram',
+      userAgent: ua || 'LubanStackEditor/MiniProgram',
       menuButton: buildEditorMenuButton(windowWidth),
       platform: 'miniprogram',
     }

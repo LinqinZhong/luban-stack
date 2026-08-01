@@ -3,7 +3,7 @@
     <template #header>关于项目</template>
 
     <el-space direction="vertical" alignment="start" :size="16">
-      <p>Voider 是一个前后端分离的本地系统项目。</p>
+      <p>LubanStack 是一个前后端分离的本地系统项目。</p>
       <el-descriptions :column="1" border>
         <el-descriptions-item label="前端">
           Vue 3 + TypeScript + Element Plus + Vite

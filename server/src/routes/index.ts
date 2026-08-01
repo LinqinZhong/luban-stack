@@ -13,7 +13,7 @@ router.use('/components', componentsRouter)
 
 router.get('/', (_req, res) => {
   res.json({
-    message: 'Voider 本地系统 API',
+    message: 'LubanStack 本地系统 API',
     version: '1.0.0',
   })
 })

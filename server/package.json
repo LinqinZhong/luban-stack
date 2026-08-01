@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "Voider 本地系统 Node.js 服务",
+  "description": "LubanStack 本地系统 Node.js 服务",
   "scripts": {
     "dev": "nodemon",
     "build": "tsc",

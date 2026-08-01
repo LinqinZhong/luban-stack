@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { useProjectStore } from '../stores/project'
 import MainLayout from '../layouts/MainLayout.vue'
+import { PRODUCT_NAME } from '../constants/brand'
 
 const router = createRouter({
   history: createWebHistory(),
@@ -39,7 +40,7 @@ router.beforeEach((to) => {
 
 router.afterEach((to) => {
   const title = to.meta.title as string | undefined
-  document.title = title ? `${title} - Voider` : 'Voider'
+  document.title = title ? `${title} - ${PRODUCT_NAME}` : PRODUCT_NAME
 })
 
 export default router

@@ -2,7 +2,7 @@
   "name": "voider-desktop",
   "version": "0.1.0",
   "private": true,
-  "description": "Voider Electron 桌面端",
+  "description": "LubanStack Electron 桌面端",
   "main": "dist/main.js",
   "scripts": {
     "postinstall": "node node_modules/electron/install.js",
@@ -26,7 +26,7 @@
   },
   "build": {
     "appId": "com.voider.desktop",
-    "productName": "Voider",
+    "productName": "LubanStack",
     "directories": {
       "output": "release"
     },

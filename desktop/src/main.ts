@@ -133,7 +133,7 @@ function createWindow(uiUrl: string): BrowserWindow {
       nodeIntegration: false,
       sandbox: false,
     },
-    title: 'Voider',
+    title: 'LubanStack',
   })
 
   win.once('ready-to-show', () => win.show())
@@ -162,7 +162,7 @@ async function boot(): Promise<void> {
   serverProcess.on('exit', (code, signal) => {
     if (quitting) return
     const detail = signal ? `signal ${signal}` : `code ${code}`
-    void dialog.showErrorBox('Voider 服务已退出', `后端进程异常结束（${detail}）`)
+    void dialog.showErrorBox('LubanStack 服务已退出', `后端进程异常结束（${detail}）`)
     app.quit()
   })
 
@@ -176,7 +176,7 @@ app.whenReady().then(() => {
   void boot().catch(async (err) => {
     stopServerProcess()
     const message = err instanceof Error ? err.message : String(err)
-    await dialog.showErrorBox('Voider 启动失败', message)
+    await dialog.showErrorBox('LubanStack 启动失败', message)
     app.quit()
   })
 })
