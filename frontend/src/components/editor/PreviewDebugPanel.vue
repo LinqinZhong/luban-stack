@@ -1,6 +1,15 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
-import { ArrowDown, Connection, Delete, EditPen, Plus, RefreshRight } from '@element-plus/icons-vue'
+import {
+  Aim,
+  ArrowDown,
+  Connection,
+  Delete,
+  Edit,
+  EditPen,
+  Plus,
+  RefreshRight,
+} from '@element-plus/icons-vue'
 import type { ComponentConfig, ComponentPropDef } from '../../types/component'
 import type { DataField, DataFieldValue, PageData } from '../../types/page-data'
 import { arrayTypeLabel } from '../../types/page-data'
@@ -51,6 +60,10 @@ const props = defineProps<{
   emitLogs?: EmitLogEntry[]
   typeLibrary?: DataTypeLibrary | null
   projectPath?: string
+  /** 页面预览中检视某组件实例时显示的标题 */
+  inspectLabel?: string
+  /** 检视中的组件 id，用于跳转编辑 */
+  inspectComponentId?: string
 }>()
 
 const emit = defineEmits<{
@@ -58,7 +71,25 @@ const emit = defineEmits<{
   'update:prop': [name: string, value: unknown]
   'update:data-field': [name: string, value: DataFieldValue]
   'clear-emit-logs': []
+  'clear-inspect': []
+  /** 击中数据池 ref：切换组件模式并检视该节点 */
+  'locate-ref': [nodePath: string]
+  /** 跳转到检视组件的编辑页 */
+  'edit-component': [componentId: string]
 }>()
+
+function locateRefField(field: DataField) {
+  const path = field.value == null ? '' : String(field.value).trim()
+  if (!path) return
+  emit('locate-ref', path)
+}
+
+/** 页面预览检视组件，或组件资源预览：展示入参区 */
+const showPropSection = computed(
+  () =>
+    Boolean(props.inspectLabel) ||
+    (props.mode === 'component' && debugTab.value === 'data'),
+)
 
 /** 组件调试：数据（入参+数据池）/ 日志（emit） */
 const debugTab = ref<'data' | 'log'>('data')
@@ -925,7 +956,7 @@ watch(
     <div class="panel-header">
       <span>调试</span>
       <el-radio-group
-        v-if="mode === 'component'"
+        v-if="mode === 'component' && !inspectLabel"
         v-model="debugTab"
         size="small"
         class="panel-tabs"
@@ -936,11 +967,40 @@ watch(
           <span v-if="emitLogs?.length" class="tab-badge">{{ emitLogs.length }}</span>
         </el-radio-button>
       </el-radio-group>
+      <el-button
+        v-else-if="inspectLabel"
+        link
+        type="primary"
+        size="small"
+        @click="emit('clear-inspect')"
+      >
+        返回页面
+      </el-button>
     </div>
 
     <div class="panel-body">
-      <!-- 组件 · 数据：入参 + 数据池 -->
-      <template v-if="mode === 'component' && debugTab === 'data'">
+      <div v-if="inspectLabel" class="inspect-banner">
+        <span class="inspect-banner-label">检视组件</span>
+        <span class="inspect-banner-name">{{ inspectLabel }}</span>
+        <el-tooltip
+          v-if="inspectComponentId"
+          content="查看组件"
+          placement="top"
+        >
+          <el-button
+            class="inspect-edit-btn"
+            type="primary"
+            link
+            size="small"
+            :icon="Edit"
+            @click="emit('edit-component', inspectComponentId)"
+          >
+            查看
+          </el-button>
+        </el-tooltip>
+      </div>
+      <!-- 组件 · 数据 / 页面检视组件：入参 -->
+      <template v-if="showPropSection">
       <div class="section">
         <div class="section-title">入参</div>
         <el-empty
@@ -1170,15 +1230,15 @@ watch(
         </div>
       </div>
 
-      <!-- 数据池：页面始终显示；组件在「数据」页 -->
+      <!-- 数据池：页面始终显示；组件在「数据」页；页面检视组件时显示该组件数据池 -->
       <div
-        v-if="mode === 'page' || debugTab === 'data'"
+        v-if="mode === 'page' || debugTab === 'data' || inspectLabel"
         class="section"
       >
         <div class="section-title row">
           <span>数据池</span>
           <el-button
-            v-if="mode === 'component'"
+            v-if="mode === 'component' || inspectLabel"
             :icon="RefreshRight"
             link
             type="primary"
@@ -1348,6 +1408,26 @@ watch(
                     form.readonly ? undefined : onDataFieldInput(form.field, $event)
                   "
                 />
+                <div
+                  v-else-if="form.field.type === 'ref'"
+                  class="ref-field-row"
+                >
+                  <el-input
+                    :model-value="
+                      form.field.value == null ? '' : String(form.field.value)
+                    "
+                    readonly
+                    placeholder="控件引用路径"
+                  />
+                  <el-tooltip content="击中：组件模式并选中该组件" placement="top">
+                    <el-button
+                      class="ref-locate-btn"
+                      :icon="Aim"
+                      :disabled="!String(form.field.value ?? '').trim()"
+                      @click="locateRefField(form.field)"
+                    />
+                  </el-tooltip>
+                </div>
                 <el-input
                   v-else
                   :model-value="
@@ -1681,6 +1761,40 @@ watch(
   border-bottom: 1px solid #ebeef5;
 }
 
+.inspect-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 12px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: linear-gradient(90deg, #eef2ff, #f5f3ff);
+  border: 1px solid #e0e7ff;
+}
+
+.inspect-banner-label {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: #6366f1;
+  font-weight: 600;
+}
+
+.inspect-banner-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: #312e81;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inspect-edit-btn {
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
 .panel-tabs {
   flex-shrink: 0;
 }
@@ -1880,6 +1994,25 @@ watch(
   flex-direction: column;
   gap: 8px;
   min-width: 0;
+}
+
+.ref-field-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.ref-field-row .el-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.ref-locate-btn {
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  padding: 0;
 }
 
 .data-field-inline-editor .object-fields,

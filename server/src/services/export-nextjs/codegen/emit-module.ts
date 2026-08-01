@@ -11,6 +11,7 @@ import {
   buildMethodIndex,
   buildProcessorMaps,
   collectExternalInjectDeps,
+  collectFlowUsesObjectMap,
   emitFlowMethodBody,
   emitMethodSignature,
   type ExternalInjectDep,
@@ -20,6 +21,7 @@ import {
   collectUsedDataMethodIds,
   emitRepositoryFile,
 } from './emit-repository.js'
+import { emitTypeOrmEntityFile } from './emit-typeorm-entity.js'
 import {
   dataTypeToTs,
   findTypeDef,
@@ -134,6 +136,12 @@ function emitServiceFile(options: {
   }
 
   const imports = typeImportLines(idToName, typeIdToGroupStem, refs)
+  const usesObjectMap = collectFlowUsesObjectMap(
+    (processor.methods ?? []).map((m) => m.flow),
+  )
+  const objectMapImport = usesObjectMap
+    ? `import { mapObjectFields } from '../../../common/object-map'\n`
+    : ''
 
   const flowCtx: FlowEmitContext = {
     ...flowCtxBase,
@@ -210,7 +218,7 @@ function emitServiceFile(options: {
 
   return `/** 业务处理器「${processor.name}」 */
 import { Injectable } from '@nestjs/common'
-${injectImports.join('\n')}${injectImports.length ? '\n' : ''}${imports ? imports + '\n' : ''}
+${injectImports.join('\n')}${injectImports.length ? '\n' : ''}${objectMapImport}${imports ? imports + '\n' : ''}
 @Injectable()
 export class ${className} {
 ${ctor}
@@ -260,6 +268,12 @@ function emitControllerFile(options: {
 
   const refs = (controller.apis ?? []).flatMap(collectApiTypeRefs)
   const imports = typeImportLines(idToName, typeIdToGroupStem, refs)
+  const usesObjectMap = collectFlowUsesObjectMap(
+    (controller.apis ?? []).map((api) => api.flow),
+  )
+  const objectMapImport = usesObjectMap
+    ? `import { mapObjectFields } from '../../../common/object-map'\n`
+    : ''
 
   const flowCtx: FlowEmitContext = {
     ...flowCtxBase,
@@ -399,7 +413,7 @@ import {
 } from '@nestjs/common'
 ${serviceImport}import { success, fail, type Result } from '../../../common/result'
 import { parseMaybeJson } from '../../../common/http'
-${imports ? imports + '\n' : ''}
+${objectMapImport}${imports ? imports + '\n' : ''}
 @Controller('${controllerPath}')
 export class ${className} {
 ${ctor}
@@ -414,6 +428,7 @@ function emitResourceModuleFile(options: {
   hasController: boolean
   hasService: boolean
   hasRepository: boolean
+  entityClassName?: string
   externalDeps: ExternalInjectDep[]
 }): string {
   const {
@@ -422,6 +437,7 @@ function emitResourceModuleFile(options: {
     hasController,
     hasService,
     hasRepository,
+    entityClassName,
     externalDeps,
   } = options
   const pascal = toPascalCase(resourceSlug)
@@ -430,6 +446,14 @@ function emitResourceModuleFile(options: {
   const controllers: string[] = []
   const providers: string[] = []
   const exportsList: string[] = []
+
+  if (hasRepository && entityClassName) {
+    imports.push(`import { TypeOrmModule } from '@nestjs/typeorm'`)
+    imports.push(
+      `import { ${entityClassName} } from './${resourceSlug}.entity'`,
+    )
+    nestImports.push(`TypeOrmModule.forFeature([${entityClassName}])`)
+  }
 
   if (hasController) {
     imports.push(
@@ -553,7 +577,8 @@ function emitEntityFile(
   dataProcessor: ServiceProcessor | null,
   typeLibrary: DataTypeLibrary,
   idToName: IdToName,
-  typeIdToGroupStem: Map<string, string>,
+  tableColumns: MysqlColumnDef[] = [],
+  typeIdToGroupStem?: Map<string, string>,
 ): string {
   if (!dataProcessor?.entityRef) {
     return `/** ${resourceSlug} entity placeholder */\nexport {}\n`
@@ -562,8 +587,15 @@ function emitEntityFile(
   if (!def) {
     return `/** ${resourceSlug} entity placeholder */\nexport {}\n`
   }
-  const stem = typeIdToGroupStem.get(def.id) || 'common'
-  return `/** ${resourceSlug} entity */\nexport type { ${def.name} } from '../../../types/${stem}'\n`
+  const tableName =
+    def.tableName?.trim() || def.name?.trim() || resourceSlug
+  return emitTypeOrmEntityFile({
+    entityDef: def,
+    tableName,
+    columns: tableColumns,
+    idToName,
+    typeIdToGroupStem,
+  })
 }
 
 export function emitServiceModules(options: {
@@ -697,6 +729,17 @@ export function emitServiceModules(options: {
         )
       : []
 
+    const tableColumns = dataP
+      ? (() => {
+          const entity = findTypeDef(typeLibrary, dataP.entityRef)
+          const tableName =
+            entity?.tableName?.trim() || entity?.name?.trim() || ''
+          return tableName
+            ? tableColumnsByName?.get(tableName) ?? []
+            : []
+        })()
+      : []
+
     if (dataP) {
       const entity = findTypeDef(typeLibrary, dataP.entityRef)
       const tableName =
@@ -749,8 +792,12 @@ export function emitServiceModules(options: {
       dataP,
       typeLibrary,
       idToName,
+      tableColumns,
       typeIdToGroupStem,
     )
+
+    const entityClassName =
+      dataP && findTypeDef(typeLibrary, dataP.entityRef)?.name?.trim()
 
     files[`${base}/${resourceSlug}.module.ts`] = emitResourceModuleFile({
       resourceSlug,
@@ -758,6 +805,7 @@ export function emitServiceModules(options: {
       hasController: Boolean(ctrl),
       hasService: Boolean(bizP),
       hasRepository: Boolean(dataP),
+      entityClassName: entityClassName || undefined,
       externalDeps,
     })
     emittedResources.push(resourceSlug)

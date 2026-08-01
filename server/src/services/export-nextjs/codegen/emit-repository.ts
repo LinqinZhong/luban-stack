@@ -14,6 +14,8 @@ import {
 import { safeIdent, toPascalCase } from './names.js'
 import { emitMethodSignature } from './emit-flow.js'
 import { methodJsDoc } from './js-comments.js'
+import { listCommaArrayFieldNames } from '../../../utils/comma-array-fields.js'
+import { compileTypeOrmMethodBody } from './compile-typeorm-method.js'
 
 function resolveTableName(
   processor: ServiceProcessor,
@@ -29,11 +31,21 @@ function resolveTableName(
   return table
 }
 
+function resolveEntityClassName(
+  processor: ServiceProcessor,
+  library: DataTypeLibrary,
+  resourceSlug: string,
+): string {
+  const entity = findTypeDef(library, processor.entityRef)
+  return entity?.name?.trim() || `${toPascalCase(resourceSlug)}Entity`
+}
+
 function typeImportLines(
   typeLibrary: DataTypeLibrary,
   idToName: IdToName,
   typeIdToGroupStem: Map<string, string>,
   refs: string[],
+  entityClassName: string,
 ): string {
   const byGroup = new Map<string, Set<string>>()
   for (const ref of refs) {
@@ -41,6 +53,7 @@ function typeImportLines(
     const name = idToName.get(ref)
     const stem = typeIdToGroupStem.get(ref)
     if (!name || !stem) continue
+    if (name === entityClassName) continue
     if (!byGroup.has(stem)) byGroup.set(stem, new Set())
     byGroup.get(stem)!.add(name)
   }
@@ -70,27 +83,18 @@ function collectRefsFromMethod(method: ProcessorMethod): string[] {
   return refs
 }
 
-function emitDataMethod(
+function emitTypeOrmMethod(
   method: ProcessorMethod,
   table: string,
   idToName: IdToName,
-): string {
+  commaArrayFields: string[],
+): { code: string; imports: string[]; needsCommaArrayHelper: boolean } {
   const name = safeIdent(method.name, 'method')
   const { params, returnType } = emitMethodSignature(method, idToName)
-  const config = method.dataConfig
-  const paramNames = (method.params ?? []).map((p) =>
-    safeIdent(p.name, 'param'),
-  )
-  const paramsObject =
-    paramNames.length === 0 ? '{}' : `{ ${paramNames.join(', ')} }`
-
-  const outputMeta = {
-    type: method.output?.type || 'json',
-    typeRef: method.output?.typeRef || '',
-    itemType: method.output?.itemType || '',
-    itemTypeRef: method.output?.itemTypeRef || '',
-    keyType: method.output?.keyType || '',
-  }
+  const compiled = compileTypeOrmMethodBody(method, table, {
+    returnType,
+    commaArrayFields,
+  })
 
   const remark = methodJsDoc(
     method.remark,
@@ -100,15 +104,15 @@ function emitDataMethod(
     })),
   )
 
-  return `${remark}  async ${name}(${params}): Promise<${returnType}> {
-    return runDataMethod({
-      table: ${JSON.stringify(table)},
-      config: ${JSON.stringify(config, null, 2)} as unknown as DataMethodConfig,
-      params: ${paramsObject},
-      output: ${JSON.stringify(outputMeta)},
-      dryRun: false,
-    }) as Promise<${returnType}>
+  const code = `${remark}  async ${name}(${params}): Promise<${returnType}> {
+${compiled.body}
   }`
+
+  return {
+    code,
+    imports: compiled.imports,
+    needsCommaArrayHelper: compiled.needsCommaArrayHelper,
+  }
 }
 
 /** 从业务流节点收集被引用的 dataMethodId（按 processorId 分组） */
@@ -160,6 +164,7 @@ export function emitRepositoryFile(options: {
     tableIndexes = [],
   } = options
   const className = `${toPascalCase(resourceSlug)}Repository`
+  const entityClassName = resolveEntityClassName(processor, typeLibrary, resourceSlug)
   const table = resolveTableName(processor, typeLibrary)
 
   const entity = findTypeDef(typeLibrary, processor.entityRef)
@@ -180,31 +185,83 @@ export function emitRepositoryFile(options: {
   })
 
   const methodsToEmit = [...usedPresets, ...customMethods]
-  const methods = methodsToEmit
-    .map((m) => emitDataMethod(m, table, idToName))
-    .join('\n\n')
+  const allTypeOrmImports = new Set<string>()
+  const methodBlocks: string[] = []
+  let needsCommaArrayHelper = false
+
+  // 出参/实体中数组字段（varchar 逗号串）合并，供 raw query / map 组装后拆分
+  const entityArrayFields = listCommaArrayFieldNames(entity)
+  const outputArrayFields = new Set<string>(entityArrayFields)
+  for (const m of methodsToEmit) {
+    for (const ref of [
+      m.output?.typeRef,
+      m.output?.itemTypeRef,
+      m.output?.itemItemTypeRef,
+    ]) {
+      if (!ref) continue
+      for (const name of listCommaArrayFieldNames(
+        findTypeDef(typeLibrary, ref),
+      )) {
+        outputArrayFields.add(name)
+      }
+    }
+  }
+  const commaArrayFields = [...outputArrayFields]
+
+  for (const m of methodsToEmit) {
+    const emitted = emitTypeOrmMethod(m, table, idToName, commaArrayFields)
+    methodBlocks.push(emitted.code)
+    for (const imp of emitted.imports) allTypeOrmImports.add(imp)
+    if (emitted.needsCommaArrayHelper) needsCommaArrayHelper = true
+  }
+
+  const methods = methodBlocks.join('\n\n')
 
   const refs = [
     processor.entityRef,
     ...methodsToEmit.flatMap(collectRefsFromMethod),
   ]
-  const imports = typeImportLines(
+  const typeImports = typeImportLines(
     typeLibrary,
     idToName,
     typeIdToGroupStem,
     refs,
+    entityClassName,
   )
+
+  const typeormImportList = ['Repository', ...allTypeOrmImports].sort()
+  const typeormImportLine = `import { ${typeormImportList.join(', ')} } from 'typeorm'`
+  const commaArrayImport = needsCommaArrayHelper
+    ? `import { coerceCommaArrayFields, coerceCommaArrayRows } from '../../../common/comma-array'\n`
+    : ''
 
   return `/** 数据处理器「${processor.name}」 */
 import { Injectable } from '@nestjs/common'
-import {
-  runDataMethod,
-  type DataMethodConfig,
-} from '../../../common/data-method'
-${imports ? imports + '\n' : ''}
+import { InjectRepository } from '@nestjs/typeorm'
+${typeormImportLine}
+${commaArrayImport}import { ${entityClassName} } from './${resourceSlug}.entity'
+${typeImports ? typeImports + '\n' : ''}
 @Injectable()
 export class ${className} {
+  constructor(
+    @InjectRepository(${entityClassName})
+    private readonly repo: Repository<${entityClassName}>,
+  ) {}
+
 ${methods || '  // no methods\n'}
 }
 `
+}
+
+/** 供模块注册 TypeOrmModule.forFeature 使用 */
+export function resolveRepositoryEntityClassName(options: {
+  resourceSlug: string
+  processor: ServiceProcessor
+  typeLibrary: DataTypeLibrary
+}): string {
+  return resolveEntityClassName(
+    options.processor,
+    options.typeLibrary,
+    options.resourceSlug,
+  )
 }

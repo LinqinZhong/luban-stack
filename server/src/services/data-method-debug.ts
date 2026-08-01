@@ -21,6 +21,11 @@ import {
 } from './backend-services.js'
 import { readDataTypeLibrary } from './data-types.js'
 import { camelToSnake, mapRowKeysToCamel } from '../utils/sql-naming.js'
+import {
+  coerceCommaArrayFields,
+  listCommaArrayFieldNames,
+  serializeCommaArrayValue,
+} from '../utils/comma-array-fields.js'
 
 function findTypeDef(
   library: DataTypeLibrary,
@@ -47,13 +52,16 @@ function quoteIdent(name: string): string {
 }
 
 function sqlLiteral(value: unknown): string {
-  if (value == null) return 'NULL'
-  if (typeof value === 'number' && Number.isFinite(value)) return String(value)
-  if (typeof value === 'boolean') return value ? '1' : '0'
-  if (typeof value === 'object') {
-    return `'${JSON.stringify(value).replace(/\\/g, '\\\\').replace(/'/g, "''")}'`
+  const normalized = serializeCommaArrayValue(value)
+  if (normalized == null) return 'NULL'
+  if (typeof normalized === 'number' && Number.isFinite(normalized)) {
+    return String(normalized)
   }
-  return `'${String(value).replace(/\\/g, '\\\\').replace(/'/g, "''")}'`
+  if (typeof normalized === 'boolean') return normalized ? '1' : '0'
+  if (typeof normalized === 'object') {
+    return `'${JSON.stringify(normalized).replace(/\\/g, '\\\\').replace(/'/g, "''")}'`
+  }
+  return `'${String(normalized).replace(/\\/g, '\\\\').replace(/'/g, "''")}'`
 }
 
 function resolveTableName(
@@ -515,6 +523,20 @@ function wrapBatchInsertOutput(
   }
 }
 
+function resolveCommaArrayFields(
+  method: ProcessorMethod,
+  library: DataTypeLibrary,
+  entityRef?: string,
+): string[] {
+  const named = leafNamedRef(method.output)
+  const fromOutput = listCommaArrayFieldNames(findTypeDef(library, named))
+  if (fromOutput.length) return fromOutput
+  if (entityRef) {
+    return listCommaArrayFieldNames(findTypeDef(library, entityRef))
+  }
+  return []
+}
+
 function wrapOutput(
   method: ProcessorMethod,
   library: DataTypeLibrary,
@@ -523,6 +545,7 @@ function wrapOutput(
 ): unknown {
   const named = leafNamedRef(method.output)
   const def = findTypeDef(library, named)
+  const arrayFields = listCommaArrayFieldNames(def)
   const mappings = (method.dataConfig?.fieldMappings ?? [])
     .map((m) => ({
       field: m.field.trim(),
@@ -542,6 +565,8 @@ function wrapOutput(
       const valueMaps = mappings.filter((m) => m.field !== 'key')
       const valueIsArray = method.output.itemType === 'array'
       const keyIsNumber = method.output.keyType === 'number'
+      const valueDef = findTypeDef(library, method.output.itemTypeRef || '')
+      const valueArrayFields = listCommaArrayFieldNames(valueDef)
       const out = new Map<string | number, unknown>()
       for (const row of rows) {
         const rawKey = row[keyMap.column]
@@ -558,7 +583,7 @@ function wrapOutput(
           for (const m of valueMaps) {
             obj[m.field] = row[m.column]
           }
-          entry = obj
+          entry = coerceCommaArrayFields(obj, valueArrayFields)
         }
         if (valueIsArray) {
           const list = (out.get(key) as unknown[] | undefined) ?? []
@@ -631,7 +656,7 @@ function wrapOutput(
       for (const m of mappings) {
         obj[m.field] = row[m.column]
       }
-      return obj
+      return coerceCommaArrayFields(obj, arrayFields)
     }
   }
 
@@ -825,9 +850,16 @@ export async function debugDataLayerMethod(payload: {
     return { sql, raw, output, dryRun: useDryRun }
   }
 
+  const commaArrayFields = resolveCommaArrayFields(
+    method,
+    typeLib,
+    processor.entityRef,
+  )
   const rows =
     config.operation === 'query' || (config.operation === 'custom' && !isWrite)
-      ? exec.rows.map((row) => mapRowKeysToCamel(row))
+      ? exec.rows.map((row) =>
+          coerceCommaArrayFields(mapRowKeysToCamel(row), commaArrayFields),
+        )
       : exec.rows
   let total = rows.length
   if (

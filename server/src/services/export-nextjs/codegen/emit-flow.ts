@@ -388,25 +388,22 @@ function emitNodeBlock(
       '_objectTarget',
     )
     const mappings = readObjectMapFieldMappings(data.fieldMappings)
-    let block =
-      `${pad}let ${targetVarName}: any;\n` +
-      `${pad}{\n` +
-      `${pad}  const _srcObj = ${sourcePath || 'undefined'};\n` +
-      `${pad}  const _objOut: Record<string, unknown> = {};\n` +
-      `${pad}  if (_srcObj && typeof _srcObj === 'object') {\n`
-    for (const m of mappings) {
-      const targetField = m.targetField.trim()
-      const sourceField = m.sourceField.trim()
-      if (!targetField || !sourceField) continue
-      block +=
-        `${pad}    if (${JSON.stringify(sourceField)} in (_srcObj as object)) {\n` +
-        `${pad}      _objOut[${JSON.stringify(targetField)}] = (_srcObj as unknown as Record<string, unknown>)[${JSON.stringify(sourceField)}];\n` +
-        `${pad}    }\n`
-    }
-    block +=
-      `${pad}  }\n` +
-      `${pad}  ${targetVarName} = _objOut;\n` +
-      `${pad}}\n`
+    const mappingEntries = mappings
+      .map((m) => {
+        const targetField = m.targetField.trim()
+        const sourceField = m.sourceField.trim()
+        if (!targetField || !sourceField) return ''
+        if (targetField === sourceField) {
+          return JSON.stringify(targetField)
+        }
+        return `[${JSON.stringify(targetField)}, ${JSON.stringify(sourceField)}]`
+      })
+      .filter(Boolean)
+      .join(`,\n${pad}  `)
+    const block =
+      `${pad}let ${targetVarName}: any = mapObjectFields(${sourcePath || 'undefined'}, [\n` +
+      `${pad}  ${mappingEntries}\n` +
+      `${pad}]);\n`
     return (
       block +
       emitNodeBlock(
@@ -475,6 +472,18 @@ function emitNodeBlock(
     level,
     nextStack,
   )
+}
+
+/** 工作流是否包含对象映射节点（用于按需 import mapObjectFields） */
+export function collectFlowUsesObjectMap(
+  flows: Array<MethodFlow | null | undefined>,
+): boolean {
+  for (const flow of flows) {
+    for (const node of flow?.nodes ?? []) {
+      if (node.kind === 'objectMap') return true
+    }
+  }
+  return false
 }
 
 export function emitFlowMethodBody(

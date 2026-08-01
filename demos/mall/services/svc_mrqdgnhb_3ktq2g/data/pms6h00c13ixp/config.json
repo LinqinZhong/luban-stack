@@ -70,7 +70,7 @@
         "conditionGroups": []
       },
       "debugParams": {
-        "goodsId": 37,
+        "goodsId": 39,
         "type": "all"
       },
       "flow": {
@@ -157,7 +157,7 @@
         "source": "mysql",
         "operation": "custom",
         "queryFields": [],
-        "sql": "SELECT id, goods_id, content, score, user_id, images, created_at\nFROM {TABLE_NAME}\nWHERE is_deleted = 0\n  AND goods_id = #{goodsId}\n<if test=\"type == 'good'\">\n  AND score >= 8\n</if>\n<if test=\"type == 'mid'\">\n  AND score >= 5 AND score < 8\n</if>\n<if test=\"type == 'bad'\">\n  AND score < 5\n</if>\nORDER BY id DESC",
+        "sql": "SELECT id, goods_id, content, score, user_id, images, created_at\nFROM {TABLE_NAME}\nWHERE is_deleted = 0\n  AND goods_id = #{goodsId}\n<if test=\"type == 'good'\">\n  AND score >= 8\n</if>\n<if test=\"type == 'mid'\">\n  AND score >= 5 AND score < 8\n</if>\n<if test=\"type == 'bad'\">\n  AND score < 5\n</if>\nORDER BY id DESC\n<if test=\"pageDto != null\">\n  LIMIT #{pageDto.pageSize} OFFSET #{pageDto.current}\n</if>\n",
         "fieldMappings": [
           {
             "field": "id",
@@ -185,7 +185,7 @@
           },
           {
             "field": "createdAt",
-            "column": "created_at"
+            "column": ""
           }
         ],
         "batchSourceParam": "",
@@ -197,7 +197,7 @@
           "current": 1,
           "pageSize": 10
         },
-        "goodsId": 37,
+        "goodsId": 39,
         "type": "all"
       },
       "flow": {

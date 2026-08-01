@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, inject, onBeforeUnmount, onMounted, provide, ref, shallowRef, watch, type ComputedRef, type CSSProperties } from 'vue'
+import { computed, inject, onBeforeUnmount, onMounted, provide, ref, shallowRef, watch, type ComputedRef, type CSSProperties, type Ref } from 'vue'
 import type { IconLibrary } from '../../types/icon-library'
 import { findIcon, iconSymbolId } from '../../types/icon-library'
 import { resolvePaletteColorValue } from '../../types/color-palette'
@@ -41,7 +41,14 @@ import {
   parseVisibilityConditions,
 } from '../../types/dynamic-styles'
 import { countEventBindings, countNodeEventBindings, INTERACTION_EVENT_KEYS } from '../../types/page-method'
-import { MODAL_HOST_KEY, MODAL_STACK_KEY } from '../../composables/useModalStack'
+import {
+  MODAL_HOST_KEY,
+  MODAL_STACK_KEY,
+  PREVIEW_INSPECT_MODE_KEY,
+  type PreviewInspectMode,
+} from '../../composables/useModalStack'
+import { OPEN_INSPECT_KEY } from '../../composables/useInspectCalloutLayout'
+import type { PreviewInspectPayload } from '../../types/preview-inspect'
 import WidgetSelectShell from './WidgetSelectShell.vue'
 import OverlayScrollPort from './OverlayScrollPort.vue'
 import SwiperPort from './SwiperPort.vue'
@@ -123,6 +130,18 @@ const props = defineProps<{
   expandRepeat?: boolean
   /** 祖先 Component 注入的插槽内容（显式下传；勿用 slotScope 名） */
   voiderSlotScope?: VoiderSlotScope | null
+  /**
+   * 当前 pageData 所属组件 id；空表示页面数据池。
+   * 供嵌套 Component 检视时回写宿主绑定。
+   */
+  hostDataOwnerComponentId?: string
+  /**
+   * 是否处于某 Component 的「定义树」内（不含插槽投影内容）。
+   * 定义树内的内层 Component 不显示检视操纵杆；插槽里的组件仍显示。
+   */
+  insideComponentDefinition?: boolean
+  /** 预览态正在检视的 Component 节点 id */
+  inspectNodeId?: string
 }>()
 
 const emit = defineEmits<{
@@ -130,6 +149,7 @@ const emit = defineEmits<{
   hover: [id: string]
   'open-repeat': [id: string]
   'open-event': [id: string]
+  'open-inspect': [payload: import('../../types/preview-inspect').PreviewInspectPayload]
   interact: [payload: PreviewInteractPayload]
   'add-window': [parentId: string]
 }>()
@@ -141,6 +161,23 @@ const canvasRuntime = inject(CANVAS_RUNTIME_KEY, null)
 const injectedComponentMap = inject(COMPONENT_RENDER_MAP_KEY, null)
 const resolvedComponentMap = computed(
   () => injectedComponentMap?.value ?? props.componentMap,
+)
+const previewInspectMode = inject<Ref<PreviewInspectMode> | null>(
+  PREVIEW_INSPECT_MODE_KEY,
+  null,
+)
+/** 直达 PageCanvas，不依赖中间节点逐级 @open-inspect */
+const openInspectDirect = inject(OPEN_INSPECT_KEY, null)
+/**
+ * 仅「页面树 / 插槽投影」中的 Component 显示检视杆。
+ * 组件定义树节点 id 含 `/c:`（见 Component 渲染 `nodeId/c:0:...`），这类内层组件不显示、也不可检视。
+ */
+const showComponentInspect = computed(
+  () =>
+    Boolean(props.interactEnabled) &&
+    previewInspectMode?.value === 'component' &&
+    !props.insideComponentDefinition &&
+    !props.nodeId.includes('/c:'),
 )
 
 function buildSlotContentMap(
@@ -315,6 +352,19 @@ const attrs = computed(() => {
 })
 const width = computed(() => parseSize(attrs.value.width, 'wrap_content'))
 const height = computed(() => parseSize(attrs.value.height, 'wrap_content'))
+
+/** 操纵杆旁名称：实例 name → 组件配置名 → componentId */
+const inspectLabel = computed(() => {
+  if (props.node.tag !== 'Component') return ''
+  return (
+    attrs.value.name?.trim() ||
+    componentDetail.value?.config.name?.trim() ||
+    componentDetail.value?.config.title?.trim() ||
+    props.node.attrs.componentId?.trim() ||
+    ''
+  )
+})
+
 const isSelected = computed(() => {
   if (!props.selectedId) return false
   // 虚拟插槽出口（Component/#slot:name）
@@ -1614,12 +1664,43 @@ function handleOpenEvent() {
   emit('open-event', props.nodeId)
 }
 
+function handleOpenInspect() {
+  const detail = componentDetail.value
+  const componentId = detail?.id?.trim() || props.node.attrs.componentId?.trim() || ''
+  if (!detail?.config || !componentId) return
+  const label =
+    detail.config.name?.trim() ||
+    props.node.attrs.name?.trim() ||
+    componentId
+  const payload: PreviewInspectPayload = {
+    nodeId: props.nodeId,
+    componentId,
+    label,
+    config: detail.config,
+    hostAttrs: { ...props.node.attrs },
+    hostDataOwnerId: props.hostDataOwnerComponentId?.trim() || '',
+  }
+  if (openInspectDirect) {
+    openInspectDirect(payload)
+    return
+  }
+  emit('open-inspect', payload)
+}
+
 function forwardOpenRepeat(id: string) {
   emit('open-repeat', id)
 }
 
 function forwardOpenEvent(id: string) {
   emit('open-event', id)
+}
+
+function forwardOpenInspect(payload: PreviewInspectPayload) {
+  if (openInspectDirect) {
+    openInspectDirect(payload)
+    return
+  }
+  emit('open-inspect', payload)
 }
 
 function forwardAddWindow(parentId: string) {
@@ -1821,6 +1902,9 @@ onBeforeUnmount(() => {
       :parent-height-definite="heightIsDefinite"
       :icon-library="iconLibrary"
       :page-data="pageData"
+      :host-data-owner-component-id="hostDataOwnerComponentId"
+      :inside-component-definition="insideComponentDefinition"
+      :inspect-node-id="inspectNodeId"
       :hidden-node-ids="hiddenNodeIds"
       :component-map="componentMap"
       :dollar-props="dollarProps"
@@ -1831,6 +1915,7 @@ onBeforeUnmount(() => {
       @hover="emit('hover', $event)"
       @open-repeat="emit('open-repeat', $event)"
       @open-event="emit('open-event', $event)"
+      @open-inspect="forwardOpenInspect"
       @interact="emit('interact', $event)"
       @add-window="emit('add-window', $event)"
     />
@@ -2103,6 +2188,9 @@ onBeforeUnmount(() => {
         :parent-height-definite="heightIsDefinite"
         :icon-library="iconLibrary"
         :page-data="slotFillPageData"
+        :host-data-owner-component-id="hostDataOwnerComponentId"
+        :inside-component-definition="false"
+        :inspect-node-id="inspectNodeId"
         :hidden-node-ids="hiddenNodeIds"
         :component-map="componentMap"
         :dollar-props="slotFillDollarProps"
@@ -2113,6 +2201,7 @@ onBeforeUnmount(() => {
         @hover="forwardHover"
         @open-repeat="forwardOpenRepeat"
         @open-event="forwardOpenEvent"
+        @open-inspect="forwardOpenInspect"
         @interact="forwardSlotInteract"
         @add-window="forwardAddWindow"
       />
@@ -2138,6 +2227,9 @@ onBeforeUnmount(() => {
         :parent-height-definite="heightIsDefinite"
         :icon-library="iconLibrary"
         :page-data="pageData"
+        :host-data-owner-component-id="hostDataOwnerComponentId"
+        :inside-component-definition="insideComponentDefinition"
+        :inspect-node-id="inspectNodeId"
         :hidden-node-ids="hiddenNodeIds"
         :component-map="componentMap"
         :dollar-props="dollarProps"
@@ -2148,6 +2240,7 @@ onBeforeUnmount(() => {
         @hover="forwardHover"
         @open-repeat="forwardOpenRepeat"
         @open-event="forwardOpenEvent"
+        @open-inspect="forwardOpenInspect"
         @interact="forwardInteract"
         @add-window="forwardAddWindow"
       />
@@ -2170,6 +2263,9 @@ onBeforeUnmount(() => {
     :extra-style="componentShellExtraStyle"
     :repeat-badge="showRepeatBadge"
     :event-badge-count="eventBadgeCount"
+    :inspect-badge="showComponentInspect"
+    :inspect-label="inspectLabel"
+    :inspect-active="inspectNodeId === nodeId"
     :visually-hidden="visuallyHidden"
     :visibility-hidden="isEditorHidden"
     :interactive="previewInteractive"
@@ -2182,6 +2278,7 @@ onBeforeUnmount(() => {
     @pointerleave="handlePointerLeave"
     @open-repeat="handleOpenRepeat"
     @open-event="handleOpenEvent"
+    @open-inspect="handleOpenInspect"
   >
     <div class="widget component-host" :style="componentStyle">
       <XmlNodeView
@@ -2198,6 +2295,9 @@ onBeforeUnmount(() => {
         :parent-height-definite="heightIsDefinite"
         :icon-library="iconLibrary"
         :page-data="componentPageData ?? pageData"
+        :host-data-owner-component-id="componentDetail?.id || hostDataOwnerComponentId"
+        :inside-component-definition="true"
+        :inspect-node-id="inspectNodeId"
         :hidden-node-ids="hiddenNodeIds"
         :component-map="componentMap"
         :dollar-props="instanceDollarProps"
@@ -2209,6 +2309,7 @@ onBeforeUnmount(() => {
         @hover="forwardHover"
         @open-repeat="forwardOpenRepeat"
         @open-event="forwardOpenEvent"
+        @open-inspect="forwardOpenInspect"
         @interact="forwardComponentInteract"
         @add-window="forwardAddWindow"
       />
@@ -2291,6 +2392,9 @@ onBeforeUnmount(() => {
             :parent-height-definite="true"
             :icon-library="iconLibrary"
             :page-data="pageData"
+            :host-data-owner-component-id="hostDataOwnerComponentId"
+            :inside-component-definition="insideComponentDefinition"
+            :inspect-node-id="inspectNodeId"
             :hidden-node-ids="hiddenNodeIds"
             :component-map="componentMap"
             :dollar-props="dollarProps"
@@ -2301,6 +2405,7 @@ onBeforeUnmount(() => {
             @hover="forwardHover"
             @open-repeat="forwardOpenRepeat"
           @open-event="forwardOpenEvent"
+          @open-inspect="forwardOpenInspect"
             @interact="forwardInteract"
             @add-window="forwardAddWindow"
           />
@@ -2363,6 +2468,9 @@ onBeforeUnmount(() => {
             :parent-height-definite="true"
             :icon-library="iconLibrary"
             :page-data="pageData"
+            :host-data-owner-component-id="hostDataOwnerComponentId"
+            :inside-component-definition="insideComponentDefinition"
+            :inspect-node-id="inspectNodeId"
             :hidden-node-ids="hiddenNodeIds"
             :component-map="componentMap"
             :dollar-props="dollarProps"
@@ -2373,6 +2481,7 @@ onBeforeUnmount(() => {
             @hover="forwardHover"
             @open-repeat="forwardOpenRepeat"
           @open-event="forwardOpenEvent"
+          @open-inspect="forwardOpenInspect"
             @interact="forwardInteract"
             @add-window="forwardAddWindow"
           />
@@ -2413,6 +2522,9 @@ onBeforeUnmount(() => {
             :extra-style="childRelativeStyle(child)"
             :icon-library="iconLibrary"
             :page-data="pageData"
+            :host-data-owner-component-id="hostDataOwnerComponentId"
+            :inside-component-definition="insideComponentDefinition"
+            :inspect-node-id="inspectNodeId"
             :hidden-node-ids="hiddenNodeIds"
             :component-map="componentMap"
             :dollar-props="dollarProps"
@@ -2423,6 +2535,7 @@ onBeforeUnmount(() => {
             @hover="forwardHover"
             @open-repeat="forwardOpenRepeat"
           @open-event="forwardOpenEvent"
+          @open-inspect="forwardOpenInspect"
             @interact="forwardInteract"
             @add-window="forwardAddWindow"
           />
@@ -2494,6 +2607,9 @@ onBeforeUnmount(() => {
         :parent-height-definite="heightIsDefinite"
         :icon-library="iconLibrary"
         :page-data="pageData"
+        :host-data-owner-component-id="hostDataOwnerComponentId"
+        :inside-component-definition="insideComponentDefinition"
+        :inspect-node-id="inspectNodeId"
         :hidden-node-ids="hiddenNodeIds"
         :component-map="componentMap"
         :dollar-props="dollarProps"
@@ -2504,6 +2620,7 @@ onBeforeUnmount(() => {
         @hover="forwardHover"
         @open-repeat="forwardOpenRepeat"
         @open-event="forwardOpenEvent"
+        @open-inspect="forwardOpenInspect"
         @interact="forwardInteract"
         @add-window="forwardAddWindow"
       />
@@ -2572,6 +2689,9 @@ onBeforeUnmount(() => {
           :parent-height-definite="heightIsDefinite"
           :icon-library="iconLibrary"
           :page-data="pageData"
+          :host-data-owner-component-id="hostDataOwnerComponentId"
+          :inside-component-definition="insideComponentDefinition"
+          :inspect-node-id="inspectNodeId"
           :hidden-node-ids="hiddenNodeIds"
           :component-map="componentMap"
           :dollar-props="dollarProps"
@@ -2582,6 +2702,7 @@ onBeforeUnmount(() => {
           @hover="forwardHover"
           @open-repeat="forwardOpenRepeat"
           @open-event="forwardOpenEvent"
+          @open-inspect="forwardOpenInspect"
           @interact="forwardInteract"
           @add-window="forwardAddWindow"
         />

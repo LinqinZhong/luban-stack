@@ -1,0 +1,12 @@
+{
+  "fields": [
+    {
+      "name": "score",
+      "type": "number",
+      "remark": "",
+      "value": 0,
+      "binding": "computed",
+      "computeBody": "// 可直接使用同级数据池字段名作为变量（无需形参）\n// return 的值即为该字段的计算值\nreturn $props.score\n"
+    }
+  ]
+}

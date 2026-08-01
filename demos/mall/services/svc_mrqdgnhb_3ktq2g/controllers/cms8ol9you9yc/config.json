@@ -57,7 +57,7 @@
       "requireAuth": false,
       "scope": "public",
       "debugParams": {
-        "goodsId": 37,
+        "goodsId": 39,
         "page": {
           "current": 1,
           "pageSize": 4

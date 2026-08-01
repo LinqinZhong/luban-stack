@@ -1,0 +1,66 @@
+{
+  "name": "商品页评论卡片",
+  "title": "商品页评论卡片",
+  "width": "match_parent",
+  "height": "wrap_content",
+  "props": [
+    {
+      "name": "avatar",
+      "type": "string",
+      "remark": "头像",
+      "defaultValue": "",
+      "twoWay": false,
+      "required": true
+    },
+    {
+      "name": "nickname",
+      "type": "string",
+      "remark": "昵称",
+      "defaultValue": "",
+      "twoWay": false,
+      "required": true
+    },
+    {
+      "name": "score",
+      "type": "number",
+      "remark": "评分",
+      "defaultValue": 0,
+      "twoWay": false,
+      "required": true
+    },
+    {
+      "name": "content",
+      "type": "string",
+      "remark": "内容",
+      "defaultValue": "",
+      "twoWay": false,
+      "required": true
+    },
+    {
+      "name": "time",
+      "type": "datetime",
+      "remark": "时间",
+      "defaultValue": "",
+      "twoWay": false,
+      "required": true
+    },
+    {
+      "name": "images",
+      "type": "array",
+      "remark": "图片",
+      "defaultValue": [],
+      "twoWay": false,
+      "required": true,
+      "itemType": "json",
+      "itemTypeRef": "type_common_URI"
+    }
+  ],
+  "events": [],
+  "exposedMethods": [],
+  "debugProps": {
+    "nickname": "aazaa",
+    "score": 8,
+    "time": "2026-07-28 00:00:00",
+    "content": "好吃阿萨大大萨达萨达阿三大苏打啊啊实打实大苏打实打实大苏打啊实打实大苏打阿三大苏打撒打算"
+  }
+}

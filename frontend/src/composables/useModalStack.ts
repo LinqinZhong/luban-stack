@@ -20,6 +20,11 @@ export type CanvasToolMode = 'select' | 'measure'
 export const CANVAS_TOOL_MODE_KEY: InjectionKey<Ref<CanvasToolMode>> =
   Symbol('voiderCanvasToolMode')
 
+/** 预览检视：纯净模式不显示组件操纵杆；组件模式显示 */
+export type PreviewInspectMode = 'clean' | 'component'
+export const PREVIEW_INSPECT_MODE_KEY: InjectionKey<Ref<PreviewInspectMode>> =
+  Symbol('voiderPreviewInspectMode')
+
 /**
  * 页面级 Modal 堆栈：同一时刻仅栈顶可见；
  * open 会将同名项移到栈顶（其余层暂隐，关闭时可恢复）。

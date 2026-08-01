@@ -48,11 +48,8 @@ export async function scaffoldNestJsFiles(
   const includeOss = ctx.includeOss !== false
   const files: Record<string, string> = {}
   const pkgName = slugify(ctx.projectName)
-  const templateReads = [
-    readTemplate('data-method.ts'),
-    readTemplate('db.ts'),
-  ] as const
-  const [dataMethodTpl, dbTpl, ossTpl] = await Promise.all([
+  const templateReads = [readTemplate('db.ts')] as const
+  const [dbTpl, ossTpl] = await Promise.all([
     ...templateReads,
     includeOss ? readTemplate('oss.ts') : Promise.resolve(''),
   ])
@@ -74,10 +71,12 @@ export async function scaffoldNestJsFiles(
         '@nestjs/common': '^11.0.1',
         '@nestjs/core': '^11.0.1',
         '@nestjs/platform-express': '^11.0.1',
+        '@nestjs/typeorm': '^11.0.0',
         dotenv: '^16.4.7',
         mysql2: '^3.23.0',
         'reflect-metadata': '^0.2.2',
         rxjs: '^7.8.1',
+        typeorm: '^0.3.26',
       },
       devDependencies: {
         '@nestjs/cli': '^11.0.0',
@@ -171,7 +170,7 @@ dist
 src/
   main.ts / app.module.ts
   modules/{服务}/{资源}/
-  common/                  # db、result、oss、data-method
+  common/                  # db、result、oss、object-map
   types/
 config/
   routes-manifest.json     # 路由清单（非密钥）
@@ -257,10 +256,42 @@ bootstrap()
   ].join(',\n    ')
 
   files['src/app.module.ts'] = `import { Module } from '@nestjs/common'
+import { TypeOrmModule } from '@nestjs/typeorm'
 ${moduleImports}${includeOss ? `\nimport { OssModule } from './modules/oss/oss.module'` : ''}
+
+function readMysqlConfig() {
+  const host =
+    process.env.MYSQL_HOST?.trim() ||
+    process.env.MYSQL_HOST_1?.trim() ||
+    ''
+  const port = Number(process.env.MYSQL_PORT || process.env.MYSQL_PORT_1) || 3306
+  const username =
+    process.env.MYSQL_USER?.trim() ||
+    process.env.MYSQL_USER_1?.trim() ||
+    ''
+  const password =
+    process.env.MYSQL_PASSWORD ?? process.env.MYSQL_PASSWORD_1 ?? ''
+  const database =
+    process.env.MYSQL_DATABASE?.trim() ||
+    process.env.MYSQL_DATABASE_1?.trim() ||
+    ''
+  return { host, port, username, password, database }
+}
+
+const mysql = readMysqlConfig()
 
 @Module({
   imports: [
+    TypeOrmModule.forRoot({
+      type: 'mysql',
+      host: mysql.host,
+      port: mysql.port,
+      username: mysql.username,
+      password: mysql.password,
+      database: mysql.database,
+      autoLoadEntities: true,
+      synchronize: false,
+    }),
     ${moduleList}
   ],
 })
@@ -280,6 +311,69 @@ export function success<T>(data: T): Result<T> {
 
 export function fail(message: string, code = 500): Result<null> {
   return { code, message, error: message, data: null }
+}
+`
+
+  files['src/common/object-map.ts'] = `export type ObjectFieldMapping =
+  | string
+  | readonly [target: string, source: string]
+
+/** 按字段映射从源对象提取属性（源字段不存在则跳过；字段名相同时传字符串即可） */
+export function mapObjectFields(
+  src: unknown,
+  mappings: ReadonlyArray<ObjectFieldMapping>,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {}
+  if (!src || typeof src !== 'object' || Array.isArray(src)) return out
+  const rec = src as Record<string, unknown>
+  for (const entry of mappings) {
+    const target = typeof entry === 'string' ? entry : entry[0]
+    const source = typeof entry === 'string' ? entry : entry[1]
+    if (!target || !source) continue
+    if (source in (src as object)) {
+      out[target] = rec[source]
+    }
+  }
+  return out
+}
+`
+
+  files['src/common/comma-array.ts'] = `/** varchar 逗号串 ↔ 字符串数组（实体字段类型为数组时使用） */
+export function coerceCommaArrayValue(value: unknown): unknown {
+  if (value == null) return value
+  if (Array.isArray(value)) return value
+  if (typeof value === 'string') {
+    if (!value) return []
+    return value
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean)
+  }
+  return value
+}
+
+export function coerceCommaArrayFields<T extends Record<string, unknown>>(
+  row: T,
+  fieldNames: readonly string[],
+): T {
+  if (!fieldNames.length) return row
+  const out = { ...row } as T
+  for (const name of fieldNames) {
+    if (name in out) {
+      ;(out as Record<string, unknown>)[name] = coerceCommaArrayValue(
+        (out as Record<string, unknown>)[name],
+      )
+    }
+  }
+  return out
+}
+
+export function coerceCommaArrayRows<T extends Record<string, unknown>>(
+  rows: T[],
+  fieldNames: readonly string[],
+): T[] {
+  if (!fieldNames.length) return rows
+  return rows.map((row) => coerceCommaArrayFields(row, fieldNames))
 }
 `
 
@@ -303,7 +397,6 @@ export function fail(message: string, code = 500): Result<null> {
 
   files['src/common/db.ts'] = dbTpl
 
-  files['src/common/data-method.ts'] = dataMethodTpl
   if (includeOss) {
     files['src/common/oss.ts'] = ossTpl
 

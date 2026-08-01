@@ -8,9 +8,16 @@ import {
   createModalStack,
   MODAL_HOST_KEY,
   MODAL_STACK_KEY,
+  PREVIEW_INSPECT_MODE_KEY,
   type CanvasToolMode,
   type ModalStackApi,
+  type PreviewInspectMode,
 } from '../../composables/useModalStack'
+import {
+  INSPECT_HOST_KEY,
+  OPEN_INSPECT_KEY,
+  PHONE_FRAME_KEY,
+} from '../../composables/useInspectCalloutLayout'
 import { CANVAS_RUNTIME_KEY } from '../../composables/useCanvasRuntime'
 import { COMPONENT_RENDER_MAP_KEY } from '../../composables/useComponentRenderMap'
 import { EDITOR_MENU_BUTTON, getDeviceInfo } from '../../utils/device-info'
@@ -74,6 +81,8 @@ const props = defineProps<{
   statusBarNavigationBar?: boolean
   /** 标题栏文案（页面 title） */
   navigationBarTitle?: string
+  /** 预览态正在检视的 Component 节点 id */
+  inspectNodeId?: string
 }>()
 
 const emit = defineEmits<{
@@ -83,6 +92,9 @@ const emit = defineEmits<{
   delete: []
   'open-repeat': [id: string]
   'open-event': [id: string]
+  'open-inspect': [
+    payload: import('../../types/preview-inspect').PreviewInspectPayload,
+  ]
   'add-window': [parentId: string]
   interact: [payload: import('../../utils/event-runtime').PreviewInteractPayload]
   contextmenu: [payload: { nodeId: string; x: number; y: number }]
@@ -105,16 +117,26 @@ function handleWidgetContextMenu(event: MouseEvent) {
 const fallbackModalStack = createModalStack()
 const modalHostRef = ref<HTMLElement | null>(null)
 const badgeHostRef = ref<HTMLElement | null>(null)
+const inspectHostRef = ref<HTMLElement | null>(null)
+const phoneRef = ref<HTMLElement | null>(null)
 /** 选中工具 / 测量工具 */
 const toolMode = ref<CanvasToolMode>('select')
 
 /** 画布场景：H5 / 小程序 */
 const scene = defineModel<'h5' | 'miniprogram'>('scene', { default: 'h5' })
+/** 预览检视：纯净 / 组件（仅预览态使用） */
+const inspectMode = defineModel<PreviewInspectMode>('inspectMode', {
+  default: 'clean',
+})
 
 provide(MODAL_STACK_KEY, props.modalStack ?? fallbackModalStack)
 provide(MODAL_HOST_KEY, modalHostRef)
 provide(BADGE_HOST_KEY, badgeHostRef)
+provide(INSPECT_HOST_KEY, inspectHostRef)
+provide(PHONE_FRAME_KEY, phoneRef)
+provide(OPEN_INSPECT_KEY, (payload) => emit('open-inspect', payload))
 provide(CANVAS_TOOL_MODE_KEY, toolMode)
+provide(PREVIEW_INSPECT_MODE_KEY, inspectMode)
 provide(
   COMPONENT_RENDER_MAP_KEY,
   computed(() => props.componentMap),
@@ -676,8 +698,6 @@ function handleStageClick(event: MouseEvent) {
   emit('select', '')
 }
 
-/** ??????????????????????????? */
-const phoneRef = ref<HTMLElement | null>(null)
 const touchCursorVisible = ref(false)
 const touchCursorPressed = ref(false)
 const touchCursorPos = ref({ x: 0, y: 0 })
@@ -737,6 +757,7 @@ watch(
 
 /** 底部悬浮模式 tab 占用高度（含间距），初始适配时避开 */
 const BOTTOM_UI_SAFE = 56
+/** 适配/重置视图边距（与组件检视留白无关，避免重置时被压到很小） */
 const STAGE_PAD = 24
 
 function fitView() {
@@ -955,6 +976,7 @@ watch(
         }"
         :style="phoneFitContent ? phoneSlotStyle : undefined"
       >
+        <div class="phone-shell">
         <div
           ref="phoneRef"
           class="phone"
@@ -1075,7 +1097,7 @@ watch(
           <XmlNodeView
             :node="parsed.root"
             :node-id="rootId"
-            :selected-id="selectable ? selectedId : ''"
+            :selected-id="selectable ? selectedId : inspectNodeId || ''"
             :hovered-id="hoveredNodeId"
             :selectable="selectable"
             :interact-enabled="!selectable"
@@ -1086,11 +1108,13 @@ watch(
             :dollar-props="dollarProps"
             :route-params="routeParams"
             :preview-lifecycle-gate="previewLifecycleGate"
+            :inspect-node-id="inspectNodeId"
             is-root
             @select="emit('select', $event)"
             @hover="handleHover"
             @open-repeat="emit('open-repeat', $event)"
             @open-event="emit('open-event', $event)"
+            @open-inspect="emit('open-inspect', $event)"
             @add-window="emit('add-window', $event)"
             @interact="emit('interact', $event)"
           />
@@ -1102,7 +1126,6 @@ watch(
           aria-hidden="true"
         />
         <div
-          v-if="selectable"
           ref="badgeHostRef"
           class="phone-badge-host"
         >
@@ -1156,8 +1179,16 @@ watch(
           aria-hidden="true"
         />
       </div>
+        </div>
       </div>
     </div>
+
+    <!-- 挂在 stage 层，避免被右侧工具条盖住导致点不中 -->
+    <div
+      v-show="!selectable && inspectMode === 'component'"
+      ref="inspectHostRef"
+      class="stage-inspect-host"
+    />
 
     <div
       v-if="alignGuides.length"
@@ -1229,6 +1260,45 @@ watch(
           @click="scene = tab.key"
         >
           {{ tab.label }}
+        </button>
+      </div>
+      <div
+        v-if="!selectable"
+        class="scene-tabs tool-tabs"
+        role="tablist"
+        aria-label="预览检视模式"
+      >
+        <button
+          type="button"
+          role="tab"
+          class="scene-tab tool-tab"
+          :class="{ active: inspectMode === 'clean' }"
+          :aria-selected="inspectMode === 'clean'"
+          title="纯净模式"
+          @click="inspectMode = 'clean'"
+        >
+          <svg class="tool-icon" viewBox="0 0 16 16" aria-hidden="true">
+            <path
+              fill="currentColor"
+              d="M8 2.2c3.6 0 6.5 2.6 7.2 5.8-.7 3.2-3.6 5.8-7.2 5.8S1.5 11.2.8 8C1.5 4.8 4.4 2.2 8 2.2Zm0 1.5c-2.7 0-5 1.9-5.6 4.3.6 2.4 2.9 4.3 5.6 4.3s5-1.9 5.6-4.3C13 5.6 10.7 3.7 8 3.7Zm0 1.6a2.7 2.7 0 1 1 0 5.4 2.7 2.7 0 0 1 0-5.4Zm0 1.5a1.2 1.2 0 1 0 0 2.4 1.2 1.2 0 0 0 0-2.4Z"
+            />
+          </svg>
+        </button>
+        <button
+          type="button"
+          role="tab"
+          class="scene-tab tool-tab"
+          :class="{ active: inspectMode === 'component' }"
+          :aria-selected="inspectMode === 'component'"
+          title="组件模式"
+          @click="inspectMode = 'component'"
+        >
+          <svg class="tool-icon" viewBox="0 0 16 16" aria-hidden="true">
+            <path
+              fill="currentColor"
+              d="M6.2 1.4h3.6l1.2 1.2v2.4H14l1.2 1.2v3.6L14 10.8h-2.4V14L10.4 15.2H6.8L5.6 14v-3.2H3.2L2 9.6V6l1.2-1.2h2.4V2.6L6.2 1.4Zm.6 1.5v2.5H4.2v2.8h2.6v2.5h2.4v-2.5h2.6V5.4H9.2V2.9H6.8Z"
+            />
+          </svg>
         </button>
       </div>
       <span
@@ -1306,6 +1376,32 @@ watch(
   display: contents;
 }
 
+/* 与原先 .phone 作为 stage-world 子项时一致：占满高度，否则内部 flex:1 页面层会塌成 0 */
+.phone-shell {
+  position: relative;
+  flex-shrink: 0;
+  height: 100%;
+  box-sizing: border-box;
+  overflow: visible;
+}
+
+.phone-slot.is-framed .phone-shell {
+  width: 100%;
+  height: 100%;
+}
+
+.stage-inspect-host {
+  position: absolute;
+  inset: 0;
+  z-index: 7;
+  pointer-events: none;
+  overflow: visible;
+}
+
+.stage-inspect-host :deep(.inspect-callout) {
+  pointer-events: auto;
+}
+
 .phone-slot.center-x {
   justify-content: center;
 }
@@ -1346,10 +1442,16 @@ watch(
   right: 16px;
   /* 避开底部悬浮模式 tab */
   bottom: 64px;
-  z-index: 2;
+  /* 低于检视层；空白处穿透，避免挡住操纵杆 */
+  z-index: 6;
   display: flex;
   align-items: center;
   gap: 8px;
+  pointer-events: none;
+}
+
+.stage-status > * {
+  pointer-events: auto;
 }
 
 .scene-tabs {

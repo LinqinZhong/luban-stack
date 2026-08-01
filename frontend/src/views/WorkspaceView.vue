@@ -189,6 +189,7 @@ import {
   setWidgetClipboard,
 } from '../utils/widget-clipboard'
 import { parsePageXml } from '../utils/xml'
+import { resolveRefTargetNode } from '../utils/widget-ref'
 import {
   isSlotOutletNodeId,
   parseSlotOutletNodeId,
@@ -363,6 +364,18 @@ const previewToast = ref<{ message: string; id: number } | null>(null)
 let previewToastTimer: ReturnType<typeof setTimeout> | null = null
 /** 组件预览：调试面板覆盖的 $props */
 const previewPropOverrides = ref<Record<string, unknown>>({})
+/** 页面预览：检视 Component 实例时的入参覆盖（按节点 path） */
+const previewInstancePropOverrides = ref<Record<string, Record<string, unknown>>>({})
+/** 页面预览：当前检视的组件实例 */
+const previewInspectTarget = ref<import('../types/preview-inspect').PreviewInspectPayload | null>(
+  null,
+)
+/** 预览检视模式：纯净 / 组件 */
+const previewInspectMode = ref<'clean' | 'component'>('clean')
+
+watch(previewInspectMode, (mode) => {
+  if (mode === 'clean') previewInspectTarget.value = null
+})
 const previewEmitLogs = ref<EmitLogEntry[]>([])
 let previewEmitLogSeq = 0
 /** 预览态左侧运行日志（错误/警告，含位置） */
@@ -525,6 +538,9 @@ function resetPreviewRuntime() {
     previewRuntimeData.value = null
     previewComponentMap.value = null
     previewPropOverrides.value = {}
+    previewInstancePropOverrides.value = {}
+    previewInspectTarget.value = null
+    previewInspectMode.value = 'clean'
     previewEmitLogs.value = []
     previewRuntimeLogs.value = []
     return
@@ -537,6 +553,9 @@ function resetPreviewRuntime() {
   previewPropOverrides.value = isComponentResource.value
     ? restoreComponentDebugProps()
     : {}
+  previewInstancePropOverrides.value = {}
+  previewInspectTarget.value = null
+  previewInspectMode.value = 'clean'
   previewEmitLogs.value = []
   previewRuntimeLogs.value = []
 }
@@ -547,6 +566,9 @@ function clearPreviewRuntime() {
   previewPropOverrides.value = isComponentResource.value
     ? restoreComponentDebugProps()
     : {}
+  previewInstancePropOverrides.value = {}
+  previewInspectTarget.value = null
+  previewInspectMode.value = 'clean'
   previewEmitLogs.value = []
   previewRuntimeLogs.value = []
 }
@@ -597,6 +619,164 @@ const editorDollarProps = computed(() => {
 })
 
 const previewDebugDollarProps = computed(() => editorDollarPropsRaw.value ?? {})
+
+const previewInspectNodeId = computed(
+  () => previewInspectTarget.value?.nodeId ?? '',
+)
+
+/** 调试面板：检视组件入参 / 组件资源入参 */
+const previewPanelPropValues = computed(() => {
+  const target = previewInspectTarget.value
+  if (!target) return previewDebugDollarProps.value
+  const hostOwner = target.hostDataOwnerId.trim()
+  const hostData = hostOwner
+    ? canvasComponentMap.value[hostOwner]?.data
+    : resolvedPageData.value
+  const base = resolveComponentInstanceDollarProps({
+    config: target.config,
+    hostAttrs: target.hostAttrs,
+    pageData: hostData ?? { fields: [] },
+    routeParams: routeParams.value,
+    projectPath: projectStore.path,
+  })
+  const overrides = previewInstancePropOverrides.value[target.nodeId] ?? {}
+  return { ...base, ...overrides }
+})
+
+/** 调试面板：检视组件数据池 / 页面或组件资源数据池 */
+const previewPanelPageData = computed(() => {
+  const target = previewInspectTarget.value
+  if (!target) return resolvedPageData.value
+  const raw = canvasComponentMap.value[target.componentId]?.data
+  if (!raw) return resolvedPageData.value
+  return resolveComputedPageData(raw, {
+    getDeviceInfo: previewGetDeviceInfo,
+    dollarProps: previewPanelPropValues.value,
+    colorPalette: colorPalette.value,
+  })
+})
+
+const previewPanelMode = computed<'page' | 'component'>(() => {
+  if (previewInspectTarget.value) return 'component'
+  return isComponentResource.value ? 'component' : 'page'
+})
+
+const previewPanelConfig = computed(
+  () =>
+    previewInspectTarget.value?.config ??
+    activeComponent.value?.config ??
+    null,
+)
+
+function handlePreviewOpenInspect(
+  payload: import('../types/preview-inspect').PreviewInspectPayload,
+) {
+  if (
+    previewInspectTarget.value?.nodeId === payload.nodeId
+  ) {
+    previewInspectTarget.value = null
+    return
+  }
+  previewInspectTarget.value = payload
+}
+
+function clearPreviewInspect() {
+  previewInspectTarget.value = null
+}
+
+/** 从预览检视跳转到该组件的编辑页 */
+async function handleEditInspectedComponent(componentId: string) {
+  const id = componentId.trim()
+  if (!id) {
+    ElMessage.warning('组件 ID 为空')
+    return
+  }
+  clearPreviewInspect()
+  previewInspectMode.value = 'clean'
+  setWorkspaceMode('edit')
+  await openComponent(id)
+}
+
+/** 数据池 ref「击中」：切到组件模式并检视对应 Component */
+function handleLocateRef(refPath: string) {
+  const path = refPath.trim()
+  if (!path) {
+    ElMessage.warning('引用路径为空')
+    return
+  }
+
+  const inspecting = previewInspectTarget.value
+  // 当前在看某组件数据池时，ref 相对该组件 XML；否则相对页面/正在编辑的组件文档
+  const scopeXml = inspecting
+    ? canvasComponentMap.value[inspecting.componentId]?.xml
+    : activeDoc.value?.xml
+  const resolved = resolveRefTargetNode(scopeXml, path)
+  if (!resolved) {
+    ElMessage.warning('未找到引用对应的节点')
+    return
+  }
+  if (resolved.node.tag !== 'Component') {
+    ElMessage.warning('引用目标不是组件节点')
+    return
+  }
+  const componentId = resolved.node.attrs.componentId?.trim() || ''
+  const detail = componentId ? canvasComponentMap.value[componentId] : null
+  if (!detail?.config || !componentId) {
+    ElMessage.warning('组件未加载或缺少配置')
+    return
+  }
+
+  const nodeId = inspecting
+    ? `${inspecting.nodeId}/c:${resolved.path}`
+    : resolved.path
+
+  previewInspectMode.value = 'component'
+  previewInspectTarget.value = {
+    nodeId,
+    componentId: detail.id,
+    label:
+      resolved.node.attrs.name?.trim() ||
+      detail.config.name?.trim() ||
+      detail.config.title?.trim() ||
+      componentId,
+    config: detail.config,
+    hostAttrs: { ...resolved.node.attrs },
+    hostDataOwnerId: inspecting?.componentId?.trim() || '',
+  }
+}
+
+function handlePreviewPanelPropUpdate(name: string, value: unknown) {
+  const target = previewInspectTarget.value
+  if (!target) {
+    handlePreviewPropUpdate(name, value)
+    return
+  }
+  previewInstancePropOverrides.value = {
+    ...previewInstancePropOverrides.value,
+    [target.nodeId]: {
+      ...(previewInstancePropOverrides.value[target.nodeId] ?? {}),
+      [name]: value,
+    },
+  }
+  applyPreviewUpdateProps(name, value, {
+    componentId: target.componentId,
+    hostAttrs: target.hostAttrs,
+    hostDataOwnerId: target.hostDataOwnerId,
+    config: target.config,
+  })
+}
+
+function handlePreviewPanelDataField(
+  name: string,
+  value: import('../types/page-data').DataFieldValue,
+) {
+  const target = previewInspectTarget.value
+  if (target?.componentId) {
+    applyComponentPreviewSetData(target.componentId, name, value)
+    return
+  }
+  applyPreviewSetData(name, value)
+}
 
 const canPreviewGoBack = computed(
   () => workspaceMode.value === 'preview' && pageHistory.value.length > 0,
@@ -4397,6 +4577,7 @@ watch(
           v-model:pan-y="canvasPanY"
           v-model:zoom="canvasZoom"
           v-model:scene="canvasScene"
+          v-model:inspect-mode="previewInspectMode"
           :modal-stack="modalStack"
           :xml="activeDoc.xml"
           :canvas-width="canvasFrameWidth"
@@ -4417,6 +4598,7 @@ watch(
           :route-params="routeParams"
           :project-path="projectStore.path || undefined"
           :preview-lifecycle-gate="previewLifecycleGate"
+          :inspect-node-id="previewInspectNodeId"
           :hidden-node-ids="isEditMode ? editorHiddenNodeIds : undefined"
           :toast="workspaceMode === 'preview' ? previewToast : null"
           :show-device-chrome="!isComponentResource"
@@ -4429,6 +4611,7 @@ watch(
           @select="selectedNodeId = $event"
           @open-repeat="handleOpenRepeatConfig"
           @open-event="handleOpenEventConfig"
+          @open-inspect="handlePreviewOpenInspect"
           @add-window="handleAddMultiWindow"
           @interact="handlePreviewInteract"
           @add="openAddWidgetDialog"
@@ -4509,17 +4692,22 @@ watch(
     />
     <PreviewDebugPanel
       v-else-if="isFrontendNav && workspaceMode === 'preview' && activeDoc"
-      :mode="isComponentResource ? 'component' : 'page'"
-      :config="activeComponent?.config"
-      :prop-values="previewDebugDollarProps"
-      :page-data="resolvedPageData"
+      :mode="previewPanelMode"
+      :config="previewPanelConfig"
+      :prop-values="previewPanelPropValues"
+      :page-data="previewPanelPageData"
+      :inspect-label="previewInspectTarget?.label"
+      :inspect-component-id="previewInspectTarget?.componentId"
       :emit-logs="previewEmitLogs"
       :type-library="dataTypeLibrary"
       :project-path="projectStore.path || undefined"
       @refresh="handlePreviewRefresh"
-      @update:prop="handlePreviewPropUpdate"
-      @update:data-field="applyPreviewSetData"
+      @update:prop="handlePreviewPanelPropUpdate"
+      @update:data-field="handlePreviewPanelDataField"
       @clear-emit-logs="previewEmitLogs = []"
+      @clear-inspect="clearPreviewInspect"
+      @locate-ref="handleLocateRef"
+      @edit-component="handleEditInspectedComponent"
     />
     <DataMethodDebugPanel
       v-else-if="isBackendNav && backendServiceLayer === 'data'"

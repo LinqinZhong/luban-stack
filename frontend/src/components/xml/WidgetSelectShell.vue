@@ -12,6 +12,14 @@ import {
 } from 'vue'
 import { BADGE_HOST_KEY, CANVAS_TOOL_MODE_KEY, type CanvasToolMode } from '../../composables/useModalStack'
 import {
+  INSPECT_HOST_KEY,
+  PHONE_FRAME_KEY,
+  getInspectButtonY,
+  removeInspectCallout,
+  subscribeInspectLayout,
+  upsertInspectCallout,
+} from '../../composables/useInspectCalloutLayout'
+import {
   hasMargin,
   marginStyle,
   marginValues,
@@ -20,6 +28,7 @@ import {
 } from '../../utils/xml'
 import RepeatBadge from './RepeatBadge.vue'
 import EventBadge from './EventBadge.vue'
+import InspectBadge from './InspectBadge.vue'
 
 const props = defineProps<{
   selected?: boolean
@@ -37,6 +46,12 @@ const props = defineProps<{
   repeatBadge?: boolean
   /** 编辑模式下，已绑定事件方法的角标数量 */
   eventBadgeCount?: number
+  /** 预览态：组件旁显示调试操纵杆 */
+  inspectBadge?: boolean
+  /** 预览态：操纵杆旁显示的组件名 */
+  inspectLabel?: string
+  /** 预览态：当前正在检视该组件 */
+  inspectActive?: boolean
   /** 类似 v-show：保留节点但隐藏（不占位，display:none） */
   visuallyHidden?: boolean
   /**
@@ -71,6 +86,7 @@ const emit = defineEmits<{
   mouseenter: []
   'open-repeat': []
   'open-event': []
+  'open-inspect': []
 }>()
 
 const matchParentWidth = computed(() => props.width === 'match_parent')
@@ -300,53 +316,152 @@ const showMarginFrame = computed(
   () => (props.selected || props.hovered) && hasMargin(props.marginAttrs),
 )
 
-const showContentFrame = computed(() => props.selected || props.hovered)
+const showContentFrame = computed(
+  () => props.selected || props.hovered || props.inspectActive,
+)
 
 const badgeHostRef = inject<Ref<HTMLElement | null> | null>(BADGE_HOST_KEY, null)
+const inspectHostRef = inject<Ref<HTMLElement | null> | null>(INSPECT_HOST_KEY, null)
+const phoneFrameRef = inject<Ref<HTMLElement | null> | null>(PHONE_FRAME_KEY, null)
 const toolMode = inject<Ref<CanvasToolMode> | null>(CANVAS_TOOL_MODE_KEY, null)
 
-const hasBadges = computed(
+/** 编辑态事件/循环角标（右上角） */
+const hasEditBadges = computed(
   () =>
     toolMode?.value !== 'measure' &&
     (Boolean(props.repeatBadge) || (props.eventBadgeCount ?? 0) > 0),
 )
+/** 预览组件模式操纵杆（左右外延） */
+const hasInspectBadge = computed(
+  () => toolMode?.value !== 'measure' && Boolean(props.inspectBadge),
+)
+const hasBadges = computed(() => hasEditBadges.value || hasInspectBadge.value)
 const badgeHostEl = computed(() => badgeHostRef?.value ?? null)
+const inspectHostEl = computed(() => inspectHostRef?.value ?? null)
 const contentBoxRef = ref<HTMLElement | null>(null)
 const badgeAnchorStyle = ref<CSSProperties>({ visibility: 'hidden' })
+const inspectAnchorStyle = ref<CSSProperties>({ visibility: 'hidden' })
+const inspectSide = ref<'left' | 'right'>('right')
+/** 水平伸出到屏外（手机本地 px） */
+const inspectStemH = ref(28)
+/** 按钮相对锚点纵向偏移（向上为负） */
+const inspectRise = ref(-16)
+const INSPECT_BTN = 18
+/** 按钮落点距手机外缘（越大离屏幕越远） */
+const OUTSIDE_PAD = 72
+/** 最近一次同步的组件中线 Y（检视布局订阅用） */
+let lastInspectMidY = 0
 let badgeSyncRaf = 0
 let badgeLiveRaf = 0
 let badgeResizeObserver: ResizeObserver | null = null
+let unsubInspectLayout: (() => void) | null = null
 
 const useBadgeTeleport = computed(
-  () => hasBadges.value && Boolean(badgeHostEl.value),
+  () => hasEditBadges.value && Boolean(badgeHostEl.value),
+)
+const useInspectTeleport = computed(
+  () => hasInspectBadge.value && Boolean(inspectHostEl.value),
 )
 
 function syncBadgeAnchor() {
-  const host = badgeHostRef?.value
   const box = contentBoxRef.value
-  if (!host || !box || !hasBadges.value) {
+  if (!box) {
     badgeAnchorStyle.value = { visibility: 'hidden' }
+    inspectAnchorStyle.value = { visibility: 'hidden' }
     return
   }
-  const hr = host.getBoundingClientRect()
   const br = box.getBoundingClientRect()
-  if (hr.width < 1 || hr.height < 1) {
-    badgeAnchorStyle.value = { visibility: 'hidden' }
-    return
+  const badgeHost = badgeHostRef?.value
+  const bhr = badgeHost?.getBoundingClientRect()
+  const phone = phoneFrameRef?.value ?? badgeHost
+  const pr = phone?.getBoundingClientRect()
+  const inspectHost = inspectHostRef?.value
+  const ihr = inspectHost?.getBoundingClientRect()
+
+  // 左右：相对手机屏中线
+  if (hasInspectBadge.value) {
+    const boxMidX = (br.left + br.right) / 2
+    const midX = pr ? (pr.left + pr.right) / 2 : window.innerWidth / 2
+    inspectSide.value = boxMidX >= midX ? 'right' : 'left'
   }
-  // 画布 scale 后 getBoundingClientRect 是视口坐标，角标 host 在 phone 本地坐标系
-  const scaleX = host.offsetWidth / hr.width
-  const scaleY = host.offsetHeight / hr.height
-  // 锚定到 content-box 右上角，角标仍用 top/right + translate(50%,-50%)
-  badgeAnchorStyle.value = {
-    position: 'absolute',
-    top: `${(br.top - hr.top) * scaleY}px`,
-    left: `${(br.right - hr.left) * scaleX}px`,
-    width: 0,
-    height: 0,
-    overflow: 'visible',
-    pointerEvents: 'none',
-    visibility: 'visible',
+
+  if (hasEditBadges.value && badgeHost && bhr && bhr.width >= 1) {
+    const scaleX = badgeHost.offsetWidth / bhr.width
+    const scaleY = badgeHost.offsetHeight / bhr.height
+    badgeAnchorStyle.value = {
+      position: 'absolute',
+      top: `${(br.top - bhr.top) * scaleY}px`,
+      left: `${(br.right - bhr.left) * scaleX}px`,
+      width: 0,
+      height: 0,
+      overflow: 'visible',
+      pointerEvents: 'none',
+      visibility: 'visible',
+    }
+  } else {
+    badgeAnchorStyle.value = { visibility: 'hidden' }
+  }
+
+  if (hasInspectBadge.value && inspectHost && ihr && pr && ihr.width >= 1) {
+    const scaleX = inspectHost.offsetWidth / ihr.width
+    const scaleY = inspectHost.offsetHeight / ihr.height
+    const side = inspectSide.value
+    const edgeX = side === 'right' ? br.right : br.left
+    const midY = (br.top + br.bottom) / 2
+    const phoneEdge = side === 'right' ? pr.right : pr.left
+    // 水平段：组件边 → 屏外 pad
+    const stemScreen =
+      side === 'right'
+        ? phoneEdge + OUTSIDE_PAD - edgeX
+        : edgeX - (phoneEdge - OUTSIDE_PAD)
+    const nextStem = Math.max(16, stemScreen * scaleX)
+    if (Math.abs(inspectStemH.value - nextStem) > 0.5) {
+      inspectStemH.value = nextStem
+    }
+
+    const midLocalY = (midY - ihr.top) * scaleY
+    lastInspectMidY = midLocalY
+    const calloutId = props.widgetNodeId || 'inspect'
+    const preferredBtnY = midLocalY - 16
+    const buttonY = upsertInspectCallout({
+      id: calloutId,
+      side,
+      preferredY: preferredBtnY,
+      btnSize: INSPECT_BTN,
+    })
+    const nextRise = buttonY - midLocalY
+    if (Math.abs(inspectRise.value - nextRise) > 0.5) {
+      inspectRise.value = nextRise
+    }
+
+    const nextLeft = (edgeX - ihr.left) * scaleX
+    const prev = inspectAnchorStyle.value
+    const prevTop = typeof prev.top === 'string' ? parseFloat(prev.top) : NaN
+    const prevLeft = typeof prev.left === 'string' ? parseFloat(prev.left) : NaN
+    if (
+      prev.visibility !== 'visible' ||
+      !Number.isFinite(prevTop) ||
+      !Number.isFinite(prevLeft) ||
+      Math.abs(prevTop - midLocalY) > 0.5 ||
+      Math.abs(prevLeft - nextLeft) > 0.5
+    ) {
+      inspectAnchorStyle.value = {
+        position: 'absolute',
+        top: `${midLocalY}px`,
+        left: `${nextLeft}px`,
+        width: 0,
+        height: 0,
+        overflow: 'visible',
+        pointerEvents: 'none',
+        visibility: 'visible',
+        zIndex: 100060,
+      }
+    }
+  } else {
+    if (props.widgetNodeId) removeInspectCallout(props.widgetNodeId)
+    if (inspectAnchorStyle.value.visibility !== 'hidden') {
+      inspectAnchorStyle.value = { visibility: 'hidden' }
+    }
   }
 }
 
@@ -358,10 +473,14 @@ function scheduleSyncBadgeAnchor() {
   })
 }
 
+const needBadgeSync = computed(
+  () => hasEditBadges.value || hasInspectBadge.value,
+)
+
 function startBadgeLiveSync() {
   if (badgeLiveRaf) return
   const tick = () => {
-    if (!useBadgeTeleport.value) {
+    if (!needBadgeSync.value) {
       badgeLiveRaf = 0
       return
     }
@@ -371,8 +490,19 @@ function startBadgeLiveSync() {
   badgeLiveRaf = requestAnimationFrame(tick)
 }
 
+unsubInspectLayout = subscribeInspectLayout(() => {
+  if (!hasInspectBadge.value || !props.widgetNodeId) return
+  const y = getInspectButtonY(props.widgetNodeId)
+  if (y == null) return
+  const nextRise = y - lastInspectMidY
+  if (Math.abs(inspectRise.value - nextRise) > 0.5) {
+    inspectRise.value = nextRise
+  }
+})
+
 const frameKind = computed(() => {
   if (props.selected) return 'selected'
+  if (props.inspectActive) return 'inspecting'
   if (props.hovered) return 'hovered'
   return ''
 })
@@ -393,7 +523,7 @@ function onClick(event: MouseEvent) {
 }
 
 watch(
-  useBadgeTeleport,
+  needBadgeSync,
   async (enabled) => {
     await nextTick()
     scheduleSyncBadgeAnchor()
@@ -410,7 +540,15 @@ onMounted(() => {
     badgeResizeObserver = new ResizeObserver(() => scheduleSyncBadgeAnchor())
     if (contentBoxRef.value) badgeResizeObserver.observe(contentBoxRef.value)
     if (badgeHostEl.value) badgeResizeObserver.observe(badgeHostEl.value)
+    if (inspectHostEl.value) badgeResizeObserver.observe(inspectHostEl.value)
   }
+})
+
+watch(inspectHostEl, (el, prev) => {
+  if (!badgeResizeObserver) return
+  if (prev) badgeResizeObserver.unobserve(prev)
+  if (el) badgeResizeObserver.observe(el)
+  scheduleSyncBadgeAnchor()
 })
 
 watch(contentBoxRef, (el, prev) => {
@@ -427,6 +565,9 @@ onBeforeUnmount(() => {
   window.removeEventListener('scroll', scheduleSyncBadgeAnchor, true)
   badgeResizeObserver?.disconnect()
   badgeResizeObserver = null
+  unsubInspectLayout?.()
+  unsubInspectLayout = null
+  if (props.widgetNodeId) removeInspectCallout(props.widgetNodeId)
 })
 </script>
 
@@ -448,12 +589,16 @@ onBeforeUnmount(() => {
       <div
         ref="contentBoxRef"
         class="content-box"
-        :class="{ selected, hovered: hovered && !selected }"
+        :class="{
+          selected,
+          hovered: hovered && !selected && !inspectActive,
+          inspecting: inspectActive && !selected,
+        }"
         :style="contentBoxStyle"
       >
         <slot />
         <div v-if="showContentFrame" class="frame-content" :class="frameKind" />
-        <div v-if="hasBadges && !useBadgeTeleport" class="badge-stack">
+        <div v-if="hasEditBadges && !useBadgeTeleport" class="badge-stack">
           <EventBadge
             v-if="(eventBadgeCount ?? 0) > 0"
             :count="eventBadgeCount"
@@ -485,6 +630,20 @@ onBeforeUnmount(() => {
         </div>
       </div>
     </Teleport>
+    <!-- 操纵杆挂到手机框外层，避免被 phone overflow 裁切 -->
+    <Teleport v-if="useInspectTeleport && inspectHostEl" :to="inspectHostEl">
+      <div class="badge-anchor" :style="inspectAnchorStyle">
+        <InspectBadge
+          :side="inspectSide"
+          :active="inspectActive"
+          :label="inspectLabel"
+          :size="INSPECT_BTN"
+          :stem-h="inspectStemH"
+          :rise="inspectRise"
+          @click="emit('open-inspect')"
+        />
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -502,9 +661,10 @@ onBeforeUnmount(() => {
   overflow: visible;
 }
 
-/* 边框按 1/zoom 反缩放，屏幕上始终约 1px */
-.content-box.selected {
-  outline: calc(1px / var(--canvas-zoom, 1)) solid #d48806;
+/* 边框按 1/zoom 反缩放，屏幕上始终约 1px；黄色一律虚线 */
+.content-box.selected,
+.content-box.inspecting {
+  outline: calc(1px / var(--canvas-zoom, 1)) dashed #d48806;
   outline-offset: calc(-1px / var(--canvas-zoom, 1));
   background-color: rgba(212, 136, 6, 0.08);
 }
@@ -526,8 +686,9 @@ onBeforeUnmount(() => {
   inset: 0;
 }
 
-.frame-content.selected {
-  border: calc(1px / var(--canvas-zoom, 1)) solid #d48806;
+.frame-content.selected,
+.frame-content.inspecting {
+  border: calc(1px / var(--canvas-zoom, 1)) dashed #d48806;
 }
 
 .frame-content.hovered {
@@ -538,7 +699,8 @@ onBeforeUnmount(() => {
   inset: 0;
 }
 
-.frame-margin.selected {
+.frame-margin.selected,
+.frame-margin.inspecting {
   border: calc(1px / var(--canvas-zoom, 1)) dashed #d48806;
 }
 
@@ -560,5 +722,22 @@ onBeforeUnmount(() => {
 
 .badge-stack > * {
   pointer-events: auto;
+}
+
+.inspect-local {
+  position: absolute;
+  top: 50%;
+  z-index: 100050;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
+
+.inspect-local.side-right {
+  right: 0;
+}
+
+.inspect-local.side-left {
+  left: 0;
 }
 </style>
