@@ -523,12 +523,12 @@ export const COMPONENT_BUILTIN_METHODS: PageMethod[] = [
     ],
     returnType: 'void',
     body:
-      '// 更新双向绑定（model）参数并通知父级\n' +
+      '// 更新「可更新」入参并通知父级（入参仍可传常量，不必双向绑定）\n' +
       "// 用法：updateProps(参数名, 新值)\n" +
-      '// 参数名须为组件设置中开启「双向绑定」的参数；新值类型与该参数一致\n' +
+      '// 参数名须为组件设置中开启「可更新」的参数；新值类型与该参数一致\n' +
       "// 例如：updateProps('data', list)",
     builtin: true,
-    summary: '更新已开启双向绑定的入参，并通知父级',
+    summary: '更新已开启「可更新」的入参，并通知父级',
   },
 ]
 

@@ -115,6 +115,8 @@
         "stock": 4,
         "img": "https://ts3.tc.mm.bing.net/th/id/OIP-C.R1kFUsXP2QVRw6S7sOyPPAAAAA?w=108&h=108&c=1&bgcl=d4ffc6&r=0&o=7&pid=ImgRC&rm=3"
       }
-    ]
+    ],
+    "bottomText": "没有更多了~",
+    "loading": false
   }
 }

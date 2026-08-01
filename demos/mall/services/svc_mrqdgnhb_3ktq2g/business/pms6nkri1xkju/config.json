@@ -83,12 +83,12 @@
         "conditionGroups": []
       },
       "debugParams": {
-        "goodsId": 37,
-        "type": "all",
+        "goodsId": 38,
         "page": {
           "current": 1,
           "pageSize": 10
-        }
+        },
+        "type": "all"
       },
       "flow": {
         "nodes": [

@@ -650,7 +650,7 @@ function handleSave() {
         <el-form-item label="必填">
           <el-switch v-model="draft.required" />
         </el-form-item>
-        <el-form-item v-if="!isApiType" label="双向绑定（model）">
+        <el-form-item v-if="!isApiType" label="可更新">
           <el-switch v-model="draft.twoWay" />
         </el-form-item>
       </div>
@@ -660,7 +660,9 @@ function handleSave() {
           <code>Promise&lt;出参类型&gt;</code>。
         </template>
         <template v-else>
-          关闭「双向绑定」为 Props；开启后为 model。模板中用
+          关闭为普通入参；开启后可在组件内用
+          <code>updateProps</code>
+          修改并通知父级。入参仍可传常量或表达式，模板用
           <code>{$props.字段名}</code> 读取。
         </template>
       </p>

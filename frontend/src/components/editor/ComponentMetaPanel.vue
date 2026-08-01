@@ -177,7 +177,7 @@ function propSummary(row: ComponentPropDef): string {
     }
     parts.push('props')
   } else if (row.twoWay) {
-    parts.push('model')
+    parts.push('可更新')
   } else {
     parts.push('props')
   }

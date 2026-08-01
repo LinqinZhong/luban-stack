@@ -55,22 +55,22 @@ export function buildDollarPropsAmbientDeclaration(
 }
 
 /**
- * 双向绑定（model）参数的 updateProps 重载：
+ * 可更新参数的 updateProps 重载：
  * updateProps('data', value) — 首参字面量补全，次参按该 prop 类型约束。
  */
 export function buildUpdatePropsAmbientDeclarations(
   defs: ComponentPropDef[] | null | undefined,
   typeLibrary?: DataTypeLibrary | null,
 ): string {
-  const models = (defs ?? []).filter((item) => {
+  const updatable = (defs ?? []).filter((item) => {
     if (!item.twoWay || item.type === 'api') return false
     const name = item.name.trim()
     return Boolean(name) && /^[A-Za-z_$][\w$]*$/.test(name)
   })
   const lines = [
-    '/** 更新双向绑定（model）参数：updateProps(参数名, 新值) */',
+    '/** 更新可更新参数：updateProps(参数名, 新值)；父级可监听变更 */',
   ]
-  for (const item of models) {
+  for (const item of updatable) {
     const name = item.name.trim()
     const ts = isApiPropDef(item)
       ? 'any'

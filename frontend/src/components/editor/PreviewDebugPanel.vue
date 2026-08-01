@@ -5,10 +5,10 @@ import {
   ArrowDown,
   Connection,
   Delete,
-  Edit,
   EditPen,
   Plus,
   RefreshRight,
+  Right,
 } from '@element-plus/icons-vue'
 import type { ComponentConfig, ComponentPropDef } from '../../types/component'
 import type { DataField, DataFieldValue, PageData } from '../../types/page-data'
@@ -64,6 +64,8 @@ const props = defineProps<{
   inspectLabel?: string
   /** 检视中的组件 id，用于跳转编辑 */
   inspectComponentId?: string
+  /** 检视实例在宿主上的原始属性（含 `{field}` / `{$props.x}` 绑定） */
+  hostAttrs?: Record<string, string> | null
 }>()
 
 const emit = defineEmits<{
@@ -71,7 +73,6 @@ const emit = defineEmits<{
   'update:prop': [name: string, value: unknown]
   'update:data-field': [name: string, value: DataFieldValue]
   'clear-emit-logs': []
-  'clear-inspect': []
   /** 击中数据池 ref：切换组件模式并检视该节点 */
   'locate-ref': [nodePath: string]
   /** 跳转到检视组件的编辑页 */
@@ -84,11 +85,9 @@ function locateRefField(field: DataField) {
   emit('locate-ref', path)
 }
 
-/** 页面预览检视组件，或组件资源预览：展示入参区 */
+/** 组件资源预览 / 检视组件：在「数据」页展示入参 */
 const showPropSection = computed(
-  () =>
-    Boolean(props.inspectLabel) ||
-    (props.mode === 'component' && debugTab.value === 'data'),
+  () => props.mode === 'component' && debugTab.value === 'data',
 )
 
 /** 组件调试：数据（入参+数据池）/ 日志（emit） */
@@ -672,6 +671,20 @@ function propRemark(def: ComponentPropDef): string {
   return def.remark?.trim() || ''
 }
 
+/** 宿主属性是否为非常量绑定（数据池 / $props 等） */
+function isPropDynamic(def: ComponentPropDef): boolean {
+  const name = def.name.trim()
+  if (!name) return false
+  const raw = props.hostAttrs?.[name]
+  if (typeof raw !== 'string') return false
+  return /\{[^{}]+\}/.test(raw.trim())
+}
+
+function propHostBinding(def: ComponentPropDef): string {
+  const name = def.name.trim()
+  return String(props.hostAttrs?.[name] ?? '').trim()
+}
+
 function propDisplayValue(def: ComponentPropDef): unknown {
   const name = def.name.trim()
   if (props.propValues && name in props.propValues) {
@@ -681,6 +694,7 @@ function propDisplayValue(def: ComponentPropDef): unknown {
 }
 
 function onPropInput(def: ComponentPropDef, raw: unknown) {
+  if (isPropDynamic(def)) return
   const name = def.name.trim()
   if (!name) return
   emit('update:prop', name, normalizePropDefaultValue(def.type, raw))
@@ -986,7 +1000,7 @@ watch(
     <div class="panel-header">
       <span>调试</span>
       <el-radio-group
-        v-if="mode === 'component' && !inspectLabel"
+        v-if="mode === 'component'"
         v-model="debugTab"
         size="small"
         class="panel-tabs"
@@ -997,15 +1011,6 @@ watch(
           <span v-if="emitLogs?.length" class="tab-badge">{{ emitLogs.length }}</span>
         </el-radio-button>
       </el-radio-group>
-      <el-button
-        v-else-if="inspectLabel"
-        link
-        type="primary"
-        size="small"
-        @click="emit('clear-inspect')"
-      >
-        返回页面
-      </el-button>
     </div>
 
     <div class="panel-body">
@@ -1014,7 +1019,7 @@ watch(
         <span class="inspect-banner-name">{{ inspectLabel }}</span>
         <el-tooltip
           v-if="inspectComponentId"
-          content="查看组件"
+          content="进入组件"
           placement="top"
         >
           <el-button
@@ -1022,7 +1027,7 @@ watch(
             type="primary"
             link
             size="small"
-            :icon="Edit"
+            :icon="Right"
             @click="emit('edit-component', inspectComponentId)"
           >
             查看
@@ -1050,8 +1055,42 @@ watch(
           >
             <div class="data-field-summary-top">
               <div class="data-field-summary-main">
+                <span
+                  v-if="isPropDynamic(form.def)"
+                  class="binding-field-icon is-dynamic"
+                  :title="`动态绑定 ${propHostBinding(form.def)}`"
+                  aria-label="动态绑定"
+                >
+                  <svg
+                    viewBox="0 0 16 16"
+                    width="14"
+                    height="14"
+                    fill="none"
+                    xmlns="http://www.w3.org/2000/svg"
+                    aria-hidden="true"
+                  >
+                    <path
+                      d="M5.2 3.2C3.7 3.2 2.5 4.4 2.5 5.9v.7c0 1.1.9 2 2 2h1.2"
+                      stroke="currentColor"
+                      stroke-width="1.35"
+                      stroke-linecap="round"
+                    />
+                    <path
+                      d="M10.8 12.8c1.5 0 2.7-1.2 2.7-2.7v-.7c0-1.1-.9-2-2-2H10.3"
+                      stroke="currentColor"
+                      stroke-width="1.35"
+                      stroke-linecap="round"
+                    />
+                    <path
+                      d="M5.5 8h5"
+                      stroke="currentColor"
+                      stroke-width="1.35"
+                      stroke-linecap="round"
+                    />
+                  </svg>
+                </span>
                 <el-checkbox
-                  v-if="form.def.type === 'boolean'"
+                  v-else-if="form.def.type === 'boolean'"
                   :model-value="propDisplayValue(form.def) === true"
                   title="布尔值"
                   @update:model-value="onPropInput(form.def, $event === true)"
@@ -1092,13 +1131,25 @@ watch(
               "
               class="data-field-inline-editor"
             >
-              <template v-if="form.mode === 'scalar'">
+              <template v-if="form.mode === 'scalar' || isPropDynamic(form.def)">
                 <el-input-number
                   v-if="form.def.type === 'number'"
                   :model-value="Number(propDisplayValue(form.def) ?? 0)"
                   controls-position="right"
                   style="width: 100%"
+                  :disabled="isPropDynamic(form.def)"
                   @update:model-value="onPropInput(form.def, $event ?? 0)"
+                />
+                <el-input
+                  v-else-if="isPropDynamic(form.def)"
+                  :model-value="
+                    form.def.type === 'object' ||
+                    form.def.type === 'array' ||
+                    form.def.type === 'json'
+                      ? formatJson(propDisplayValue(form.def))
+                      : String(propDisplayValue(form.def) ?? '')
+                  "
+                  disabled
                 />
                 <ColorPicker
                   v-else-if="form.def.type === 'color'"
@@ -1122,6 +1173,13 @@ watch(
                   :model-value="String(propDisplayValue(form.def) ?? '')"
                   @update:model-value="onPropInput(form.def, $event)"
                 />
+                <div
+                  v-if="isPropDynamic(form.def)"
+                  class="prop-dynamic-bind"
+                  :title="propHostBinding(form.def)"
+                >
+                  {{ propHostBinding(form.def) }}
+                </div>
               </template>
 
               <ApiPropBindField
@@ -1313,9 +1371,9 @@ watch(
         </div>
       </div>
 
-      <!-- 数据池：页面始终显示；组件在「数据」页；页面检视组件时显示该组件数据池 -->
+      <!-- 数据池：页面始终显示；组件 / 检视组件在「数据」页 -->
       <div
-        v-if="mode === 'page' || debugTab === 'data' || inspectLabel"
+        v-if="mode === 'page' || debugTab === 'data'"
         class="section"
       >
         <div class="section-title row">
@@ -1851,23 +1909,23 @@ watch(
   margin: 0 0 12px;
   padding: 8px 10px;
   border-radius: 8px;
-  background: linear-gradient(90deg, #eef2ff, #f5f3ff);
-  border: 1px solid #e0e7ff;
+  background: linear-gradient(90deg, #f5f3ff, #faf5ff);
+  border: 1px solid #e9d5ff;
 }
 
 .inspect-banner-label {
   flex-shrink: 0;
   font-size: 11px;
-  color: #6366f1;
+  color: #8b5cf6;
   font-weight: 600;
 }
 
 .inspect-banner-name {
   flex: 1;
   min-width: 0;
-  font-size: 13px;
-  font-weight: 600;
-  color: #312e81;
+  font-size: 12px;
+  font-weight: 500;
+  color: #7c3aed;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2055,6 +2113,19 @@ watch(
 
 .binding-field-icon.is-controller {
   color: #f97316;
+}
+
+.binding-field-icon.is-dynamic {
+  color: #22c55e;
+}
+
+.prop-dynamic-bind {
+  margin-top: 4px;
+  font-size: 11px;
+  line-height: 1.35;
+  color: #22c55e;
+  word-break: break-all;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
 
 .expand-btn {

@@ -10,6 +10,7 @@ import {
 } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
+  ArrowLeft,
   Box,
   Coin,
   Collection,
@@ -378,8 +379,25 @@ const previewInspectTarget = ref<import('../types/preview-inspect').PreviewInspe
 const previewInspectMode = ref<'clean' | 'component'>('clean')
 
 watch(previewInspectMode, (mode) => {
-  if (mode === 'clean') previewInspectTarget.value = null
+  if (mode === 'clean' && !refNavRestoring.value) {
+    previewInspectTarget.value = null
+  }
 })
+
+/** 从「查看」进入组件时的引用栈（支持多次进入，可逐级返回） */
+type RefNavSnapshot = {
+  resourceKind: 'page' | 'component'
+  resourceId: string
+  workspaceMode: WorkspaceMode
+  inspectMode: 'clean' | 'component'
+  inspectTarget: import('../types/preview-inspect').PreviewInspectPayload | null
+  routeParams: Record<string, unknown>
+}
+
+const refNavStack = ref<RefNavSnapshot[]>([])
+/** 正在执行「回到引用处」，避免切页/进预览时清掉待恢复的检视 */
+const refNavRestoring = ref(false)
+
 const previewEmitLogs = ref<EmitLogEntry[]>([])
 let previewEmitLogSeq = 0
 /** 预览态左侧运行日志（错误/警告，含位置） */
@@ -573,8 +591,10 @@ function clearPreviewRuntime() {
     ? restoreComponentDebugProps()
     : {}
   previewInstancePropOverrides.value = {}
-  previewInspectTarget.value = null
-  previewInspectMode.value = 'clean'
+  if (!refNavRestoring.value) {
+    previewInspectTarget.value = null
+    previewInspectMode.value = 'clean'
+  }
   previewEmitLogs.value = []
   previewRuntimeLogs.value = []
   resetPreviewDataRevision()
@@ -650,11 +670,15 @@ const previewPanelPropValues = computed(() => {
   const merged: Record<string, unknown> = { ...base }
   for (const [key, value] of Object.entries(overrides)) {
     const raw = target.hostAttrs[key]
-    if (
-      typeof raw === 'string' &&
-      /^\{\s*[A-Za-z_$][\w$]*\s*\}$/.test(raw.trim())
-    ) {
-      continue
+    if (typeof raw === 'string') {
+      const t = raw.trim()
+      // 数据池 `{field}` 或父级 `{$props.xxx}` 以绑定源为准
+      if (
+        /^\{\s*[A-Za-z_$][\w$]*\s*\}$/.test(t) ||
+        /^\{\s*\$?props(?:\.[A-Za-z_$][\w$]*(?:\[\d+\])*)*\s*\}$/.test(t)
+      ) {
+        continue
+      }
     }
     merged[key] = value
   }
@@ -702,6 +726,43 @@ function clearPreviewInspect() {
   previewInspectTarget.value = null
 }
 
+function clearRefNavStack() {
+  if (refNavStack.value.length) refNavStack.value = []
+}
+
+function captureRefNavSnapshot(): RefNavSnapshot | null {
+  const kind = resourceKind.value === 'component' ? 'component' : 'page'
+  const resourceId =
+    kind === 'component' ? activeComponentId.value : activePageId.value
+  if (!resourceId.trim()) return null
+  const target = previewInspectTarget.value
+  return {
+    resourceKind: kind,
+    resourceId,
+    workspaceMode: workspaceMode.value,
+    inspectMode: previewInspectMode.value,
+    inspectTarget: target
+      ? {
+          ...target,
+          hostAttrs: { ...target.hostAttrs },
+        }
+      : null,
+    routeParams: { ...routeParams.value },
+  }
+}
+
+/** 侧栏点选页面：清空引用栈 */
+function openPageFromSidebar(pageId: string) {
+  clearRefNavStack()
+  return openPage(pageId)
+}
+
+/** 侧栏点选组件：清空引用栈 */
+function openComponentFromSidebar(componentId: string) {
+  clearRefNavStack()
+  return openComponent(componentId)
+}
+
 /** 从预览检视跳转到该组件的编辑页 */
 async function handleEditInspectedComponent(componentId: string) {
   const id = componentId.trim()
@@ -709,10 +770,58 @@ async function handleEditInspectedComponent(componentId: string) {
     ElMessage.warning('组件 ID 为空')
     return
   }
+  const snap = captureRefNavSnapshot()
+  if (snap) {
+    refNavStack.value = [...refNavStack.value, snap]
+  }
   clearPreviewInspect()
   previewInspectMode.value = 'clean'
   setWorkspaceMode('edit')
   await openComponent(id)
+}
+
+/** 画布「回到引用处」：弹出一层引用栈并还原 */
+async function handleBackToRef() {
+  const stack = refNavStack.value
+  if (!stack.length) return
+  const snap = stack[stack.length - 1]!
+  refNavStack.value = stack.slice(0, -1)
+
+  const mode =
+    snap.workspaceMode === 'preview' ||
+    snap.workspaceMode === 'edit' ||
+    snap.workspaceMode === 'datapool' ||
+    snap.workspaceMode === 'methods' ||
+    snap.workspaceMode === 'lifecycle'
+      ? snap.workspaceMode
+      : 'preview'
+
+  refNavRestoring.value = true
+  try {
+    // 先切模式，让后续 openPage 走预览初始化路径
+    if (workspaceMode.value !== mode) {
+      setWorkspaceMode(mode)
+      await nextTick()
+    }
+    if (snap.resourceKind === 'page') {
+      await openPage(snap.resourceId, {
+        keepHistory: true,
+        params: snap.routeParams,
+      })
+    } else {
+      await openComponent(snap.resourceId)
+    }
+    await nextTick()
+    previewInspectMode.value = snap.inspectMode
+    previewInspectTarget.value = snap.inspectTarget
+      ? {
+          ...snap.inspectTarget,
+          hostAttrs: { ...snap.inspectTarget.hostAttrs },
+        }
+      : null
+  } finally {
+    refNavRestoring.value = false
+  }
 }
 
 /** 数据池 ref「击中」：切到组件模式并检视对应 Component */
@@ -788,7 +897,7 @@ function handlePreviewPanelPropUpdate(name: string, value: unknown) {
     })
     return
   }
-  // 调试面板改入参：预览覆盖即可，不要求双向绑定（updateProps 运行时 API 才需要）
+  // 调试面板改入参：预览覆盖即可，不要求「可更新」（updateProps 运行时 API 才需要）
   const coerced = normalizePropDefaultValue(def.type, value)
   previewInstancePropOverrides.value = {
     ...previewInstancePropOverrides.value,
@@ -945,6 +1054,15 @@ function handlePreviewPropUpdate(name: string, value: unknown) {
       void persistComponentDebugPropsBaseline()
     }, 400)
   }
+  // 预览态 pageData 是快照，须用新 $props 重算依赖计算字段（如 StarRate.stars）
+  if (
+    workspaceMode.value === 'preview' &&
+    isComponentResource.value &&
+    previewRuntimeData.value
+  ) {
+    previewRuntimeData.value = resolvePreviewPageData(previewRuntimeData.value)
+    bumpPreviewDataRevision()
+  }
   void runLifecycleUpdateSequence()
 }
 
@@ -953,6 +1071,9 @@ function applyPreviewPropRuntimeOverride(name: string, value: unknown) {
   previewPropOverrides.value = {
     ...previewPropOverrides.value,
     [name]: value,
+  }
+  if (isComponentResource.value && previewRuntimeData.value) {
+    previewRuntimeData.value = resolvePreviewPageData(previewRuntimeData.value)
   }
 }
 
@@ -2034,6 +2155,7 @@ async function openComponent(componentId: string) {
 function switchResourceKind(kind: ResourceKind) {
   leaveProjectNav()
   if (resourceKind.value === kind) return
+  clearRefNavStack()
   resourceKind.value = kind
   selectedNodeId.value = ''
   // 切换页面/组件资源时保持当前工作模式（编辑/数据池等），不要强制回预览
@@ -2616,7 +2738,7 @@ function applyPreviewUpdateProps(
   if (!def.twoWay) {
     pushPreviewRuntimeLog({
       level: 'warn',
-      message: `「${name}」未开启双向绑定，无法 updateProps`,
+      message: `「${name}」未开启「可更新」，无法 updateProps`,
       location: options?.componentId
         ? `组件 ${options.componentId} · updateProps('${name}')`
         : `updateProps('${name}')`,
@@ -3021,7 +3143,9 @@ function commitPreviewRuntime(
     : {}
   // 切页时清掉检视/入参覆盖，避免同路径 nodeId 串到上一页的标题栏等
   previewInstancePropOverrides.value = {}
-  previewInspectTarget.value = null
+  if (!refNavRestoring.value) {
+    previewInspectTarget.value = null
+  }
   previewEmitLogs.value = []
   previewRuntimeLogs.value = []
 }
@@ -4268,7 +4392,7 @@ watch(
                   type="button"
                   class="page-item"
                   :class="{ active: page.id === activePageId, entry: page.isEntry }"
-                  @click="openPage(page.id)"
+                  @click="openPageFromSidebar(page.id)"
                   @contextmenu.prevent
                 >
                   <el-icon><Document /></el-icon>
@@ -4317,7 +4441,7 @@ watch(
                   type="button"
                   class="page-item"
                   :class="{ active: item.id === activeComponentId }"
-                  @click="openComponent(item.id)"
+                  @click="openComponentFromSidebar(item.id)"
                   @contextmenu.prevent
                 >
                   <el-icon><Box /></el-icon>
@@ -4520,6 +4644,16 @@ watch(
       </div>
 
       <div class="preview-body">
+        <button
+          v-if="refNavStack.length"
+          type="button"
+          class="ref-nav-back"
+          title="回到引用处"
+          @click="handleBackToRef"
+        >
+          <el-icon :size="14"><ArrowLeft /></el-icon>
+          <span>回到引用处</span>
+        </button>
         <!-- 仅首次无文档时展示骨架，避免切换页面时插入骨架把画布顶抖 -->
         <el-skeleton
           v-if="loadingPage && isFrontendNav && !activeDoc"
@@ -4767,6 +4901,7 @@ watch(
       :page-data="previewPanelPageData"
       :inspect-label="previewInspectTarget?.label"
       :inspect-component-id="previewInspectTarget?.componentId"
+      :host-attrs="previewInspectTarget?.hostAttrs"
       :emit-logs="previewEmitLogs"
       :type-library="dataTypeLibrary"
       :project-path="projectStore.path || undefined"
@@ -4774,7 +4909,6 @@ watch(
       @update:prop="handlePreviewPanelPropUpdate"
       @update:data-field="handlePreviewPanelDataField"
       @clear-emit-logs="previewEmitLogs = []"
-      @clear-inspect="clearPreviewInspect"
       @locate-ref="handleLocateRef"
       @edit-component="handleEditInspectedComponent"
     />
@@ -5372,6 +5506,33 @@ watch(
   min-height: 0;
   overflow: hidden;
   position: relative;
+}
+
+.ref-nav-back {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 40;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid #e4e7ed;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.08);
+  color: #606266;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  user-select: none;
+}
+
+.ref-nav-back:hover {
+  color: #409eff;
+  border-color: #c6e2ff;
+  background: #ecf5ff;
 }
 
 .preview-pane-fill {

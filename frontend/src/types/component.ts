@@ -2,7 +2,7 @@ import type { DataFieldType, DataFieldValue } from './page-data'
 import type { MethodParam } from './page-method'
 import type { ProcessorTypeExpr } from './backend-services'
 
-/** 组件公开参数：twoWay=false 为 Props，true 为 model（双向） */
+/** 组件公开参数：twoWay=false 普通入参；true 可 updateProps 回写并通知父级（仍可传常量） */
 export interface ComponentPropDef {
   name: string
   type: DataFieldType

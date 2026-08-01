@@ -1,7 +1,11 @@
 import type { ComponentConfig } from '../types/component'
 import type { PageData } from '../types/page-data'
 import { hydrateApiDollarProps } from './api-prop'
-import { buildDollarProps } from './component-props'
+import {
+  buildDollarProps,
+  interpolateDollarProps,
+  resolveDollarPropsPath,
+} from './component-props'
 import {
   interpolateDataBindings,
   resolveAttrBindingValue,
@@ -61,6 +65,39 @@ export function buildHostBoundAttrsDepsKey(
 }
 
 /**
+ * 让 computed 订阅 attrs 里 `{$props.xxx}` 用到的父级入参。
+ * 嵌套 Component（如 StarRate value="{$props.score}"）依赖此键重算。
+ */
+export function buildParentDollarPropsBoundAttrsDepsKey(
+  attrs: Record<string, string> | null | undefined,
+  parentDollarProps: Record<string, unknown> | null | undefined,
+): string {
+  if (!attrs || !parentDollarProps) return ''
+  const parts: unknown[] = []
+  for (const [key, raw] of Object.entries(attrs)) {
+    if (!raw || !raw.includes('{')) continue
+    for (const match of raw.matchAll(/\{([^{}]+)\}/g)) {
+      const expr = match[1]?.trim()
+      if (!expr) continue
+      if (
+        expr === '$props' ||
+        expr === 'props' ||
+        expr.startsWith('$props.') ||
+        expr.startsWith('props.')
+      ) {
+        parts.push(key, expr, resolveDollarPropsPath(expr, parentDollarProps))
+      }
+    }
+  }
+  if (!parts.length) return ''
+  try {
+    return JSON.stringify(parts)
+  } catch {
+    return String(parts.length)
+  }
+}
+
+/**
  * 由页面/父组件上的 Component 实例属性 + 宿主数据池，组装可运行的 $props
  *（含 api 类型参数 hydrate 为可调用函数）。
  * 与 XmlNodeView.instanceDollarProps 规则对齐，供 ref 调暴露方法等非画布路径复用。
@@ -70,6 +107,8 @@ export function resolveComponentInstanceDollarProps(options: {
   hostAttrs?: Record<string, string> | null
   pageData?: PageData | null
   routeParams?: Record<string, unknown> | null
+  /** 父级/宿主 $props：解析 attrs 上的 {$props.xxx}（嵌套组件入参） */
+  parentDollarProps?: Record<string, unknown> | null
   /** repeat 作用域等 */
   scope?: Pick<DynamicStyleScope, 'item' | 'index'> | null
   projectPath?: string | null
@@ -79,13 +118,16 @@ export function resolveComponentInstanceDollarProps(options: {
   const hostAttrs = options.hostAttrs ?? {}
   const pageData = options.pageData ?? { fields: [] }
   const routeParams = options.routeParams ?? {}
+  const parentDollarProps = options.parentDollarProps ?? undefined
   const scope: DynamicStyleScope = {
     ...(options.scope ?? {}),
     $route: routeParams,
     $query: routeParams,
+    ...(parentDollarProps ? { $props: parentDollarProps } : {}),
   }
 
   trackPageDataBindingsInAttrs(hostAttrs, pageData)
+  void buildParentDollarPropsBoundAttrsDepsKey(hostAttrs, parentDollarProps)
 
   const propDefs = config?.props ?? []
   const propNames = new Set(
@@ -95,7 +137,11 @@ export function resolveComponentInstanceDollarProps(options: {
 
   for (const [key, value] of Object.entries(hostAttrs)) {
     if (!propNames.has(key)) {
-      resolved[key] = interpolateDataBindings(value, pageData, scope)
+      let text = interpolateDataBindings(value, pageData, scope)
+      if (parentDollarProps) {
+        text = interpolateDollarProps(text, parentDollarProps)
+      }
+      resolved[key] = text
       continue
     }
     const def = propDefs.find((p) => p.name.trim() === key)
@@ -110,7 +156,11 @@ export function resolveComponentInstanceDollarProps(options: {
       if (native !== undefined) resolved[key] = native
       continue
     }
-    resolved[key] = interpolateDataBindings(value, pageData, scope)
+    let text = interpolateDataBindings(value, pageData, scope)
+    if (parentDollarProps) {
+      text = interpolateDollarProps(text, parentDollarProps)
+    }
+    resolved[key] = text
   }
 
   const built = buildDollarProps(config, resolved)
@@ -125,6 +175,9 @@ export function resolveComponentInstanceDollarProps(options: {
       ),
       $query: routeParams,
       $route: routeParams,
+      ...(parentDollarProps
+        ? { $props: parentDollarProps, props: parentDollarProps }
+        : {}),
     }),
   })
 }

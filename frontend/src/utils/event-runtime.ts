@@ -120,7 +120,7 @@ export interface RunEventBindingsContext {
   navigateBack: () => void | Promise<void>
   setData: (prop: string, value: DataFieldValue) => void
   /**
-   * 更新双向绑定（model）参数。
+   * 更新「可更新」入参，并通知父级。
    * 预览：回写调试 Props / 父级数据池绑定；导出：emit(`update:${prop}`, value)。
    */
   updateProps?: (prop: string, value: unknown) => void
@@ -496,7 +496,7 @@ function buildCustomScope(ctx: RunEventBindingsContext): Record<string, unknown>
         return
       }
       ctx.onUnknownMethod?.(
-        `updateProps: 仅可在组件内更新双向绑定参数（未找到「${name}」）`,
+        `updateProps: 仅可更新已开启「可更新」的入参（未找到「${name}」）`,
       )
     },
     showToast: (message?: string, duration?: string) => {

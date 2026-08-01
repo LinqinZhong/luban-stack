@@ -2405,7 +2405,7 @@ onBeforeUnmount(() => {
                 <el-form-item
                   v-for="def in componentPropDefs"
                   :key="def.name"
-                  :label="`${def.name}${def.required ? ' *' : ''} · ${propTypeLabel(def.type)}${def.twoWay ? ' · model' : ''}`"
+                  :label="`${def.name}${def.required ? ' *' : ''} · ${propTypeLabel(def.type)}${def.twoWay ? ' · 可更新' : ''}`"
                 >
                   <IconValueSelect
                     v-if="def.type === 'icon'"

@@ -1863,7 +1863,7 @@ ${pad}</template>`
       const propDef = config?.props.find((p) => p.name === key)
       const isDeclaredProp = Boolean(propDef)
       if (isLayout && !isDeclaredProp) continue
-      // 双向绑定 + `{field}` → v-model:prop
+      // 可更新入参 + `{field}` → v-model:prop（父级可监听更新）
       if (
         propDef?.twoWay &&
         propDef.type !== 'api' &&

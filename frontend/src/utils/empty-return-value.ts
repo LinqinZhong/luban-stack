@@ -24,7 +24,13 @@ export function defaultEmptyReturnValue(
   const t = (expr.type || '').trim()
   if (!t || t === 'void') return undefined
   if (isQueryPageVoOutput(expr, library)) {
-    return { total: 0, records: [] }
+    return {
+      current: 0,
+      pageSize: 0,
+      hasNext: false,
+      total: 0,
+      records: [],
+    }
   }
   if (t === 'array') return []
   if (t === 'map') return new Map()
@@ -44,7 +50,7 @@ export function defaultEmptyReturnHint(
   const t = (expr.type || '').trim()
   if (!t || t === 'void') return ''
   if (isQueryPageVoOutput(expr, library)) {
-    return '留空 → { total: 0, records: [] }'
+    return '留空 → { current: 0, pageSize: 0, hasNext: false, total: 0, records: [] }'
   }
   if (t === 'array') return '留空 → []'
   if (t === 'map') return '留空 → new Map()'
@@ -63,7 +69,7 @@ export function defaultEmptyReturnCode(
   const t = (expr.type || '').trim()
   if (!t || t === 'void') return 'undefined'
   if (isQueryPageVoOutput(expr, library)) {
-    return '{ total: 0, records: [] }'
+    return '{ current: 0, pageSize: 0, hasNext: false, total: 0, records: [] }'
   }
   if (t === 'array') return '[]'
   if (t === 'map') return 'new Map()'

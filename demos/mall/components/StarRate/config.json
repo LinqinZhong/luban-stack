@@ -74,11 +74,11 @@
   ],
   "exposedMethods": [],
   "debugProps": {
-    "value": 10,
+    "value": 7,
     "readonly": false,
-    "allowHalf": true,
-    "size": 32,
-    "gap": -1,
+    "allowHalf": false,
+    "size": 24,
+    "gap": 0,
     "activeColor": "#f7ba2a",
     "inactiveColor": "#c0c4cc"
   }

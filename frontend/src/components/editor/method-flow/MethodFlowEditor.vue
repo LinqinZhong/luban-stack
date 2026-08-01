@@ -849,6 +849,27 @@ function pageMapToParam(data: Record<string, unknown>): MethodParam | null {
   }
 }
 
+function objectMapToParam(data: Record<string, unknown>): MethodParam | null {
+  const varName =
+    (typeof data.targetVarName === 'string' ? data.targetVarName.trim() : '') ||
+    (typeof data.targetPath === 'string' ? data.targetPath.trim() : '')
+  if (!varName) return null
+  const typeRef =
+    typeof data.targetTypeRef === 'string' ? data.targetTypeRef.trim() : ''
+  const typeExpr = flowDraftToTypeExpr({
+    type: 'object',
+    typeRef,
+    genericArgs: readGenericArgs(data.targetGenericArgs),
+  })
+  const tsType = processorTypeExprToTs(typeExpr, props.typeLibrary)
+  return {
+    name: varName,
+    type: 'object',
+    typeExpr,
+    ...(tsType ? { tsType } : {}),
+  }
+}
+
 const reservedNames = computed(() => {
   const names = props.methodParams.map((p) => p.name.trim()).filter(Boolean)
   for (const n of nodes.value) {
@@ -1083,6 +1104,14 @@ const ambientVars = computed((): MethodParam[] => {
     if (n.type === 'pageMap') {
       if (n.id === editingNodeId.value && pageMapDialogVisible.value) continue
       const param = pageMapToParam(data)
+      if (!param) continue
+      if (vars.some((v) => v.name === param.name)) continue
+      vars.push(param)
+      continue
+    }
+    if (n.type === 'objectMap') {
+      if (n.id === editingNodeId.value && objectMapDialogVisible.value) continue
+      const param = objectMapToParam(data)
       if (!param) continue
       if (vars.some((v) => v.name === param.name)) continue
       vars.push(param)

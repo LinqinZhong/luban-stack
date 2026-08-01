@@ -27,6 +27,7 @@ import { resolveMatchingStyleOverrides, evaluateScenarios, interpolateDataBindin
 import { interpolateDollarProps } from '../../utils/component-props'
 import {
   buildHostBoundAttrsDepsKey,
+  buildParentDollarPropsBoundAttrsDepsKey,
   resolveComponentInstanceDollarProps,
 } from '../../utils/instance-dollar-props'
 import {
@@ -311,8 +312,23 @@ const hostPageDataForInstanceProps = computed(() => {
   return pageLivePageData?.value ?? props.pageData
 })
 
+/** 宿主属性是否为数据池 / 父级 $props 的 live 绑定（勿被检视覆盖盖住） */
+function isLiveHostAttrBinding(raw: string): boolean {
+  const t = raw.trim()
+  if (/^\{\s*[A-Za-z_$][\w$]*\s*\}$/.test(t)) return true
+  if (/^\{\s*\$?props(?:\.[A-Za-z_$][\w$]*(?:\[\d+\])*)*\s*\}$/.test(t)) {
+    return true
+  }
+  return false
+}
+
+/** 外层 Component 下发的 live 数据池；本节点是 Component 时改挂自己的 */
+const parentLivePageData = inject(COMPONENT_LIVE_PAGE_DATA_KEY, null)
+/** 定义树内父级 live $props（须在 instanceDollarProps 之前 inject） */
+const parentLiveDollarProps = inject(COMPONENT_LIVE_DOLLAR_PROPS_KEY, null)
+
 /**
- * 本实例 $props。显式订阅宿主 `{field}` 绑定值 + 预览数据版本号，
+ * 本实例 $props。显式订阅宿主 `{field}` / 父级 `{$props.xxx}` + 预览数据版本号，
  * 避免 updateProps 原地回写后 `$props.loading` 卡住 → vShow「加载中」不消失。
  * sameJson 仅稳定对象引用；绑定键 / revision 变化时一定会重算。
  */
@@ -320,14 +336,23 @@ let cachedInstanceDollarProps: Record<string, unknown> | null = null
 const instanceDollarProps = computed(() => {
   void previewDataRevision.value
   const hostData = hostPageDataForInstanceProps.value
+  // 父级 $props：嵌套 Component 的 value="{$props.score}" 等
+  const parentDollarProps =
+    parentLiveDollarProps?.value ?? props.dollarProps ?? null
   // 必须用返回值：让 computed 依赖键本身，而不只是内部 void 读取
   const boundKey = buildHostBoundAttrsDepsKey(props.node.attrs, hostData)
   void boundKey
+  const parentBoundKey = buildParentDollarPropsBoundAttrsDepsKey(
+    props.node.attrs,
+    parentDollarProps,
+  )
+  void parentBoundKey
   const base = resolveComponentInstanceDollarProps({
     config: componentDetail.value?.config,
     hostAttrs: props.node.attrs,
     pageData: hostData,
     routeParams: props.routeParams,
+    parentDollarProps,
     scope: props.node.scope
       ? {
           item: props.node.scope.item,
@@ -338,15 +363,12 @@ const instanceDollarProps = computed(() => {
   })
   const overrides = previewInstancePropOverrides?.value?.[props.nodeId]
   const next: Record<string, unknown> = { ...base }
-  // 检视覆盖：仅作用于未绑定宿主字段的入参。
-  // `{loading}` 等必须以数据池为准，否则 updateProps 回写后覆盖仍停在 true。
+  // 检视覆盖：仅作用于未绑定宿主字段 / 父级 $props 的入参。
+  // `{loading}` / `{$props.score}` 等必须以绑定源为准。
   if (overrides) {
     for (const [key, value] of Object.entries(overrides)) {
       const raw = props.node.attrs[key]
-      if (
-        typeof raw === 'string' &&
-        /^\{\s*[A-Za-z_$][\w$]*\s*\}$/.test(raw.trim())
-      ) {
+      if (typeof raw === 'string' && isLiveHostAttrBinding(raw)) {
         continue
       }
       next[key] = value
@@ -362,8 +384,6 @@ const instanceDollarProps = computed(() => {
   return next
 })
 
-/** 外层 Component 下发的 live 数据池；本节点是 Component 时改挂自己的 */
-const parentLivePageData = inject(COMPONENT_LIVE_PAGE_DATA_KEY, null)
 const livePageDataForSubtree = computed(() => {
   if (props.node.tag === 'Component' && componentDetail.value?.data) {
     return componentDetail.value.data
@@ -372,8 +392,6 @@ const livePageDataForSubtree = computed(() => {
 })
 provide(COMPONENT_LIVE_PAGE_DATA_KEY, livePageDataForSubtree)
 
-/** 定义树内 vIf/vShow 用 live $props，不依赖可能过期的 prop 透传引用 */
-const parentLiveDollarProps = inject(COMPONENT_LIVE_DOLLAR_PROPS_KEY, null)
 const liveDollarPropsForSubtree = computed(() => {
   if (props.node.tag === 'Component' && componentDetail.value) {
     return instanceDollarProps.value

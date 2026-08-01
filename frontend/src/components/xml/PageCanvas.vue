@@ -734,38 +734,55 @@ const touchCursorStyle = computed(() => ({
   top: `${touchCursorPos.value.y}px`,
 }))
 
+/** 相对整个 stage 定位，避免被 .phone overflow 裁成半圆 */
 function updateTouchCursorPos(event: PointerEvent) {
-  const phone = phoneRef.value
-  if (!phone) return
-  const rect = phone.getBoundingClientRect()
+  const stage = stageRef.value
+  if (!stage) return
+  const rect = stage.getBoundingClientRect()
   if (rect.width < 1 || rect.height < 1) return
-  const scaleX = phone.offsetWidth / rect.width
-  const scaleY = phone.offsetHeight / rect.height
   touchCursorPos.value = {
-    x: (event.clientX - rect.left) * scaleX,
-    y: (event.clientY - rect.top) * scaleY,
+    x: event.clientX - rect.left,
+    y: event.clientY - rect.top,
   }
 }
 
-function onPhonePointerMove(event: PointerEvent) {
+/** 工具栏 / 检视操纵杆等 chrome：用系统 pointer，不跟手指光标 */
+function isStageChromeTarget(target: EventTarget | null): boolean {
+  const el = target as HTMLElement | null
+  return Boolean(
+    el?.closest?.('.color-pick-ignore, .inspect-callout, .stage-inspect-host'),
+  )
+}
+
+function syncTouchCursorMove(event: PointerEvent) {
   if (!showTouchCursor.value) return
+  if (isStageChromeTarget(event.target)) {
+    touchCursorVisible.value = false
+    touchCursorPressed.value = false
+    return
+  }
   touchCursorVisible.value = true
   updateTouchCursorPos(event)
 }
 
-function onPhonePointerDown(event: PointerEvent) {
+function syncTouchCursorDown(event: PointerEvent) {
   if (!showTouchCursor.value) return
   if (event.pointerType === 'mouse' && event.button !== 0) return
+  if (isStageChromeTarget(event.target)) {
+    touchCursorVisible.value = false
+    touchCursorPressed.value = false
+    return
+  }
   touchCursorVisible.value = true
   touchCursorPressed.value = true
   updateTouchCursorPos(event)
 }
 
-function onPhonePointerUp() {
+function syncTouchCursorUp() {
   touchCursorPressed.value = false
 }
 
-function onPhonePointerLeave() {
+function syncTouchCursorLeave() {
   touchCursorVisible.value = false
   touchCursorPressed.value = false
 }
@@ -857,7 +874,8 @@ function endPan(target?: HTMLElement | null) {
 }
 
 function onStagePointerDown(event: PointerEvent) {
-  // ???????
+  syncTouchCursorDown(event)
+  // 中键拖动画布
   if (event.button !== 1) return
   event.preventDefault()
   event.stopPropagation()
@@ -871,14 +889,20 @@ function onStagePointerDown(event: PointerEvent) {
 }
 
 function onStagePointerMove(event: PointerEvent) {
+  syncTouchCursorMove(event)
   if (!panning.value) return
   panX.value = panOriginX + (event.clientX - panStartClientX)
   panY.value = panOriginY + (event.clientY - panStartClientY)
 }
 
 function onStagePointerUp(event: PointerEvent) {
+  syncTouchCursorUp()
   if (event.button !== 1 && !panning.value) return
   endPan(event.currentTarget as HTMLElement)
+}
+
+function onStagePointerLeave() {
+  syncTouchCursorLeave()
 }
 
 /** ????????????? */
@@ -944,11 +968,12 @@ watch(
   <div
     ref="stageRef"
     class="stage"
-    :class="{ panning }"
+    :class="{ panning, 'is-preview-touch': showTouchCursor }"
     @pointerdown="onStagePointerDown"
     @pointermove="onStagePointerMove"
     @pointerup="onStagePointerUp"
     @pointercancel="onStagePointerUp"
+    @pointerleave="onStagePointerLeave"
     @mousedown="onStageMouseDown"
     @auxclick="onStageAuxClick"
     @click="handleStageClick"
@@ -1017,11 +1042,6 @@ watch(
           :style="phoneFrameStyle"
           @click="handlePhoneClick"
           @mouseleave="clearHover"
-          @pointermove="onPhonePointerMove"
-          @pointerdown="onPhonePointerDown"
-          @pointerup="onPhonePointerUp"
-          @pointercancel="onPhonePointerUp"
-          @pointerleave="onPhonePointerLeave"
         >
         <div
           v-if="showDeviceChrome"
@@ -1194,13 +1214,6 @@ watch(
             {{ toast.message }}
           </div>
         </Transition>
-        <div
-          v-if="showTouchCursor && touchCursorVisible"
-          class="phone-touch-cursor"
-          :class="{ 'is-pressed': touchCursorPressed }"
-          :style="touchCursorStyle"
-          aria-hidden="true"
-        />
       </div>
         </div>
       </div>
@@ -1211,6 +1224,15 @@ watch(
       v-show="!selectable && inspectMode === 'component'"
       ref="inspectHostRef"
       class="stage-inspect-host"
+    />
+
+    <!-- 预览手指光标：挂 stage，不被手机框 overflow 裁切 -->
+    <div
+      v-if="showTouchCursor && touchCursorVisible"
+      class="stage-touch-cursor"
+      :class="{ 'is-pressed': touchCursorPressed }"
+      :style="touchCursorStyle"
+      aria-hidden="true"
     />
 
     <div
@@ -1366,6 +1388,25 @@ watch(
   cursor: default;
 }
 
+.stage.is-preview-touch {
+  cursor: none;
+}
+
+/* 仅内容区隐藏系统光标；工具栏等 chrome 保留 pointer */
+.stage.is-preview-touch .stage-world,
+.stage.is-preview-touch .phone,
+.stage.is-preview-touch .phone :deep(*) {
+  cursor: none;
+}
+
+.stage.is-preview-touch .color-pick-ignore,
+.stage.is-preview-touch .color-pick-ignore :deep(button),
+.stage.is-preview-touch .color-pick-ignore :deep(.el-button),
+.stage.is-preview-touch .inspect-callout,
+.stage.is-preview-touch .inspect-callout :deep(button) {
+  cursor: pointer !important;
+}
+
 .stage.panning,
 .stage.panning :deep(*) {
   cursor: grabbing !important;
@@ -1408,9 +1449,23 @@ watch(
   overflow: visible;
 }
 
+/* 小于屏宽/屏高时 shell 随内容，才能在 phone-slot 内真正居中 */
 .phone-slot.is-framed .phone-shell {
+  max-width: 100%;
+  max-height: 100%;
+  box-sizing: border-box;
+}
+.phone-slot.is-framed:not(.center-x) .phone-shell {
   width: 100%;
+}
+.phone-slot.is-framed:not(.center-y) .phone-shell {
   height: 100%;
+}
+.phone-slot.is-framed.center-x .phone-shell {
+  width: auto;
+}
+.phone-slot.is-framed.center-y .phone-shell {
+  height: auto;
 }
 
 .stage-inspect-host {
@@ -1837,7 +1892,7 @@ watch(
   cursor: grabbing;
 }
 
-.phone-touch-cursor {
+.stage-touch-cursor {
   position: absolute;
   z-index: 100050;
   width: 28px;
@@ -1852,7 +1907,7 @@ watch(
   transition: transform 0.08s ease, background 0.08s ease, border-color 0.08s ease;
 }
 
-.phone-touch-cursor.is-pressed {
+.stage-touch-cursor.is-pressed {
   background: rgba(64, 158, 255, 0.42);
   border-color: rgba(64, 158, 255, 0.75);
   transform: scale(1.2);
