@@ -44,6 +44,10 @@ import {
 } from '../api/pages'
 import { createModalStack } from '../composables/useModalStack'
 import {
+  bumpPreviewDataRevision,
+  resetPreviewDataRevision,
+} from '../composables/preview-data-revision'
+import {
   createComponent,
   deleteComponent,
   deleteComponentMethod,
@@ -543,6 +547,7 @@ function resetPreviewRuntime() {
     previewInspectMode.value = 'clean'
     previewEmitLogs.value = []
     previewRuntimeLogs.value = []
+    resetPreviewDataRevision()
     return
   }
   previewRuntimeData.value = resolvePreviewPageData(
@@ -558,6 +563,7 @@ function resetPreviewRuntime() {
   previewInspectMode.value = 'clean'
   previewEmitLogs.value = []
   previewRuntimeLogs.value = []
+  resetPreviewDataRevision()
 }
 
 function clearPreviewRuntime() {
@@ -571,6 +577,7 @@ function clearPreviewRuntime() {
   previewInspectMode.value = 'clean'
   previewEmitLogs.value = []
   previewRuntimeLogs.value = []
+  resetPreviewDataRevision()
 }
 
 /** 画布/预览运行时使用：预览走副本（写入时已 resolve），编辑走数据池现算 */
@@ -640,7 +647,18 @@ const previewPanelPropValues = computed(() => {
     projectPath: projectStore.path,
   })
   const overrides = previewInstancePropOverrides.value[target.nodeId] ?? {}
-  return { ...base, ...overrides }
+  const merged: Record<string, unknown> = { ...base }
+  for (const [key, value] of Object.entries(overrides)) {
+    const raw = target.hostAttrs[key]
+    if (
+      typeof raw === 'string' &&
+      /^\{\s*[A-Za-z_$][\w$]*\s*\}$/.test(raw.trim())
+    ) {
+      continue
+    }
+    merged[key] = value
+  }
+  return merged
 })
 
 /** 调试面板：检视组件数据池 / 页面或组件资源数据池 */
@@ -751,19 +769,47 @@ function handlePreviewPanelPropUpdate(name: string, value: unknown) {
     handlePreviewPropUpdate(name, value)
     return
   }
+  const propName = name.trim()
+  if (!propName) return
+  const def = target.config?.props?.find((item) => item.name.trim() === propName)
+  if (!def) {
+    pushPreviewRuntimeLog({
+      level: 'error',
+      message: `组件参数不存在：${propName}`,
+      location: `组件 ${target.componentId} · 入参`,
+    })
+    return
+  }
+  if (def.type === 'api') {
+    pushPreviewRuntimeLog({
+      level: 'warn',
+      message: `「${propName}」为后端 API 参数，无法在调试面板修改`,
+      location: `组件 ${target.componentId} · 入参`,
+    })
+    return
+  }
+  // 调试面板改入参：预览覆盖即可，不要求双向绑定（updateProps 运行时 API 才需要）
+  const coerced = normalizePropDefaultValue(def.type, value)
   previewInstancePropOverrides.value = {
     ...previewInstancePropOverrides.value,
     [target.nodeId]: {
       ...(previewInstancePropOverrides.value[target.nodeId] ?? {}),
-      [name]: value,
+      [propName]: coerced,
     },
   }
-  applyPreviewUpdateProps(name, value, {
-    componentId: target.componentId,
-    hostAttrs: target.hostAttrs,
-    hostDataOwnerId: target.hostDataOwnerId,
-    config: target.config,
-  })
+  // model 且父级为 `{field}` 时同步回写宿主数据池
+  if (def.twoWay) {
+    const boundField = parseSimpleDataBinding(target.hostAttrs?.[propName])
+    if (boundField) {
+      const hostOwner = target.hostDataOwnerId?.trim() || ''
+      if (hostOwner) {
+        applyComponentPreviewSetData(hostOwner, boundField, coerced)
+      } else {
+        applyPreviewSetData(boundField, coerced)
+      }
+    }
+  }
+  bumpPreviewDataRevision()
 }
 
 function handlePreviewPanelDataField(
@@ -2523,6 +2569,7 @@ function applyComponentPreviewSetData(
     dollarProps: buildDollarProps(info.config),
     colorPalette: colorPalette.value,
   })
+  bumpPreviewDataRevision()
 }
 
 /** 解析 Component 属性上的纯数据池绑定：`{field}` */
@@ -2607,7 +2654,23 @@ function applyPreviewUpdateProps(
     } else {
       applyPreviewSetData(boundField, coerced)
     }
+    // 清掉同名检视覆盖，避免 $props 被旧 override 卡住
+    const prev = previewInstancePropOverrides.value
+    let changed = false
+    const next: Record<string, Record<string, unknown>> = {}
+    for (const [nodeId, bag] of Object.entries(prev)) {
+      if (!(name in bag)) {
+        next[nodeId] = bag
+        continue
+      }
+      const { [name]: _drop, ...rest } = bag
+      changed = true
+      if (Object.keys(rest).length) next[nodeId] = rest
+    }
+    if (changed) previewInstancePropOverrides.value = next
   }
+  // 即使 setData 因值未变提前返回，也要强制 $props / vShow 重算
+  bumpPreviewDataRevision()
 }
 
 /** 父页通过引用调用组件「暴露方法」 */
@@ -2956,6 +3019,9 @@ function commitPreviewRuntime(
   previewPropOverrides.value = isComponentResource.value
     ? restoreComponentDebugProps()
     : {}
+  // 切页时清掉检视/入参覆盖，避免同路径 nodeId 串到上一页的标题栏等
+  previewInstancePropOverrides.value = {}
+  previewInspectTarget.value = null
   previewEmitLogs.value = []
   previewRuntimeLogs.value = []
 }
@@ -3410,6 +3476,7 @@ function applyPreviewSetData(prop: string, value: import('../types/page-data').D
     dollarQuery: isPageResource.value ? routeParams.value : undefined,
     colorPalette: colorPalette.value,
   })
+  bumpPreviewDataRevision()
   scheduleLifecycleUpdate()
 }
 
@@ -4599,6 +4666,7 @@ watch(
           :project-path="projectStore.path || undefined"
           :preview-lifecycle-gate="previewLifecycleGate"
           :inspect-node-id="previewInspectNodeId"
+          :instance-prop-overrides="previewInstancePropOverrides"
           :hidden-node-ids="isEditMode ? editorHiddenNodeIds : undefined"
           :toast="workspaceMode === 'preview' ? previewToast : null"
           :show-device-chrome="!isComponentResource"
@@ -4612,6 +4680,7 @@ watch(
           @open-repeat="handleOpenRepeatConfig"
           @open-event="handleOpenEventConfig"
           @open-inspect="handlePreviewOpenInspect"
+          @clear-inspect="clearPreviewInspect"
           @add-window="handleAddMultiWindow"
           @interact="handlePreviewInteract"
           @add="openAddWidgetDialog"

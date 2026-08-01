@@ -276,6 +276,22 @@ function isEmptyBindingValue(left: unknown): boolean {
   return false
 }
 
+/** 布尔条件：true/"true"/1 与 false/"false"/0/'' 对齐，避免面板勾选与 vShow 字符串比较拧巴 */
+function coerceConditionBoolean(value: unknown): boolean | undefined {
+  if (typeof value === 'boolean') return value
+  if (typeof value === 'number') {
+    if (value === 1) return true
+    if (value === 0) return false
+    return undefined
+  }
+  if (typeof value === 'string') {
+    const s = value.trim().toLowerCase()
+    if (s === 'true' || s === '1') return true
+    if (s === 'false' || s === '0' || s === '') return false
+  }
+  return undefined
+}
+
 function compareValues(op: StyleConditionOp, left: unknown, right: string): boolean {
   switch (op) {
     case 'empty':
@@ -284,10 +300,18 @@ function compareValues(op: StyleConditionOp, left: unknown, right: string): bool
       return !isEmptyBindingValue(left)
     case 'contains':
       return String(left ?? '').includes(right)
-    case 'eq':
+    case 'eq': {
+      const lb = coerceConditionBoolean(left)
+      const rb = coerceConditionBoolean(right)
+      if (lb !== undefined && rb !== undefined) return lb === rb
       return String(left ?? '') === String(right)
-    case 'neq':
+    }
+    case 'neq': {
+      const lb = coerceConditionBoolean(left)
+      const rb = coerceConditionBoolean(right)
+      if (lb !== undefined && rb !== undefined) return lb !== rb
       return String(left ?? '') !== String(right)
+    }
     case 'gt':
       return Number(left) > Number(right)
     case 'gte':

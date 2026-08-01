@@ -112,12 +112,17 @@ const shellStyle = computed<CSSProperties>(() => {
   const style: CSSProperties = {
     position: 'relative',
     maxWidth: '100%',
-    display: props.visuallyHidden ? 'none' : 'flex',
+    display: 'flex',
     flexDirection: 'column',
     boxSizing: 'border-box',
     cursor: props.interactive ? 'pointer' : undefined,
     ...marginStyle(props.marginAttrs),
     ...(props.extraStyle ?? {}),
+  }
+
+  // 必须在 extraStyle 之后：布局里的 display:flex 会盖掉 vShow 的 none
+  if (props.visuallyHidden) {
+    style.display = 'none'
   }
 
   // 放在 extraStyle 之后，避免被覆盖；占位保留
@@ -574,6 +579,7 @@ onBeforeUnmount(() => {
 <template>
   <div
     class="select-shell"
+    :class="{ 'is-vshow-hidden': visuallyHidden }"
     :style="shellStyle"
     :data-widget-node-id="widgetNodeId || undefined"
     @click="onClick"
@@ -650,6 +656,11 @@ onBeforeUnmount(() => {
 <style scoped>
 .select-shell {
   overflow: visible;
+}
+
+/* 压过任何布局 display:flex，保证 vShow 隐藏真正生效 */
+.select-shell.is-vshow-hidden {
+  display: none !important;
 }
 
 .margin-box {

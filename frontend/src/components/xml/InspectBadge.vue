@@ -136,10 +136,10 @@ function fire(event: Event) {
         class="inspect-btn"
         :style="{ width: `${BTN}px`, height: `${BTN}px` }"
       >
-        <svg class="inspect-btn-icon" viewBox="0 0 24 24" aria-hidden="true">
+        <svg class="inspect-btn-icon" viewBox="0 0 16 16" aria-hidden="true">
           <path
             fill="currentColor"
-            d="M12 2a4 4 0 0 1 4 4v1.1c2.3.5 4 2.5 4 4.9v3a5 5 0 0 1-5 5h-1.1a2.5 2.5 0 0 1-4.8 0H8a5 5 0 0 1-5-5v-3c0-2.4 1.7-4.4 4-4.9V6a4 4 0 0 1 4-4Zm0 2a2 2 0 0 0-2 2v1h4V6a2 2 0 0 0-2-2Zm-5 6.1c-1.2.3-2 1.4-2 2.9v3a3 3 0 0 0 3 3h8a3 3 0 0 0 3-3v-3c0-1.5-.8-2.6-2-2.9H7Zm1.5 2.4a1.25 1.25 0 1 1 0 2.5 1.25 1.25 0 0 1 0-2.5Zm7.25.25h1v1.25H17.5V14h-1.25v-1.25H15V11.5h1.25V10.25Z"
+            d="M6.2 1.4h3.6l1.2 1.2v2.4H14l1.2 1.2v3.6L14 10.8h-2.4V14L10.4 15.2H6.8L5.6 14v-3.2H3.2L2 9.6V6l1.2-1.2h2.4V2.6L6.2 1.4Zm.6 1.5v2.5H4.2v2.8h2.6v2.5h2.4v-2.5h2.6V5.4H9.2V2.9H6.8Z"
           />
         </svg>
       </span>

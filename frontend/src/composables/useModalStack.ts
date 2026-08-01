@@ -25,6 +25,11 @@ export type PreviewInspectMode = 'clean' | 'component'
 export const PREVIEW_INSPECT_MODE_KEY: InjectionKey<Ref<PreviewInspectMode>> =
   Symbol('voiderPreviewInspectMode')
 
+/** 预览检视：按 Component 节点 id 覆盖实例入参（调试面板修改，不要求双向绑定） */
+export const PREVIEW_INSTANCE_PROP_OVERRIDES_KEY: InjectionKey<
+  Ref<Record<string, Record<string, unknown>>>
+> = Symbol('voiderPreviewInstancePropOverrides')
+
 /**
  * 页面级 Modal 堆栈：同一时刻仅栈顶可见；
  * open 会将同名项移到栈顶（其余层暂隐，关闭时可恢复）。

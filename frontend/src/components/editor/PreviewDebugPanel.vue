@@ -650,6 +650,28 @@ function resolvePropForm(def: ComponentPropDef): PropFormModel {
 
 const propForms = computed(() => propDefs.value.map(resolvePropForm))
 
+/** 入参：行内展开编辑（与数据池同布局；同时最多一个） */
+const expandedInlinePropName = ref('')
+
+function isPropInlineExpandable(def: ComponentPropDef): boolean {
+  return def.type !== 'boolean'
+}
+
+function togglePropInlineExpand(form: PropFormModel) {
+  const name = form.def.name.trim()
+  if (!name) return
+  expandedInlinePropName.value =
+    expandedInlinePropName.value === name ? '' : name
+}
+
+function isPropInlineExpanded(form: PropFormModel): boolean {
+  return expandedInlinePropName.value === form.def.name.trim()
+}
+
+function propRemark(def: ComponentPropDef): string {
+  return def.remark?.trim() || ''
+}
+
 function propDisplayValue(def: ComponentPropDef): unknown {
   const name = def.name.trim()
   if (props.propValues && name in props.propValues) {
@@ -663,6 +685,14 @@ function onPropInput(def: ComponentPropDef, raw: unknown) {
   if (!name) return
   emit('update:prop', name, normalizePropDefaultValue(def.type, raw))
 }
+
+watch(
+  () =>
+    `${props.inspectComponentId ?? ''}\0${props.inspectLabel ?? ''}\0${props.config?.name ?? ''}`,
+  () => {
+    expandedInlinePropName.value = ''
+  },
+)
 
 function formatJson(value: unknown): string {
   try {
@@ -1008,190 +1038,243 @@ watch(
           description="暂无入参"
           :image-size="48"
         />
-        <div v-else class="prop-list">
-          <div v-for="form in propForms" :key="form.def.name" class="prop-row">
-            <div class="prop-label">
-              <span class="prop-name">{{ form.def.name }}</span>
-              <span class="prop-type">{{ form.typeLabel }}</span>
-            </div>
-
-            <el-switch
-              v-if="form.mode === 'scalar' && form.def.type === 'boolean'"
-              :model-value="propDisplayValue(form.def) === true"
-              @update:model-value="onPropInput(form.def, $event)"
-            />
-            <el-input-number
-              v-else-if="form.mode === 'scalar' && form.def.type === 'number'"
-              :model-value="Number(propDisplayValue(form.def) ?? 0)"
-              controls-position="right"
-              style="width: 100%"
-              @update:model-value="onPropInput(form.def, $event ?? 0)"
-            />
-            <ColorPicker
-              v-else-if="form.mode === 'scalar' && form.def.type === 'color'"
-              :model-value="String(propDisplayValue(form.def) ?? '')"
-              placeholder="#409eff / rgba(...)"
-              @update:model-value="onPropInput(form.def, $event)"
-            />
-            <DateTimeValueInput
-              v-else-if="
-                form.mode === 'scalar' &&
-                (form.def.type === 'time' ||
-                  form.def.type === 'date' ||
-                  form.def.type === 'datetime')
-              "
-              :kind="form.def.type"
-              size="small"
-              :model-value="String(propDisplayValue(form.def) ?? '')"
-              @update:model-value="onPropInput(form.def, $event)"
-            />
-            <ApiPropBindField
-              v-else-if="form.mode === 'api'"
-              :model-value="String(propDisplayValue(form.def) ?? '')"
-              :project-path="projectPath || ''"
-              :api-params="form.def.apiParams"
-              :api-return-type="form.def.apiReturnType"
-              :data-fields="dataFields"
-              :type-library="typeLibrary"
-              @update:model-value="onPropInput(form.def, $event)"
-            />
-            <el-input
-              v-else-if="form.mode === 'scalar'"
-              :model-value="String(propDisplayValue(form.def) ?? '')"
-              @update:model-value="onPropInput(form.def, $event)"
-            />
-
-            <!-- 具名对象：字段展开 -->
-            <div v-else-if="form.mode === 'object'" class="object-fields">
-              <div
-                v-for="field in form.fields"
-                :key="field.name"
-                class="object-field"
-              >
-                <div class="object-field-label">
-                  <span class="prop-name">{{ field.name }}</span>
-                  <span v-if="field.remark" class="prop-type">{{ field.remark }}</span>
-                </div>
-                <el-switch
-                  v-if="field.kind === 'boolean'"
-                  :model-value="objectFieldValue(form.def, field.name) === true"
-                  @update:model-value="
-                    setObjectField(form.def, field.name, $event === true)
-                  "
+        <div v-else class="param-list">
+          <div
+            v-for="form in propForms"
+            :key="form.def.name"
+            class="data-field-summary"
+            :class="{
+              'is-expanded': isPropInlineExpanded(form),
+              'has-remark': Boolean(propRemark(form.def)),
+            }"
+          >
+            <div class="data-field-summary-top">
+              <div class="data-field-summary-main">
+                <el-checkbox
+                  v-if="form.def.type === 'boolean'"
+                  :model-value="propDisplayValue(form.def) === true"
+                  title="布尔值"
+                  @update:model-value="onPropInput(form.def, $event === true)"
                 />
+                <el-checkbox
+                  v-else
+                  :model-value="true"
+                  disabled
+                  title="入参"
+                />
+                <div class="data-field-summary-text">
+                  <div class="data-field-summary-line">
+                    <span class="prop-name">{{ form.def.name }}</span>
+                    <span class="prop-type">: {{ form.typeLabel }}</span>
+                  </div>
+                  <div
+                    v-if="propRemark(form.def)"
+                    class="data-field-remark"
+                    :title="propRemark(form.def)"
+                  >
+                    {{ propRemark(form.def) }}
+                  </div>
+                </div>
+              </div>
+              <el-button
+                v-if="isPropInlineExpandable(form.def)"
+                type="primary"
+                link
+                class="expand-btn"
+                :class="{ 'is-open': isPropInlineExpanded(form) }"
+                :icon="ArrowDown"
+                @click="togglePropInlineExpand(form)"
+              />
+            </div>
+            <div
+              v-if="
+                isPropInlineExpandable(form.def) && isPropInlineExpanded(form)
+              "
+              class="data-field-inline-editor"
+            >
+              <template v-if="form.mode === 'scalar'">
                 <el-input-number
-                  v-else-if="field.kind === 'number'"
-                  :model-value="Number(objectFieldValue(form.def, field.name) ?? 0)"
+                  v-if="form.def.type === 'number'"
+                  :model-value="Number(propDisplayValue(form.def) ?? 0)"
                   controls-position="right"
                   style="width: 100%"
-                  @update:model-value="
-                    setObjectField(form.def, field.name, $event ?? 0)
-                  "
+                  @update:model-value="onPropInput(form.def, $event ?? 0)"
                 />
-                <el-select
-                  v-else-if="field.kind === 'enum'"
-                  :model-value="String(objectFieldValue(form.def, field.name) ?? '')"
-                  clearable
-                  placeholder="选择"
-                  style="width: 100%"
-                  @update:model-value="
-                    setObjectField(form.def, field.name, $event ?? '')
+                <ColorPicker
+                  v-else-if="form.def.type === 'color'"
+                  :model-value="String(propDisplayValue(form.def) ?? '')"
+                  placeholder="#409eff / rgba(...)"
+                  @update:model-value="onPropInput(form.def, $event)"
+                />
+                <DateTimeValueInput
+                  v-else-if="
+                    form.def.type === 'time' ||
+                    form.def.type === 'date' ||
+                    form.def.type === 'datetime'
                   "
-                >
-                  <el-option
-                    v-for="opt in field.enumOptions"
-                    :key="opt"
-                    :label="opt"
-                    :value="opt"
-                  />
-                </el-select>
-                <el-input
-                  v-else-if="field.kind === 'json' || field.kind === 'array'"
-                  type="textarea"
-                  :rows="2"
-                  :model-value="formatJson(objectFieldValue(form.def, field.name))"
-                  @blur="
-                    onObjectFieldJsonBlur(
-                      form.def,
-                      field.name,
-                      ($event.target as HTMLTextAreaElement).value,
-                      field.kind === 'array',
-                    )
-                  "
+                  :kind="form.def.type"
+                  size="small"
+                  :model-value="String(propDisplayValue(form.def) ?? '')"
+                  @update:model-value="onPropInput(form.def, $event)"
                 />
                 <el-input
                   v-else
-                  :model-value="
-                    String(objectFieldValue(form.def, field.name) ?? '')
-                  "
-                  @update:model-value="
-                    setObjectField(form.def, field.name, String($event ?? ''))
-                  "
+                  :model-value="String(propDisplayValue(form.def) ?? '')"
+                  @update:model-value="onPropInput(form.def, $event)"
                 />
-              </div>
-            </div>
+              </template>
 
-            <!-- 数组：逐项列表（对齐后端入参） -->
-            <div v-else-if="form.mode === 'array'" class="array-list">
-              <div
-                v-if="!getArrayItems(form.def).length"
-                class="array-empty"
-              >
-                暂无数据，点击下方添加
-              </div>
-              <div
-                v-for="(item, index) in getArrayItems(form.def)"
-                :key="`${form.def.name}-${index}`"
-                class="array-item"
-                @click="openEditArrayItem(form, index)"
-              >
-                <div class="array-item-main">
-                  <span class="array-index">{{ index + 1 }}</span>
-                  <span class="array-summary">{{
-                    summarizeItem(item, form.fields)
-                  }}</span>
-                </div>
-                <div class="array-item-actions" @click.stop>
-                  <el-button
-                    type="primary"
-                    link
-                    :icon="EditPen"
-                    @click="openEditArrayItem(form, index)"
-                  />
-                  <el-button
-                    type="danger"
-                    link
-                    :icon="Delete"
-                    @click="removeArrayItem(form.def, index)"
-                  />
-                </div>
-              </div>
-              <button
-                type="button"
-                class="array-item array-add-item"
-                @click="openAddArrayItem(form)"
-              >
-                <div class="array-item-main">
-                  <span class="array-index array-add-icon">
-                    <el-icon :size="12"><Plus /></el-icon>
-                  </span>
-                  <span class="array-summary array-add-label">添加</span>
-                </div>
-              </button>
-            </div>
+              <ApiPropBindField
+                v-else-if="form.mode === 'api'"
+                :model-value="String(propDisplayValue(form.def) ?? '')"
+                :project-path="projectPath || ''"
+                :api-params="form.def.apiParams"
+                :api-return-type="form.def.apiReturnType"
+                :data-fields="dataFields"
+                :type-library="typeLibrary"
+                @update:model-value="onPropInput(form.def, $event)"
+              />
 
-            <el-input
-              v-else
-              type="textarea"
-              :rows="3"
-              :model-value="formatJson(propDisplayValue(form.def))"
-              @blur="
-                onJsonPropBlur(
-                  form.def,
-                  ($event.target as HTMLTextAreaElement).value,
-                )
-              "
-            />
+              <div v-else-if="form.mode === 'object'" class="object-fields">
+                <div
+                  v-for="field in form.fields"
+                  :key="field.name"
+                  class="object-field"
+                >
+                  <div class="object-field-label">
+                    <span class="prop-name">{{ field.name }}</span>
+                    <span v-if="field.remark" class="prop-type">{{
+                      field.remark
+                    }}</span>
+                  </div>
+                  <el-switch
+                    v-if="field.kind === 'boolean'"
+                    :model-value="
+                      objectFieldValue(form.def, field.name) === true
+                    "
+                    @update:model-value="
+                      setObjectField(form.def, field.name, $event === true)
+                    "
+                  />
+                  <el-input-number
+                    v-else-if="field.kind === 'number'"
+                    :model-value="
+                      Number(objectFieldValue(form.def, field.name) ?? 0)
+                    "
+                    controls-position="right"
+                    style="width: 100%"
+                    @update:model-value="
+                      setObjectField(form.def, field.name, $event ?? 0)
+                    "
+                  />
+                  <el-select
+                    v-else-if="field.kind === 'enum'"
+                    :model-value="
+                      String(objectFieldValue(form.def, field.name) ?? '')
+                    "
+                    clearable
+                    placeholder="选择"
+                    style="width: 100%"
+                    @update:model-value="
+                      setObjectField(form.def, field.name, $event ?? '')
+                    "
+                  >
+                    <el-option
+                      v-for="opt in field.enumOptions"
+                      :key="opt"
+                      :label="opt"
+                      :value="opt"
+                    />
+                  </el-select>
+                  <el-input
+                    v-else-if="field.kind === 'json' || field.kind === 'array'"
+                    type="textarea"
+                    :rows="2"
+                    :model-value="
+                      formatJson(objectFieldValue(form.def, field.name))
+                    "
+                    @blur="
+                      onObjectFieldJsonBlur(
+                        form.def,
+                        field.name,
+                        ($event.target as HTMLTextAreaElement).value,
+                        field.kind === 'array',
+                      )
+                    "
+                  />
+                  <el-input
+                    v-else
+                    :model-value="
+                      String(objectFieldValue(form.def, field.name) ?? '')
+                    "
+                    @update:model-value="
+                      setObjectField(form.def, field.name, String($event ?? ''))
+                    "
+                  />
+                </div>
+              </div>
+
+              <div v-else-if="form.mode === 'array'" class="array-list">
+                <div
+                  v-if="!getArrayItems(form.def).length"
+                  class="array-empty"
+                >
+                  暂无数据，点击下方添加
+                </div>
+                <div
+                  v-for="(item, index) in getArrayItems(form.def)"
+                  :key="`${form.def.name}-${index}`"
+                  class="array-item"
+                  @click="openEditArrayItem(form, index)"
+                >
+                  <div class="array-item-main">
+                    <span class="array-index">{{ index + 1 }}</span>
+                    <span class="array-summary">{{
+                      summarizeItem(item, form.fields)
+                    }}</span>
+                  </div>
+                  <div class="array-item-actions" @click.stop>
+                    <el-button
+                      type="primary"
+                      link
+                      :icon="EditPen"
+                      @click="openEditArrayItem(form, index)"
+                    />
+                    <el-button
+                      type="danger"
+                      link
+                      :icon="Delete"
+                      @click="removeArrayItem(form.def, index)"
+                    />
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  class="array-item array-add-item"
+                  @click="openAddArrayItem(form)"
+                >
+                  <div class="array-item-main">
+                    <span class="array-index array-add-icon">
+                      <el-icon :size="12"><Plus /></el-icon>
+                    </span>
+                    <span class="array-summary array-add-label">添加</span>
+                  </div>
+                </button>
+              </div>
+
+              <el-input
+                v-else
+                type="textarea"
+                :rows="3"
+                :model-value="formatJson(propDisplayValue(form.def))"
+                @blur="
+                  onJsonPropBlur(
+                    form.def,
+                    ($event.target as HTMLTextAreaElement).value,
+                  )
+                "
+              />
+            </div>
           </div>
         </div>
       </div>

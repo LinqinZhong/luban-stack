@@ -292,6 +292,8 @@ onBeforeUnmount(() => {
           editable,
           active: editable && win.index === editIndex,
           unbound: editable && !win.key,
+          'is-preview-hidden':
+            !editable && !isPreviewVisible(win.index, win.key),
         }"
         :style="paneStyle(win.index)"
         @click.stop="editable && allowManage && emit('select-window', win.index)"
@@ -359,6 +361,13 @@ onBeforeUnmount(() => {
   min-height: 0;
   box-sizing: border-box;
   overflow: visible;
+}
+
+/* 预览非激活窗：绝对定位叠层 + display:flex 时，强化隐藏，避免与 data 窗叠出「加载中」 */
+.multi-window-pane.is-preview-hidden {
+  display: none !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
 }
 
 .multi-window-pane.editable {

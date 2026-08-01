@@ -9,6 +9,7 @@ import {
   MODAL_HOST_KEY,
   MODAL_STACK_KEY,
   PREVIEW_INSPECT_MODE_KEY,
+  PREVIEW_INSTANCE_PROP_OVERRIDES_KEY,
   type CanvasToolMode,
   type ModalStackApi,
   type PreviewInspectMode,
@@ -19,7 +20,10 @@ import {
   PHONE_FRAME_KEY,
 } from '../../composables/useInspectCalloutLayout'
 import { CANVAS_RUNTIME_KEY } from '../../composables/useCanvasRuntime'
-import { COMPONENT_RENDER_MAP_KEY } from '../../composables/useComponentRenderMap'
+import {
+  COMPONENT_RENDER_MAP_KEY,
+  PAGE_LIVE_PAGE_DATA_KEY,
+} from '../../composables/useComponentRenderMap'
 import { EDITOR_MENU_BUTTON, getDeviceInfo } from '../../utils/device-info'
 import type { IconLibrary } from '../../types/icon-library'
 import type { PageData } from '../../types/page-data'
@@ -83,7 +87,13 @@ const props = defineProps<{
   navigationBarTitle?: string
   /** 预览态正在检视的 Component 节点 id */
   inspectNodeId?: string
+  /** 预览检视：按节点 id 覆盖 Component 实例入参 */
+  instancePropOverrides?: Record<string, Record<string, unknown>>
 }>()
+
+const instancePropOverridesRef = computed(
+  () => props.instancePropOverrides ?? {},
+)
 
 const emit = defineEmits<{
   select: [id: string]
@@ -95,6 +105,7 @@ const emit = defineEmits<{
   'open-inspect': [
     payload: import('../../types/preview-inspect').PreviewInspectPayload,
   ]
+  'clear-inspect': []
   'add-window': [parentId: string]
   interact: [payload: import('../../utils/event-runtime').PreviewInteractPayload]
   contextmenu: [payload: { nodeId: string; x: number; y: number }]
@@ -137,9 +148,14 @@ provide(PHONE_FRAME_KEY, phoneRef)
 provide(OPEN_INSPECT_KEY, (payload) => emit('open-inspect', payload))
 provide(CANVAS_TOOL_MODE_KEY, toolMode)
 provide(PREVIEW_INSPECT_MODE_KEY, inspectMode)
+provide(PREVIEW_INSTANCE_PROP_OVERRIDES_KEY, instancePropOverridesRef)
 provide(
   COMPONENT_RENDER_MAP_KEY,
   computed(() => props.componentMap),
+)
+provide(
+  PAGE_LIVE_PAGE_DATA_KEY,
+  computed(() => props.pageData),
 )
 provide(CANVAS_RUNTIME_KEY, {
   getDeviceInfo: () =>
@@ -685,9 +701,8 @@ function handlePhoneClick(event: MouseEvent) {
   }
 }
 
-/** 点击画布空白（网格区域等）取消选中 */
+/** 点击画布空白（网格区域等）取消选中 / 取消检视 */
 function handleStageClick(event: MouseEvent) {
-  if (!props.selectable) return
   if (colorPickState.picking.value) return
   const el = event.target as HTMLElement | null
   if (!el) return
@@ -695,7 +710,15 @@ function handleStageClick(event: MouseEvent) {
   if (el.closest('.color-pick-ignore')) return
   // 控件自身会 stopPropagation；此处再兜底
   if (el.closest('.select-shell')) return
-  emit('select', '')
+  if (el.closest('.inspect-callout')) return
+  if (props.selectable) {
+    emit('select', '')
+    return
+  }
+  // 预览组件检视：点手机外的画布空白取消检视
+  if (props.inspectNodeId && !el.closest('.phone')) {
+    emit('clear-inspect')
+  }
 }
 
 const touchCursorVisible = ref(false)
@@ -1248,20 +1271,6 @@ watch(
           </svg>
         </button>
       </div>
-      <div class="scene-tabs" role="tablist" aria-label="画布场景">
-        <button
-          v-for="tab in sceneTabs"
-          :key="tab.key"
-          type="button"
-          role="tab"
-          class="scene-tab"
-          :class="{ active: scene === tab.key }"
-          :aria-selected="scene === tab.key"
-          @click="scene = tab.key"
-        >
-          {{ tab.label }}
-        </button>
-      </div>
       <div
         v-if="!selectable"
         class="scene-tabs tool-tabs"
@@ -1299,6 +1308,20 @@ watch(
               d="M6.2 1.4h3.6l1.2 1.2v2.4H14l1.2 1.2v3.6L14 10.8h-2.4V14L10.4 15.2H6.8L5.6 14v-3.2H3.2L2 9.6V6l1.2-1.2h2.4V2.6L6.2 1.4Zm.6 1.5v2.5H4.2v2.8h2.6v2.5h2.4v-2.5h2.6V5.4H9.2V2.9H6.8Z"
             />
           </svg>
+        </button>
+      </div>
+      <div class="scene-tabs" role="tablist" aria-label="画布场景">
+        <button
+          v-for="tab in sceneTabs"
+          :key="tab.key"
+          type="button"
+          role="tab"
+          class="scene-tab"
+          :class="{ active: scene === tab.key }"
+          :aria-selected="scene === tab.key"
+          @click="scene = tab.key"
+        >
+          {{ tab.label }}
         </button>
       </div>
       <span

@@ -235,13 +235,27 @@ export function buildDollarProps(
   return result
 }
 
+/** 支持 a.b / a[0] / a.b[0].c */
 function getByPath(source: unknown, path: string): unknown {
   if (!path) return source
-  const parts = path.split('.').filter(Boolean)
+  const tokens: Array<{ kind: 'key'; value: string } | { kind: 'index'; value: number }> =
+    []
+  const re = /([^.\[\]]+)|\[(\d+)\]/g
+  let match: RegExpExecArray | null
+  while ((match = re.exec(path))) {
+    if (match[1] != null) tokens.push({ kind: 'key', value: match[1] })
+    else if (match[2] != null) tokens.push({ kind: 'index', value: Number(match[2]) })
+  }
   let current: unknown = source
-  for (const part of parts) {
-    if (current == null || typeof current !== 'object') return undefined
-    current = (current as Record<string, unknown>)[part]
+  for (const token of tokens) {
+    if (current == null) return undefined
+    if (token.kind === 'index') {
+      if (!Array.isArray(current)) return undefined
+      current = current[token.value]
+      continue
+    }
+    if (typeof current !== 'object') return undefined
+    current = (current as Record<string, unknown>)[token.value]
   }
   return current
 }

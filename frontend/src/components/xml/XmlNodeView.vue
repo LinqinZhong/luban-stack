@@ -25,15 +25,28 @@ import {
 } from '../../utils/xml'
 import { resolveMatchingStyleOverrides, evaluateScenarios, interpolateDataBindings, resolveAttrBindingValue } from '../../utils/dynamic-style-runtime'
 import { interpolateDollarProps } from '../../utils/component-props'
-import { resolveComponentInstanceDollarProps } from '../../utils/instance-dollar-props'
+import {
+  buildHostBoundAttrsDepsKey,
+  resolveComponentInstanceDollarProps,
+} from '../../utils/instance-dollar-props'
 import {
   resolveComputedPageData,
   buildComputeDepsKey,
   sameJson,
 } from '../../utils/compute-runtime'
+import {
+  buildVisibilityDataDepsKey,
+  collectXmlVisibilityDataFieldNames,
+} from '../../utils/visibility-data-deps'
 import { buildRepeatExpandKey, expandRepeatTree, applyEditRepeatPreviewScope } from '../../utils/repeat'
 import { CANVAS_RUNTIME_KEY } from '../../composables/useCanvasRuntime'
-import { COMPONENT_RENDER_MAP_KEY } from '../../composables/useComponentRenderMap'
+import {
+  COMPONENT_LIVE_DOLLAR_PROPS_KEY,
+  COMPONENT_LIVE_PAGE_DATA_KEY,
+  COMPONENT_RENDER_MAP_KEY,
+  PAGE_LIVE_PAGE_DATA_KEY,
+} from '../../composables/useComponentRenderMap'
+import { previewDataRevision } from '../../composables/preview-data-revision'
 import {
   DYNAMIC_STYLES_ATTR,
   V_IF_ATTR,
@@ -45,6 +58,7 @@ import {
   MODAL_HOST_KEY,
   MODAL_STACK_KEY,
   PREVIEW_INSPECT_MODE_KEY,
+  PREVIEW_INSTANCE_PROP_OVERRIDES_KEY,
   type PreviewInspectMode,
 } from '../../composables/useModalStack'
 import { OPEN_INSPECT_KEY } from '../../composables/useInspectCalloutLayout'
@@ -68,6 +82,11 @@ export type VoiderSlotScope = {
   /** 宿主（填写插槽的一侧）数据池 / $props，不是组件定义内部的 */
   hostPageData?: PageData
   hostDollarProps?: Record<string, unknown>
+  /**
+   * 插槽投影内容上 `{field}` 绑定所属数据池：页面为空串，否则为外层组件 id。
+   * 注意：不是「当前定义组件」自己的 id（LoadingPlaceholder 槽里的 Pager 应回写页面）。
+   */
+  hostDataOwnerId?: string
   /**
    * 外层 Component 的插槽作用域。
    * 用于「插槽转发」：定义里把 `<Slot name="header" slot="header"/>` 传给内层组件时，
@@ -166,6 +185,10 @@ const previewInspectMode = inject<Ref<PreviewInspectMode> | null>(
   PREVIEW_INSPECT_MODE_KEY,
   null,
 )
+const previewInstancePropOverrides = inject(
+  PREVIEW_INSTANCE_PROP_OVERRIDES_KEY,
+  null,
+)
 /** 直达 PageCanvas，不依赖中间节点逐级 @open-inspect */
 const openInspectDirect = inject(OPEN_INSPECT_KEY, null)
 /**
@@ -208,6 +231,8 @@ const effectiveSlotScope = computed<VoiderSlotScope | null>(() => {
       // 插槽内容属于宿主 XML，必须用宿主上下文（而非定义内 Pager 的空 $props）
       hostPageData: props.pageData,
       hostDollarProps: props.dollarProps,
+      // 投影内容的 `{loading}` 等绑定写回「放置该 Component 的一侧」，不是本组件 data
+      hostDataOwnerId: props.hostDataOwnerComponentId?.trim() || '',
       parent: props.voiderSlotScope ?? null,
     }
   }
@@ -249,51 +274,6 @@ const displayNode = computed(() => {
 /** 模板用：编辑态 repeat 节点带首项 scope，使 {item.xxx} 布局生效 */
 const node = displayNode
 
-const runtimeScope = computed(() => ({
-  ...(displayNode.value.scope ?? {}),
-  $props: props.dollarProps,
-  $route: props.routeParams,
-  $query: props.routeParams,
-}))
-
-const mountAllowed = computed(() => {
-  // 编辑态忽略 v-if，始终挂载（仅左侧眼睛可隐藏）
-  if (props.selectable) return true
-  const config = parseVisibilityConditions(props.node.attrs[V_IF_ATTR])
-  return evaluateScenarios(config.scenarios, props.pageData, runtimeScope.value)
-})
-
-const showAllowed = computed(() => {
-  // 编辑态忽略 v-show，始终显示
-  if (props.selectable) return true
-  const config = parseVisibilityConditions(props.node.attrs[V_SHOW_ATTR])
-  return evaluateScenarios(config.scenarios, props.pageData, runtimeScope.value)
-})
-
-/** Modal id：优先 name，否则用节点路径 */
-const modalKey = computed(
-  () => props.node.attrs.name?.trim() || props.nodeId,
-)
-
-const modalIsOpen = computed(() => {
-  if (props.node.tag !== 'Modal') return true
-  if (props.selectable) return true
-  return Boolean(modalStack?.isTop(modalKey.value))
-})
-
-/** 编辑态：始终全屏展示；预览态：仅栈顶打开 */
-const modalLayerVisible = computed(() => {
-  if (props.node.tag !== 'Modal') return false
-  if (isEditorHidden.value || !mountAllowed.value) return false
-  if (props.selectable) return true
-  return showAllowed.value && modalIsOpen.value
-})
-
-/** v-show / Modal 栈：条件为假时隐藏但仍挂载 */
-const visuallyHidden = computed(
-  () => !showAllowed.value || (props.node.tag === 'Modal' && !modalIsOpen.value),
-)
-
 const previewClickable = computed(
   () =>
     Boolean(props.interactEnabled) &&
@@ -317,6 +297,151 @@ const componentDetail = computed(() => {
   if (!id || !map) return null
   return map[id] ?? null
 })
+
+/** 页面 live 数据池；插槽里的 Component 组装 $props 时优先用它 */
+const pageLivePageData = inject(PAGE_LIVE_PAGE_DATA_KEY, null)
+
+/**
+ * 解析实例 `$props` 用的宿主数据池：
+ * - 页面侧放置的 Component（含插槽投影）：用页面 live，避免快照卡住
+ * - 组件定义树内的嵌套 Component：仍用当前 props.pageData
+ */
+const hostPageDataForInstanceProps = computed(() => {
+  if (props.hostDataOwnerComponentId?.trim()) return props.pageData
+  return pageLivePageData?.value ?? props.pageData
+})
+
+/**
+ * 本实例 $props。显式订阅宿主 `{field}` 绑定值 + 预览数据版本号，
+ * 避免 updateProps 原地回写后 `$props.loading` 卡住 → vShow「加载中」不消失。
+ * sameJson 仅稳定对象引用；绑定键 / revision 变化时一定会重算。
+ */
+let cachedInstanceDollarProps: Record<string, unknown> | null = null
+const instanceDollarProps = computed(() => {
+  void previewDataRevision.value
+  const hostData = hostPageDataForInstanceProps.value
+  // 必须用返回值：让 computed 依赖键本身，而不只是内部 void 读取
+  const boundKey = buildHostBoundAttrsDepsKey(props.node.attrs, hostData)
+  void boundKey
+  const base = resolveComponentInstanceDollarProps({
+    config: componentDetail.value?.config,
+    hostAttrs: props.node.attrs,
+    pageData: hostData,
+    routeParams: props.routeParams,
+    scope: props.node.scope
+      ? {
+          item: props.node.scope.item,
+          index: props.node.scope.index,
+        }
+      : null,
+    projectPath: canvasRuntime?.projectPath,
+  })
+  const overrides = previewInstancePropOverrides?.value?.[props.nodeId]
+  const next: Record<string, unknown> = { ...base }
+  // 检视覆盖：仅作用于未绑定宿主字段的入参。
+  // `{loading}` 等必须以数据池为准，否则 updateProps 回写后覆盖仍停在 true。
+  if (overrides) {
+    for (const [key, value] of Object.entries(overrides)) {
+      const raw = props.node.attrs[key]
+      if (
+        typeof raw === 'string' &&
+        /^\{\s*[A-Za-z_$][\w$]*\s*\}$/.test(raw.trim())
+      ) {
+        continue
+      }
+      next[key] = value
+    }
+  }
+  if (
+    cachedInstanceDollarProps &&
+    sameJson(cachedInstanceDollarProps, next)
+  ) {
+    return cachedInstanceDollarProps
+  }
+  cachedInstanceDollarProps = next
+  return next
+})
+
+/** 外层 Component 下发的 live 数据池；本节点是 Component 时改挂自己的 */
+const parentLivePageData = inject(COMPONENT_LIVE_PAGE_DATA_KEY, null)
+const livePageDataForSubtree = computed(() => {
+  if (props.node.tag === 'Component' && componentDetail.value?.data) {
+    return componentDetail.value.data
+  }
+  return parentLivePageData?.value
+})
+provide(COMPONENT_LIVE_PAGE_DATA_KEY, livePageDataForSubtree)
+
+/** 定义树内 vIf/vShow 用 live $props，不依赖可能过期的 prop 透传引用 */
+const parentLiveDollarProps = inject(COMPONENT_LIVE_DOLLAR_PROPS_KEY, null)
+const liveDollarPropsForSubtree = computed(() => {
+  if (props.node.tag === 'Component' && componentDetail.value) {
+    return instanceDollarProps.value
+  }
+  return parentLiveDollarProps?.value ?? props.dollarProps
+})
+provide(COMPONENT_LIVE_DOLLAR_PROPS_KEY, liveDollarPropsForSubtree)
+
+const runtimeScope = computed(() => ({
+  ...(displayNode.value.scope ?? {}),
+  $props: liveDollarPropsForSubtree.value ?? props.dollarProps,
+  $route: props.routeParams,
+  $query: props.routeParams,
+}))
+
+/** Modal id：优先 name，否则用节点路径 */
+const modalKey = computed(
+  () => props.node.attrs.name?.trim() || props.nodeId,
+)
+
+const modalIsOpen = computed(() => {
+  if (props.node.tag !== 'Modal') return true
+  if (props.selectable) return true
+  return Boolean(modalStack?.isTop(modalKey.value))
+})
+
+/** vIf/vShow：优先 live 数据池，保证 setData 后条件立刻生效 */
+const visibilityPageData = computed(
+  () => livePageDataForSubtree.value ?? props.pageData,
+)
+
+const mountAllowed = computed(() => {
+  // 编辑态忽略 v-if，始终挂载（仅左侧眼睛可隐藏）
+  if (props.selectable) return true
+  void previewDataRevision.value
+  const config = parseVisibilityConditions(props.node.attrs[V_IF_ATTR])
+  return evaluateScenarios(
+    config.scenarios,
+    visibilityPageData.value,
+    runtimeScope.value,
+  )
+})
+
+const showAllowed = computed(() => {
+  // 编辑态忽略 v-show，始终显示
+  if (props.selectable) return true
+  // 与 $props / 数据池原地写入对齐，确保条件随 revision 重算
+  void previewDataRevision.value
+  const config = parseVisibilityConditions(props.node.attrs[V_SHOW_ATTR])
+  return evaluateScenarios(
+    config.scenarios,
+    visibilityPageData.value,
+    runtimeScope.value,
+  )
+})
+
+/** 编辑态：始终全屏展示；预览态：仅栈顶打开 */
+const modalLayerVisible = computed(() => {
+  if (props.node.tag !== 'Modal') return false
+  if (isEditorHidden.value || !mountAllowed.value) return false
+  if (props.selectable) return true
+  return showAllowed.value && modalIsOpen.value
+})
+
+/** v-show / Modal 栈：条件为假时隐藏但仍挂载 */
+const visuallyHidden = computed(
+  () => !showAllowed.value || (props.node.tag === 'Modal' && !modalIsOpen.value),
+)
 
 /** 基础 attrs + 动态样式；解析数据池绑定；预览态再替换 $props */
 const attrs = computed(() => {
@@ -492,32 +617,6 @@ const textStyle = computed(() => ({
   ...rotateStyle(attrs.value),
 }))
 
-/** 稳定 $props 对象引用：宿主 pageData 刷新但绑定值未变时不换新对象 */
-let cachedInstanceDollarProps: Record<string, unknown> | null = null
-const instanceDollarProps = computed(() => {
-  const next = resolveComponentInstanceDollarProps({
-    config: componentDetail.value?.config,
-    hostAttrs: props.node.attrs,
-    pageData: props.pageData,
-    routeParams: props.routeParams,
-    scope: props.node.scope
-      ? {
-          item: props.node.scope.item,
-          index: props.node.scope.index,
-        }
-      : null,
-    projectPath: canvasRuntime?.projectPath,
-  })
-  if (
-    cachedInstanceDollarProps &&
-    sameJson(cachedInstanceDollarProps, next)
-  ) {
-    return cachedInstanceDollarProps
-  }
-  cachedInstanceDollarProps = next
-  return next
-})
-
 /**
  * 仅当计算体真正用到的 $props / 设备信息变化时才变。
  * 滚动改 titleBarColor 不会让只依赖 isFillScreen 的计算字段重跑。
@@ -534,19 +633,39 @@ const componentComputeDepsKey = computed(() => {
   )
 })
 
-/** 用实例 $props 重新求值组件数据池（避免只用 config 默认值） */
+/** 组件 XML 中 vIf/vShow/dynamicStyles 用到的数据池字段（如 hasNext） */
+const componentVisibilityFields = computed(() => {
+  const xml = componentDetail.value?.xml
+  if (!xml?.trim()) return [] as string[]
+  return collectXmlVisibilityDataFieldNames(xml)
+})
+
+/**
+ * 计算依赖 + 可见性字段：任一变化则按「本实例 $props」重算数据池快照。
+ * 必须每实例一份副本——多开同一 componentId 时不能共用 live data，否则会串 $props。
+ */
+const componentDataSyncKey = computed(() => {
+  const detail = componentDetail.value
+  if (!detail) return ''
+  const visKey = buildVisibilityDataDepsKey(
+    detail.data,
+    componentVisibilityFields.value,
+  )
+  return `${componentComputeDepsKey.value}\0${visKey}`
+})
+
+/** 用本实例 $props 求值的数据池快照（与同 componentId 的其它实例隔离） */
 const componentPageData = shallowRef<PageData | undefined>(undefined)
 
 watch(
-  [() => componentDetail.value?.data, componentComputeDepsKey],
+  [() => componentDetail.value?.data, componentDataSyncKey],
   () => {
     const detail = componentDetail.value
     if (!detail) {
       componentPageData.value = props.pageData
       return
     }
-    // 仅 data / 计算依赖变化时重算；勿订阅 instanceDollarProps 对象引用
-    // （宿主 pageData 每帧更新都会 new 出 $props，导致 StarRate 等整池重跑）
+    // 勿订阅 instanceDollarProps 对象引用：宿主 pageData 每帧更新都会 new $props
     componentPageData.value = resolveComputedPageData(detail.data, {
       getDeviceInfo: canvasRuntime?.getDeviceInfo,
       dollarProps: instanceDollarProps.value,
@@ -2188,7 +2307,9 @@ onBeforeUnmount(() => {
         :parent-height-definite="heightIsDefinite"
         :icon-library="iconLibrary"
         :page-data="slotFillPageData"
-        :host-data-owner-component-id="hostDataOwnerComponentId"
+        :host-data-owner-component-id="
+          effectiveSlotScope?.hostDataOwnerId ?? hostDataOwnerComponentId
+        "
         :inside-component-definition="false"
         :inspect-node-id="inspectNodeId"
         :hidden-node-ids="hiddenNodeIds"
