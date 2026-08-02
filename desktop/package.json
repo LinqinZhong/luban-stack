@@ -1,19 +1,20 @@
 {
-  "name": "voider-desktop",
+  "name": "luban-desktop",
   "version": "0.1.0",
   "private": true,
-  "description": "LubanStack Electron 桌面端",
+  "description": "LubanStack Electron desktop",
   "main": "dist/main.js",
   "scripts": {
     "postinstall": "node node_modules/electron/install.js",
     "build:main": "tsc -p tsconfig.json",
     "dev": "npm run build:main && concurrently -k -n vite,electron -c cyan,magenta \"npm run dev:vite\" \"npm run dev:electron\"",
     "dev:vite": "npm --prefix ../frontend run dev",
-    "dev:electron": "wait-on http://127.0.0.1:5173 && cross-env VOIDER_ELECTRON_DEV=1 electron .",
-    "prepack:app": "npm run build:main && npm --prefix ../frontend run build && npm --prefix ../server run build",
+    "dev:electron": "wait-on http://127.0.0.1:5173 && cross-env LUBAN_ELECTRON_DEV=1 electron .",
+    "icons": "node scripts/generate-icon.mjs",
+    "prepack:app": "npm run icons && npm run build:main && npm --prefix ../frontend run build && npm --prefix ../server run build",
     "pack": "npm run prepack:app && electron-builder --win dir",
     "build": "npm run prepack:app && electron-builder --win",
-    "start": "npm run build:main && cross-env VOIDER_ELECTRON_DEV=1 electron ."
+    "start": "npm run build:main && cross-env LUBAN_ELECTRON_DEV=1 electron ."
   },
   "devDependencies": {
     "@types/node": "^24.13.2",
@@ -21,18 +22,22 @@
     "cross-env": "^7.0.3",
     "electron": "^37.2.0",
     "electron-builder": "^26.0.12",
+    "png-to-ico": "^3.0.2",
+    "sharp": "^0.35.3",
     "typescript": "^5.9.2",
     "wait-on": "^8.0.4"
   },
   "build": {
-    "appId": "com.voider.desktop",
+    "appId": "com.luban.desktop",
     "productName": "LubanStack",
     "directories": {
-      "output": "release"
+      "output": "release",
+      "buildResources": "build"
     },
     "files": [
       "dist/**/*",
-      "package.json"
+      "package.json",
+      "build/icon.ico"
     ],
     "extraResources": [
       {
@@ -56,6 +61,7 @@
       }
     ],
     "win": {
+      "icon": "build/icon.ico",
       "target": [
         {
           "target": "nsis",

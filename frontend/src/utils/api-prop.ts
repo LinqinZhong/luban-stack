@@ -37,7 +37,7 @@ export interface ApiPropBinding {
 }
 
 /** 下拉「常量」选项的哨兵值（不写入持久化） */
-export const API_PROP_LITERAL_SELECT = '__voider_literal__'
+export const API_PROP_LITERAL_SELECT = '__luban_literal__'
 
 export function createEmptyApiPropBinding(): ApiPropBinding {
   return { serviceId: '', controllerId: '', apiId: '', paramBindings: {} }
@@ -439,7 +439,7 @@ export function isApiPropDef(def: ComponentPropDef | null | undefined): boolean 
 }
 
 /** 挂在可调用函数上，供 depsKey / 调试识别绑定 */
-export const API_PROP_BINDING_MARK = '__voiderApiBinding'
+export const API_PROP_BINDING_MARK = '__lubanApiBinding'
 
 export type ApiPropInvoker = ((
   args?: Record<string, unknown>,

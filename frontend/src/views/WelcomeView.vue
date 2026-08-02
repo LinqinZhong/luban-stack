@@ -52,6 +52,8 @@ const engineVersionLabel = computed(
   () => meta.value?.engineVersion ?? '1.0.0',
 )
 
+const configFileName = computed(() => meta.value?.configFile ?? 'luban.json')
+
 async function loadMeta() {
   try {
     meta.value = await getProjectMeta()
@@ -190,7 +192,7 @@ onMounted(() => {
     </div>
 
     <el-dialog v-model="openDialogVisible" title="打开项目" width="560px" destroy-on-close :close-on-click-modal="false" :close-on-press-escape="false">
-      <p class="hint">选择包含 voider.json 的项目文件夹</p>
+      <p class="hint">选择包含 {{ configFileName }} 的项目文件夹</p>
       <div class="path-row">
         <el-input v-model="openPath" placeholder="项目文件夹路径" clearable />
         <el-button :icon="Folder" @click="openFolderPicker('open')">浏览</el-button>
@@ -204,7 +206,11 @@ onMounted(() => {
       <el-form ref="createFormRef" :model="createForm" :rules="createRules" label-width="100px">
         <el-form-item label="项目路径" prop="path">
           <div class="path-row full">
-            <el-input v-model="createForm.path" placeholder="将在此文件夹创建 voider.json" clearable />
+            <el-input
+              v-model="createForm.path"
+              :placeholder="`将在此文件夹创建 ${configFileName}`"
+              clearable
+            />
             <el-button :icon="Folder" @click="openFolderPicker('create')">浏览</el-button>
           </div>
         </el-form-item>

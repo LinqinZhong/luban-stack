@@ -98,14 +98,14 @@ async function setupEditor() {
     ambientModel = monaco.editor.createModel(
       ambient,
       'typescript',
-      monaco.Uri.parse(`inmemory://voider/types-ambient-${stamp}.d.ts`),
+      monaco.Uri.parse(`inmemory://luban/types-ambient-${stamp}.d.ts`),
     )
   }
 
   model = monaco.editor.createModel(
     initial,
     'typescript',
-    monaco.Uri.parse(`inmemory://voider/type-edit-${stamp}.ts`),
+    monaco.Uri.parse(`inmemory://luban/type-edit-${stamp}.ts`),
   )
 
   editor = monaco.editor.create(hostRef.value, {

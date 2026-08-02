@@ -3,7 +3,8 @@ import path from 'node:path'
 
 dotenv.config()
 
-const staticDirRaw = process.env.VOIDER_STATIC_DIR?.trim()
+const staticDirRaw =
+  process.env.LUBAN_STATIC_DIR?.trim() || process.env.VOIDER_STATIC_DIR?.trim()
 
 export const env = {
   port: Number(process.env.PORT) || 3000,

@@ -1,11 +1,11 @@
-﻿import type { VoiderProjectConfig } from '../../types/voider-project.js'
+﻿import type { LubanProjectConfig } from '../../types/luban-project.js'
 import type { ColorPalette } from '../../types/color-palette.js'
 import { buildPaletteCssVars } from '../../types/color-palette.js'
 import { pageIdToViewName } from './naming.js'
 
 export interface ScaffoldContext {
   projectName: string
-  config: VoiderProjectConfig
+  config: LubanProjectConfig
   pages: Array<{ id: string; title: string }>
   componentIds: string[]
   colorPalette?: ColorPalette

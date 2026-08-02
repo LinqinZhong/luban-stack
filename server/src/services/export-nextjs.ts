@@ -141,7 +141,7 @@ export async function exportNestJsProject(
   })
 
   const scaffold = await scaffoldNestJsFiles({
-    projectName: options.projectName || config.name || 'voider-backend',
+    projectName: options.projectName || config.name || 'luban-backend',
     defaultMysqlId: generated.defaultMysqlId,
     routes: generated.routes,
     rootModuleImports: generated.rootModuleImports,

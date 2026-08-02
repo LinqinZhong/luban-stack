@@ -71,12 +71,12 @@ import MultiWindowPort from './MultiWindowPort.vue'
 import { makeSlotOutletNodeId } from '../../utils/slot-outlet'
 
 /** 纵向滚动列标记：子孙节点 match_parent 高度勿再 flex 抢视口 */
-const SCROLL_COLUMN_KEY = 'voiderVerticalScrollColumn'
+const SCROLL_COLUMN_KEY = 'lubanVerticalScrollColumn'
 
 /** Component → Slot：父侧子节点按 slot 名注入（经 props 下传，避免 inject 失效） */
 type SlotContentEntry = { node: XmlNode; nodeId: string }
 /** 勿命名 slotScope：模板里 slot-scope 易与 Vue 历史插槽语法混淆 */
-export type VoiderSlotScope = {
+export type LubanSlotScope = {
   map: Record<string, SlotContentEntry[]>
   selectable: boolean
   hostId: string
@@ -93,7 +93,7 @@ export type VoiderSlotScope = {
    * 用于「插槽转发」：定义里把 `<Slot name="header" slot="header"/>` 传给内层组件时，
    * 内层填入的 Slot 仍要能读到更外层（如页面）写入的 header 内容。
    */
-  parent?: VoiderSlotScope | null
+  parent?: LubanSlotScope | null
 }
 
 const SKIP_DOLLAR_PROPS_ATTRS = new Set<string>([
@@ -149,7 +149,7 @@ const props = defineProps<{
   /** 预览态展开 repeat（页面根与组件定义树都需要） */
   expandRepeat?: boolean
   /** 祖先 Component 注入的插槽内容（显式下传；勿用 slotScope 名） */
-  voiderSlotScope?: VoiderSlotScope | null
+  lubanSlotScope?: LubanSlotScope | null
   /**
    * 当前 pageData 所属组件 id；空表示页面数据池。
    * 供嵌套 Component 检视时回写宿主绑定。
@@ -221,9 +221,9 @@ function buildSlotContentMap(
 
 /**
  * 当前作用域：若本节点是 Component，用自身子节点覆盖；
- * 否则透传祖先 voiderSlotScope（供定义内 Slot 读取）。
+ * 否则透传祖先 lubanSlotScope（供定义内 Slot 读取）。
  */
-const effectiveSlotScope = computed<VoiderSlotScope | null>(() => {
+const effectiveSlotScope = computed<LubanSlotScope | null>(() => {
   if (props.node.tag === 'Component') {
     return {
       map: buildSlotContentMap(props.node, props.nodeId),
@@ -234,14 +234,14 @@ const effectiveSlotScope = computed<VoiderSlotScope | null>(() => {
       hostDollarProps: props.dollarProps,
       // 投影内容的 `{loading}` 等绑定写回「放置该 Component 的一侧」，不是本组件 data
       hostDataOwnerId: props.hostDataOwnerComponentId?.trim() || '',
-      parent: props.voiderSlotScope ?? null,
+      parent: props.lubanSlotScope ?? null,
     }
   }
-  return props.voiderSlotScope ?? null
+  return props.lubanSlotScope ?? null
 })
 
 /** 继续下传给子树的 scope（Component 内部定义树用自身 scope） */
-const childVoiderSlotScope = computed(() => effectiveSlotScope.value)
+const childLubanSlotScope = computed(() => effectiveSlotScope.value)
 
 const slotOutletNodeId = computed(() => {
   if (props.node.tag !== 'Slot') return null
@@ -353,6 +353,7 @@ const instanceDollarProps = computed(() => {
     pageData: hostData,
     routeParams: props.routeParams,
     parentDollarProps,
+    editCanvasFallback: Boolean(props.selectable),
     scope: props.node.scope
       ? {
           item: props.node.scope.item,
@@ -418,10 +419,18 @@ const modalIsOpen = computed(() => {
   return Boolean(modalStack?.isTop(modalKey.value))
 })
 
-/** vIf/vShow：优先 live 数据池，保证 setData 后条件立刻生效 */
-const visibilityPageData = computed(
-  () => livePageDataForSubtree.value ?? props.pageData,
-)
+/**
+ * vIf/vShow 数据池：须与 attrs 插值同源。
+ * - 组件定义树：用组件 live 池（setData 后条件立刻生效）
+ * - 页面树 / 插槽投影：用页面 live 池，勿被外层 Component（如 LoadingPlaceholder）
+ *   经 COMPONENT_LIVE_PAGE_DATA_KEY 注入的内部池盖住（否则 remarkTotal 等读成 undefined）
+ */
+const visibilityPageData = computed(() => {
+  if (props.insideComponentDefinition) {
+    return livePageDataForSubtree.value ?? props.pageData
+  }
+  return pageLivePageData?.value ?? props.pageData
+})
 
 const mountAllowed = computed(() => {
   // 编辑态忽略 v-if，始终挂载（仅左侧眼睛可隐藏）
@@ -919,9 +928,18 @@ function isTemplateSrc(src: string): boolean {
   return /\{[^{}]+\}/.test(src)
 }
 
+/** 外链加载失败时回退占位，避免白块无说明 */
+const imageLoadFailed = ref(false)
+watch(
+  () => attrs.value.src,
+  () => {
+    imageLoadFailed.value = false
+  },
+)
+
 const imageSrc = computed(() => {
   const src = attrs.value.src?.trim() || ''
-  if (!src || isTemplateSrc(src)) return ''
+  if (!src || isTemplateSrc(src) || imageLoadFailed.value) return ''
   return src
 })
 const imageAlt = computed(() => attrs.value.alt || '')
@@ -935,6 +953,9 @@ const imagePlaceholderLabel = computed(() => {
   if (isTemplateSrc(src)) return '图片'
   return imageAlt.value || 'Image'
 })
+function handleImageError() {
+  imageLoadFailed.value = true
+}
 
 const imageStyle = computed(() => ({
   ...layoutStyle.value,
@@ -1046,9 +1067,13 @@ provide(
 
 const layoutOverflowStyle = computed(() => {
   const strategy = parseOverflow(attrs.value.overflow, 'visible')
-  // 编辑态默认 visible，避免选中框 / 平铺 Swiper 被裁；显式 overflow=hidden 仍裁切（半星等）
-  if (!props.interactEnabled && strategy !== 'hidden') {
-    return { overflow: 'visible' as const }
+  if (!props.interactEnabled) {
+    // 页面树编辑态：始终 visible，露出 Swiper / 多窗体平铺（否则如首页 overflow=hidden
+    // 会裁掉右侧第 2 页，只剩 MultiWindow 让出的空白）。
+    // 组件定义内仍尊重 overflow=hidden（半星裁切等）。
+    if (!props.insideComponentDefinition || strategy !== 'hidden') {
+      return { overflow: 'visible' as const }
+    }
   }
   return overflowStyle(attrs.value, 'visible')
 })
@@ -1816,6 +1841,9 @@ function handleOpenInspect() {
     config: detail.config,
     hostAttrs: { ...props.node.attrs },
     hostDataOwnerId: props.hostDataOwnerComponentId?.trim() || '',
+    scope: props.node.scope
+      ? { item: props.node.scope.item, index: props.node.scope.index }
+      : null,
   }
   if (openInspectDirect) {
     openInspectDirect(payload)
@@ -2047,7 +2075,7 @@ onBeforeUnmount(() => {
       :dollar-props="dollarProps"
       :route-params="routeParams"
       :expand-repeat="expandRepeat"
-      :voider-slot-scope="childVoiderSlotScope"
+      :luban-slot-scope="childLubanSlotScope"
       @select="emit('select', $event)"
       @hover="emit('hover', $event)"
       @open-repeat="emit('open-repeat', $event)"
@@ -2199,6 +2227,7 @@ onBeforeUnmount(() => {
       :loading="imageLoading"
       :style="imageStyle"
       draggable="false"
+      @error="handleImageError"
     />
     <div
       v-else
@@ -2335,7 +2364,7 @@ onBeforeUnmount(() => {
         :dollar-props="slotFillDollarProps"
         :route-params="routeParams"
         :expand-repeat="expandRepeat"
-        :voider-slot-scope="effectiveSlotScope?.parent ?? null"
+        :luban-slot-scope="effectiveSlotScope?.parent ?? null"
         @select="forwardSelect"
         @hover="forwardHover"
         @open-repeat="forwardOpenRepeat"
@@ -2374,7 +2403,7 @@ onBeforeUnmount(() => {
         :dollar-props="dollarProps"
         :route-params="routeParams"
         :expand-repeat="expandRepeat"
-        :voider-slot-scope="childVoiderSlotScope"
+        :luban-slot-scope="childLubanSlotScope"
         @select="forwardSelect"
         @hover="forwardHover"
         @open-repeat="forwardOpenRepeat"
@@ -2442,7 +2471,7 @@ onBeforeUnmount(() => {
         :dollar-props="instanceDollarProps"
         :route-params="routeParams"
         :expand-repeat="expandRepeat"
-        :voider-slot-scope="childVoiderSlotScope"
+        :luban-slot-scope="childLubanSlotScope"
         is-root
         @select="forwardSelect"
         @hover="forwardHover"
@@ -2539,7 +2568,7 @@ onBeforeUnmount(() => {
             :dollar-props="dollarProps"
             :route-params="routeParams"
             :expand-repeat="expandRepeat"
-            :voider-slot-scope="childVoiderSlotScope"
+            :luban-slot-scope="childLubanSlotScope"
             @select="forwardSelect"
             @hover="forwardHover"
             @open-repeat="forwardOpenRepeat"
@@ -2615,7 +2644,7 @@ onBeforeUnmount(() => {
             :dollar-props="dollarProps"
             :route-params="routeParams"
             :expand-repeat="expandRepeat"
-            :voider-slot-scope="childVoiderSlotScope"
+            :luban-slot-scope="childLubanSlotScope"
             @select="forwardSelect"
             @hover="forwardHover"
             @open-repeat="forwardOpenRepeat"
@@ -2669,7 +2698,7 @@ onBeforeUnmount(() => {
             :dollar-props="dollarProps"
             :route-params="routeParams"
             :expand-repeat="expandRepeat"
-            :voider-slot-scope="childVoiderSlotScope"
+            :luban-slot-scope="childLubanSlotScope"
             @select="forwardSelect"
             @hover="forwardHover"
             @open-repeat="forwardOpenRepeat"
@@ -2754,7 +2783,7 @@ onBeforeUnmount(() => {
         :dollar-props="dollarProps"
         :route-params="routeParams"
         :expand-repeat="expandRepeat"
-        :voider-slot-scope="childVoiderSlotScope"
+        :luban-slot-scope="childLubanSlotScope"
         @select="forwardSelect"
         @hover="forwardHover"
         @open-repeat="forwardOpenRepeat"
@@ -2836,7 +2865,7 @@ onBeforeUnmount(() => {
           :dollar-props="dollarProps"
           :route-params="routeParams"
           :expand-repeat="expandRepeat"
-          :voider-slot-scope="childVoiderSlotScope"
+          :luban-slot-scope="childLubanSlotScope"
           @select="forwardSelect"
           @hover="forwardHover"
           @open-repeat="forwardOpenRepeat"

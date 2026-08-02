@@ -1,4 +1,4 @@
-/*@voider-method
+﻿/*@luban-method
 {
   "name": "loadData",
   "params": [

@@ -49,7 +49,7 @@ export function buildDollarPropsAmbientDeclaration(
       return `  ${item.name.trim()}: ${ts};`
     })
     .join('\n')
-  return [`interface VoiderDollarProps {`, fields, `}`, `declare const $props: VoiderDollarProps;`].join(
+  return [`interface LubanDollarProps {`, fields, `}`, `declare const $props: LubanDollarProps;`].join(
     '\n',
   )
 }

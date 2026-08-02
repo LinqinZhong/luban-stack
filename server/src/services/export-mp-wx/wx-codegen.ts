@@ -1,4 +1,4 @@
-﻿import type { PageData } from '../../types/page-data.js'
+import type { PageData } from '../../types/page-data.js'
 import type { ComponentConfig } from '../../types/component.js'
 import type { LifecycleConfig } from '../../types/lifecycle.js'
 import type { PageMethod } from '../../types/page-method.js'
@@ -8,7 +8,7 @@ import {
   resolvePaletteColorForCss,
 } from '../../types/color-palette.js'
 import type { XmlNode } from '../export-vue3/xml-parser.js'
-import { DEFAULT_CANVAS_WIDTH } from '../../types/voider-project.js'
+import { DEFAULT_CANVAS_WIDTH } from '../../types/luban-project.js'
 import {
   isSimpleBindingPath,
   normalizeBindingOperators,
@@ -594,7 +594,7 @@ function registerCustomEventHandler(
       prelude.push(
         `    if (that.data.loading || that.data.refreshing) return`,
       )
-      prelude.push(`    that.__voiderAtLower = true`)
+      prelude.push(`    that.__lubanAtLower = true`)
     }
     ctx.pageHandlers.push({
       name: finalName,
@@ -1051,7 +1051,7 @@ function wireScrollToLowerFallback(
 
   const seq = ctx.handlerSeq.n++
   const wrapName = `__onScrollWithLower_${seq}`
-  const scrollId = `voiderScrollY${seq}`
+  const scrollId = `lubanScrollY${seq}`
   const threshold = 150
   const bodyLines = [
     `    var that = this`,
@@ -1069,27 +1069,27 @@ function wireScrollToLowerFallback(
   bodyLines.push(
     `    var tryFire = function (viewH, st, sh) {`,
     `      if (!(viewH > 0) || !(sh > viewH + 1)) {`,
-    `        that.__voiderAtLower = false`,
+    `        that.__lubanAtLower = false`,
     `        return`,
     `      }`,
-    `      if (that.__voiderLastScrollH && sh > that.__voiderLastScrollH + 8) {`,
-    `        that.__voiderAtLower = false`,
+    `      if (that.__lubanLastScrollH && sh > that.__lubanLastScrollH + 8) {`,
+    `        that.__lubanAtLower = false`,
     `      }`,
-    `      that.__voiderLastScrollH = sh`,
+    `      that.__lubanLastScrollH = sh`,
     `      var nowLower = st >= sh - viewH - ${threshold}`,
-    `      if (nowLower && !that.__voiderAtLower) {`,
-    `        that.__voiderAtLower = true`,
+    `      if (nowLower && !that.__lubanAtLower) {`,
+    `        that.__lubanAtLower = true`,
     `        if (typeof that.${lowerFn} === 'function') that.${lowerFn}(e)`,
-    `        setTimeout(function () { that.__voiderAtLower = false }, 400)`,
+    `        setTimeout(function () { that.__lubanAtLower = false }, 400)`,
     `      } else if (!nowLower) {`,
-    `        that.__voiderAtLower = false`,
+    `        that.__lubanAtLower = false`,
     `      }`,
     `    }`,
-    `    var viewH = that.__voiderScrollViewH || 0`,
+    `    var viewH = that.__lubanScrollViewH || 0`,
     `    if (viewH > 0 && scrollHeight > 0) tryFire(viewH, scrollTop, scrollHeight)`,
     `    var now = Date.now()`,
-    `    if (viewH > 0 && that.__voiderScrollLowerTs && now - that.__voiderScrollLowerTs < 100) return`,
-    `    that.__voiderScrollLowerTs = now`,
+    `    if (viewH > 0 && that.__lubanScrollLowerTs && now - that.__lubanScrollLowerTs < 100) return`,
+    `    that.__lubanScrollLowerTs = now`,
     `    wx.createSelectorQuery()`,
     `      .in(that)`,
     `      .select(${JSON.stringify('#' + scrollId)})`,
@@ -1097,12 +1097,12 @@ function wireScrollToLowerFallback(
     `      .exec(function (res) {`,
     `        var info = res && res[0]`,
     `        if (!info) return`,
-    `        if (info.height) that.__voiderScrollViewH = info.height`,
+    `        if (info.height) that.__lubanScrollViewH = info.height`,
     `        var st = info.scrollTop != null ? Number(info.scrollTop) : scrollTop`,
     `        var sh = info.scrollHeight != null ? Number(info.scrollHeight) : scrollHeight`,
     `        if (!isFinite(st)) st = scrollTop`,
     `        if (!isFinite(sh)) sh = scrollHeight`,
-    `        tryFire(that.__voiderScrollViewH || 0, st, sh)`,
+    `        tryFire(that.__lubanScrollViewH || 0, st, sh)`,
     `      })`,
   )
 

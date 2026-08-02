@@ -8,7 +8,7 @@ import type { PageData } from '../types/page-data'
  */
 export const COMPONENT_RENDER_MAP_KEY: InjectionKey<
   Ref<ComponentRenderMap | undefined>
-> = Symbol('voiderComponentRenderMap')
+> = Symbol('lubanComponentRenderMap')
 
 /**
  * 当前组件实例的 live 数据池（setData 写入处）。
@@ -16,7 +16,7 @@ export const COMPONENT_RENDER_MAP_KEY: InjectionKey<
  */
 export const COMPONENT_LIVE_PAGE_DATA_KEY: InjectionKey<
   ComputedRef<PageData | undefined>
-> = Symbol('voiderComponentLivePageData')
+> = Symbol('lubanComponentLivePageData')
 
 /**
  * 当前组件实例的 live `$props`（随宿主 `{field}` 绑定刷新）。
@@ -24,7 +24,7 @@ export const COMPONENT_LIVE_PAGE_DATA_KEY: InjectionKey<
  */
 export const COMPONENT_LIVE_DOLLAR_PROPS_KEY: InjectionKey<
   ComputedRef<Record<string, unknown> | undefined>
-> = Symbol('voiderComponentLiveDollarProps')
+> = Symbol('lubanComponentLiveDollarProps')
 
 /**
  * 页面级 live 数据池（previewRuntimeData / 编辑态数据池）。
@@ -32,4 +32,4 @@ export const COMPONENT_LIVE_DOLLAR_PROPS_KEY: InjectionKey<
  */
 export const PAGE_LIVE_PAGE_DATA_KEY: InjectionKey<
   ComputedRef<PageData | undefined>
-> = Symbol('voiderPageLivePageData')
+> = Symbol('lubanPageLivePageData')

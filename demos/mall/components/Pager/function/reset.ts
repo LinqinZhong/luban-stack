@@ -1,4 +1,4 @@
-/*@voider-method
+﻿/*@luban-method
 {
   "name": "reset",
   "params": [],

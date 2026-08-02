@@ -13,7 +13,7 @@ export interface IconLibrary {
   icons: IconDefinition[]
 }
 
-export const ICON_SYMBOL_PREFIX = 'voider-icon-'
+export const ICON_SYMBOL_PREFIX = 'luban-icon-'
 
 export function iconSymbolId(iconId: string): string {
   return `${ICON_SYMBOL_PREFIX}${iconId}`

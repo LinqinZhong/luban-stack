@@ -1,24 +1,39 @@
 <script setup lang="ts">
 import { computed, reactive, watch } from 'vue'
-import ColorPicker from './ColorPicker.vue'
-import NumericInput from './NumericInput.vue'
+import AttrBindField from './AttrBindField.vue'
 import {
   GRAVITY_OPTIONS,
   SIZE_OPTIONS,
 } from '../../utils/xml-node'
 import { OVERFLOW_OPTIONS } from '../../utils/xml'
 import type { StyleOverrides } from '../../types/dynamic-styles'
+import type { DataField } from '../../types/page-data'
+import type { ComponentPropDef } from '../../types/component'
+import type { PageQueryParamDef } from '../../types/page-query'
 
 const props = defineProps<{
   modelValue: StyleOverrides
   /** 控件 tag，用于显示内容/图标等专属项 */
   tag?: string
   showBorder?: boolean
+  dataFields?: DataField[]
+  componentProps?: ComponentPropDef[] | null
+  routeParams?: Record<string, unknown> | null
+  pageQueryParams?: PageQueryParamDef[] | null
+  repeatListName?: string | null
 }>()
 
 const emit = defineEmits<{
   'update:modelValue': [value: StyleOverrides]
 }>()
+
+const attrBindShared = computed(() => ({
+  dataFields: props.dataFields ?? [],
+  componentProps: props.componentProps,
+  routeParams: props.routeParams,
+  pageQueryParams: props.pageQueryParams,
+  repeatListName: props.repeatListName,
+}))
 
 const form = reactive({
   widthMode: 'wrap_content' as string,
@@ -162,7 +177,6 @@ function emitStyles() {
     if (trimmed) next[key] = trimmed
   }
 
-  // wrap_content 表示「不覆盖尺寸」，不写入 overrides；Modal 永不写宽高 / margin
   if (showSizeProps.value) {
     if (form.widthMode === 'match_parent' || form.widthMode === 'fixed') {
       set('width', sizeToAttr(form.widthMode, form.widthValue))
@@ -235,10 +249,11 @@ function onFieldChange() {
                 :value="opt.value"
               />
             </el-select>
-            <NumericInput
+            <AttrBindField
               v-if="form.widthMode === 'fixed'"
               v-model="form.widthValue"
-              placeholder="数字或 {变量}"
+              placeholder="数字 / 绑定"
+              v-bind="attrBindShared"
               @change="onFieldChange"
             />
           </div>
@@ -253,10 +268,11 @@ function onFieldChange() {
                 :value="opt.value"
               />
             </el-select>
-            <NumericInput
+            <AttrBindField
               v-if="form.heightMode === 'fixed'"
               v-model="form.heightValue"
-              placeholder="数字或 {变量}"
+              placeholder="数字 / 绑定"
+              v-bind="attrBindShared"
               @change="onFieldChange"
             />
           </div>
@@ -267,38 +283,78 @@ function onFieldChange() {
     <div class="section-title">间距</div>
     <el-form label-position="top" size="small">
       <el-form-item label="padding">
-        <NumericInput v-model="form.padding" @change="onFieldChange" />
+        <AttrBindField
+          v-model="form.padding"
+          v-bind="attrBindShared"
+          @change="onFieldChange"
+        />
       </el-form-item>
       <div class="quad-grid">
         <el-form-item label="上">
-          <NumericInput v-model="form.paddingTop" @change="onFieldChange" />
+          <AttrBindField
+            v-model="form.paddingTop"
+            v-bind="attrBindShared"
+            @change="onFieldChange"
+          />
         </el-form-item>
         <el-form-item label="右">
-          <NumericInput v-model="form.paddingRight" @change="onFieldChange" />
+          <AttrBindField
+            v-model="form.paddingRight"
+            v-bind="attrBindShared"
+            @change="onFieldChange"
+          />
         </el-form-item>
         <el-form-item label="下">
-          <NumericInput v-model="form.paddingBottom" @change="onFieldChange" />
+          <AttrBindField
+            v-model="form.paddingBottom"
+            v-bind="attrBindShared"
+            @change="onFieldChange"
+          />
         </el-form-item>
         <el-form-item label="左">
-          <NumericInput v-model="form.paddingLeft" @change="onFieldChange" />
+          <AttrBindField
+            v-model="form.paddingLeft"
+            v-bind="attrBindShared"
+            @change="onFieldChange"
+          />
         </el-form-item>
       </div>
       <template v-if="showMarginProps">
         <el-form-item label="margin">
-          <NumericInput v-model="form.margin" @change="onFieldChange" />
+          <AttrBindField
+            v-model="form.margin"
+            v-bind="attrBindShared"
+            @change="onFieldChange"
+          />
         </el-form-item>
         <div class="quad-grid">
           <el-form-item label="上">
-            <NumericInput v-model="form.marginTop" @change="onFieldChange" />
+            <AttrBindField
+              v-model="form.marginTop"
+              v-bind="attrBindShared"
+              @change="onFieldChange"
+            />
           </el-form-item>
           <el-form-item label="右">
-            <NumericInput v-model="form.marginRight" @change="onFieldChange" />
+            <AttrBindField
+              v-model="form.marginRight"
+              v-bind="attrBindShared"
+              @change="onFieldChange"
+            />
           </el-form-item>
           <el-form-item label="下">
-            <NumericInput v-model="form.marginBottom" @change="onFieldChange" />
+            <AttrBindField
+              v-model="form.marginBottom"
+              v-bind="attrBindShared"
+              @change="onFieldChange"
+            />
           </el-form-item>
           <el-form-item label="左">
-            <NumericInput v-model="form.marginLeft" @change="onFieldChange" />
+            <AttrBindField
+              v-model="form.marginLeft"
+              v-bind="attrBindShared"
+              @change="onFieldChange"
+            />
           </el-form-item>
         </div>
       </template>
@@ -307,12 +363,18 @@ function onFieldChange() {
     <div class="section-title">外观</div>
     <el-form label-position="top" size="small">
       <el-form-item label="background">
-        <ColorPicker v-model="form.background" @change="onFieldChange" />
+        <AttrBindField
+          v-model="form.background"
+          placeholder="色值 / 绑定"
+          v-bind="attrBindShared"
+          @change="onFieldChange"
+        />
       </el-form-item>
       <el-form-item label="层级 zIndex">
-        <NumericInput
+        <AttrBindField
           v-model="form.zIndex"
-          placeholder="如 10，越大越靠上"
+          placeholder="如 10"
+          v-bind="attrBindShared"
           @change="onFieldChange"
         />
       </el-form-item>
@@ -333,43 +395,56 @@ function onFieldChange() {
       </el-form-item>
       <template v-if="showBorder">
         <el-form-item label="borderRadius 统一圆角">
-          <NumericInput
+          <AttrBindField
             v-model="form.borderRadius"
-            placeholder="四角共用；分角优先"
+            v-bind="attrBindShared"
             @change="onFieldChange"
           />
         </el-form-item>
         <div class="quad-grid">
           <el-form-item label="上左">
-            <NumericInput
+            <AttrBindField
               v-model="form.borderTopLeftRadius"
+              v-bind="attrBindShared"
               @change="onFieldChange"
             />
           </el-form-item>
           <el-form-item label="上右">
-            <NumericInput
+            <AttrBindField
               v-model="form.borderTopRightRadius"
+              v-bind="attrBindShared"
               @change="onFieldChange"
             />
           </el-form-item>
           <el-form-item label="下右">
-            <NumericInput
+            <AttrBindField
               v-model="form.borderBottomRightRadius"
+              v-bind="attrBindShared"
               @change="onFieldChange"
             />
           </el-form-item>
           <el-form-item label="下左">
-            <NumericInput
+            <AttrBindField
               v-model="form.borderBottomLeftRadius"
+              v-bind="attrBindShared"
               @change="onFieldChange"
             />
           </el-form-item>
         </div>
         <el-form-item label="borderWidth">
-          <NumericInput v-model="form.borderWidth" @change="onFieldChange" />
+          <AttrBindField
+            v-model="form.borderWidth"
+            v-bind="attrBindShared"
+            @change="onFieldChange"
+          />
         </el-form-item>
         <el-form-item label="borderColor">
-          <ColorPicker v-model="form.borderColor" @change="onFieldChange" />
+          <AttrBindField
+            v-model="form.borderColor"
+            placeholder="色值 / 绑定"
+            v-bind="attrBindShared"
+            @change="onFieldChange"
+          />
         </el-form-item>
       </template>
       <el-form-item v-if="showOverflow" label="overflow 溢出">
@@ -393,18 +468,26 @@ function onFieldChange() {
       <div class="section-title">内容</div>
       <el-form label-position="top" size="small">
         <el-form-item label="text">
-          <el-input v-model="form.text" clearable @change="onFieldChange" />
+          <AttrBindField
+            v-model="form.text"
+            v-bind="attrBindShared"
+            @change="onFieldChange"
+          />
         </el-form-item>
         <el-form-item label="textSize">
-          <NumericInput
+          <AttrBindField
             v-model="form.textSize"
-            :min="1"
-            :max="200"
+            v-bind="attrBindShared"
             @change="onFieldChange"
           />
         </el-form-item>
         <el-form-item label="textColor">
-          <ColorPicker v-model="form.textColor" @change="onFieldChange" />
+          <AttrBindField
+            v-model="form.textColor"
+            placeholder="色值 / 绑定"
+            v-bind="attrBindShared"
+            @change="onFieldChange"
+          />
         </el-form-item>
       </el-form>
     </template>
@@ -413,25 +496,33 @@ function onFieldChange() {
       <div class="section-title">输入</div>
       <el-form label-position="top" size="small">
         <el-form-item label="value">
-          <el-input v-model="form.value" clearable @change="onFieldChange" />
+          <AttrBindField
+            v-model="form.value"
+            v-bind="attrBindShared"
+            @change="onFieldChange"
+          />
         </el-form-item>
         <el-form-item label="placeholder">
-          <el-input
+          <AttrBindField
             v-model="form.placeholder"
-            clearable
+            v-bind="attrBindShared"
             @change="onFieldChange"
           />
         </el-form-item>
         <el-form-item label="textSize">
-          <NumericInput
+          <AttrBindField
             v-model="form.textSize"
-            :min="1"
-            :max="200"
+            v-bind="attrBindShared"
             @change="onFieldChange"
           />
         </el-form-item>
         <el-form-item label="textColor">
-          <ColorPicker v-model="form.textColor" @change="onFieldChange" />
+          <AttrBindField
+            v-model="form.textColor"
+            placeholder="色值 / 绑定"
+            v-bind="attrBindShared"
+            @change="onFieldChange"
+          />
         </el-form-item>
       </el-form>
     </template>
@@ -440,7 +531,12 @@ function onFieldChange() {
       <div class="section-title">图标</div>
       <el-form label-position="top" size="small">
         <el-form-item label="color">
-          <ColorPicker v-model="form.color" @change="onFieldChange" />
+          <AttrBindField
+            v-model="form.color"
+            placeholder="色值 / 绑定"
+            v-bind="attrBindShared"
+            @change="onFieldChange"
+          />
         </el-form-item>
       </el-form>
     </template>
@@ -449,29 +545,26 @@ function onFieldChange() {
       <div class="section-title">旋转</div>
       <el-form label-position="top" size="small">
         <el-form-item label="rotateX（度）">
-          <NumericInput
+          <AttrBindField
             v-model="form.rotateX"
-            :min="-360"
-            :max="360"
             placeholder="0"
+            v-bind="attrBindShared"
             @change="onFieldChange"
           />
         </el-form-item>
         <el-form-item label="rotateY（度）">
-          <NumericInput
+          <AttrBindField
             v-model="form.rotateY"
-            :min="-360"
-            :max="360"
             placeholder="0"
+            v-bind="attrBindShared"
             @change="onFieldChange"
           />
         </el-form-item>
         <el-form-item label="rotateZ（度）">
-          <NumericInput
+          <AttrBindField
             v-model="form.rotateZ"
-            :min="-360"
-            :max="360"
             placeholder="0"
+            v-bind="attrBindShared"
             @change="onFieldChange"
           />
         </el-form-item>
@@ -498,24 +591,15 @@ function onFieldChange() {
 
 .size-row {
   display: flex;
+  flex-direction: column;
   gap: 8px;
   width: 100%;
 }
 
-.size-row > :first-child {
-  flex: 1;
-  min-width: 0;
-}
-
-.size-row > :last-child {
-  width: 100px;
-  flex-shrink: 0;
-}
-
 .quad-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 0 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
 }
 
 :deep(.el-form-item) {

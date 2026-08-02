@@ -1,6 +1,7 @@
 /** 工作区 UI 状态：刷新 / 切活动栏后恢复 */
 
-const STORAGE_PREFIX = 'voider.workspaceUi.v1:'
+const STORAGE_PREFIX = 'luban.workspaceUi.v1:'
+const LEGACY_STORAGE_PREFIX = 'voider.workspaceUi.v1:'
 
 export type BackendLayer = 'controller' | 'service' | 'data' | 'schedule'
 
@@ -38,7 +39,16 @@ export function loadWorkspaceUiState(
 ): WorkspaceUiState | null {
   if (!projectPath) return null
   try {
-    const raw = localStorage.getItem(storageKey(projectPath))
+    const key = storageKey(projectPath)
+    let raw = localStorage.getItem(key)
+    if (!raw) {
+      const legacyKey = `${LEGACY_STORAGE_PREFIX}${projectPath}`
+      raw = localStorage.getItem(legacyKey)
+      if (raw) {
+        localStorage.setItem(key, raw)
+        localStorage.removeItem(legacyKey)
+      }
+    }
     if (!raw) return null
     return JSON.parse(raw) as WorkspaceUiState
   } catch {
@@ -53,6 +63,7 @@ export function saveWorkspaceUiState(
   if (!projectPath) return
   try {
     localStorage.setItem(storageKey(projectPath), JSON.stringify(state))
+    localStorage.removeItem(`${LEGACY_STORAGE_PREFIX}${projectPath}`)
   } catch {
     // quota / private mode
   }

@@ -69,8 +69,8 @@ export function interpolateTemplate(
 /**
  * 属性插值：整段 `{item}` 且值为对象时保留占位符，交给运行时按 scope 取原生对象
  *（避免 stringify 后再被误当成绑定表达式）。
- * 整段 `{item.xxx}` 若值为 number/boolean，也保留占位符，供 Component 的 number/boolean
- * props 走 resolveAttrBindingValue 取原生值（避免先烤成字符串再丢精度/空串）。
+ * 整段 `{item.xxx}` 若值为 number/boolean/array/object，也保留占位符，供 Component
+ * props 走 resolveAttrBindingValue 取原生值（避免数组被 String() 烤成 "a,b" 后变空）。
  * 非整段简单路径的表达式（如 `{item.nickname || '匿名用户'}`）原样保留。
  */
 function interpolateAttrTemplate(
@@ -95,7 +95,12 @@ function interpolateAttrTemplate(
     }
     if (expr.startsWith('item.')) {
       const value = getByPath(item, expr.slice('item.'.length))
-      if (typeof value === 'number' || typeof value === 'boolean') {
+      if (
+        typeof value === 'number' ||
+        typeof value === 'boolean' ||
+        Array.isArray(value) ||
+        (value != null && typeof value === 'object')
+      ) {
         return trimmed
       }
     }

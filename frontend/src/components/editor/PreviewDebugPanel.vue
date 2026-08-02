@@ -1143,9 +1143,9 @@ watch(
                 <el-input
                   v-else-if="isPropDynamic(form.def)"
                   :model-value="
-                    form.def.type === 'object' ||
                     form.def.type === 'array' ||
-                    form.def.type === 'json'
+                    form.def.type === 'json' ||
+                    form.def.type === 'map'
                       ? formatJson(propDisplayValue(form.def))
                       : String(propDisplayValue(form.def) ?? '')
                   "

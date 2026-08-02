@@ -165,7 +165,7 @@ function publicBucketPolicy(bucketName: string): string {
     Version: '2012-10-17',
     Statement: [
       {
-        Sid: 'VoiderPublicRead',
+        Sid: 'LubanPublicRead',
         Effect: 'Allow',
         Principal: { AWS: ['*'] },
         Action: ['s3:GetObject'],

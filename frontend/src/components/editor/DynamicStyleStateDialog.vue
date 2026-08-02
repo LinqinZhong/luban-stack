@@ -15,6 +15,7 @@ import {
 } from '../../types/dynamic-styles'
 import type { DataField } from '../../types/page-data'
 import type { ComponentPropDef } from '../../types/component'
+import type { PageQueryParamDef } from '../../types/page-query'
 import { findNearestRepeatListName } from '../../utils/data-field-paths'
 
 const props = defineProps<{
@@ -26,6 +27,7 @@ const props = defineProps<{
   componentProps?: ComponentPropDef[] | null
   /** 路由参数（含空对象），字段树展示 $route */
   routeParams?: Record<string, unknown> | null
+  pageQueryParams?: PageQueryParamDef[] | null
   selectedNodeId?: string
   xml?: string
 }>()
@@ -242,6 +244,11 @@ function handleSave() {
         v-model="draft.styles"
         :tag="nodeTag"
         :show-border="true"
+        :data-fields="dataFields"
+        :component-props="componentProps"
+        :route-params="routeParams"
+        :page-query-params="pageQueryParams"
+        :repeat-list-name="repeatListName"
       />
     </div>
 

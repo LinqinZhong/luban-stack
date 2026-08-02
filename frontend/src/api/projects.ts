@@ -1,4 +1,4 @@
-import { request } from './index'
+﻿import { request } from './index'
 import type { IconDefinition, IconLibrary } from '../types/icon-library'
 import type { ColorPalette, PaletteColor } from '../types/color-palette'
 import type { DataTypeGroup, DataTypeLibrary } from '../types/data-types'
@@ -37,7 +37,7 @@ export type {
   ServiceProcessor,
 }
 
-export interface VoiderProjectConfig {
+export interface LubanProjectConfig {
   name: string
   version: string
   author: string
@@ -59,7 +59,7 @@ export interface VoiderProjectConfig {
 
 export interface ProjectResult {
   path: string
-  config: VoiderProjectConfig
+  config: LubanProjectConfig
 }
 
 export interface BrowseEntry {

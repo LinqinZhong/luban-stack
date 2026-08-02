@@ -123,10 +123,10 @@ export function buildDollarQueryAmbientDeclaration(
     ].join('\n')
   }
   return [
-    'interface VoiderPageQuery {',
+    'interface LubanPageQuery {',
     ...fields,
     '}',
-    'declare const $query: VoiderPageQuery;',
-    'declare const $route: VoiderPageQuery;',
+    'declare const $query: LubanPageQuery;',
+    'declare const $route: LubanPageQuery;',
   ].join('\n')
 }

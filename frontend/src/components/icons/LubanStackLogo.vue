@@ -9,7 +9,7 @@ withDefaults(
 </script>
 
 <template>
-  <!-- LubanStack：三块蓝方（Stack）+ 几何锤线稿（Luban） -->
+  <!-- LubanStack：七方块对称等距十字，整体方正 -->
   <svg
     class="lubanstack-logo"
     xmlns="http://www.w3.org/2000/svg"
@@ -20,37 +20,68 @@ withDefaults(
     aria-hidden="true"
   >
     <defs>
-      <linearGradient id="ls-a" x1="4" y1="18" x2="28" y2="44" gradientUnits="userSpaceOnUse">
-        <stop stop-color="#82CFFF" />
-        <stop offset="1" stop-color="#4A9BE8" />
+      <linearGradient id="lb-top" x1="0" y1="0" x2="1" y2="1">
+        <stop stop-color="#F3DFC4" />
+        <stop offset="1" stop-color="#E8C9A0" />
       </linearGradient>
-      <linearGradient id="ls-b" x1="32" y1="4" x2="58" y2="28" gradientUnits="userSpaceOnUse">
-        <stop stop-color="#9AD4FF" />
-        <stop offset="1" stop-color="#3078D7" />
+      <linearGradient id="lb-left" x1="0" y1="0" x2="0" y2="1">
+        <stop stop-color="#D4A574" />
+        <stop offset="1" stop-color="#C4956A" />
       </linearGradient>
-      <linearGradient id="ls-c" x1="30" y1="32" x2="58" y2="58" gradientUnits="userSpaceOnUse">
-        <stop stop-color="#5BA8F0" />
-        <stop offset="1" stop-color="#1E5BB8" />
+      <linearGradient id="lb-right" x1="1" y1="0" x2="0" y2="1">
+        <stop stop-color="#C9A07A" />
+        <stop offset="1" stop-color="#A67C52" />
       </linearGradient>
     </defs>
 
-    <!-- Stack -->
-    <rect x="4" y="20" width="24" height="24" rx="1" fill="url(#ls-a)" />
-    <rect x="34" y="6" width="24" height="24" rx="1" fill="url(#ls-b)" />
-    <rect x="32" y="34" width="24" height="24" rx="1" fill="url(#ls-c)" />
-
     <!--
-      Luban 锤：粗描边几何轮廓（锤头右上、柄左下）
-      形态贴近参考：直角折线、开口端
+      单元方块：顶面半宽 8 / 半高 4，侧高 8
+      步进 9.5：留细缝；六向对称，外接约正方形
     -->
-    <path
-      stroke="#2B1B10"
-      stroke-width="3.6"
-      stroke-linejoin="miter"
-      stroke-linecap="square"
-      fill="none"
-      d="M20 50 L34 36 L40 42 L26 56 M34 36 L48 22 L54 28 L40 42 M48 22 L56 14 L50 8 L42 16 L48 22"
-    />
+    <g transform="translate(32 28)">
+      <!-- 上 -->
+      <g transform="translate(0 -9.5)">
+        <path fill="url(#lb-top)" d="M0 -4 L8 0 L0 4 L-8 0 Z" />
+        <path fill="url(#lb-left)" d="M-8 0 L0 4 L0 12 L-8 8 Z" />
+        <path fill="url(#lb-right)" d="M8 0 L0 4 L0 12 L8 8 Z" />
+      </g>
+      <!-- 后 -->
+      <g transform="translate(-9.5 4.75)">
+        <path fill="url(#lb-top)" d="M0 -4 L8 0 L0 4 L-8 0 Z" />
+        <path fill="url(#lb-left)" d="M-8 0 L0 4 L0 12 L-8 8 Z" />
+        <path fill="url(#lb-right)" d="M8 0 L0 4 L0 12 L8 8 Z" />
+      </g>
+      <!-- 左 -->
+      <g transform="translate(-9.5 -4.75)">
+        <path fill="url(#lb-top)" d="M0 -4 L8 0 L0 4 L-8 0 Z" />
+        <path fill="url(#lb-left)" d="M-8 0 L0 4 L0 12 L-8 8 Z" />
+        <path fill="url(#lb-right)" d="M8 0 L0 4 L0 12 L8 8 Z" />
+      </g>
+      <!-- 中 -->
+      <g>
+        <path fill="url(#lb-top)" d="M0 -4 L8 0 L0 4 L-8 0 Z" />
+        <path fill="url(#lb-left)" d="M-8 0 L0 4 L0 12 L-8 8 Z" />
+        <path fill="url(#lb-right)" d="M8 0 L0 4 L0 12 L8 8 Z" />
+      </g>
+      <!-- 右 -->
+      <g transform="translate(9.5 4.75)">
+        <path fill="url(#lb-top)" d="M0 -4 L8 0 L0 4 L-8 0 Z" />
+        <path fill="url(#lb-left)" d="M-8 0 L0 4 L0 12 L-8 8 Z" />
+        <path fill="url(#lb-right)" d="M8 0 L0 4 L0 12 L8 8 Z" />
+      </g>
+      <!-- 前 -->
+      <g transform="translate(9.5 -4.75)">
+        <path fill="url(#lb-top)" d="M0 -4 L8 0 L0 4 L-8 0 Z" />
+        <path fill="url(#lb-left)" d="M-8 0 L0 4 L0 12 L-8 8 Z" />
+        <path fill="url(#lb-right)" d="M8 0 L0 4 L0 12 L8 8 Z" />
+      </g>
+      <!-- 下 -->
+      <g transform="translate(0 9.5)">
+        <path fill="url(#lb-top)" d="M0 -4 L8 0 L0 4 L-8 0 Z" />
+        <path fill="url(#lb-left)" d="M-8 0 L0 4 L0 12 L-8 8 Z" />
+        <path fill="url(#lb-right)" d="M8 0 L0 4 L0 12 L8 8 Z" />
+      </g>
+    </g>
   </svg>
 </template>
 

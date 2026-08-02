@@ -224,7 +224,7 @@ function mountEditor() {
   model = monaco.editor.createModel(
     props.modelValue || '',
     'sql',
-    monaco.Uri.parse(`inmemory://voider/sql-${Date.now()}.sql`),
+    monaco.Uri.parse(`inmemory://luban/sql-${Date.now()}.sql`),
   )
   editor = monaco.editor.create(hostRef.value, {
     model,

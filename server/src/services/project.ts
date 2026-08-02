@@ -1,13 +1,23 @@
-import { access, mkdir, readdir, readFile, writeFile, stat } from 'node:fs/promises'
+﻿import {
+  access,
+  mkdir,
+  readdir,
+  readFile,
+  rename,
+  unlink,
+  writeFile,
+  stat,
+} from 'node:fs/promises'
 import { constants } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import {
   createDefaultConfig,
   isValidProjectConfig,
-  VOIDER_CONFIG_FILE,
-  type VoiderProjectConfig,
-} from '../types/voider-project.js'
+  LEGACY_CONFIG_FILE,
+  LUBAN_CONFIG_FILE,
+  type LubanProjectConfig,
+} from '../types/luban-project.js'
 import { ensureIconLibraryFile } from './icons.js'
 import { ensureColorPaletteFile } from './palette.js'
 import { ensureDataTypeLibraryFile } from './data-types.js'
@@ -27,7 +37,7 @@ export class ProjectError extends Error {
 
 export interface ProjectResult {
   path: string
-  config: VoiderProjectConfig
+  config: LubanProjectConfig
 }
 
 export interface BrowseEntry {
@@ -63,34 +73,67 @@ async function assertDirectory(dirPath: string): Promise<void> {
   }
 }
 
-async function readConfigFile(projectPath: string): Promise<VoiderProjectConfig> {
-  const configPath = path.join(projectPath, VOIDER_CONFIG_FILE)
+async function resolveConfigPath(projectPath: string): Promise<{
+  configPath: string
+  migratedFromLegacy: boolean
+}> {
+  const lubanPath = path.join(projectPath, LUBAN_CONFIG_FILE)
+  const legacyPath = path.join(projectPath, LEGACY_CONFIG_FILE)
 
   try {
-    await access(configPath, constants.R_OK)
+    await access(lubanPath, constants.R_OK)
+    return { configPath: lubanPath, migratedFromLegacy: false }
   } catch {
-    throw new ProjectError(`所选文件夹缺少 ${VOIDER_CONFIG_FILE}`, 400)
+    // fall through
   }
+
+  try {
+    await access(legacyPath, constants.R_OK)
+  } catch {
+    throw new ProjectError(
+      `所选文件夹缺少 ${LUBAN_CONFIG_FILE}（也不存在旧版 ${LEGACY_CONFIG_FILE}）`,
+      400,
+    )
+  }
+
+  try {
+    await rename(legacyPath, lubanPath)
+    return { configPath: lubanPath, migratedFromLegacy: true }
+  } catch {
+    // 跨盘/占用时退化为复制后删除
+    try {
+      const raw = await readFile(legacyPath, 'utf-8')
+      await writeFile(lubanPath, raw, 'utf-8')
+      await unlink(legacyPath)
+      return { configPath: lubanPath, migratedFromLegacy: true }
+    } catch {
+      return { configPath: legacyPath, migratedFromLegacy: false }
+    }
+  }
+}
+
+async function readConfigFile(projectPath: string): Promise<LubanProjectConfig> {
+  const { configPath } = await resolveConfigPath(projectPath)
 
   let raw: string
   try {
     raw = await readFile(configPath, 'utf-8')
   } catch {
-    throw new ProjectError(`无法读取 ${VOIDER_CONFIG_FILE}`, 500)
+    throw new ProjectError(`无法读取 ${LUBAN_CONFIG_FILE}`, 500)
   }
 
   let parsed: unknown
   try {
     parsed = JSON.parse(raw)
   } catch {
-    throw new ProjectError(`${VOIDER_CONFIG_FILE} 不是合法 JSON`, 400)
+    throw new ProjectError(`${LUBAN_CONFIG_FILE} 不是合法 JSON`, 400)
   }
 
   if (!isValidProjectConfig(parsed)) {
-    throw new ProjectError(`${VOIDER_CONFIG_FILE} 配置不完整或字段无效`, 400)
+    throw new ProjectError(`${LUBAN_CONFIG_FILE} 配置不完整或字段无效`, 400)
   }
 
-  const config: VoiderProjectConfig = {
+  const config: LubanProjectConfig = {
     name: parsed.name,
     version: parsed.version,
     author: parsed.author,
@@ -130,13 +173,13 @@ async function readConfigFile(projectPath: string): Promise<VoiderProjectConfig>
 
 async function writeConfigFile(
   projectPath: string,
-  config: VoiderProjectConfig,
+  config: LubanProjectConfig,
 ): Promise<void> {
-  const configPath = path.join(projectPath, VOIDER_CONFIG_FILE)
+  const configPath = path.join(projectPath, LUBAN_CONFIG_FILE)
   try {
     await writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`, 'utf-8')
   } catch {
-    throw new ProjectError(`无法写入 ${VOIDER_CONFIG_FILE}`, 500)
+    throw new ProjectError(`无法写入 ${LUBAN_CONFIG_FILE}`, 500)
   }
 }
 
@@ -182,7 +225,7 @@ export async function getProjectEntryPage(
   return config.entryPage
 }
 
-/** 更新项目配置中的可编辑字段（写入 voider.json） */
+/** 更新项目配置中的可编辑字段（写入 luban.json） */
 export async function patchProjectConfig(
   projectPathInput: string,
   patch: {
@@ -248,13 +291,18 @@ export async function createProject(options: {
 
   await assertDirectory(projectPath)
 
-  const configPath = path.join(projectPath, VOIDER_CONFIG_FILE)
+  const configPath = path.join(projectPath, LUBAN_CONFIG_FILE)
+  const legacyConfigPath = path.join(projectPath, LEGACY_CONFIG_FILE)
 
-  try {
-    await access(configPath, constants.F_OK)
-    throw new ProjectError(`目标文件夹已存在 ${VOIDER_CONFIG_FILE}，请选择其他路径或打开现有项目`)
-  } catch (err) {
-    if (err instanceof ProjectError) throw err
+  for (const existing of [configPath, legacyConfigPath]) {
+    try {
+      await access(existing, constants.F_OK)
+      throw new ProjectError(
+        `目标文件夹已存在 ${path.basename(existing)}，请选择其他路径或打开现有项目`,
+      )
+    } catch (err) {
+      if (err instanceof ProjectError) throw err
+    }
   }
 
   const config = createDefaultConfig({
@@ -276,7 +324,7 @@ export async function createProject(options: {
     await ensureOssLibraryFile(projectPath)
     await ensureBackendServiceLibraryFile(projectPath)
   } catch {
-    throw new ProjectError(`无法写入 ${VOIDER_CONFIG_FILE}`, 500)
+    throw new ProjectError(`无法写入 ${LUBAN_CONFIG_FILE}`, 500)
   }
 
   return { path: projectPath, config }

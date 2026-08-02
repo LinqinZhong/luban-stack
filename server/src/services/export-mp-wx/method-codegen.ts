@@ -271,9 +271,9 @@ export function generateComputedObservers(options: {
   if (propNames.includes('params')) {
     observerLines.push(`    "params": function (params) {
       var key = JSON.stringify(params == null ? null : params)
-      if (this.__voiderParamsKey === key) return
-      var prev = this.__voiderParamsKey
-      this.__voiderParamsKey = key
+      if (this.__lubanParamsKey === key) return
+      var prev = this.__lubanParamsKey
+      this.__lubanParamsKey = key
       if (prev === undefined) return
       if (typeof this.reset === 'function') this.reset()
     },`)
@@ -766,7 +766,7 @@ ${loadingStmts.length ? `${loadingStmts.join('\n')}\n` : ''}${argLines.join('\n'
           if (typeof that.__recomputeComputed === 'function') that.__recomputeComputed([${JSON.stringify(name)}])
 ${successStmts.length ? `${successStmts.join('\n')}\n` : ''}        })
         .catch(function (err) {
-          console.error(${JSON.stringify(`[voider] controller ${name}`)}, err)
+          console.error(${JSON.stringify(`[luban] controller ${name}`)}, err)
 ${errorStmts.length ? `${errorStmts.join('\n')}\n` : ''}        })
         .then(function () {
 ${finallyStmts.length ? `${finallyStmts.join('\n')}\n` : ''}        })

@@ -1,16 +1,27 @@
-import { app, BrowserWindow, dialog, Menu } from 'electron'
+﻿import { app, BrowserWindow, dialog, Menu } from 'electron'
 import { ChildProcess, spawn } from 'node:child_process'
 import { createServer } from 'node:net'
 import path from 'node:path'
 
-const isDevUi = process.env.VOIDER_ELECTRON_DEV === '1' || !app.isPackaged
-const DEV_UI_URL = process.env.VOIDER_DEV_UI_URL || 'http://127.0.0.1:5173'
+const isDevUi =
+  process.env.LUBAN_ELECTRON_DEV === '1' ||
+  process.env.VOIDER_ELECTRON_DEV === '1' ||
+  !app.isPackaged
+const DEV_UI_URL =
+  process.env.LUBAN_DEV_UI_URL ||
+  process.env.VOIDER_DEV_UI_URL ||
+  'http://127.0.0.1:5173'
 const HEALTH_TIMEOUT_MS = 30_000
 const HEALTH_INTERVAL_MS = 200
 
 let mainWindow: BrowserWindow | null = null
 let serverProcess: ChildProcess | null = null
 let quitting = false
+
+// Windows 任务栏分组 / 图标缓存与 appId 对齐（避免沿用旧 Voider 图标）
+if (process.platform === 'win32') {
+  app.setAppUserModelId('com.luban.desktop')
+}
 
 function repoRoot(): string {
   // desktop/dist/main.js → desktop → repo
@@ -20,6 +31,11 @@ function repoRoot(): string {
 function resourceRoot(): string {
   if (app.isPackaged) return process.resourcesPath
   return repoRoot()
+}
+
+/** 窗口图标（exe 任务栏图标由 electron-builder 的 win.icon 嵌入） */
+function appIconPath(): string {
+  return path.join(__dirname, '..', 'build', 'icon.ico')
 }
 
 function findFreePort(): Promise<number> {
@@ -71,7 +87,7 @@ function startPackagedServer(port: number, corsOrigin: string): ChildProcess {
       PORT: String(port),
       CORS_ORIGIN: corsOrigin,
       NODE_ENV: 'production',
-      VOIDER_STATIC_DIR: path.join(root, 'frontend'),
+      LUBAN_STATIC_DIR: path.join(root, 'frontend'),
       MP_GATEWAY_PORT: process.env.MP_GATEWAY_PORT || '6630',
     },
     stdio: 'inherit',
@@ -127,6 +143,7 @@ function createWindow(uiUrl: string): BrowserWindow {
     minWidth: 1024,
     minHeight: 640,
     show: false,
+    icon: appIconPath(),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -139,7 +156,10 @@ function createWindow(uiUrl: string): BrowserWindow {
   win.once('ready-to-show', () => win.show())
   void win.loadURL(uiUrl)
 
-  if (process.env.VOIDER_ELECTRON_DEVTOOLS === '1') {
+  if (
+    process.env.LUBAN_ELECTRON_DEVTOOLS === '1' ||
+    process.env.VOIDER_ELECTRON_DEVTOOLS === '1'
+  ) {
     win.webContents.openDevTools({ mode: 'detach' })
   }
 

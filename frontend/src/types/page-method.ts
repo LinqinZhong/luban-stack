@@ -570,13 +570,14 @@ export function serializeMethodFile(method: PageMethod): string {
     params: method.params,
     returnType: method.returnType,
   }
-  return `/*@voider-method\n${JSON.stringify(meta, null, 2)}\n*/\n\n${method.body.trimEnd()}\n`
+  return `/*@luban-method\n${JSON.stringify(meta, null, 2)}\n*/\n\n${method.body.trimEnd()}\n`
 }
 
 /** 从 .ts 文件内容解析 */
 export function parseMethodFile(raw: string, fallbackName: string): PageMethod {
   const trimmed = raw.replace(/^\uFEFF/, '')
-  const match = trimmed.match(/^\/\*@voider-method\s*([\s\S]*?)\*\//)
+  // 兼容旧版 @voider-method
+  const match = trimmed.match(/^\/\*@(?:luban|voider)-method\s*([\s\S]*?)\*\//)
   let meta: Partial<PageMethod> = { name: fallbackName }
   let body = trimmed
 

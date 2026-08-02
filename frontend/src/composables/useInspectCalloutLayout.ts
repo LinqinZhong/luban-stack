@@ -3,11 +3,11 @@ import type { PreviewInspectPayload } from '../types/preview-inspect'
 
 /** 组件检视操纵杆挂载层（在手机框外，避免被 overflow 裁切） */
 export const INSPECT_HOST_KEY: InjectionKey<Ref<HTMLElement | null>> = Symbol(
-  'voiderInspectHost',
+  'lubanInspectHost',
 )
 /** 手机框元素，用于计算「屏外」伸出长度 */
 export const PHONE_FRAME_KEY: InjectionKey<Ref<HTMLElement | null>> = Symbol(
-  'voiderPhoneFrame',
+  'lubanPhoneFrame',
 )
 /**
  * 打开组件检视（由 PageCanvas provide）。
@@ -15,7 +15,7 @@ export const PHONE_FRAME_KEY: InjectionKey<Ref<HTMLElement | null>> = Symbol(
  */
 export const OPEN_INSPECT_KEY: InjectionKey<
   (payload: PreviewInspectPayload) => void
-> = Symbol('voiderOpenInspect')
+> = Symbol('lubanOpenInspect')
 
 export type InspectCalloutSide = 'left' | 'right'
 

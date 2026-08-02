@@ -1,4 +1,4 @@
-﻿import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { openProject, ProjectError } from './project.js'
 import { listPages, getPage } from './pages.js'
@@ -316,7 +316,7 @@ export async function exportMpWxProject(
   // 工具类写入共享文件：组件 @import；app.wxss 须把 @import 放在最前
   const utilities =
     classRegistry.toWxss() ||
-    '/* Voider utilities — none generated */\n'
+    '/* Luban utilities — none generated */\n'
   await writeProjectFile(outputPath, 'styles/utilities.wxss', utilities)
   // 绑定色值（如 background="{{props.background}}"）经 WXS 把 key 转成 var(--key)
   await writeProjectFile(

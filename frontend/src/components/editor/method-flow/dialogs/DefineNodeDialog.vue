@@ -240,7 +240,7 @@ function syncAmbientLib() {
   if (!dts) return
   ambientLib = tsLang.typescriptDefaults.addExtraLib(
     dts,
-    `inmemory://voider/define-ambient-${Date.now()}.d.ts`,
+    `inmemory://luban/define-ambient-${Date.now()}.d.ts`,
   )
 }
 
@@ -281,7 +281,7 @@ async function setupEditor() {
   model = monaco.editor.createModel(
     initial,
     'typescript',
-    monaco.Uri.parse(`inmemory://voider/define-${Date.now()}.ts`),
+    monaco.Uri.parse(`inmemory://luban/define-${Date.now()}.ts`),
   )
   editor = monaco.editor.create(hostRef.value, {
     model,

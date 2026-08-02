@@ -363,7 +363,7 @@ export async function loadControllerBoundPageData(
           pageScope[name] = cloneValue(value)
         }
       } catch (err) {
-        console.warn(`[voider] 控制器字段「${name}」加载失败:`, err)
+        console.warn(`[luban] 控制器字段「${name}」加载失败:`, err)
       }
     }),
   )

@@ -16,7 +16,7 @@ import tsWorker from 'monaco-editor/esm/vs/language/typescript/ts.worker?worker'
 
 const tsLang = (monaco.languages as any).typescript
 
-const PRINT_THEME = 'voider-print'
+const PRINT_THEME = 'luban-print'
 const LINE_HEIGHT = 20
 const VERTICAL_PAD = 16
 const MIN_LINES = 2
@@ -111,7 +111,7 @@ function mountEditor() {
   model = monaco.editor.createModel(
     props.modelValue || '',
     'typescript',
-    monaco.Uri.parse(`inmemory://voider/print-${Date.now()}.ts`),
+    monaco.Uri.parse(`inmemory://luban/print-${Date.now()}.ts`),
   )
 
   editor = monaco.editor.create(hostRef.value, {

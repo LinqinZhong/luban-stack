@@ -1,4 +1,4 @@
-import { Router } from 'express'
+﻿import { Router } from 'express'
 import {
   browseDirectory,
   createProject,
@@ -65,7 +65,11 @@ import {
   writeBuildSchemeLibrary,
 } from '../services/build-schemes.js'
 import { buildProject } from '../services/build-project.js'
-import { DEFAULT_CANVAS_WIDTH, ENGINE_VERSION } from '../types/voider-project.js'
+import {
+  DEFAULT_CANVAS_WIDTH,
+  ENGINE_VERSION,
+  LUBAN_CONFIG_FILE,
+} from '../types/luban-project.js'
 
 const router = Router()
 
@@ -83,7 +87,7 @@ router.get('/meta', (_req, res) => {
   res.json({
     engineVersion: ENGINE_VERSION,
     defaultCanvasWidth: DEFAULT_CANVAS_WIDTH,
-    configFile: 'voider.json',
+    configFile: LUBAN_CONFIG_FILE,
   })
 })
 

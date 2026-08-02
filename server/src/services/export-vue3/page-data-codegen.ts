@@ -298,7 +298,7 @@ ${argLines.join('\n')}
         const parsed = ${parseCall}
         ${name}.value = parsed as typeof ${name}.value
 ${successStmts.length ? `${successStmts.join('\n')}\n` : ''}      } catch (err) {
-        console.error(${JSON.stringify(`[voider] controller ${name}`)}, err)
+        console.error(${JSON.stringify(`[luban] controller ${name}`)}, err)
 ${errorStmts.length ? `${errorStmts.join('\n')}\n` : ''}      } finally {
 ${finallyStmts.length ? `${finallyStmts.join('\n')}\n` : ''}      }
     })(),

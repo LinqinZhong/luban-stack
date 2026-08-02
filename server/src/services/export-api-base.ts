@@ -1,5 +1,5 @@
 import type { BackendService } from '../types/backend-services.js'
-import type { VoiderProjectConfig } from '../types/voider-project.js'
+import type { LubanProjectConfig } from '../types/luban-project.js'
 
 /** 导出前端默认直连 Nest（不再走本地网关 6630） */
 export const DEFAULT_EXPORT_API_BASE = 'http://127.0.0.1:3030'
@@ -9,7 +9,7 @@ function trimBase(url: string): string {
 }
 
 function readConfiguredMap(
-  config: VoiderProjectConfig,
+  config: LubanProjectConfig,
 ): Record<string, string> {
   const out: Record<string, string> = {}
   const raw = config.apiBaseUrls
@@ -54,10 +54,10 @@ export function buildApiBaseUrlsFromBackends(
 /**
  * 导出用 baseUrl 字典：key 为 serviceName / `default`（OSS 可另配 `oss`）。
  * 同一服务只保留可读名，不重复写入 serviceId。
- * 若 voider.json 用 serviceId 配置，会归一到对应 serviceName。
+ * 若 luban.json 用 serviceId 配置，会归一到对应 serviceName。
  */
 export function buildExportApiBaseUrls(
-  config: VoiderProjectConfig,
+  config: LubanProjectConfig,
   services: Array<Pick<BackendService, 'id' | 'name'>> = [],
   override?: Record<string, string> | null,
 ): Record<string, string> {

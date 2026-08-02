@@ -340,7 +340,6 @@ const hasEditBadges = computed(
 const hasInspectBadge = computed(
   () => toolMode?.value !== 'measure' && Boolean(props.inspectBadge),
 )
-const hasBadges = computed(() => hasEditBadges.value || hasInspectBadge.value)
 const badgeHostEl = computed(() => badgeHostRef?.value ?? null)
 const inspectHostEl = computed(() => inspectHostRef?.value ?? null)
 const contentBoxRef = ref<HTMLElement | null>(null)

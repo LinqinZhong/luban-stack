@@ -58,9 +58,10 @@
   "debugProps": {
     "showBack": true,
     "background": "#ffffff",
-    "color": "#000000",
-    "isFillScreen": false,
+    "color": "primary",
+    "isFillScreen": true,
     "backBackground": "#ffffff",
-    "backBorderColor": "#ffffff"
+    "backBorderColor": "#ffffff",
+    "title": "详情"
   }
 }

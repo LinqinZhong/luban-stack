@@ -1,7 +1,8 @@
 import { defineStore } from 'pinia'
 import { ref, watch } from 'vue'
 
-const STORAGE_KEY = 'voider.workspaceSettings'
+const STORAGE_KEY = 'luban.workspaceSettings'
+const LEGACY_STORAGE_KEY = 'voider.workspaceSettings'
 
 type StoredSettings = {
   apiLatencyMs?: number
@@ -9,8 +10,14 @@ type StoredSettings = {
 
 function loadStored(): StoredSettings {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY)
+    const raw =
+      localStorage.getItem(STORAGE_KEY) ??
+      localStorage.getItem(LEGACY_STORAGE_KEY)
     if (!raw) return {}
+    if (!localStorage.getItem(STORAGE_KEY)) {
+      localStorage.setItem(STORAGE_KEY, raw)
+      localStorage.removeItem(LEGACY_STORAGE_KEY)
+    }
     return JSON.parse(raw) as StoredSettings
   } catch {
     return {}
@@ -36,6 +43,7 @@ export const useWorkspaceSettingsStore = defineStore('workspaceSettings', () => 
     (value) => {
       const next: StoredSettings = { apiLatencyMs: clampLatency(value) }
       localStorage.setItem(STORAGE_KEY, JSON.stringify(next))
+      localStorage.removeItem(LEGACY_STORAGE_KEY)
     },
     { flush: 'sync' },
   )

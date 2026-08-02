@@ -1,6 +1,6 @@
-# LubanStack
+﻿# LubanStack
 
-H5 低代码开发工具（前后端分离本地系统）。项目配置文件仍为 `voider.json`（兼容已有工程）。
+H5 低代码开发工具（前后端分离本地系统）。项目配置文件为 `luban.json`（打开时会自动将旧版 `voider.json` 迁移）。
 
 ## 项目结构
 
@@ -53,9 +53,9 @@ npm run dev
 
 前端默认运行在 `http://localhost:5173`
 
-## 项目配置 voider.json
+## 项目配置 luban.json
 
-每个项目根目录需包含 `voider.json`，示例：
+每个项目根目录需包含 `luban.json`，示例：
 
 ```json
 {
@@ -77,7 +77,7 @@ npm run dev
 | `engineVersion` | 引擎版本号 |
 | `canvas.width` | 画布宽度（px），默认 `375` |
 
-打开项目时，所选文件夹必须已有合法的 `voider.json`；新建项目会写入该文件并创建空的 `pages/` 目录。
+打开项目时，所选文件夹必须已有合法的 `luban.json`（或旧版 `voider.json`，打开时自动重命名）；新建项目会写入该文件并创建空的 `pages/` 目录。
 
 ## 页面目录 pages/
 
@@ -120,8 +120,8 @@ pages/
 | GET | `/api/health` | 健康检查 |
 | GET | `/api/projects/meta` | 获取引擎版本、默认画布宽度等元信息 |
 | GET | `/api/projects/browse?path=` | 浏览本地文件夹（空 path 为磁盘根） |
-| POST | `/api/projects/open` | 打开项目（校验 voider.json） |
-| POST | `/api/projects/create` | 新建项目并写入 voider.json |
+| POST | `/api/projects/open` | 打开项目（校验 luban.json，兼容迁移 voider.json） |
+| POST | `/api/projects/create` | 新建项目并写入 luban.json |
 | GET | `/api/projects/icons?projectPath=` | 获取项目图标库 |
 | PUT | `/api/projects/icons` | 保存项目图标库 |
 | GET | `/api/pages?projectPath=` | 列出项目 pages 下的页面 |
@@ -147,4 +147,4 @@ cd desktop
 npm run build
 ```
 
-桌面端生产环境通过 `VOIDER_STATIC_DIR` 由 Express 托管前端静态资源；开发态仍走 Vite，API 经 proxy 访问 `127.0.0.1:3000`。
+桌面端生产环境通过 `LUBAN_STATIC_DIR` 由 Express 托管前端静态资源；开发态仍走 Vite，API 经 proxy 访问 `127.0.0.1:3000`。

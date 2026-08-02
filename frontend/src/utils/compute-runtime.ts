@@ -205,7 +205,7 @@ function runComputedPass(
         changed = true
       }
     } catch (err) {
-      console.warn(`[voider] 计算字段「${name || '?'}」执行失败:`, err)
+      console.warn(`[luban] 计算字段「${name || '?'}」执行失败:`, err)
     }
   }
   return changed
@@ -300,7 +300,7 @@ export function collectDollarPropsKeysFromComputeBodies(
 /** api 可调用等不可 JSON 化的值 → 稳定可序列化标记 */
 function serializeDollarPropForDeps(value: unknown): unknown {
   if (typeof value === 'function') {
-    const mark = (value as { __voiderApiBinding?: string }).__voiderApiBinding
+    const mark = (value as { __lubanApiBinding?: string }).__lubanApiBinding
     return mark != null ? { __api: mark } : { __fn: true }
   }
   return value

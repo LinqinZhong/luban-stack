@@ -2,11 +2,9 @@
 import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { Delete, Plus } from '@element-plus/icons-vue'
 import BackLink from './BackLink.vue'
-import ColorPicker from './ColorPicker.vue'
-import DateTimeValueInput from './DateTimeValueInput.vue'
 import DynamicStyleStateDialog from './DynamicStyleStateDialog.vue'
 import EventBindDialog from './EventBindDialog.vue'
-import NumericInput from './NumericInput.vue'
+import AttrBindField from './AttrBindField.vue'
 import VisibilityConditionDialog from './VisibilityConditionDialog.vue'
 import OssResourcePickerDialog from './OssResourcePickerDialog.vue'
 import { countEventBindings, type MethodParam, type PageMethod } from '../../types/page-method'
@@ -60,8 +58,6 @@ import { DATA_FIELD_TYPE_OPTIONS, type DataFieldType } from '../../types/page-da
 import {
   isStatusBarNodeId,
   normalizeStatusBarConfig,
-  statusBarCoverIsOn,
-  statusBarFlagIsOn,
   type StatusBarConfig,
 } from '../../utils/status-bar'
 import {
@@ -168,31 +164,6 @@ function commitStatusBar() {
     navigationBar,
   })
 }
-
-function commitStatusBarTextStyleStatic(value: string) {
-  statusBarForm.textStyle = value
-  commitStatusBar()
-}
-
-function commitStatusBarCoverSwitch(on: boolean) {
-  statusBarForm.cover = on ? 'true' : 'false'
-  commitStatusBar()
-}
-
-function commitStatusBarNavigationBarSwitch(on: boolean) {
-  statusBarForm.navigationBar = on ? 'true' : 'false'
-  commitStatusBar()
-}
-
-const statusBarTextStyleIsBinding = computed(() =>
-  looksLikeDataBinding(statusBarForm.textStyle),
-)
-const statusBarCoverIsBinding = computed(() =>
-  looksLikeDataBinding(statusBarForm.cover),
-)
-const statusBarNavigationBarIsBinding = computed(() =>
-  looksLikeDataBinding(statusBarForm.navigationBar),
-)
 
 const selectedNode = computed(() =>
   props.selectedId &&
@@ -795,9 +766,22 @@ function clearComponentProp(name: string) {
   commitComponentProp(name)
 }
 
+const nearestRepeatListName = computed(() =>
+  findNearestRepeatListName(props.xml, props.selectedId),
+)
+
+/** AttrBindField 共用数据源（样式 / 组件入参） */
+const attrBindShared = computed(() => ({
+  dataFields: props.dataFields ?? [],
+  componentProps: props.componentProps,
+  routeParams: props.routeParams,
+  pageQueryParams: props.pageQueryParams,
+  repeatListName: nearestRepeatListName.value,
+}))
+
 const iconSelectOptions = computed(() => {
   const library = props.iconOptions ?? []
-  const repeatList = findNearestRepeatListName(props.xml, props.selectedId)
+  const repeatList = nearestRepeatListName.value
   const itemIcons = listRepeatItemIconOptions(
     props.dataFields ?? [],
     repeatList,
@@ -1416,71 +1400,35 @@ onBeforeUnmount(() => {
           <div class="section-title">风格</div>
           <el-form label-position="top" size="small" :disabled="canvasScene !== 'miniprogram'">
             <el-form-item label="文字样式 textStyle">
-              <el-radio-group
-                v-if="!statusBarTextStyleIsBinding"
-                :model-value="
-                  statusBarForm.textStyle === 'white' ? 'white' : 'black'
-                "
-                @change="commitStatusBarTextStyleStatic(String($event))"
-              >
-                <el-radio-button value="black">black 黑字</el-radio-button>
-                <el-radio-button value="white">white 白字</el-radio-button>
-              </el-radio-group>
-              <el-input
+              <AttrBindField
                 v-model="statusBarForm.textStyle"
-                clearable
-                placeholder="black / white，或 {数据池字段}"
-                style="margin-top: 8px"
+                placeholder="black / white / 绑定"
+                v-bind="attrBindShared"
                 @change="commitStatusBar"
               />
-              <p class="hint">可填 black / white，或绑定数据池：<code>{'{titleTextStyle}'}</code></p>
             </el-form-item>
             <el-form-item label="背景色 backgroundColor">
-              <ColorPicker
-                v-if="!looksLikeDataBinding(statusBarForm.backgroundColor)"
+              <AttrBindField
                 v-model="statusBarForm.backgroundColor"
-                placeholder="#ffffff / transparent"
+                placeholder="色值 / 绑定"
+                v-bind="attrBindShared"
                 @change="commitStatusBar"
               />
-              <el-input
-                v-else
-                v-model="statusBarForm.backgroundColor"
-                clearable
-                placeholder="色值或 {数据池字段}"
-                @change="commitStatusBar"
-              />
-              <p class="hint">可填色值，或绑定数据池：<code>{'{titleBarColor}'}</code></p>
             </el-form-item>
             <el-form-item label="与页面重叠 cover">
-              <div v-if="!statusBarCoverIsBinding" class="bool-prop-row">
-                <el-switch
-                  :model-value="statusBarCoverIsOn(statusBarForm.cover)"
-                  @update:model-value="commitStatusBarCoverSwitch"
-                />
-              </div>
-              <el-input
+              <AttrBindField
                 v-model="statusBarForm.cover"
-                clearable
-                placeholder="true / false，或 {数据池字段}"
-                :style="statusBarCoverIsBinding ? undefined : { marginTop: '8px' }"
+                placeholder="true / false / 绑定"
+                v-bind="attrBindShared"
                 @change="commitStatusBar"
               />
-              <p class="hint">
-                开启后状态栏浮在页面之上（沉浸式）。可绑定：<code>{'{immersive}'}</code>
-              </p>
+              <p class="hint">开启后状态栏浮在页面之上（沉浸式）。</p>
             </el-form-item>
             <el-form-item label="显示标题栏 navigationBar">
-              <div v-if="!statusBarNavigationBarIsBinding" class="bool-prop-row">
-                <el-switch
-                  :model-value="statusBarFlagIsOn(statusBarForm.navigationBar)"
-                  @update:model-value="commitStatusBarNavigationBarSwitch"
-                />
-              </div>
-              <el-input
+              <AttrBindField
                 v-model="statusBarForm.navigationBar"
-                clearable
-                placeholder="true / false，或 {数据池字段}"
-                :style="statusBarNavigationBarIsBinding ? undefined : { marginTop: '8px' }"
+                placeholder="true / false / 绑定"
+                v-bind="attrBindShared"
                 @change="commitStatusBar"
               />
               <p class="hint">
@@ -1628,12 +1576,13 @@ onBeforeUnmount(() => {
                       :value="opt.value"
                     />
                   </el-select>
-                  <NumericInput
+                  <AttrBindField
                     v-if="layoutForm.widthMode === 'fixed'"
                     v-model="layoutForm.widthValue"
                     placeholder="数字或 {变量}"
+                    v-bind="attrBindShared"
                     @change="commitWidth"
-                  />
+                    />
                 </div>
               </el-form-item>
 
@@ -1647,12 +1596,13 @@ onBeforeUnmount(() => {
                       :value="opt.value"
                     />
                   </el-select>
-                  <NumericInput
+                  <AttrBindField
                     v-if="layoutForm.heightMode === 'fixed'"
                     v-model="layoutForm.heightValue"
                     placeholder="数字或 {变量}"
+                    v-bind="attrBindShared"
                     @change="commitHeight"
-                  />
+                    />
                 </div>
               </el-form-item>
             </el-form>
@@ -1663,34 +1613,39 @@ onBeforeUnmount(() => {
           <div class="section-title">间距</div>
           <el-form label-position="top" size="small">
             <el-form-item label="padding">
-              <NumericInput
+              <AttrBindField
                 v-model="layoutForm.padding"
-                placeholder="例如：16 或 {padding}"
+                placeholder="数据池 / 常量 / 自定义"
+                v-bind="attrBindShared"
                 @change="commitAttr('padding', layoutForm.padding)"
               />
             </el-form-item>
             <div class="quad-grid">
               <el-form-item label="上">
-                <NumericInput
+                <AttrBindField
                   v-model="layoutForm.paddingTop"
+                  v-bind="attrBindShared"
                   @change="commitAttr('paddingTop', layoutForm.paddingTop)"
                 />
               </el-form-item>
               <el-form-item label="右">
-                <NumericInput
+                <AttrBindField
                   v-model="layoutForm.paddingRight"
+                  v-bind="attrBindShared"
                   @change="commitAttr('paddingRight', layoutForm.paddingRight)"
                 />
               </el-form-item>
               <el-form-item label="下">
-                <NumericInput
+                <AttrBindField
                   v-model="layoutForm.paddingBottom"
+                  v-bind="attrBindShared"
                   @change="commitAttr('paddingBottom', layoutForm.paddingBottom)"
                 />
               </el-form-item>
               <el-form-item label="左">
-                <NumericInput
+                <AttrBindField
                   v-model="layoutForm.paddingLeft"
+                  v-bind="attrBindShared"
                   @change="commitAttr('paddingLeft', layoutForm.paddingLeft)"
                 />
               </el-form-item>
@@ -1698,34 +1653,39 @@ onBeforeUnmount(() => {
 
             <template v-if="showMarginProps">
               <el-form-item label="margin">
-                <NumericInput
+                <AttrBindField
                   v-model="layoutForm.margin"
-                  placeholder="例如：8 或 {margin}"
+                  placeholder="数据池 / 常量 / 自定义"
+                  v-bind="attrBindShared"
                   @change="commitAttr('margin', layoutForm.margin)"
                 />
               </el-form-item>
               <div class="quad-grid">
                 <el-form-item label="上">
-                  <NumericInput
+                  <AttrBindField
                     v-model="layoutForm.marginTop"
+                    v-bind="attrBindShared"
                     @change="commitAttr('marginTop', layoutForm.marginTop)"
                   />
                 </el-form-item>
                 <el-form-item label="右">
-                  <NumericInput
+                  <AttrBindField
                     v-model="layoutForm.marginRight"
+                    v-bind="attrBindShared"
                     @change="commitAttr('marginRight', layoutForm.marginRight)"
                   />
                 </el-form-item>
                 <el-form-item label="下">
-                  <NumericInput
+                  <AttrBindField
                     v-model="layoutForm.marginBottom"
+                    v-bind="attrBindShared"
                     @change="commitAttr('marginBottom', layoutForm.marginBottom)"
                   />
                 </el-form-item>
                 <el-form-item label="左">
-                  <NumericInput
+                  <AttrBindField
                     v-model="layoutForm.marginLeft"
+                    v-bind="attrBindShared"
                     @change="commitAttr('marginLeft', layoutForm.marginLeft)"
                   />
                 </el-form-item>
@@ -1738,18 +1698,20 @@ onBeforeUnmount(() => {
           <div class="section-title">外观</div>
           <el-form label-position="top" size="small">
             <el-form-item label="background">
-              <ColorPicker
+              <AttrBindField
                 v-model="layoutForm.background"
                 placeholder="transparent"
+                v-bind="attrBindShared"
                 @change="commitAttr('background', layoutForm.background)"
-              />
+                />
             </el-form-item>
             <el-form-item label="层级 zIndex">
-              <NumericInput
+              <AttrBindField
                 v-model="layoutForm.zIndex"
                 placeholder="如 10，越大越靠上"
+                v-bind="attrBindShared"
                 @change="commitAttr('zIndex', layoutForm.zIndex)"
-              />
+                />
             </el-form-item>
             <el-form-item v-if="!showModalProps" label="gravity">
               <el-select
@@ -1768,65 +1730,72 @@ onBeforeUnmount(() => {
             </el-form-item>
             <template v-if="showLayoutContainerProps">
               <el-form-item label="borderRadius 统一圆角">
-                <NumericInput
+                <AttrBindField
                   v-model="layoutForm.borderRadius"
                   placeholder="四角共用；分角优先"
+                  v-bind="attrBindShared"
                   @change="commitAttr('borderRadius', layoutForm.borderRadius)"
-                />
+                  />
               </el-form-item>
               <div class="quad-grid">
                 <el-form-item label="上左">
-                  <NumericInput
+                  <AttrBindField
                     v-model="layoutForm.borderTopLeftRadius"
+                    v-bind="attrBindShared"
                     @change="
                       commitAttr('borderTopLeftRadius', layoutForm.borderTopLeftRadius)
                     "
-                  />
+                    />
                 </el-form-item>
                 <el-form-item label="上右">
-                  <NumericInput
+                  <AttrBindField
                     v-model="layoutForm.borderTopRightRadius"
+                    v-bind="attrBindShared"
                     @change="
                       commitAttr('borderTopRightRadius', layoutForm.borderTopRightRadius)
                     "
-                  />
+                    />
                 </el-form-item>
                 <el-form-item label="下右">
-                  <NumericInput
+                  <AttrBindField
                     v-model="layoutForm.borderBottomRightRadius"
+                    v-bind="attrBindShared"
                     @change="
                       commitAttr(
                         'borderBottomRightRadius',
                         layoutForm.borderBottomRightRadius,
                       )
                     "
-                  />
+                    />
                 </el-form-item>
                 <el-form-item label="下左">
-                  <NumericInput
+                  <AttrBindField
                     v-model="layoutForm.borderBottomLeftRadius"
+                    v-bind="attrBindShared"
                     @change="
                       commitAttr(
                         'borderBottomLeftRadius',
                         layoutForm.borderBottomLeftRadius,
                       )
                     "
-                  />
+                    />
                 </el-form-item>
               </div>
               <el-form-item label="borderWidth">
-                <NumericInput
+                <AttrBindField
                   v-model="layoutForm.borderWidth"
                   placeholder="边框宽度"
+                  v-bind="attrBindShared"
                   @change="commitAttr('borderWidth', layoutForm.borderWidth)"
-                />
+                  />
               </el-form-item>
               <el-form-item label="borderColor">
-                <ColorPicker
+                <AttrBindField
                   v-model="layoutForm.borderColor"
                   placeholder="#dcdfe6"
+                  v-bind="attrBindShared"
                   @change="commitAttr('borderColor', layoutForm.borderColor)"
-                />
+                  />
               </el-form-item>
             </template>
             <el-form-item v-if="showOverflowProps" label="overflow 溢出">
@@ -1850,27 +1819,28 @@ onBeforeUnmount(() => {
             <div class="section-title">内容</div>
             <el-form label-position="top" size="small">
               <el-form-item label="text">
-                <el-input
+                <AttrBindField
                   v-model="layoutForm.text"
-                  clearable
+                  placeholder="数据池 / 常量 / 自定义"
+                  v-bind="attrBindShared"
                   @change="commitAttr('text', layoutForm.text)"
-                />
+                  />
               </el-form-item>
               <el-form-item label="textSize">
-                <NumericInput
+                <AttrBindField
                   v-model="layoutForm.textSize"
                   placeholder="例如：16"
-                  :min="1"
-                  :max="200"
+                  v-bind="attrBindShared"
                   @change="commitAttr('textSize', layoutForm.textSize)"
-                />
+                  />
               </el-form-item>
               <el-form-item label="textColor">
-                <ColorPicker
+                <AttrBindField
                   v-model="layoutForm.textColor"
                   placeholder="#303133"
+                  v-bind="attrBindShared"
                   @change="commitAttr('textColor', layoutForm.textColor)"
-                />
+                  />
               </el-form-item>
             </el-form>
             </section>
@@ -1881,36 +1851,36 @@ onBeforeUnmount(() => {
             <div class="section-title">输入</div>
             <el-form label-position="top" size="small">
               <el-form-item label="value">
-                <el-input
+                <AttrBindField
                   v-model="layoutForm.value"
-                  clearable
                   placeholder="静态值，或在「动态」配置双向绑定"
+                  v-bind="attrBindShared"
                   @change="commitAttr('value', layoutForm.value)"
-                />
+                  />
               </el-form-item>
               <el-form-item label="placeholder">
-                <el-input
+                <AttrBindField
                   v-model="layoutForm.placeholder"
-                  clearable
                   placeholder="占位提示"
+                  v-bind="attrBindShared"
                   @change="commitAttr('placeholder', layoutForm.placeholder)"
-                />
+                  />
               </el-form-item>
               <el-form-item label="textSize">
-                <NumericInput
+                <AttrBindField
                   v-model="layoutForm.textSize"
                   placeholder="例如：14"
-                  :min="1"
-                  :max="200"
+                  v-bind="attrBindShared"
                   @change="commitAttr('textSize', layoutForm.textSize)"
-                />
+                  />
               </el-form-item>
               <el-form-item label="textColor">
-                <ColorPicker
+                <AttrBindField
                   v-model="layoutForm.textColor"
                   placeholder="#303133"
+                  v-bind="attrBindShared"
                   @change="commitAttr('textColor', layoutForm.textColor)"
-                />
+                  />
               </el-form-item>
             </el-form>
             </section>
@@ -1922,10 +1892,10 @@ onBeforeUnmount(() => {
             <el-form label-position="top" size="small">
               <el-form-item label="src">
                 <div class="image-src-row">
-                  <el-input
+                  <AttrBindField
                     v-model="layoutForm.src"
-                    clearable
-                    placeholder="图片 URL"
+                    placeholder="图片 URL / 绑定"
+                    v-bind="attrBindShared"
                     @change="commitAttr('src', layoutForm.src)"
                   />
                   <el-button type="primary" link @click="openImageOssPicker">
@@ -1934,20 +1904,20 @@ onBeforeUnmount(() => {
                 </div>
               </el-form-item>
               <el-form-item label="alt">
-                <el-input
+                <AttrBindField
                   v-model="layoutForm.alt"
-                  clearable
                   placeholder="替代文本"
+                  v-bind="attrBindShared"
                   @change="commitAttr('alt', layoutForm.alt)"
-                />
+                  />
               </el-form-item>
               <el-form-item label="title">
-                <el-input
+                <AttrBindField
                   v-model="layoutForm.title"
-                  clearable
                   placeholder="悬停提示"
+                  v-bind="attrBindShared"
                   @change="commitAttr('title', layoutForm.title)"
-                />
+                  />
               </el-form-item>
               <el-form-item label="objectFit">
                 <el-select
@@ -2000,35 +1970,36 @@ onBeforeUnmount(() => {
                 </p>
               </el-form-item>
               <el-form-item label="size">
-                <NumericInput
+                <AttrBindField
                   v-model="layoutForm.size"
                   placeholder="例如：24"
-                  :min="1"
-                  :max="500"
+                  v-bind="attrBindShared"
                   @change="commitAttr('size', layoutForm.size)"
-                />
+                  />
               </el-form-item>
               <el-form-item label="color">
-                <ColorPicker
+                <AttrBindField
                   v-model="layoutForm.color"
                   placeholder="#303133"
+                  v-bind="attrBindShared"
                   @change="commitAttr('color', layoutForm.color)"
-                />
+                  />
               </el-form-item>
               <el-form-item label="圆角 borderRadius">
-                <NumericInput
+                <AttrBindField
                   v-model="layoutForm.borderRadius"
                   placeholder="例如：4 / 50%"
+                  v-bind="attrBindShared"
                   @change="commitAttr('borderRadius', layoutForm.borderRadius)"
-                />
+                  />
               </el-form-item>
               <el-form-item label="内容阴影">
-                <el-input
+                <AttrBindField
                   v-model="layoutForm.contentShadow"
-                  clearable
                   placeholder="如 0 2px 8px rgba(0,0,0,.2)"
+                  v-bind="attrBindShared"
                   @change="commitAttr('contentShadow', layoutForm.contentShadow)"
-                />
+                  />
               </el-form-item>
             </el-form>
             </section>
@@ -2039,31 +2010,28 @@ onBeforeUnmount(() => {
             <div class="section-title">旋转</div>
             <el-form label-position="top" size="small">
               <el-form-item label="rotateX（度）">
-                <NumericInput
+                <AttrBindField
                   v-model="layoutForm.rotateX"
                   placeholder="0"
-                  :min="-360"
-                  :max="360"
+                  v-bind="attrBindShared"
                   @change="commitAttr('rotateX', layoutForm.rotateX)"
-                />
+                  />
               </el-form-item>
               <el-form-item label="rotateY（度）">
-                <NumericInput
+                <AttrBindField
                   v-model="layoutForm.rotateY"
                   placeholder="0"
-                  :min="-360"
-                  :max="360"
+                  v-bind="attrBindShared"
                   @change="commitAttr('rotateY', layoutForm.rotateY)"
-                />
+                  />
               </el-form-item>
               <el-form-item label="rotateZ（度）">
-                <NumericInput
+                <AttrBindField
                   v-model="layoutForm.rotateZ"
                   placeholder="0"
-                  :min="-360"
-                  :max="360"
+                  v-bind="attrBindShared"
                   @change="commitAttr('rotateZ', layoutForm.rotateZ)"
-                />
+                  />
               </el-form-item>
             </el-form>
             </section>
@@ -2087,11 +2055,12 @@ onBeforeUnmount(() => {
                 </el-select>
               </el-form-item>
               <el-form-item label="gap">
-                <NumericInput
+                <AttrBindField
                   v-model="layoutForm.gap"
                   placeholder="子项间距"
+                  v-bind="attrBindShared"
                   @change="commitAttr('gap', layoutForm.gap)"
-                />
+                  />
               </el-form-item>
             </el-form>
             </section>
@@ -2108,13 +2077,12 @@ onBeforeUnmount(() => {
                 />
               </el-form-item>
               <el-form-item label="interval 间隔(ms)">
-                <NumericInput
+                <AttrBindField
                   v-model="layoutForm.interval"
                   placeholder="3000"
-                  :min="800"
-                  :max="60000"
+                  v-bind="attrBindShared"
                   @change="commitAttr('interval', layoutForm.interval)"
-                />
+                  />
               </el-form-item>
               <el-form-item label="circular 循环">
                 <el-switch
@@ -2131,36 +2099,36 @@ onBeforeUnmount(() => {
                 />
               </el-form-item>
               <el-form-item label="indicatorColor">
-                <ColorPicker
+                <AttrBindField
                   v-model="layoutForm.indicatorColor"
                   placeholder="rgba(0,0,0,0.25)"
+                  v-bind="attrBindShared"
                   @change="commitAttr('indicatorColor', layoutForm.indicatorColor)"
-                />
+                  />
               </el-form-item>
               <el-form-item label="indicatorActiveColor">
-                <ColorPicker
+                <AttrBindField
                   v-model="layoutForm.indicatorActiveColor"
                   placeholder="#409eff"
+                  v-bind="attrBindShared"
                   @change="commitAttr('indicatorActiveColor', layoutForm.indicatorActiveColor)"
-                />
+                  />
               </el-form-item>
               <el-form-item label="duration 动画(ms)">
-                <NumericInput
+                <AttrBindField
                   v-model="layoutForm.duration"
                   placeholder="280"
-                  :min="0"
-                  :max="3000"
+                  v-bind="attrBindShared"
                   @change="commitAttr('duration', layoutForm.duration)"
-                />
+                  />
               </el-form-item>
               <el-form-item label="current 初始页">
-                <NumericInput
+                <AttrBindField
                   v-model="layoutForm.current"
                   placeholder="0"
-                  :min="0"
-                  :max="99"
+                  v-bind="attrBindShared"
                   @change="commitAttr('current', layoutForm.current)"
-                />
+                  />
               </el-form-item>
               <p class="hint">每个直接子控件为一页；预览时可左右滑动切换。</p>
             </el-form>
@@ -2184,12 +2152,12 @@ onBeforeUnmount(() => {
             <div class="section-title">窗口项名</div>
             <el-form label-position="top" size="small">
               <el-form-item label="windowKey">
-                <el-input
+                <AttrBindField
                   v-model="layoutForm.windowKey"
-                  clearable
                   placeholder="与激活项匹配，如 home"
+                  v-bind="attrBindShared"
                   @change="commitAttr('windowKey', layoutForm.windowKey.trim())"
-                />
+                  />
               </el-form-item>
               <p class="hint">
                 当激活项等于该值时显示本窗口。支持字符串或数字（按字符串比较）。
@@ -2240,28 +2208,32 @@ onBeforeUnmount(() => {
 
               <div class="quad-grid">
                 <el-form-item label="layout_marginTop">
-                  <NumericInput
+                  <AttrBindField
                     v-model="layoutForm.layout_marginTop"
+                    v-bind="attrBindShared"
                     @change="commitAttr('layout_marginTop', layoutForm.layout_marginTop)"
-                  />
+                    />
                 </el-form-item>
                 <el-form-item label="layout_marginRight">
-                  <NumericInput
+                  <AttrBindField
                     v-model="layoutForm.layout_marginRight"
+                    v-bind="attrBindShared"
                     @change="commitAttr('layout_marginRight', layoutForm.layout_marginRight)"
-                  />
+                    />
                 </el-form-item>
                 <el-form-item label="layout_marginBottom">
-                  <NumericInput
+                  <AttrBindField
                     v-model="layoutForm.layout_marginBottom"
+                    v-bind="attrBindShared"
                     @change="commitAttr('layout_marginBottom', layoutForm.layout_marginBottom)"
-                  />
+                    />
                 </el-form-item>
                 <el-form-item label="layout_marginLeft">
-                  <NumericInput
+                  <AttrBindField
                     v-model="layoutForm.layout_marginLeft"
+                    v-bind="attrBindShared"
                     @change="commitAttr('layout_marginLeft', layoutForm.layout_marginLeft)"
-                  />
+                    />
                 </el-form-item>
               </div>
             </el-form>
@@ -2427,22 +2399,13 @@ onBeforeUnmount(() => {
                     :type-library="typeLibrary"
                     @change="commitComponentProp(def.name)"
                   />
-                  <template v-else-if="def.type === 'color'">
-                    <ColorPicker
-                      v-if="!looksLikeDataBinding(componentPropForm[def.name])"
-                      v-model="componentPropForm[def.name]"
-                      placeholder="#409eff / rgba(...)"
-                      @change="commitComponentProp(def.name)"
-                    />
-                    <el-input
-                      v-else
-                      v-model="componentPropForm[def.name]"
-                      clearable
-                      placeholder="颜色值或 {数据池字段}"
-                      @change="commitComponentProp(def.name)"
-                    />
-                    <p class="hint">可填色值，或绑定数据池：<code>{'{titleBarColor}'}</code></p>
-                  </template>
+                  <AttrBindField
+                    v-else-if="def.type === 'color'"
+                    v-model="componentPropForm[def.name]"
+                    placeholder="颜色常量 / 绑定"
+                    v-bind="attrBindShared"
+                    @change="commitComponentProp(def.name)"
+                  />
                   <template v-else-if="def.type === 'boolean'">
                     <div class="bool-prop-row">
                       <el-switch
@@ -2459,42 +2422,30 @@ onBeforeUnmount(() => {
                       </el-button>
                       <span v-else class="bool-prop-hint">当前用默认：{{ propDefaultPreview(def) }}</span>
                     </div>
-                    <el-input
+                    <AttrBindField
                       v-model="componentPropForm[def.name]"
-                      clearable
-                      placeholder="也可填 true / false，或 {数据池字段}"
+                      placeholder="true / false / 绑定"
                       style="margin-top: 8px"
+                      v-bind="attrBindShared"
                       @change="commitComponentProp(def.name)"
                     />
                   </template>
-                  <template
+                  <AttrBindField
                     v-else-if="
                       def.type === 'time' ||
                       def.type === 'date' ||
                       def.type === 'datetime'
                     "
-                  >
-                    <DateTimeValueInput
-                      v-if="!looksLikeDataBinding(componentPropForm[def.name])"
-                      :kind="def.type"
-                      size="small"
-                      v-model="componentPropForm[def.name]"
-                      @update:model-value="commitComponentProp(def.name)"
-                    />
-                    <el-input
-                      v-else
-                      v-model="componentPropForm[def.name]"
-                      clearable
-                      :placeholder="`默认：${propDefaultPreview(def)}；可用 {数据池字段}`"
-                      @change="commitComponentProp(def.name)"
-                    />
-                    <p class="hint">可选择值，或绑定数据池：<code>{'{字段名}'}</code></p>
-                  </template>
-                  <el-input
+                    v-model="componentPropForm[def.name]"
+                    :placeholder="`默认：${propDefaultPreview(def)}`"
+                    v-bind="attrBindShared"
+                    @change="commitComponentProp(def.name)"
+                  />
+                  <AttrBindField
                     v-else
                     v-model="componentPropForm[def.name]"
-                    clearable
-                    :placeholder="`默认：${propDefaultPreview(def)}；可用 {item.字段} 或 {数据池字段}`"
+                    :placeholder="`默认：${propDefaultPreview(def)}`"
+                    v-bind="attrBindShared"
                     @change="commitComponentProp(def.name)"
                   />
                   <p v-if="def.type === 'api'" class="hint">
@@ -2762,6 +2713,7 @@ onBeforeUnmount(() => {
       :data-fields="props.dataFields"
       :component-props="props.componentProps"
       :route-params="props.routeParams"
+      :page-query-params="props.pageQueryParams"
       :selected-node-id="selectedId"
       :xml="xml"
       @save="saveStyleState"
@@ -3096,15 +3048,15 @@ onBeforeUnmount(() => {
   width: 100%;
 }
 
-.image-src-row .el-input {
+.image-src-row > :first-child {
   flex: 1;
   min-width: 0;
 }
 
 .quad-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 0 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
 }
 
 :deep(.el-form-item) {

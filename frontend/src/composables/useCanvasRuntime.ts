@@ -9,5 +9,5 @@ export interface CanvasRuntimeApi {
 }
 
 export const CANVAS_RUNTIME_KEY: InjectionKey<CanvasRuntimeApi> = Symbol(
-  'voiderCanvasRuntime',
+  'lubanCanvasRuntime',
 )

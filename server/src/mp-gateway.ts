@@ -10,6 +10,7 @@ import { signOssObjectByConnectionId } from './services/oss.js'
 function resolveProjectPath(req: express.Request): string {
   return (
     String(req.headers['x-project-path'] || '').trim() ||
+    String(req.headers['x-luban-project'] || '').trim() ||
     String(req.headers['x-voider-project'] || '').trim() ||
     String(req.query.projectPath || '').trim() ||
     String((req.body as { projectPath?: string } | undefined)?.projectPath || '').trim()
@@ -27,6 +28,7 @@ export function createMpGatewayApp() {
     res.json({ ok: true, service: 'mp-gateway' })
   }
   app.get('/health', health)
+  app.get('/__luban/health', health)
   // 兼容旧路径
   app.get('/__voider/health', health)
 
@@ -74,6 +76,7 @@ export function createMpGatewayApp() {
 
   /** 私有桶对象：运行时签名（小程序 / H5 联调） */
   app.post('/oss/sign', ossSign)
+  app.post('/__luban/oss/sign', ossSign)
   // 兼容旧路径
   app.post('/__voider/oss/sign', ossSign)
 

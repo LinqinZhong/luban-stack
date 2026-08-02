@@ -407,7 +407,7 @@ let previewRuntimeLogSeq = 0
 const canvasPanX = ref(0)
 const canvasPanY = ref(0)
 const canvasZoom = ref(1)
-/** 画布场景：H5 / 小程序（持久化到 voider.json → canvas.scene） */
+/** 画布场景：H5 / 小程序（持久化到 luban.json → canvas.scene） */
 const canvasScene = ref<'h5' | 'miniprogram'>(
   projectStore.config?.canvas?.scene === 'miniprogram' ? 'miniprogram' : 'h5',
 )
@@ -665,6 +665,10 @@ const previewPanelPropValues = computed(() => {
     pageData: hostData ?? { fields: [] },
     routeParams: routeParams.value,
     projectPath: projectStore.path,
+    editCanvasFallback: workspaceMode.value === 'edit',
+    scope: target.scope
+      ? { item: target.scope.item, index: target.scope.index }
+      : null,
   })
   const overrides = previewInstancePropOverrides.value[target.nodeId] ?? {}
   const merged: Record<string, unknown> = { ...base }
@@ -672,9 +676,10 @@ const previewPanelPropValues = computed(() => {
     const raw = target.hostAttrs[key]
     if (typeof raw === 'string') {
       const t = raw.trim()
-      // 数据池 `{field}` 或父级 `{$props.xxx}` 以绑定源为准
+      // 数据池 `{field}` / `{item.xxx}` / 父级 `{$props.xxx}` 以绑定源为准
       if (
         /^\{\s*[A-Za-z_$][\w$]*\s*\}$/.test(t) ||
+        /^\{\s*item(?:\.[A-Za-z_$][\w$]*(?:\[\d+\])*)*\s*\}$/.test(t) ||
         /^\{\s*\$?props(?:\.[A-Za-z_$][\w$]*(?:\[\d+\])*)*\s*\}$/.test(t)
       ) {
         continue
@@ -1106,7 +1111,7 @@ async function persistComponentDebugPropsBaseline() {
       }
     }
   } catch (err) {
-    console.error('[voider] 保存组件调试 Props 失败:', err)
+    console.error('[luban] 保存组件调试 Props 失败:', err)
   }
 }
 
@@ -3213,7 +3218,7 @@ async function hydratePreviewControllerBindings() {
       },
     )
   } catch (err) {
-    console.warn('[voider] 预览控制器数据加载失败:', err)
+    console.warn('[luban] 预览控制器数据加载失败:', err)
   }
 }
 
@@ -3245,7 +3250,7 @@ async function preparePreviewRuntime() {
         }
       }
     } catch (err) {
-      console.warn('[voider] 同步组件调试 Props 失败:', err)
+      console.warn('[luban] 同步组件调试 Props 失败:', err)
     }
   }
   if (!isPreviewSessionLive(sessionGen) || !activeDoc.value) return

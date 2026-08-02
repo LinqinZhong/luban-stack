@@ -132,7 +132,7 @@ function syncAmbientLib() {
   ambientLibSeq += 1
   ambientLib = tsLang.typescriptDefaults.addExtraLib(
     dts,
-    `inmemory://voider/method-ambient-${ambientLibSeq}.d.ts`,
+    `inmemory://luban/method-ambient-${ambientLibSeq}.d.ts`,
   )
 }
 
@@ -293,7 +293,7 @@ onMounted(() => {
   model = monaco.editor.createModel(
     initial,
     props.language || 'typescript',
-    monaco.Uri.parse(`inmemory://voider/method-${Date.now()}.ts`),
+    monaco.Uri.parse(`inmemory://luban/method-${Date.now()}.ts`),
   )
 
   editor = monaco.editor.create(hostRef.value, {

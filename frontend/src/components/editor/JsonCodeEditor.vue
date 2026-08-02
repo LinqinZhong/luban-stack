@@ -38,9 +38,9 @@ const hostRef = ref<HTMLDivElement | null>(null)
 let editor: monaco.editor.IStandaloneCodeEditor | null = null
 let model: monaco.editor.ITextModel | null = null
 let syncing = false
-const schemaUri = `inmemory://voider/schema-${Date.now()}-${Math.random().toString(36).slice(2)}.json`
+const schemaUri = `inmemory://luban/schema-${Date.now()}-${Math.random().toString(36).slice(2)}.json`
 const modelUri = monaco.Uri.parse(
-  `inmemory://voider/json-${Date.now()}-${Math.random().toString(36).slice(2)}.json`,
+  `inmemory://luban/json-${Date.now()}-${Math.random().toString(36).slice(2)}.json`,
 )
 
 function applySchema(schema: JsonSchema | null | undefined) {

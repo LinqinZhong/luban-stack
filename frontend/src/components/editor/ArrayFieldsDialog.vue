@@ -37,7 +37,7 @@ import {
 
 type EditorMode = 'visual' | 'code'
 
-const CLIPBOARD_MARKER = '__voiderArrayItem'
+const CLIPBOARD_MARKER = '__lubanArrayItem'
 
 /** 跨弹窗实例共享，避免 destroy-on-close / 嵌套对话框丢剪贴板 */
 let sharedClipboard: ArraySubField | null = null

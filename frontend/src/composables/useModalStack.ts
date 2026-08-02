@@ -11,24 +11,24 @@ export interface ModalStackApi {
   isTop: (name: string) => boolean
 }
 
-export const MODAL_STACK_KEY: InjectionKey<ModalStackApi> = Symbol('voiderModalStack')
-export const MODAL_HOST_KEY: InjectionKey<Ref<HTMLElement | null>> = Symbol('voiderModalHost')
+export const MODAL_STACK_KEY: InjectionKey<ModalStackApi> = Symbol('lubanModalStack')
+export const MODAL_HOST_KEY: InjectionKey<Ref<HTMLElement | null>> = Symbol('lubanModalHost')
 /** 编辑态角标挂载层（需高于屏幕虚线框） */
-export const BADGE_HOST_KEY: InjectionKey<Ref<HTMLElement | null>> = Symbol('voiderBadgeHost')
+export const BADGE_HOST_KEY: InjectionKey<Ref<HTMLElement | null>> = Symbol('lubanBadgeHost')
 /** 编辑态测量模式：select 普通选中；measure 显示间距与尺寸 */
 export type CanvasToolMode = 'select' | 'measure'
 export const CANVAS_TOOL_MODE_KEY: InjectionKey<Ref<CanvasToolMode>> =
-  Symbol('voiderCanvasToolMode')
+  Symbol('lubanCanvasToolMode')
 
 /** 预览检视：纯净模式不显示组件操纵杆；组件模式显示 */
 export type PreviewInspectMode = 'clean' | 'component'
 export const PREVIEW_INSPECT_MODE_KEY: InjectionKey<Ref<PreviewInspectMode>> =
-  Symbol('voiderPreviewInspectMode')
+  Symbol('lubanPreviewInspectMode')
 
 /** 预览检视：按 Component 节点 id 覆盖实例入参（调试面板修改，不要求「可更新」） */
 export const PREVIEW_INSTANCE_PROP_OVERRIDES_KEY: InjectionKey<
   Ref<Record<string, Record<string, unknown>>>
-> = Symbol('voiderPreviewInstancePropOverrides')
+> = Symbol('lubanPreviewInstancePropOverrides')
 
 /**
  * 页面级 Modal 堆栈：同一时刻仅栈顶可见；

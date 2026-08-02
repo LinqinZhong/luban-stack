@@ -1,12 +1,12 @@
-﻿import type { VoiderProjectConfig } from '../../types/voider-project.js'
+import type { LubanProjectConfig } from '../../types/luban-project.js'
 import { generateApiJs, generateDeviceJs, generateRuntimeJs } from './api-runtime.js'
 
 export function scaffoldMpWxFiles(options: {
-  config: VoiderProjectConfig
+  config: LubanProjectConfig
   pages: Array<{ id: string; title: string }>
   /** serviceName / default → baseUrl */
   apiBaseUrls: Record<string, string>
-  /** 覆盖 voider.json 中的 wechatAppId */
+  /** 覆盖 luban.json 中的 wechatAppId */
   wechatAppId?: string
 }): Record<string, string> {
   const entry =

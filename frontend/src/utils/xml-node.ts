@@ -754,7 +754,7 @@ export function pasteWidget(
   if (!targetEl) throw new Error('未找到粘贴目标')
 
   const wrapped = parser.parseFromString(
-    `<VoiderPasteRoot>${frag}</VoiderPasteRoot>`,
+    `<LubanPasteRoot>${frag}</LubanPasteRoot>`,
     'application/xml',
   )
   if (wrapped.querySelector('parsererror')) {

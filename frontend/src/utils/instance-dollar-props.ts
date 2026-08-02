@@ -97,6 +97,15 @@ export function buildParentDollarPropsBoundAttrsDepsKey(
   }
 }
 
+function isEmptyPropForEditFallback(
+  value: unknown,
+  type: string | undefined,
+): boolean {
+  if (value === undefined || value === null || value === '') return true
+  if (type === 'array' && Array.isArray(value) && value.length === 0) return true
+  return false
+}
+
 /**
  * 由页面/父组件上的 Component 实例属性 + 宿主数据池，组装可运行的 $props
  *（含 api 类型参数 hydrate 为可调用函数）。
@@ -113,6 +122,11 @@ export function resolveComponentInstanceDollarProps(options: {
   scope?: Pick<DynamicStyleScope, 'item' | 'index'> | null
   projectPath?: string | null
   dryRun?: boolean
+  /**
+   * 编辑画布：绑定结果为空时回退 config.debugProps，
+   * 避免列表类组件因页面数据尚未拉取而塌成一条空壳。
+   */
+  editCanvasFallback?: boolean
 }): Record<string, unknown> {
   const config = options.config
   const hostAttrs = options.hostAttrs ?? {}
@@ -163,7 +177,22 @@ export function resolveComponentInstanceDollarProps(options: {
     resolved[key] = text
   }
 
-  const built = buildDollarProps(config, resolved)
+  let built = buildDollarProps(config, resolved)
+
+  if (options.editCanvasFallback && config?.debugProps) {
+    const next = { ...built }
+    let touched = false
+    for (const def of propDefs) {
+      const name = def.name.trim()
+      if (!name) continue
+      if (!(name in config.debugProps)) continue
+      if (!isEmptyPropForEditFallback(next[name], def.type)) continue
+      next[name] = config.debugProps[name]
+      touched = true
+    }
+    if (touched) built = next
+  }
+
   const fields = pageData.fields ?? []
   return hydrateApiDollarProps(built, propDefs, options.projectPath, {
     dryRun: options.dryRun ?? true,

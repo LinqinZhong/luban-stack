@@ -9,4 +9,6 @@ export type PreviewInspectPayload = {
   hostAttrs: Record<string, string>
   /** 宿主数据池所属组件；空=页面 */
   hostDataOwnerId: string
+  /** 列表展开项 scope（解析 `{item.xxx}` 入参） */
+  scope?: { item: unknown; index: number } | null
 }
