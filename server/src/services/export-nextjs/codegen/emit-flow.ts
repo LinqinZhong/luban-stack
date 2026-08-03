@@ -178,6 +178,7 @@ export function collectExternalInjectDeps(
     for (const node of flow?.nodes ?? []) {
       if (node.kind !== 'input' && node.kind !== 'output') continue
       const data = asRecord(node.data)
+      if (str(data, 'channel') === 'network') continue
       if (node.kind === 'input' && str(data, 'dataSource') === 'request_header') {
         continue
       }
@@ -203,6 +204,187 @@ export function collectExternalInjectDeps(
     }
   }
   return [...out.values()]
+}
+
+type EmitParamRow = {
+  name: string
+  valueKind: 'variable' | 'constant'
+  value: string
+  constantType?: string
+}
+
+function readEmitParamRows(raw: unknown): EmitParamRow[] {
+  if (!Array.isArray(raw)) return []
+  const out: EmitParamRow[] = []
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue
+    const row = item as Record<string, unknown>
+    const name = typeof row.name === 'string' ? row.name.trim() : ''
+    if (!name) continue
+    out.push({
+      name,
+      valueKind: row.valueKind === 'variable' ? 'variable' : 'constant',
+      value: row.value == null ? '' : String(row.value),
+      constantType:
+        typeof row.constantType === 'string' ? row.constantType : 'string',
+    })
+  }
+  return out
+}
+
+function emitParamValueExpr(row: EmitParamRow): string {
+  if (row.valueKind === 'variable') {
+    const v = row.value.trim()
+    return v ? safeIdent(v, 'v') : 'undefined'
+  }
+  if (row.constantType === 'number') {
+    const n = Number(row.value)
+    return Number.isFinite(n) ? String(n) : '0'
+  }
+  if (row.constantType === 'boolean') {
+    const t = row.value.trim().toLowerCase()
+    return t === 'true' || t === '1' ? 'true' : 'false'
+  }
+  return JSON.stringify(row.value)
+}
+
+function emitNetworkHttpBlock(
+  pad: string,
+  data: Record<string, unknown>,
+  opts: { awaitResult: boolean },
+): string {
+  const network = asRecord(data.network)
+  const src = Object.keys(network).length ? network : data
+  const apiUrlRaw = str(src, 'apiUrl').trim() || '""'
+  const method = (str(src, 'httpMethod') || 'GET').toUpperCase()
+  const mediaType = str(src, 'mediaType') || 'application/json'
+  const headers = readEmitParamRows(src.headers)
+  const query = readEmitParamRows(src.queryParams)
+  const formParams = readEmitParamRows(src.formParams)
+  const bodyVar = str(src, 'bodyVarName').trim()
+
+  const lines: string[] = []
+  const urlExpr = /^[A-Za-z_][A-Za-z0-9_]*$/.test(apiUrlRaw)
+    ? apiUrlRaw
+    : apiUrlRaw.includes('{')
+      ? `\`${apiUrlRaw.replace(/\{([A-Za-z_][A-Za-z0-9_]*)\}/g, '${$1}')}\``
+      : JSON.stringify(apiUrlRaw)
+
+  // IIFE keeps temps private; response vars are assigned in outer scope
+  if (opts.awaitResult) {
+    const bodyVarName = safeIdent(
+      str(src, 'responseBodyVarName') || str(data, 'varName') || 'responseBody',
+      'responseBody',
+    )
+    const bodyType = str(src, 'responseBodyType') || 'string'
+    const headerVar = str(src, 'responseHeaderVarName').trim()
+    const statusVar = str(src, 'statusCodeVarName').trim()
+    const hv = headerVar ? safeIdent(headerVar, 'responseHeaders') : ''
+    const sv = statusVar ? safeIdent(statusVar, 'statusCode') : ''
+
+    lines.push(`${pad}let ${bodyVarName}: any;`)
+    if (hv) lines.push(`${pad}let ${hv}: Record<string, string>;`)
+    if (sv) lines.push(`${pad}let ${sv}: number;`)
+    lines.push(`${pad}{`)
+    lines.push(`${pad}  const __netUrl = new URL(String(${urlExpr}));`)
+    for (const row of query) {
+      lines.push(
+        `${pad}  __netUrl.searchParams.set(${JSON.stringify(row.name)}, String(${emitParamValueExpr(row)}));`,
+      )
+    }
+    lines.push(`${pad}  const __netHeaders: Record<string, string> = {};`)
+    for (const row of headers) {
+      lines.push(
+        `${pad}  __netHeaders[${JSON.stringify(row.name)}] = String(${emitParamValueExpr(row)});`,
+      )
+    }
+    if (!headers.some((h) => h.name.toLowerCase() === 'content-type')) {
+      lines.push(
+        `${pad}  __netHeaders['Content-Type'] = ${JSON.stringify(mediaType)};`,
+      )
+    }
+    if (mediaType === 'application/x-www-form-urlencoded') {
+      lines.push(`${pad}  const __netBodyParams = new URLSearchParams();`)
+      for (const row of formParams) {
+        lines.push(
+          `${pad}  __netBodyParams.set(${JSON.stringify(row.name)}, String(${emitParamValueExpr(row)}));`,
+        )
+      }
+      lines.push(`${pad}  const __netBody = __netBodyParams.toString();`)
+    } else if (bodyVar) {
+      const bodyIdent = safeIdent(bodyVar, 'body')
+      lines.push(
+        `${pad}  const __netBody = typeof ${bodyIdent} === 'string' ? ${bodyIdent} : JSON.stringify(${bodyIdent} ?? null);`,
+      )
+    } else {
+      lines.push(`${pad}  const __netBody = undefined as string | undefined;`)
+    }
+    lines.push(
+      `${pad}  const __netRes = await fetch(__netUrl, { method: ${JSON.stringify(method)}, headers: __netHeaders, body: ${
+        method === 'GET' || method === 'HEAD' ? 'undefined' : '__netBody'
+      } });`,
+    )
+    lines.push(`${pad}  const __netText = await __netRes.text();`)
+    if (bodyType === 'json') {
+      lines.push(
+        `${pad}  try { ${bodyVarName} = JSON.parse(__netText || 'null'); } catch { ${bodyVarName} = __netText; }`,
+      )
+    } else {
+      lines.push(`${pad}  ${bodyVarName} = __netText;`)
+    }
+    if (hv) {
+      lines.push(
+        `${pad}  ${hv} = {};`,
+        `${pad}  __netRes.headers.forEach((v, k) => { ${hv}[k] = v; });`,
+      )
+    }
+    if (sv) {
+      lines.push(`${pad}  ${sv} = __netRes.status;`)
+    }
+    lines.push(`${pad}}`)
+  } else {
+    lines.push(`${pad}{`)
+    lines.push(`${pad}  const __netUrl = new URL(String(${urlExpr}));`)
+    for (const row of query) {
+      lines.push(
+        `${pad}  __netUrl.searchParams.set(${JSON.stringify(row.name)}, String(${emitParamValueExpr(row)}));`,
+      )
+    }
+    lines.push(`${pad}  const __netHeaders: Record<string, string> = {};`)
+    for (const row of headers) {
+      lines.push(
+        `${pad}  __netHeaders[${JSON.stringify(row.name)}] = String(${emitParamValueExpr(row)});`,
+      )
+    }
+    if (!headers.some((h) => h.name.toLowerCase() === 'content-type')) {
+      lines.push(
+        `${pad}  __netHeaders['Content-Type'] = ${JSON.stringify(mediaType)};`,
+      )
+    }
+    if (mediaType === 'application/x-www-form-urlencoded') {
+      lines.push(`${pad}  const __netBodyParams = new URLSearchParams();`)
+      for (const row of formParams) {
+        lines.push(
+          `${pad}  __netBodyParams.set(${JSON.stringify(row.name)}, String(${emitParamValueExpr(row)}));`,
+        )
+      }
+      lines.push(`${pad}  const __netBody = __netBodyParams.toString();`)
+    } else if (bodyVar) {
+      const bodyIdent = safeIdent(bodyVar, 'body')
+      lines.push(
+        `${pad}  const __netBody = typeof ${bodyIdent} === 'string' ? ${bodyIdent} : JSON.stringify(${bodyIdent} ?? null);`,
+      )
+    } else {
+      lines.push(`${pad}  const __netBody = undefined as string | undefined;`)
+    }
+    lines.push(
+      `${pad}  void fetch(__netUrl, { method: ${JSON.stringify(method)}, headers: __netHeaders, body: ${
+        method === 'GET' || method === 'HEAD' ? 'undefined' : '__netBody'
+      } });`,
+    )
+    lines.push(`${pad}}`)
+  }
+  return `${lines.join('\n')}\n`
 }
 
 function emitNodeBlock(
@@ -277,6 +459,12 @@ function emitNodeBlock(
   }
 
   if (node.kind === 'input') {
+    if (str(data, 'channel') === 'network') {
+      return joinNodeCode(
+        `${comment}${emitNetworkHttpBlock(pad, data, { awaitResult: true })}`,
+        emitNext(),
+      )
+    }
     const varName = safeIdent(str(data, 'varName'), 'v')
     const dataSource = str(data, 'dataSource') || 'data'
     const bindingsRaw = asRecord(data.paramBindings)
@@ -300,6 +488,12 @@ function emitNodeBlock(
   }
 
   if (node.kind === 'output') {
+    if (str(data, 'channel') === 'network') {
+      return joinNodeCode(
+        `${comment}${emitNetworkHttpBlock(pad, data, { awaitResult: false })}`,
+        emitNext(),
+      )
+    }
     const processorId = str(data, 'dataProcessorId')
     const methodId = str(data, 'dataMethodId')
     const bindingsRaw = asRecord(data.paramBindings)

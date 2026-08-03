@@ -558,6 +558,30 @@ router.put('/services/processors', async (req, res) => {
   }
 })
 
+router.post('/http-proxy', async (req, res) => {
+  try {
+    const { url, method, headers, body, contentType } = req.body ?? {}
+    if (!url || typeof url !== 'string' || !url.trim()) {
+      res.status(400).json({ message: '请提供 url' })
+      return
+    }
+    const { executeHttpProxy } = await import('../services/http-proxy.js')
+    const result = await executeHttpProxy({
+      url: url.trim(),
+      method: typeof method === 'string' ? method : 'GET',
+      headers:
+        headers && typeof headers === 'object' && !Array.isArray(headers)
+          ? (headers as Record<string, string>)
+          : {},
+      body: typeof body === 'string' ? body : body == null ? null : String(body),
+      contentType: typeof contentType === 'string' ? contentType : null,
+    })
+    res.json(result)
+  } catch (err) {
+    handleError(res, err)
+  }
+})
+
 router.post('/services/processors/debug', async (req, res) => {
   try {
     const {

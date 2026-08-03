@@ -77,16 +77,21 @@ import InputNodeDialog from './dialogs/InputNodeDialog.vue'
 import {
   createEmptyInputNodeForm,
   normalizeInputDataSource,
+  readInputNetworkFromData,
   type InputModuleOption,
   type InputNodeForm,
 } from './dialogs/input-node'
+import {
+  createEmptyOutputNodeForm,
+  readOutputNetworkFromData,
+  type OutputNodeForm,
+} from './dialogs/output-node'
+import { normalizeIoChannel } from './dialogs/network-request'
 import BranchNodeDialog from './dialogs/BranchNodeDialog.vue'
 import ActionNodeDialog, {
   type ActionNodeForm,
 } from './dialogs/ActionNodeDialog.vue'
-import OutputNodeDialog, {
-  type OutputNodeForm,
-} from './dialogs/OutputNodeDialog.vue'
+import OutputNodeDialog from './dialogs/OutputNodeDialog.vue'
 import DefineNodeDialog, {
   type DefineNodeForm,
 } from './dialogs/DefineNodeDialog.vue'
@@ -707,15 +712,7 @@ const editingActionForm = ref<ActionNodeForm>({
   outputGenericArgs: {},
   outputVarName: '',
 })
-const editingOutputForm = ref<OutputNodeForm>({
-  dataProcessorId: '',
-  dataMethodId: '',
-  methodLabel: '',
-  paramBindings: {},
-  resultVarName: '',
-  description: '',
-  printExpr: '',
-})
+const editingOutputForm = ref<OutputNodeForm>(createEmptyOutputNodeForm())
 const editingDefineForm = ref<DefineNodeForm>({
   varName: '',
   valueType: 'any',
@@ -1193,7 +1190,8 @@ function openNodeEditor(node: Node) {
   editingNodeId.value = node.id
   const data = (node.data ?? {}) as Record<string, unknown>
   if (node.type === 'input') {
-    editingInputForm.value = {
+    editingInputForm.value = createEmptyInputNodeForm({
+      channel: normalizeIoChannel(data.channel),
       serviceId: inferInputServiceId(data),
       dataSource: inferInputDataSource(data),
       dataProcessorId:
@@ -1207,7 +1205,8 @@ function openNodeEditor(node: Node) {
         typeof data.methodLabel === 'string' ? data.methodLabel : '',
       paramBindings: readParamBindings(data),
       printExpr: typeof data.printExpr === 'string' ? data.printExpr : '',
-    }
+      network: readInputNetworkFromData(data),
+    })
     inputDialogVisible.value = true
   } else if (node.type === 'branch') {
     editingExpression.value =
@@ -1252,7 +1251,8 @@ function openNodeEditor(node: Node) {
     }
     actionDialogVisible.value = true
   } else if (node.type === 'output') {
-    editingOutputForm.value = {
+    editingOutputForm.value = createEmptyOutputNodeForm({
+      channel: normalizeIoChannel(data.channel),
       dataProcessorId:
         typeof data.dataProcessorId === 'string' ? data.dataProcessorId : '',
       dataMethodId:
@@ -1265,7 +1265,8 @@ function openNodeEditor(node: Node) {
       description:
         typeof data.description === 'string' ? data.description : '',
       printExpr: typeof data.printExpr === 'string' ? data.printExpr : '',
-    }
+      network: readOutputNetworkFromData(data),
+    })
     outputDialogVisible.value = true
   } else if (node.type === 'define') {
     const valueTypeRaw =

@@ -1,10 +1,16 @@
 <script setup lang="ts">
-defineProps<{
-  modelValue: string
-  options?: Array<{ id: string; label: string }>
-  placeholder?: string
-  allowCreate?: boolean
-}>()
+withDefaults(
+  defineProps<{
+    modelValue: string
+    options?: Array<{ id: string; label: string }>
+    placeholder?: string
+    allowCreate?: boolean
+    size?: 'large' | 'default' | 'small'
+  }>(),
+  {
+    size: 'default',
+  },
+)
 
 const emit = defineEmits<{
   'update:modelValue': [value: string]
@@ -27,6 +33,7 @@ function onChange(value: string) {
 <template>
   <el-select
     :model-value="modelValue"
+    :size="size"
     filterable
     :allow-create="allowCreate !== false"
     default-first-option

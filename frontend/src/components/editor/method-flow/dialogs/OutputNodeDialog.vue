@@ -10,18 +10,18 @@ import type { MethodParam } from '../../../../types/page-method'
 import { processorTypeExprToTs } from '../../../../types/page-method'
 import TypedBindingCascader from '../TypedBindingCascader.vue'
 import FlowPrintField from '../FlowPrintField.vue'
+import NetworkRequestFields from './NetworkRequestFields.vue'
+import {
+  createEmptyOutputNodeForm,
+  type OutputNodeForm,
+} from './output-node'
+import {
+  createEmptyNetworkRequestConfig,
+  networkSummaryLabel,
+  validateNetworkParamRows,
+} from './network-request'
 
-/** 输出节点：绑定数据层写入类方法 */
-export type OutputNodeForm = {
-  dataProcessorId: string
-  dataMethodId: string
-  methodLabel: string
-  paramBindings: Record<string, string>
-  /** 可选：写入结果变量名 */
-  resultVarName: string
-  description: string
-  printExpr: string
-}
+export type { OutputNodeForm } from './output-node'
 
 const WRITE_OPERATIONS = new Set<DataMethodOperation>([
   'insert',
@@ -53,29 +53,31 @@ const emit = defineEmits<{
   save: [form: OutputNodeForm]
 }>()
 
-const draft = reactive<OutputNodeForm>({
-  dataProcessorId: '',
-  dataMethodId: '',
-  methodLabel: '',
-  paramBindings: {},
-  resultVarName: '',
-  description: '',
-  printExpr: '',
-})
+const draft = reactive<OutputNodeForm>(createEmptyOutputNodeForm())
 
 const visible = computed({
   get: () => props.modelValue,
   set: (v) => emit('update:modelValue', v),
 })
 
+const isNetwork = computed(() => draft.channel === 'network')
+
+function onChannelChange(channel: string | number | boolean | undefined) {
+  draft.channel = channel === 'network' ? 'network' : 'local'
+  if (draft.channel === 'network') {
+    draft.network = createEmptyNetworkRequestConfig(draft.network)
+  }
+}
+
 watch(
   () => props.modelValue,
   (open) => {
     if (!open) return
-    Object.assign(draft, {
+    Object.assign(draft, createEmptyOutputNodeForm({
       ...props.form,
       paramBindings: { ...(props.form.paramBindings ?? {}) },
-    })
+      network: props.form.network,
+    }))
   },
 )
 
@@ -155,6 +157,7 @@ const selectedMethodKey = computed({
 watch(
   methodParams,
   (params) => {
+    if (isNetwork.value) return
     if (!params.length && !Object.keys(draft.paramBindings).length) return
     syncParamBindings(params)
   },
@@ -162,12 +165,15 @@ watch(
 )
 
 const methodError = computed(() =>
-  draft.dataProcessorId && draft.dataMethodId
+  isNetwork.value
     ? ''
-    : '请选择数据层写入方法（插入 / 删除 / 修改等）',
+    : draft.dataProcessorId && draft.dataMethodId
+      ? ''
+      : '请选择数据层写入方法（插入 / 删除 / 修改等）',
 )
 
 const bindingError = computed(() => {
+  if (isNetwork.value) return ''
   for (const p of methodParams.value) {
     const name = p.name.trim()
     if (!name) continue
@@ -179,6 +185,7 @@ const bindingError = computed(() => {
 })
 
 const resultVarError = computed(() => {
+  if (isNetwork.value) return ''
   const name = draft.resultVarName.trim()
   if (!name) return ''
   if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
@@ -190,12 +197,49 @@ const resultVarError = computed(() => {
   return ''
 })
 
+const networkError = computed(() => {
+  if (!isNetwork.value) return ''
+  if (!draft.network.apiUrl.trim()) return '请填写 API 地址'
+  const h = validateNetworkParamRows(draft.network.headers, '请求头')
+  if (h) return h
+  const q = validateNetworkParamRows(draft.network.queryParams, '查询参数')
+  if (q) return q
+  const f = validateNetworkParamRows(draft.network.formParams, '表单参数')
+  if (f) return f
+  return ''
+})
+
 function paramTypeLabel(p: ProcessorMethodParam): string {
   return processorTypeExprToTs(p.typeExpr, props.typeLibrary)
 }
 
+const canSave = computed(() => {
+  if (isNetwork.value) return !networkError.value
+  return (
+    !methodError.value && !bindingError.value && !resultVarError.value
+  )
+})
+
 function handleSave() {
-  if (methodError.value || bindingError.value || resultVarError.value) return
+  if (!canSave.value) return
+  if (isNetwork.value) {
+    const network = createEmptyNetworkRequestConfig({
+      ...draft.network,
+      apiUrl: draft.network.apiUrl.trim(),
+      bodyVarName: draft.network.bodyVarName.trim(),
+    })
+    const label = networkSummaryLabel(network)
+    emit('save', {
+      ...createEmptyOutputNodeForm(),
+      channel: 'network',
+      methodLabel: label,
+      description: draft.description.trim() || label,
+      printExpr: draft.printExpr.trim(),
+      network,
+    })
+    visible.value = false
+    return
+  }
   const paramBindings: Record<string, string> = {}
   for (const p of methodParams.value) {
     const name = p.name.trim()
@@ -203,6 +247,8 @@ function handleSave() {
     paramBindings[name] = (draft.paramBindings[name] ?? '').trim()
   }
   emit('save', {
+    ...createEmptyOutputNodeForm(),
+    channel: 'local',
     dataProcessorId: draft.dataProcessorId,
     dataMethodId: draft.dataMethodId,
     methodLabel: draft.methodLabel,
@@ -219,7 +265,7 @@ function handleSave() {
   <el-dialog
     v-model="visible"
     title="编辑输出节点"
-    width="560px"
+    :width="isNetwork ? '720px' : '560px'"
     destroy-on-close
     append-to-body
     :close-on-click-modal="false"
@@ -229,97 +275,128 @@ function handleSave() {
       class="flow-node-form"
       label-position="right"
       label-width="110px"
+      size="small"
     >
-      <el-form-item
-        label="数据层方法"
-        required
-        :error="methodError || undefined"
-      >
-        <el-select
-          v-model="selectedMethodKey"
-          filterable
-          clearable
-          placeholder="选择插入 / 删除 / 修改等方法"
-          style="width: 100%"
+      <el-form-item label="类型" required>
+        <el-radio-group
+          :model-value="draft.channel"
+          size="small"
+          @update:model-value="onChannelChange"
         >
-          <el-option
-            v-for="opt in methodOptions"
-            :key="opt.value"
-            :label="opt.label"
-            :value="opt.value"
+          <el-radio-button value="local">本地</el-radio-button>
+          <el-radio-button value="network">网络</el-radio-button>
+        </el-radio-group>
+      </el-form-item>
+
+      <template v-if="isNetwork">
+        <NetworkRequestFields
+          v-model="draft.network"
+          :ambient-vars="ambientVars"
+        />
+        <el-form-item v-if="networkError" label=" ">
+          <span class="hint-inline error-hint">{{ networkError }}</span>
+        </el-form-item>
+        <el-form-item label="说明">
+          <el-input
+            v-model="draft.description"
+            size="small"
+            maxlength="80"
+            show-word-limit
+            placeholder="显示在流程节点上"
           />
-        </el-select>
-        <p v-if="!methodOptions.length" class="hint">
-          暂无写入类数据层方法，请先在数据层配置插入、删除或修改方法
-        </p>
-      </el-form-item>
+        </el-form-item>
+        <el-form-item label="打印">
+          <FlowPrintField
+            v-model="draft.printExpr"
+            :ambient-names="ambientVars.map((v) => v.name).filter(Boolean)"
+          />
+        </el-form-item>
+      </template>
 
-      <el-form-item
-        v-if="methodParams.length"
-        label="绑定入参"
-        required
-        :error="bindingError || undefined"
-      >
-        <div class="param-bindings">
-          <div v-for="p in methodParams" :key="p.id" class="param-row">
-            <span
-              class="param-name"
-              :title="`${p.remark || p.name} · ${paramTypeLabel(p)}`"
-            >
-              {{ p.name }}
-              <em class="param-type">{{ paramTypeLabel(p) }}</em>
-            </span>
-            <TypedBindingCascader
-              v-model="draft.paramBindings[p.name]"
-              class="param-bind"
-              :ambient-vars="ambientVars"
-              :target-type="p.typeExpr"
-              :type-library="typeLibrary"
+      <template v-else>
+        <el-form-item
+          label="数据层方法"
+          required
+          :error="methodError || undefined"
+        >
+          <el-select
+            v-model="selectedMethodKey"
+            size="small"
+            filterable
+            clearable
+            placeholder="选择插入 / 删除 / 修改等方法"
+            style="width: 100%"
+          >
+            <el-option
+              v-for="opt in methodOptions"
+              :key="opt.value"
+              :label="opt.label"
+              :value="opt.value"
             />
+          </el-select>
+          <p v-if="!methodOptions.length" class="hint">
+            暂无写入类数据层方法，请先在数据层配置插入、删除或修改方法
+          </p>
+        </el-form-item>
+
+        <el-form-item
+          v-if="methodParams.length"
+          label="绑定入参"
+          required
+          :error="bindingError || undefined"
+        >
+          <div class="param-bindings">
+            <div v-for="p in methodParams" :key="p.id" class="param-row">
+              <span
+                class="param-name"
+                :title="`${p.remark || p.name} · ${paramTypeLabel(p)}`"
+              >
+                {{ p.name }}
+                <em class="param-type">{{ paramTypeLabel(p) }}</em>
+              </span>
+              <TypedBindingCascader
+                v-model="draft.paramBindings[p.name]"
+                class="param-bind"
+                :ambient-vars="ambientVars"
+                :target-type="p.typeExpr"
+                :type-library="typeLibrary"
+              />
+            </div>
           </div>
-        </div>
-      </el-form-item>
-      <el-form-item v-else-if="selectedMethodKey" label="绑定入参">
-        <span class="hint-inline">该方法无入参</span>
-      </el-form-item>
+        </el-form-item>
+        <el-form-item v-else-if="selectedMethodKey" label="绑定入参">
+          <span class="hint-inline">该方法无入参</span>
+        </el-form-item>
 
-      <el-form-item
-        label="结果变量"
-        :error="resultVarError || undefined"
-      >
-        <el-input
-          v-model="draft.resultVarName"
-          placeholder="可选，如 affected / insertId"
-          maxlength="64"
-          clearable
-        />
-      </el-form-item>
+        <el-form-item label="结果变量" :error="resultVarError || undefined">
+          <el-input
+            v-model="draft.resultVarName"
+            size="small"
+            placeholder="可选，如 affected / insertId"
+            maxlength="64"
+            clearable
+          />
+        </el-form-item>
 
-      <el-form-item label="说明">
-        <el-input
-          v-model="draft.description"
-          maxlength="80"
-          show-word-limit
-          placeholder="显示在流程节点上"
-        />
-      </el-form-item>
-      <el-form-item label="打印">
-        <FlowPrintField
-          v-model="draft.printExpr"
-          :ambient-names="ambientVars.map((v) => v.name).filter(Boolean)"
-        />
-      </el-form-item>
+        <el-form-item label="说明">
+          <el-input
+            v-model="draft.description"
+            size="small"
+            maxlength="80"
+            show-word-limit
+            placeholder="显示在流程节点上"
+          />
+        </el-form-item>
+        <el-form-item label="打印">
+          <FlowPrintField
+            v-model="draft.printExpr"
+            :ambient-names="ambientVars.map((v) => v.name).filter(Boolean)"
+          />
+        </el-form-item>
+      </template>
     </el-form>
     <template #footer>
-      <el-button
-        type="primary"
-        :disabled="
-          Boolean(methodError) ||
-          Boolean(bindingError) ||
-          Boolean(resultVarError)
-        "
-        @click="handleSave"
-      >
+      <el-button type="primary" size="small" :disabled="!canSave" @click="handleSave">
         确定
       </el-button>
     </template>
@@ -336,6 +413,10 @@ function handleSave() {
 .hint-inline {
   font-size: 12px;
   color: #909399;
+}
+
+.error-hint {
+  color: var(--el-color-danger);
 }
 
 .param-bindings {
@@ -355,14 +436,14 @@ function handleSave() {
 .param-name {
   flex: 0 0 128px;
   box-sizing: border-box;
-  height: 32px;
+  height: 24px;
   padding: 0 8px;
   border: 1px solid #dcdfe6;
   border-radius: 4px;
   background: #f5f7fa;
-  font-size: 13px;
+  font-size: 12px;
   color: #606266;
-  line-height: 30px;
+  line-height: 22px;
   display: flex;
   align-items: center;
   gap: 6px;

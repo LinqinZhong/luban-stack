@@ -1,4 +1,18 @@
 import type { ProcessorTypeExpr } from '../../../../types/backend-services'
+import {
+  createEmptyNetworkInputConfig,
+  normalizeIoChannel,
+  normalizeNetworkInputConfig,
+  type IoChannel,
+  type NetworkInputConfig,
+} from './network-request'
+
+export type {
+  IoChannel,
+  NetworkInputConfig,
+  NetworkParamRow,
+  NetworkRequestConfig,
+} from './network-request'
 
 /** 输入节点数据来源（层） */
 export type InputDataSource = 'business' | 'data' | 'request_header'
@@ -36,6 +50,8 @@ export type InputModuleOption = {
 }
 
 export type InputNodeForm = {
+  /** 本地调用 / 网络请求；缺省按 local */
+  channel: IoChannel
   /** 所选模块（服务）id；请求头时可为空 */
   serviceId: string
   dataSource: InputDataSource
@@ -50,6 +66,8 @@ export type InputNodeForm = {
   printExpr: string
   /** 落盘的方法出参类型，供 ambient / 跨模块解析 */
   outputTypeExpr?: ProcessorTypeExpr | null
+  /** channel=network 时的请求与响应配置 */
+  network: NetworkInputConfig
 }
 
 export function normalizeInputDataSource(
@@ -75,7 +93,9 @@ export function normalizeInputDataSource(
 export function createEmptyInputNodeForm(
   partial?: Partial<InputNodeForm>,
 ): InputNodeForm {
+  const { network, channel, paramBindings, ...rest } = partial ?? {}
   return {
+    channel: normalizeIoChannel(channel),
     serviceId: '',
     dataSource: 'data',
     dataProcessorId: '',
@@ -83,9 +103,20 @@ export function createEmptyInputNodeForm(
     headerField: '',
     varName: '',
     methodLabel: '',
-    paramBindings: {},
+    paramBindings: { ...(paramBindings ?? {}) },
     printExpr: '',
     outputTypeExpr: null,
-    ...partial,
+    ...rest,
+    network: createEmptyNetworkInputConfig(network),
   }
+}
+
+export function readInputNetworkFromData(
+  data: Record<string, unknown>,
+): NetworkInputConfig {
+  if (data.network && typeof data.network === 'object') {
+    return normalizeNetworkInputConfig(data.network)
+  }
+  // 兼容曾扁平写在 node.data 上的字段
+  return normalizeNetworkInputConfig(data)
 }

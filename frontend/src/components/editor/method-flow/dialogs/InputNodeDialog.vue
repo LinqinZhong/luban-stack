@@ -10,6 +10,7 @@ import type { MethodParam } from '../../../../types/page-method'
 import { processorTypeExprToTs } from '../../../../types/page-method'
 import TypedBindingCascader from '../TypedBindingCascader.vue'
 import FlowPrintField from '../FlowPrintField.vue'
+import NetworkRequestFields from './NetworkRequestFields.vue'
 import {
   INPUT_HEADER_CUSTOM,
   INPUT_HEADER_FIELD_OPTIONS,
@@ -20,6 +21,11 @@ import {
   type InputModuleOption,
   type InputNodeForm,
 } from './input-node'
+import {
+  createEmptyNetworkInputConfig,
+  networkSummaryLabel,
+  validateNetworkParamRows,
+} from './network-request'
 
 const props = defineProps<{
   modelValue: boolean
@@ -75,8 +81,18 @@ const visible = computed({
   set: (v) => emit('update:modelValue', v),
 })
 
-const isHeaderSource = computed(() => draft.dataSource === 'request_header')
+const isNetwork = computed(() => draft.channel === 'network')
+const isHeaderSource = computed(
+  () => !isNetwork.value && draft.dataSource === 'request_header',
+)
 const isBusinessSource = computed(() => draft.dataSource === 'business')
+
+function onChannelChange(channel: string | number | boolean | undefined) {
+  draft.channel = channel === 'network' ? 'network' : 'local'
+  if (draft.channel === 'network') {
+    draft.network = createEmptyNetworkInputConfig(draft.network)
+  }
+}
 
 const layerOptions = computed(() => {
   const opts: Array<{ value: InputDataSource; label: string }> = [
@@ -178,11 +194,11 @@ watch(
   () => props.modelValue,
   async (open) => {
     if (!open) return
-    const next: InputNodeForm = {
-      ...createEmptyInputNodeForm(),
+    const next: InputNodeForm = createEmptyInputNodeForm({
       ...props.form,
       paramBindings: { ...(props.form.paramBindings ?? {}) },
-    }
+      network: props.form.network,
+    })
     next.dataSource = coerceLayer(
       normalizeInputDataSource(next.dataSource, {
         businessOnly: businessOnly.value,
@@ -349,20 +365,55 @@ watch(
   { deep: true },
 )
 
+function identError(name: string, label: string, required: boolean): string {
+  const n = name.trim()
+  if (!n) return required ? `请填写${label}` : ''
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(n)) {
+    return `${label}须为合法标识符`
+  }
+  if (props.reservedNames.includes(n)) {
+    return `${label}与已有名称冲突`
+  }
+  return ''
+}
+
 const varNameError = computed(() => {
-  const name = draft.varName.trim()
-  if (!name) return '请填写变量名'
-  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
-    return '变量名须为合法标识符'
-  }
-  if (props.reservedNames.includes(name)) {
-    return '与方法入参或其他节点变量重名'
-  }
+  if (isNetwork.value) return ''
+  return identError(draft.varName, '变量名', true)
+})
+
+const responseBodyVarError = computed(() => {
+  if (!isNetwork.value) return ''
+  return identError(draft.network.responseBodyVarName, '响应体变量名', true)
+})
+
+const responseHeaderVarError = computed(() => {
+  if (!isNetwork.value) return ''
+  return identError(draft.network.responseHeaderVarName, '响应头变量名', false)
+})
+
+const statusCodeVarError = computed(() => {
+  if (!isNetwork.value) return ''
+  return identError(draft.network.statusCodeVarName, '状态码变量名', false)
+})
+
+const networkError = computed(() => {
+  if (!isNetwork.value) return ''
+  if (!draft.network.apiUrl.trim()) return '请填写 API 地址'
+  const h = validateNetworkParamRows(draft.network.headers, '请求头')
+  if (h) return h
+  const q = validateNetworkParamRows(draft.network.queryParams, '查询参数')
+  if (q) return q
+  const f = validateNetworkParamRows(draft.network.formParams, '表单参数')
+  if (f) return f
+  if (responseBodyVarError.value) return responseBodyVarError.value
+  if (responseHeaderVarError.value) return responseHeaderVarError.value
+  if (statusCodeVarError.value) return statusCodeVarError.value
   return ''
 })
 
 const bindingError = computed(() => {
-  if (isHeaderSource.value) return ''
+  if (isNetwork.value || isHeaderSource.value) return ''
   for (const p of methodParams.value) {
     const name = p.name.trim()
     if (!name) continue
@@ -384,7 +435,7 @@ const headerError = computed(() => {
 })
 
 const moduleError = computed(() => {
-  if (isHeaderSource.value) return ''
+  if (isNetwork.value || isHeaderSource.value) return ''
   if (!draft.serviceId.trim()) return '请选择模块'
   return ''
 })
@@ -394,6 +445,7 @@ function paramTypeLabel(p: ProcessorMethodParam): string {
 }
 
 const canSave = computed(() => {
+  if (isNetwork.value) return !networkError.value
   if (varNameError.value) return false
   if (isHeaderSource.value) return !headerError.value
   return (
@@ -405,19 +457,38 @@ const canSave = computed(() => {
 
 function handleSave() {
   if (!canSave.value) return
+  if (isNetwork.value) {
+    const network = createEmptyNetworkInputConfig({
+      ...draft.network,
+      apiUrl: draft.network.apiUrl.trim(),
+      bodyVarName: draft.network.bodyVarName.trim(),
+      responseBodyVarName: draft.network.responseBodyVarName.trim(),
+      responseHeaderVarName: draft.network.responseHeaderVarName.trim(),
+      statusCodeVarName: draft.network.statusCodeVarName.trim(),
+    })
+    const label = networkSummaryLabel(network)
+    emit('save', {
+      ...createEmptyInputNodeForm(),
+      channel: 'network',
+      varName: network.responseBodyVarName,
+      methodLabel: label,
+      printExpr: draft.printExpr.trim(),
+      network,
+    })
+    visible.value = false
+    return
+  }
   if (isHeaderSource.value) {
     const field = resolvedHeaderField()
     emit('save', {
+      ...createEmptyInputNodeForm(),
+      channel: 'local',
       serviceId: '',
       dataSource: 'request_header',
-      dataProcessorId: '',
-      dataMethodId: '',
       headerField: field,
       varName: draft.varName.trim(),
       methodLabel: `请求头.${field}`,
-      paramBindings: {},
       printExpr: draft.printExpr.trim(),
-      outputTypeExpr: null,
     })
     visible.value = false
     return
@@ -429,6 +500,8 @@ function handleSave() {
     paramBindings[name] = (draft.paramBindings[name] ?? '').trim()
   }
   emit('save', {
+    ...createEmptyInputNodeForm(),
+    channel: 'local',
     serviceId: draft.serviceId.trim() || props.currentServiceId,
     dataSource: draft.dataSource,
     dataProcessorId: draft.dataProcessorId,
@@ -450,7 +523,7 @@ function handleSave() {
   <el-dialog
     v-model="visible"
     title="编辑输入节点"
-    width="560px"
+    :width="isNetwork ? '720px' : '560px'"
     destroy-on-close
     append-to-body
     :close-on-click-modal="false"
@@ -460,7 +533,82 @@ function handleSave() {
       class="flow-node-form"
       label-position="right"
       label-width="110px"
+      size="small"
     >
+      <el-form-item label="类型" required>
+        <el-radio-group
+          :model-value="draft.channel"
+          size="small"
+          @update:model-value="onChannelChange"
+        >
+          <el-radio-button value="local">本地</el-radio-button>
+          <el-radio-button value="network">网络</el-radio-button>
+        </el-radio-group>
+      </el-form-item>
+
+      <template v-if="isNetwork">
+        <NetworkRequestFields
+          v-model="draft.network"
+          :ambient-vars="ambientVars"
+        />
+        <el-form-item label="响应体类型" required>
+          <el-select
+            v-model="draft.network.responseBodyType"
+            size="small"
+            style="width: 100%"
+          >
+            <el-option label="字符串" value="string" />
+            <el-option label="JSON" value="json" />
+          </el-select>
+        </el-form-item>
+        <el-form-item
+          label="响应体变量名"
+          required
+          :error="responseBodyVarError || undefined"
+        >
+          <el-input
+            v-model="draft.network.responseBodyVarName"
+            size="small"
+            placeholder="如 responseBody"
+            maxlength="64"
+          />
+        </el-form-item>
+        <el-form-item
+          label="响应头变量名"
+          :error="responseHeaderVarError || undefined"
+        >
+          <el-input
+            v-model="draft.network.responseHeaderVarName"
+            size="small"
+            placeholder="可选，为空则不接收"
+            maxlength="64"
+            clearable
+          />
+        </el-form-item>
+        <el-form-item
+          label="状态码变量名"
+          :error="statusCodeVarError || undefined"
+        >
+          <el-input
+            v-model="draft.network.statusCodeVarName"
+            size="small"
+            placeholder="可选，为空则不接收"
+            maxlength="64"
+            clearable
+          />
+        </el-form-item>
+        <el-form-item v-if="networkError" label=" ">
+          <span class="hint-inline error-hint">{{ networkError }}</span>
+        </el-form-item>
+        <el-form-item label="打印">
+          <FlowPrintField
+            v-model="draft.printExpr"
+            :ambient-names="ambientVars.map((v) => v.name).filter(Boolean)"
+          />
+        </el-form-item>
+      </template>
+
+      <template v-else>
       <el-form-item
         v-if="!isHeaderSource"
         label="模块"
@@ -606,6 +754,7 @@ function handleSave() {
           :ambient-names="ambientVars.map((v) => v.name).filter(Boolean)"
         />
       </el-form-item>
+      </template>
     </el-form>
     <template #footer>
       <el-button type="primary" :disabled="!canSave" @click="handleSave">
@@ -636,6 +785,10 @@ function handleSave() {
 .hint-inline {
   font-size: 12px;
   color: #909399;
+}
+
+.error-hint {
+  color: var(--el-color-danger);
 }
 
 .param-bindings {

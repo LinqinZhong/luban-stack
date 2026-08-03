@@ -9,6 +9,25 @@ const { debugClass } = useFlowDebugNode(props.id)
 
 const summary = computed(() => {
   const data = (props.data ?? {}) as Record<string, unknown>
+  const channel = data.channel === 'network' ? 'network' : 'local'
+  if (channel === 'network') {
+    const network =
+      data.network && typeof data.network === 'object'
+        ? (data.network as Record<string, unknown>)
+        : data
+    const method =
+      typeof network.httpMethod === 'string' ? network.httpMethod : 'GET'
+    const url =
+      typeof network.apiUrl === 'string' ? network.apiUrl.trim() : ''
+    const bodyVar =
+      typeof network.responseBodyVarName === 'string'
+        ? network.responseBodyVarName.trim()
+        : typeof data.varName === 'string'
+          ? data.varName.trim()
+          : ''
+    const label = `${method} ${url || '(未填地址)'}`
+    return bodyVar ? `${bodyVar} ← ${label}` : label
+  }
   const varName = typeof data.varName === 'string' ? data.varName.trim() : ''
   const methodLabel =
     typeof data.methodLabel === 'string' ? data.methodLabel.trim() : ''

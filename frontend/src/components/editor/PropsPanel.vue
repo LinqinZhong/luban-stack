@@ -777,6 +777,9 @@ const attrBindShared = computed(() => ({
   routeParams: props.routeParams,
   pageQueryParams: props.pageQueryParams,
   repeatListName: nearestRepeatListName.value,
+  iconOptions: iconSelectOptions.value,
+  typeLibrary: props.typeLibrary,
+  projectPath: props.projectPath,
 }))
 
 const iconSelectOptions = computed(() => {
@@ -1411,6 +1414,7 @@ onBeforeUnmount(() => {
               <AttrBindField
                 v-model="statusBarForm.backgroundColor"
                 placeholder="色值 / 绑定"
+                value-type="color"
                 v-bind="attrBindShared"
                 @change="commitStatusBar"
               />
@@ -1419,6 +1423,7 @@ onBeforeUnmount(() => {
               <AttrBindField
                 v-model="statusBarForm.cover"
                 placeholder="true / false / 绑定"
+                value-type="boolean"
                 v-bind="attrBindShared"
                 @change="commitStatusBar"
               />
@@ -1428,6 +1433,7 @@ onBeforeUnmount(() => {
               <AttrBindField
                 v-model="statusBarForm.navigationBar"
                 placeholder="true / false / 绑定"
+                value-type="boolean"
                 v-bind="attrBindShared"
                 @change="commitStatusBar"
               />
@@ -1616,7 +1622,8 @@ onBeforeUnmount(() => {
               <AttrBindField
                 v-model="layoutForm.padding"
                 placeholder="数据池 / 常量 / 自定义"
-                v-bind="attrBindShared"
+                value-type="number"
+                  v-bind="attrBindShared"
                 @change="commitAttr('padding', layoutForm.padding)"
               />
             </el-form-item>
@@ -1624,6 +1631,7 @@ onBeforeUnmount(() => {
               <el-form-item label="上">
                 <AttrBindField
                   v-model="layoutForm.paddingTop"
+                  value-type="number"
                   v-bind="attrBindShared"
                   @change="commitAttr('paddingTop', layoutForm.paddingTop)"
                 />
@@ -1631,6 +1639,7 @@ onBeforeUnmount(() => {
               <el-form-item label="右">
                 <AttrBindField
                   v-model="layoutForm.paddingRight"
+                  value-type="number"
                   v-bind="attrBindShared"
                   @change="commitAttr('paddingRight', layoutForm.paddingRight)"
                 />
@@ -1638,6 +1647,7 @@ onBeforeUnmount(() => {
               <el-form-item label="下">
                 <AttrBindField
                   v-model="layoutForm.paddingBottom"
+                  value-type="number"
                   v-bind="attrBindShared"
                   @change="commitAttr('paddingBottom', layoutForm.paddingBottom)"
                 />
@@ -1645,6 +1655,7 @@ onBeforeUnmount(() => {
               <el-form-item label="左">
                 <AttrBindField
                   v-model="layoutForm.paddingLeft"
+                  value-type="number"
                   v-bind="attrBindShared"
                   @change="commitAttr('paddingLeft', layoutForm.paddingLeft)"
                 />
@@ -1656,6 +1667,7 @@ onBeforeUnmount(() => {
                 <AttrBindField
                   v-model="layoutForm.margin"
                   placeholder="数据池 / 常量 / 自定义"
+                  value-type="number"
                   v-bind="attrBindShared"
                   @change="commitAttr('margin', layoutForm.margin)"
                 />
@@ -1664,28 +1676,32 @@ onBeforeUnmount(() => {
                 <el-form-item label="上">
                   <AttrBindField
                     v-model="layoutForm.marginTop"
-                    v-bind="attrBindShared"
+                    value-type="number"
+                  v-bind="attrBindShared"
                     @change="commitAttr('marginTop', layoutForm.marginTop)"
                   />
                 </el-form-item>
                 <el-form-item label="右">
                   <AttrBindField
                     v-model="layoutForm.marginRight"
-                    v-bind="attrBindShared"
+                    value-type="number"
+                  v-bind="attrBindShared"
                     @change="commitAttr('marginRight', layoutForm.marginRight)"
                   />
                 </el-form-item>
                 <el-form-item label="下">
                   <AttrBindField
                     v-model="layoutForm.marginBottom"
-                    v-bind="attrBindShared"
+                    value-type="number"
+                  v-bind="attrBindShared"
                     @change="commitAttr('marginBottom', layoutForm.marginBottom)"
                   />
                 </el-form-item>
                 <el-form-item label="左">
                   <AttrBindField
                     v-model="layoutForm.marginLeft"
-                    v-bind="attrBindShared"
+                    value-type="number"
+                  v-bind="attrBindShared"
                     @change="commitAttr('marginLeft', layoutForm.marginLeft)"
                   />
                 </el-form-item>
@@ -1701,7 +1717,8 @@ onBeforeUnmount(() => {
               <AttrBindField
                 v-model="layoutForm.background"
                 placeholder="transparent"
-                v-bind="attrBindShared"
+                value-type="color"
+                  v-bind="attrBindShared"
                 @change="commitAttr('background', layoutForm.background)"
                 />
             </el-form-item>
@@ -1709,7 +1726,8 @@ onBeforeUnmount(() => {
               <AttrBindField
                 v-model="layoutForm.zIndex"
                 placeholder="如 10，越大越靠上"
-                v-bind="attrBindShared"
+                value-type="number"
+                  v-bind="attrBindShared"
                 @change="commitAttr('zIndex', layoutForm.zIndex)"
                 />
             </el-form-item>
@@ -1733,6 +1751,7 @@ onBeforeUnmount(() => {
                 <AttrBindField
                   v-model="layoutForm.borderRadius"
                   placeholder="四角共用；分角优先"
+                  value-type="number"
                   v-bind="attrBindShared"
                   @change="commitAttr('borderRadius', layoutForm.borderRadius)"
                   />
@@ -1741,7 +1760,8 @@ onBeforeUnmount(() => {
                 <el-form-item label="上左">
                   <AttrBindField
                     v-model="layoutForm.borderTopLeftRadius"
-                    v-bind="attrBindShared"
+                    value-type="number"
+                  v-bind="attrBindShared"
                     @change="
                       commitAttr('borderTopLeftRadius', layoutForm.borderTopLeftRadius)
                     "
@@ -1750,7 +1770,8 @@ onBeforeUnmount(() => {
                 <el-form-item label="上右">
                   <AttrBindField
                     v-model="layoutForm.borderTopRightRadius"
-                    v-bind="attrBindShared"
+                    value-type="number"
+                  v-bind="attrBindShared"
                     @change="
                       commitAttr('borderTopRightRadius', layoutForm.borderTopRightRadius)
                     "
@@ -1759,7 +1780,8 @@ onBeforeUnmount(() => {
                 <el-form-item label="下右">
                   <AttrBindField
                     v-model="layoutForm.borderBottomRightRadius"
-                    v-bind="attrBindShared"
+                    value-type="number"
+                  v-bind="attrBindShared"
                     @change="
                       commitAttr(
                         'borderBottomRightRadius',
@@ -1771,7 +1793,8 @@ onBeforeUnmount(() => {
                 <el-form-item label="下左">
                   <AttrBindField
                     v-model="layoutForm.borderBottomLeftRadius"
-                    v-bind="attrBindShared"
+                    value-type="number"
+                  v-bind="attrBindShared"
                     @change="
                       commitAttr(
                         'borderBottomLeftRadius',
@@ -1785,6 +1808,7 @@ onBeforeUnmount(() => {
                 <AttrBindField
                   v-model="layoutForm.borderWidth"
                   placeholder="边框宽度"
+                  value-type="number"
                   v-bind="attrBindShared"
                   @change="commitAttr('borderWidth', layoutForm.borderWidth)"
                   />
@@ -1793,6 +1817,7 @@ onBeforeUnmount(() => {
                 <AttrBindField
                   v-model="layoutForm.borderColor"
                   placeholder="#dcdfe6"
+                  value-type="color"
                   v-bind="attrBindShared"
                   @change="commitAttr('borderColor', layoutForm.borderColor)"
                   />
@@ -1830,6 +1855,7 @@ onBeforeUnmount(() => {
                 <AttrBindField
                   v-model="layoutForm.textSize"
                   placeholder="例如：16"
+                  value-type="number"
                   v-bind="attrBindShared"
                   @change="commitAttr('textSize', layoutForm.textSize)"
                   />
@@ -1838,6 +1864,7 @@ onBeforeUnmount(() => {
                 <AttrBindField
                   v-model="layoutForm.textColor"
                   placeholder="#303133"
+                  value-type="color"
                   v-bind="attrBindShared"
                   @change="commitAttr('textColor', layoutForm.textColor)"
                   />
@@ -1870,6 +1897,7 @@ onBeforeUnmount(() => {
                 <AttrBindField
                   v-model="layoutForm.textSize"
                   placeholder="例如：14"
+                  value-type="number"
                   v-bind="attrBindShared"
                   @change="commitAttr('textSize', layoutForm.textSize)"
                   />
@@ -1878,6 +1906,7 @@ onBeforeUnmount(() => {
                 <AttrBindField
                   v-model="layoutForm.textColor"
                   placeholder="#303133"
+                  value-type="color"
                   v-bind="attrBindShared"
                   @change="commitAttr('textColor', layoutForm.textColor)"
                   />
@@ -1981,6 +2010,7 @@ onBeforeUnmount(() => {
                 <AttrBindField
                   v-model="layoutForm.color"
                   placeholder="#303133"
+                  value-type="color"
                   v-bind="attrBindShared"
                   @change="commitAttr('color', layoutForm.color)"
                   />
@@ -1989,6 +2019,7 @@ onBeforeUnmount(() => {
                 <AttrBindField
                   v-model="layoutForm.borderRadius"
                   placeholder="例如：4 / 50%"
+                  value-type="number"
                   v-bind="attrBindShared"
                   @change="commitAttr('borderRadius', layoutForm.borderRadius)"
                   />
@@ -2013,6 +2044,7 @@ onBeforeUnmount(() => {
                 <AttrBindField
                   v-model="layoutForm.rotateX"
                   placeholder="0"
+                  value-type="number"
                   v-bind="attrBindShared"
                   @change="commitAttr('rotateX', layoutForm.rotateX)"
                   />
@@ -2021,6 +2053,7 @@ onBeforeUnmount(() => {
                 <AttrBindField
                   v-model="layoutForm.rotateY"
                   placeholder="0"
+                  value-type="number"
                   v-bind="attrBindShared"
                   @change="commitAttr('rotateY', layoutForm.rotateY)"
                   />
@@ -2029,6 +2062,7 @@ onBeforeUnmount(() => {
                 <AttrBindField
                   v-model="layoutForm.rotateZ"
                   placeholder="0"
+                  value-type="number"
                   v-bind="attrBindShared"
                   @change="commitAttr('rotateZ', layoutForm.rotateZ)"
                   />
@@ -2058,6 +2092,7 @@ onBeforeUnmount(() => {
                 <AttrBindField
                   v-model="layoutForm.gap"
                   placeholder="子项间距"
+                  value-type="number"
                   v-bind="attrBindShared"
                   @change="commitAttr('gap', layoutForm.gap)"
                   />
@@ -2080,6 +2115,7 @@ onBeforeUnmount(() => {
                 <AttrBindField
                   v-model="layoutForm.interval"
                   placeholder="3000"
+                  value-type="number"
                   v-bind="attrBindShared"
                   @change="commitAttr('interval', layoutForm.interval)"
                   />
@@ -2102,6 +2138,7 @@ onBeforeUnmount(() => {
                 <AttrBindField
                   v-model="layoutForm.indicatorColor"
                   placeholder="rgba(0,0,0,0.25)"
+                  value-type="color"
                   v-bind="attrBindShared"
                   @change="commitAttr('indicatorColor', layoutForm.indicatorColor)"
                   />
@@ -2110,6 +2147,7 @@ onBeforeUnmount(() => {
                 <AttrBindField
                   v-model="layoutForm.indicatorActiveColor"
                   placeholder="#409eff"
+                  value-type="color"
                   v-bind="attrBindShared"
                   @change="commitAttr('indicatorActiveColor', layoutForm.indicatorActiveColor)"
                   />
@@ -2118,6 +2156,7 @@ onBeforeUnmount(() => {
                 <AttrBindField
                   v-model="layoutForm.duration"
                   placeholder="280"
+                  value-type="number"
                   v-bind="attrBindShared"
                   @change="commitAttr('duration', layoutForm.duration)"
                   />
@@ -2126,6 +2165,7 @@ onBeforeUnmount(() => {
                 <AttrBindField
                   v-model="layoutForm.current"
                   placeholder="0"
+                  value-type="number"
                   v-bind="attrBindShared"
                   @change="commitAttr('current', layoutForm.current)"
                   />
@@ -2403,6 +2443,10 @@ onBeforeUnmount(() => {
                     v-else-if="def.type === 'color'"
                     v-model="componentPropForm[def.name]"
                     placeholder="颜色常量 / 绑定"
+                    :value-type="def.type"
+                    :type-ref="def.typeRef"
+                    :item-type="def.itemType"
+                    :item-type-ref="def.itemTypeRef"
                     v-bind="attrBindShared"
                     @change="commitComponentProp(def.name)"
                   />
@@ -2426,7 +2470,11 @@ onBeforeUnmount(() => {
                       v-model="componentPropForm[def.name]"
                       placeholder="true / false / 绑定"
                       style="margin-top: 8px"
-                      v-bind="attrBindShared"
+                      :value-type="def.type"
+                    :type-ref="def.typeRef"
+                    :item-type="def.itemType"
+                    :item-type-ref="def.itemTypeRef"
+                    v-bind="attrBindShared"
                       @change="commitComponentProp(def.name)"
                     />
                   </template>
@@ -2438,6 +2486,10 @@ onBeforeUnmount(() => {
                     "
                     v-model="componentPropForm[def.name]"
                     :placeholder="`默认：${propDefaultPreview(def)}`"
+                    :value-type="def.type"
+                    :type-ref="def.typeRef"
+                    :item-type="def.itemType"
+                    :item-type-ref="def.itemTypeRef"
                     v-bind="attrBindShared"
                     @change="commitComponentProp(def.name)"
                   />
@@ -2445,6 +2497,10 @@ onBeforeUnmount(() => {
                     v-else
                     v-model="componentPropForm[def.name]"
                     :placeholder="`默认：${propDefaultPreview(def)}`"
+                    :value-type="def.type"
+                    :type-ref="def.typeRef"
+                    :item-type="def.itemType"
+                    :item-type-ref="def.itemTypeRef"
                     v-bind="attrBindShared"
                     @change="commitComponentProp(def.name)"
                   />

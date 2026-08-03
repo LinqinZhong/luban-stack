@@ -28,6 +28,11 @@ import {
   applyObjectMap,
   readObjectMapApplyConfig,
 } from '../../../utils/object-map-flow'
+import {
+  applyNetworkInputToScope,
+  executeNetworkHttpViaProxy,
+} from './network-http-runtime'
+import { normalizeNetworkInputConfig } from './dialogs/network-request'
 
 export type FlowDebugSnapshot = {
   cursorNodeId: string
@@ -126,6 +131,37 @@ function findProcessorMethod(
   return proc?.methods.find((m) => m.id === methodId) ?? null
 }
 
+function varsFromNetworkInput(data: Record<string, unknown>): MethodParam[] {
+  const network = asRecord(data.network)
+  const src = Object.keys(network).length ? network : data
+  const cfg = normalizeNetworkInputConfig(src)
+  const out: MethodParam[] = []
+  const bodyVar =
+    cfg.responseBodyVarName.trim() || str(data, 'varName')
+  if (bodyVar) {
+    out.push(
+      cfg.responseBodyType === 'json'
+        ? { name: bodyVar, type: 'any', tsType: 'any' }
+        : { name: bodyVar, type: 'string', tsType: 'string' },
+    )
+  }
+  if (cfg.responseHeaderVarName.trim()) {
+    out.push({
+      name: cfg.responseHeaderVarName.trim(),
+      type: 'object',
+      tsType: 'Record<string, string>',
+    })
+  }
+  if (cfg.statusCodeVarName.trim()) {
+    out.push({
+      name: cfg.statusCodeVarName.trim(),
+      type: 'number',
+      tsType: 'number',
+    })
+  }
+  return out
+}
+
 function varFromNode(
   node: FlowNode,
   dataProcessors: ServiceProcessor[],
@@ -134,6 +170,9 @@ function varFromNode(
 ): MethodParam | null {
   const data = asRecord(node.data)
   if (node.kind === 'input') {
+    if (str(data, 'channel') === 'network') {
+      return varsFromNetworkInput(data)[0] ?? null
+    }
     const varName = str(data, 'varName')
     if (!varName) return null
     const dataSource = str(data, 'dataSource')
@@ -347,6 +386,11 @@ export function ambientVarsAtNode(options: {
   for (const n of flow.nodes) {
     if (!ancestors.has(n.id)) continue
     // 当前节点产生的变量在「执行完当前」后才可见；选中查看时包含自身定义
+    const data = asRecord(n.data)
+    if (n.kind === 'input' && str(data, 'channel') === 'network') {
+      for (const p of varsFromNetworkInput(data)) push(p)
+      continue
+    }
     const param = varFromNode(
       n,
       dataProcessors,
@@ -752,6 +796,12 @@ export async function executeFlowNode(
     const next = pickNext(ctx.flow, node, scope)
     result = { scope, nextNodeId: next.nextId, log: next.log }
   } else if (node.kind === 'input') {
+    if (str(data, 'channel') === 'network') {
+      const httpResult = await executeNetworkHttpViaProxy(data, scope)
+      applyNetworkInputToScope(data, scope, httpResult)
+      const next = pickNext(ctx.flow, node, scope)
+      result = { scope, nextNodeId: next.nextId, log: next.log }
+    } else {
     const varName = str(data, 'varName')
     const dataSource = normalizeInputLayer(str(data, 'dataSource') || 'data')
     if (!varName) throw new Error('输入节点未配置变量名')
@@ -831,6 +881,7 @@ export async function executeFlowNode(
       const next = pickNext(ctx.flow, node, scope)
       result = { scope, nextNodeId: next.nextId, log: next.log }
     }
+    }
   } else if (node.kind === 'action') {
     const code = str(data, 'code')
     const outputVar = str(data, 'outputVarName')
@@ -848,6 +899,17 @@ export async function executeFlowNode(
     const next = pickNext(ctx.flow, node, scope)
     result = { scope, nextNodeId: next.nextId, log: next.log }
   } else if (node.kind === 'output') {
+    if (str(data, 'channel') === 'network') {
+      // 输出网络：异步发出，不阻塞流程
+      void executeNetworkHttpViaProxy(data, scope).catch((err) => {
+        console.warn(
+          '[flow] 网络输出请求失败',
+          err instanceof Error ? err.message : err,
+        )
+      })
+      const next = pickNext(ctx.flow, node, scope)
+      result = { scope, nextNodeId: next.nextId, log: next.log }
+    } else {
     const processorId = str(data, 'dataProcessorId')
     const methodId = str(data, 'dataMethodId')
     if (!processorId || !methodId) throw new Error('输出节点未配置数据层写入方法')
@@ -881,6 +943,7 @@ export async function executeFlowNode(
     }
     const next = pickNext(ctx.flow, node, scope)
     result = { scope, nextNodeId: next.nextId, log: next.log }
+    }
   } else if (node.kind === 'pageMap') {
     const config = readPageMapApplyConfig(data)
     if (!config) {

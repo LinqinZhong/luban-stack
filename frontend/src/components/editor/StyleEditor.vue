@@ -253,7 +253,8 @@ function onFieldChange() {
               v-if="form.widthMode === 'fixed'"
               v-model="form.widthValue"
               placeholder="数字 / 绑定"
-              v-bind="attrBindShared"
+              value-type="number"
+            v-bind="attrBindShared"
               @change="onFieldChange"
             />
           </div>
@@ -272,7 +273,8 @@ function onFieldChange() {
               v-if="form.heightMode === 'fixed'"
               v-model="form.heightValue"
               placeholder="数字 / 绑定"
-              v-bind="attrBindShared"
+              value-type="number"
+            v-bind="attrBindShared"
               @change="onFieldChange"
             />
           </div>
@@ -285,7 +287,8 @@ function onFieldChange() {
       <el-form-item label="padding">
         <AttrBindField
           v-model="form.padding"
-          v-bind="attrBindShared"
+          value-type="number"
+            v-bind="attrBindShared"
           @change="onFieldChange"
         />
       </el-form-item>
@@ -293,6 +296,7 @@ function onFieldChange() {
         <el-form-item label="上">
           <AttrBindField
             v-model="form.paddingTop"
+            value-type="number"
             v-bind="attrBindShared"
             @change="onFieldChange"
           />
@@ -300,6 +304,7 @@ function onFieldChange() {
         <el-form-item label="右">
           <AttrBindField
             v-model="form.paddingRight"
+            value-type="number"
             v-bind="attrBindShared"
             @change="onFieldChange"
           />
@@ -307,6 +312,7 @@ function onFieldChange() {
         <el-form-item label="下">
           <AttrBindField
             v-model="form.paddingBottom"
+            value-type="number"
             v-bind="attrBindShared"
             @change="onFieldChange"
           />
@@ -314,6 +320,7 @@ function onFieldChange() {
         <el-form-item label="左">
           <AttrBindField
             v-model="form.paddingLeft"
+            value-type="number"
             v-bind="attrBindShared"
             @change="onFieldChange"
           />
@@ -323,6 +330,7 @@ function onFieldChange() {
         <el-form-item label="margin">
           <AttrBindField
             v-model="form.margin"
+            value-type="number"
             v-bind="attrBindShared"
             @change="onFieldChange"
           />
@@ -331,28 +339,32 @@ function onFieldChange() {
           <el-form-item label="上">
             <AttrBindField
               v-model="form.marginTop"
-              v-bind="attrBindShared"
+              value-type="number"
+            v-bind="attrBindShared"
               @change="onFieldChange"
             />
           </el-form-item>
           <el-form-item label="右">
             <AttrBindField
               v-model="form.marginRight"
-              v-bind="attrBindShared"
+              value-type="number"
+            v-bind="attrBindShared"
               @change="onFieldChange"
             />
           </el-form-item>
           <el-form-item label="下">
             <AttrBindField
               v-model="form.marginBottom"
-              v-bind="attrBindShared"
+              value-type="number"
+            v-bind="attrBindShared"
               @change="onFieldChange"
             />
           </el-form-item>
           <el-form-item label="左">
             <AttrBindField
               v-model="form.marginLeft"
-              v-bind="attrBindShared"
+              value-type="number"
+            v-bind="attrBindShared"
               @change="onFieldChange"
             />
           </el-form-item>
@@ -366,7 +378,8 @@ function onFieldChange() {
         <AttrBindField
           v-model="form.background"
           placeholder="色值 / 绑定"
-          v-bind="attrBindShared"
+          value-type="color"
+            v-bind="attrBindShared"
           @change="onFieldChange"
         />
       </el-form-item>
@@ -374,7 +387,8 @@ function onFieldChange() {
         <AttrBindField
           v-model="form.zIndex"
           placeholder="如 10"
-          v-bind="attrBindShared"
+          value-type="number"
+            v-bind="attrBindShared"
           @change="onFieldChange"
         />
       </el-form-item>
@@ -397,6 +411,7 @@ function onFieldChange() {
         <el-form-item label="borderRadius 统一圆角">
           <AttrBindField
             v-model="form.borderRadius"
+            value-type="number"
             v-bind="attrBindShared"
             @change="onFieldChange"
           />
@@ -405,28 +420,32 @@ function onFieldChange() {
           <el-form-item label="上左">
             <AttrBindField
               v-model="form.borderTopLeftRadius"
-              v-bind="attrBindShared"
+              value-type="number"
+            v-bind="attrBindShared"
               @change="onFieldChange"
             />
           </el-form-item>
           <el-form-item label="上右">
             <AttrBindField
               v-model="form.borderTopRightRadius"
-              v-bind="attrBindShared"
+              value-type="number"
+            v-bind="attrBindShared"
               @change="onFieldChange"
             />
           </el-form-item>
           <el-form-item label="下右">
             <AttrBindField
               v-model="form.borderBottomRightRadius"
-              v-bind="attrBindShared"
+              value-type="number"
+            v-bind="attrBindShared"
               @change="onFieldChange"
             />
           </el-form-item>
           <el-form-item label="下左">
             <AttrBindField
               v-model="form.borderBottomLeftRadius"
-              v-bind="attrBindShared"
+              value-type="number"
+            v-bind="attrBindShared"
               @change="onFieldChange"
             />
           </el-form-item>
@@ -434,6 +453,7 @@ function onFieldChange() {
         <el-form-item label="borderWidth">
           <AttrBindField
             v-model="form.borderWidth"
+            value-type="number"
             v-bind="attrBindShared"
             @change="onFieldChange"
           />
@@ -442,6 +462,7 @@ function onFieldChange() {
           <AttrBindField
             v-model="form.borderColor"
             placeholder="色值 / 绑定"
+            value-type="color"
             v-bind="attrBindShared"
             @change="onFieldChange"
           />
@@ -477,6 +498,7 @@ function onFieldChange() {
         <el-form-item label="textSize">
           <AttrBindField
             v-model="form.textSize"
+            value-type="number"
             v-bind="attrBindShared"
             @change="onFieldChange"
           />
@@ -485,6 +507,7 @@ function onFieldChange() {
           <AttrBindField
             v-model="form.textColor"
             placeholder="色值 / 绑定"
+            value-type="color"
             v-bind="attrBindShared"
             @change="onFieldChange"
           />
@@ -512,6 +535,7 @@ function onFieldChange() {
         <el-form-item label="textSize">
           <AttrBindField
             v-model="form.textSize"
+            value-type="number"
             v-bind="attrBindShared"
             @change="onFieldChange"
           />
@@ -520,6 +544,7 @@ function onFieldChange() {
           <AttrBindField
             v-model="form.textColor"
             placeholder="色值 / 绑定"
+            value-type="color"
             v-bind="attrBindShared"
             @change="onFieldChange"
           />
@@ -534,6 +559,7 @@ function onFieldChange() {
           <AttrBindField
             v-model="form.color"
             placeholder="色值 / 绑定"
+            value-type="color"
             v-bind="attrBindShared"
             @change="onFieldChange"
           />
@@ -548,6 +574,7 @@ function onFieldChange() {
           <AttrBindField
             v-model="form.rotateX"
             placeholder="0"
+            value-type="number"
             v-bind="attrBindShared"
             @change="onFieldChange"
           />
@@ -556,6 +583,7 @@ function onFieldChange() {
           <AttrBindField
             v-model="form.rotateY"
             placeholder="0"
+            value-type="number"
             v-bind="attrBindShared"
             @change="onFieldChange"
           />
@@ -564,6 +592,7 @@ function onFieldChange() {
           <AttrBindField
             v-model="form.rotateZ"
             placeholder="0"
+            value-type="number"
             v-bind="attrBindShared"
             @change="onFieldChange"
           />

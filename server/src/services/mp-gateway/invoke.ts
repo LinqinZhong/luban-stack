@@ -25,6 +25,10 @@ import {
 } from '../../utils/object-map-flow.js'
 import { defaultEmptyReturnValue } from '../../utils/empty-return-value.js'
 import { coerceMapTypedOutput } from '../../utils/runtime-map.js'
+import {
+  applyNetworkInputResponse,
+  runNetworkRequest,
+} from './network-http.js'
 
 function asRecord(v: unknown): Record<string, unknown> {
   return v && typeof v === 'object' && !Array.isArray(v)
@@ -273,6 +277,11 @@ async function executeNode(
   }
 
   if (node.kind === 'input') {
+    if (str(data, 'channel') === 'network') {
+      const httpResult = await runNetworkRequest(data, scope)
+      applyNetworkInputResponse(data, scope, httpResult)
+      return { scope, nextId: pickNext(ctx.flow, node, scope) }
+    }
     const varName = str(data, 'varName')
     if (!varName) throw new Error('输入节点未配置变量名')
     const dataSource = normalizeInputLayer(str(data, 'dataSource') || 'data')
@@ -346,6 +355,15 @@ async function executeNode(
   }
 
   if (node.kind === 'output') {
+    if (str(data, 'channel') === 'network') {
+      void runNetworkRequest(data, scope).catch((err) => {
+        console.warn(
+          '[invoke] 网络输出请求失败',
+          err instanceof Error ? err.message : err,
+        )
+      })
+      return { scope, nextId: pickNext(ctx.flow, node, scope) }
+    }
     const processorId = str(data, 'dataProcessorId')
     const methodId = str(data, 'dataMethodId')
     if (!processorId || !methodId) throw new Error('输出节点未配置数据层写入方法')

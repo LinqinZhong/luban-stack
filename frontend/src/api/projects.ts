@@ -273,6 +273,24 @@ export function debugDataLayerMethod(payload: {
   })
 }
 
+/** 服务端代发 HTTP（流程网络输入/输出节点调试） */
+export function proxyHttpRequest(payload: {
+  url: string
+  method: string
+  headers?: Record<string, string>
+  body?: string | null
+  contentType?: string | null
+}) {
+  return request<{
+    status: number
+    headers: Record<string, string>
+    bodyText: string
+  }>('/api/projects/http-proxy', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
 export function testMysqlConnection(payload: MysqlConnectionPayload) {
   return request<{
     ok: true

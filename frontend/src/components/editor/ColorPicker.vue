@@ -8,12 +8,25 @@ import {
   type PaletteColor,
 } from '../../types/color-palette'
 
-const props = defineProps<{
-  modelValue: string
-  placeholder?: string
-  /** 为 true 时隐藏调色板选择（如调色板编辑对话框内） */
-  hidePalette?: boolean
-}>()
+const props = withDefaults(
+  defineProps<{
+    modelValue: string
+    placeholder?: string
+    /** 为 true 时隐藏调色板选择（如调色板编辑对话框内） */
+    hidePalette?: boolean
+    /**
+     * 紧凑模式：只显示色块 + 值，点击弹出完整选择器
+     *（属性面板常量行用）
+     */
+    compact?: boolean
+  }>(),
+  {
+    hidePalette: false,
+    compact: false,
+  },
+)
+
+const popoverVisible = ref(false)
 
 const emit = defineEmits<{
   'update:modelValue': [value: string]
@@ -188,10 +201,142 @@ function paletteTitle(color: PaletteColor): string {
   const desc = color.description?.trim()
   return desc ? `${color.name} · ${desc}` : color.name
 }
+
+/** 预览方块背景：调色板 key 用实际色值 */
+const swatchCss = computed(() => {
+  if (activePaletteColor.value) {
+    const v = activePaletteColor.value.value.trim()
+    if (!v || v === 'transparent') return undefined
+    return v
+  }
+  const cur = localValue.value.trim()
+  if (!cur || cur === 'transparent' || isBinding.value) return undefined
+  return toPickerColor(cur)
+})
+
+const isTransparentSwatch = computed(() => {
+  if (activePaletteColor.value) {
+    const v = activePaletteColor.value.value.trim()
+    return !v || v === 'transparent'
+  }
+  const cur = localValue.value.trim()
+  return !cur || cur === 'transparent'
+})
+
+const displayLabel = computed(() => {
+  const cur = localValue.value.trim()
+  if (!cur) return props.placeholder || '选择颜色'
+  return cur
+})
 </script>
 
 <template>
-  <div class="color-picker">
+  <el-popover
+    v-if="compact"
+    v-model:visible="popoverVisible"
+    placement="bottom-start"
+    :width="320"
+    trigger="click"
+    :disabled="isBinding"
+    popper-class="color-picker-compact-popper"
+  >
+    <template #reference>
+      <button
+        type="button"
+        class="color-compact-trigger"
+        :title="displayLabel"
+      >
+        <span
+          class="compact-swatch"
+          :class="{ checker: isTransparentSwatch }"
+          :style="swatchCss ? { background: swatchCss } : undefined"
+        />
+        <span class="compact-label">{{ displayLabel }}</span>
+      </button>
+    </template>
+    <div class="color-picker">
+      <div class="color-picker-row">
+        <el-color-picker
+          v-model="pickerModel"
+          class="ep-picker"
+          size="small"
+          show-alpha
+          :predefine="PREDEFINE"
+          :disabled="isBinding || isPaletteKey"
+        />
+        <el-input
+          v-model="localValue"
+          class="hex-input"
+          size="small"
+          :placeholder="placeholder || '#ffffff / transparent / rgba() / key'"
+          clearable
+          @change="handleTextChange"
+        />
+        <el-tooltip content="吸管取色" placement="top">
+          <el-button
+            class="eyedropper-btn"
+            size="small"
+            :icon="Aim"
+            :disabled="isBinding"
+            @click="handleEyedropper"
+          />
+        </el-tooltip>
+      </div>
+      <div
+        v-if="paletteColors.length"
+        class="preset-row"
+        role="list"
+        aria-label="调色板"
+      >
+        <button
+          v-for="item in paletteColors"
+          :key="item.name"
+          type="button"
+          class="preset-chip palette-chip"
+          :class="{ active: isPaletteActive(item.name) }"
+          :title="paletteTitle(item)"
+          role="listitem"
+          @click="applyPalette(item)"
+        >
+          <span
+            class="preset-swatch"
+            :class="{ checker: item.value === 'transparent' }"
+            :style="
+              item.value === 'transparent'
+                ? undefined
+                : { background: item.value }
+            "
+          />
+          <span class="preset-label">{{ item.name }}</span>
+        </button>
+      </div>
+      <div class="preset-row" role="list" aria-label="参考颜色">
+        <button
+          v-for="item in PRESET_COLORS"
+          :key="item.value"
+          type="button"
+          class="preset-chip"
+          :class="{ active: isPresetActive(item.value) }"
+          :title="item.label"
+          role="listitem"
+          @click="applyPreset(item.value)"
+        >
+          <span
+            class="preset-swatch"
+            :class="{ checker: item.value === 'transparent' }"
+            :style="
+              item.value === 'transparent'
+                ? undefined
+                : { background: item.value }
+            "
+          />
+          <span class="preset-label">{{ item.label }}</span>
+        </button>
+      </div>
+    </div>
+  </el-popover>
+
+  <div v-else class="color-picker">
     <div class="color-picker-row">
       <el-color-picker
         v-model="pickerModel"
@@ -274,6 +419,63 @@ function paletteTitle(color: PaletteColor): string {
 </template>
 
 <style scoped>
+.color-compact-trigger {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+  height: 24px;
+  min-height: 24px;
+  padding: 0 8px;
+  margin: 0;
+  border: 1px solid var(--el-border-color);
+  border-radius: var(--el-border-radius-base);
+  background: var(--el-fill-color-blank);
+  color: var(--el-text-color-primary);
+  font-size: 12px;
+  line-height: 1;
+  text-align: left;
+  cursor: pointer;
+  box-sizing: border-box;
+}
+
+.color-compact-trigger:hover {
+  border-color: var(--el-border-color-hover);
+}
+
+.compact-swatch {
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  box-sizing: border-box;
+}
+
+.compact-swatch.checker {
+  background-color: #fff;
+  background-image:
+    linear-gradient(45deg, #ccc 25%, transparent 25%),
+    linear-gradient(-45deg, #ccc 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #ccc 75%),
+    linear-gradient(-45deg, transparent 75%, #ccc 75%);
+  background-size: 8px 8px;
+  background-position:
+    0 0,
+    0 4px,
+    4px -4px,
+    -4px 0;
+}
+
+.compact-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .color-picker {
   display: flex;
   flex-direction: column;
