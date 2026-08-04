@@ -729,6 +729,8 @@ function handleStageClick(event: MouseEvent) {
 const touchCursorVisible = ref(false)
 const touchCursorPressed = ref(false)
 const touchCursorPos = ref({ x: 0, y: 0 })
+/** 按下期间用 window 跟踪，避免拖出画布后 pointerleave/capture 导致光标错位乱跳 */
+let touchWindowTrackBound = false
 
 const showTouchCursor = computed(
   () => !props.selectable && !colorPickState.picking.value,
@@ -738,6 +740,19 @@ const touchCursorStyle = computed(() => ({
   left: `${touchCursorPos.value.x}px`,
   top: `${touchCursorPos.value.y}px`,
 }))
+
+function isPointerInsideStage(event: PointerEvent): boolean {
+  const stage = stageRef.value
+  if (!stage) return false
+  const rect = stage.getBoundingClientRect()
+  if (rect.width < 1 || rect.height < 1) return false
+  return (
+    event.clientX >= rect.left &&
+    event.clientX <= rect.right &&
+    event.clientY >= rect.top &&
+    event.clientY <= rect.bottom
+  )
+}
 
 /** 相对整个 stage 定位，避免被 .phone overflow 裁成半圆 */
 function updateTouchCursorPos(event: PointerEvent) {
@@ -759,15 +774,57 @@ function isStageChromeTarget(target: EventTarget | null): boolean {
   )
 }
 
-function syncTouchCursorMove(event: PointerEvent) {
-  if (!showTouchCursor.value) return
-  if (isStageChromeTarget(event.target)) {
+function applyTouchCursorFromEvent(event: PointerEvent) {
+  if (!showTouchCursor.value) {
     touchCursorVisible.value = false
-    touchCursorPressed.value = false
+    return
+  }
+  if (!isPointerInsideStage(event)) {
+    // 画布外：隐藏自定义光标，交给系统光标，避免贴边裁切乱跳
+    touchCursorVisible.value = false
+    return
+  }
+  if (isStageChromeTarget(event.target) && !touchCursorPressed.value) {
+    touchCursorVisible.value = false
     return
   }
   touchCursorVisible.value = true
   updateTouchCursorPos(event)
+}
+
+function onWindowTouchPointerMove(event: PointerEvent) {
+  if (!touchCursorPressed.value) return
+  applyTouchCursorFromEvent(event)
+}
+
+function onWindowTouchPointerUp() {
+  touchCursorPressed.value = false
+  unbindTouchWindowTrack()
+}
+
+function bindTouchWindowTrack() {
+  if (touchWindowTrackBound) return
+  touchWindowTrackBound = true
+  window.addEventListener('pointermove', onWindowTouchPointerMove, true)
+  window.addEventListener('pointerup', onWindowTouchPointerUp, true)
+  window.addEventListener('pointercancel', onWindowTouchPointerUp, true)
+}
+
+function unbindTouchWindowTrack() {
+  if (!touchWindowTrackBound) return
+  touchWindowTrackBound = false
+  window.removeEventListener('pointermove', onWindowTouchPointerMove, true)
+  window.removeEventListener('pointerup', onWindowTouchPointerUp, true)
+  window.removeEventListener('pointercancel', onWindowTouchPointerUp, true)
+}
+
+function syncTouchCursorMove(event: PointerEvent) {
+  if (touchCursorPressed.value) {
+    // 按下时由 window 捕获统一处理，避免 stage leave/capture 重复打架
+    applyTouchCursorFromEvent(event)
+    return
+  }
+  applyTouchCursorFromEvent(event)
 }
 
 function syncTouchCursorDown(event: PointerEvent) {
@@ -778,18 +835,23 @@ function syncTouchCursorDown(event: PointerEvent) {
     touchCursorPressed.value = false
     return
   }
-  touchCursorVisible.value = true
   touchCursorPressed.value = true
-  updateTouchCursorPos(event)
+  applyTouchCursorFromEvent(event)
+  bindTouchWindowTrack()
 }
 
 function syncTouchCursorUp() {
   touchCursorPressed.value = false
+  unbindTouchWindowTrack()
 }
 
 function syncTouchCursorLeave() {
+  // 按下拖出画布时不要清 pressed，交给 window 跟踪
+  if (touchCursorPressed.value) {
+    touchCursorVisible.value = false
+    return
+  }
   touchCursorVisible.value = false
-  touchCursorPressed.value = false
 }
 
 watch(
@@ -797,6 +859,7 @@ watch(
   () => {
     touchCursorVisible.value = false
     touchCursorPressed.value = false
+    unbindTouchWindowTrack()
   },
 )
 
@@ -944,6 +1007,7 @@ watch(
 
 onBeforeUnmount(() => {
   endPan()
+  unbindTouchWindowTrack()
   stageRef.value?.removeEventListener('wheel', onStageWheel)
   window.removeEventListener('resize', scheduleMeasureSync)
   window.removeEventListener('scroll', scheduleMeasureSync, true)
@@ -1233,7 +1297,7 @@ watch(
 
     <!-- 预览手指光标：挂 stage，不被手机框 overflow 裁切 -->
     <div
-      v-if="showTouchCursor && touchCursorVisible"
+      v-show="showTouchCursor && touchCursorVisible"
       class="stage-touch-cursor"
       :class="{ 'is-pressed': touchCursorPressed }"
       :style="touchCursorStyle"
