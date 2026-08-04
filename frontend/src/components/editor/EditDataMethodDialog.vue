@@ -465,19 +465,64 @@ const conditionAmbientVars = computed((): MethodParam[] =>
     .filter((p): p is NonNullable<typeof p> => p !== null),
 )
 
+function conditionFieldTypeExpr(
+  cond: DataMethodCondition,
+): ProcessorTypeExpr | null {
+  const col = conditionColumnName(cond)
+  if (!col || cond.field === CUSTOM_CONDITION_FIELD) return null
+  const entityDef = findDataTypeDef(props.typeLibrary, props.entityRef ?? '')
+  if (!entityDef || entityDef.kind !== 'interface') return null
+  const field = entityDef.fields.find((f) => f.name.trim() === col)
+  if (!field) return null
+  const mapped = typeExprToDataFieldType(field.type, props.typeLibrary)
+  if (mapped.typeRef) {
+    return {
+      ...createEmptyProcessorTypeExpr(
+        mapped.type === 'array' ? 'array' : 'json',
+      ),
+      typeRef: mapped.type === 'array' ? '' : mapped.typeRef,
+      itemType: mapped.itemType || '',
+      itemTypeRef: mapped.itemTypeRef || '',
+    }
+  }
+  if (
+    mapped.type === 'number' ||
+    mapped.type === 'boolean' ||
+    mapped.type === 'string'
+  ) {
+    return createEmptyProcessorTypeExpr(mapped.type)
+  }
+  if (
+    mapped.type === 'time' ||
+    mapped.type === 'date' ||
+    mapped.type === 'datetime'
+  ) {
+    return createEmptyProcessorTypeExpr('string')
+  }
+  return null
+}
+
 function conditionTargetType(cond: DataMethodCondition): ProcessorTypeExpr {
+  const fromField = conditionFieldTypeExpr(cond)
   const ui = conditionValueUi(cond)
   const leaf =
-    ui === 'number'
+    fromField ??
+    (ui === 'number'
       ? createEmptyProcessorTypeExpr('number')
       : ui === 'boolean'
         ? createEmptyProcessorTypeExpr('boolean')
-        : createEmptyProcessorTypeExpr('string')
+        : createEmptyProcessorTypeExpr('string'))
   // 「属于 / 不属于」→ IN / NOT IN，需要数组入参（如 number[]），不能只匹配元素
   if (cond.op === 'in' || cond.op === 'notIn') {
+    const itemType = leaf.typeRef
+      ? 'json'
+      : leaf.type === 'number' || leaf.type === 'boolean' || leaf.type === 'string'
+        ? leaf.type
+        : 'string'
     return {
       ...createEmptyProcessorTypeExpr('array'),
-      itemType: leaf.type || 'string',
+      itemType,
+      itemTypeRef: leaf.typeRef || '',
     }
   }
   return leaf
@@ -1829,6 +1874,7 @@ function handleSave() {
                     :ambient-vars="conditionAmbientVars"
                     :target-type="conditionTargetType(cond)"
                     :type-library="typeLibrary"
+                    compatibility="scalar-loose"
                     :placeholder="DM.pickParam"
                     @update:model-value="
                       patchCondition(group.id, cond.id, {
@@ -1843,6 +1889,7 @@ function handleSave() {
                     :ambient-vars="conditionAmbientVars"
                     :target-type="conditionTargetType(cond)"
                     :type-library="typeLibrary"
+                    compatibility="scalar-loose"
                     :placeholder="DM.pickParamTo"
                     @update:model-value="
                       patchCondition(group.id, cond.id, {

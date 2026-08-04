@@ -1,5 +1,6 @@
 import type { ComponentConfig } from '../types/component'
-import type { PageData } from '../types/page-data'
+import type { DataFieldType, PageData } from '../types/page-data'
+import { unwrapWholeBinding } from './binding-expr'
 import { hydrateApiDollarProps } from './api-prop'
 import {
   buildDollarProps,
@@ -107,6 +108,35 @@ function isEmptyPropForEditFallback(
 }
 
 /**
+ * 宿主属性是否为动态绑定（数据池 / item / $props 等）。
+ * api 配置 JSON、json/array 字面量 JSON 不算动态绑定。
+ */
+export function isDynamicPropBinding(
+  raw: string,
+  propType?: DataFieldType | string | null,
+): boolean {
+  const text = raw.trim()
+  if (!text) return false
+  if (propType === 'api') return false
+
+  const whole = unwrapWholeBinding(text)
+  if (whole != null) {
+    if (propType === 'json' || propType === 'array') {
+      try {
+        JSON.parse(text)
+        return false
+      } catch {
+        return true
+      }
+    }
+    return true
+  }
+
+  // 混写：如 `前缀{name}`
+  return /\{[^{}\n]+\}/.test(text)
+}
+
+/**
  * 由页面/父组件上的 Component 实例属性 + 宿主数据池，组装可运行的 $props
  *（含 api 类型参数 hydrate 为可调用函数）。
  * 与 XmlNodeView.instanceDollarProps 规则对齐，供 ref 调暴露方法等非画布路径复用。
@@ -123,8 +153,8 @@ export function resolveComponentInstanceDollarProps(options: {
   projectPath?: string | null
   dryRun?: boolean
   /**
-   * 编辑画布：绑定结果为空时回退 config.debugProps，
-   * 避免列表类组件因页面数据尚未拉取而塌成一条空壳。
+   * 编辑画布：动态绑定的 props 改用 config.debugProps（测试入参），
+   * 解析结果为空时同样回退，避免列表类组件塌成空壳。
    */
   editCanvasFallback?: boolean
 }): Record<string, unknown> {
@@ -186,7 +216,13 @@ export function resolveComponentInstanceDollarProps(options: {
       const name = def.name.trim()
       if (!name) continue
       if (!(name in config.debugProps)) continue
-      if (!isEmptyPropForEditFallback(next[name], def.type)) continue
+      const hostRaw = hostAttrs[name]
+      const dynamic =
+        typeof hostRaw === 'string' &&
+        isDynamicPropBinding(hostRaw, def.type)
+      if (!dynamic && !isEmptyPropForEditFallback(next[name], def.type)) {
+        continue
+      }
       next[name] = config.debugProps[name]
       touched = true
     }

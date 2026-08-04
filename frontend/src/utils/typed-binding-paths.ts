@@ -145,9 +145,13 @@ export function isTypeExprCompatible(
   const tDef = tRef ? findDataTypeDef(library, tRef) : null
   const sDef = sRef ? findDataTypeDef(library, sRef) : null
 
-  // 枚举与 string 互通
-  if (tDef?.kind === 'enum' && !sRef && source.type === 'string') return true
-  if (sDef?.kind === 'enum' && !tRef && target.type === 'string') return true
+  // 枚举与 string / number 互通（状态码常见为数字枚举）
+  if (tDef?.kind === 'enum' && !sRef) {
+    if (source.type === 'string' || source.type === 'number') return true
+  }
+  if (sDef?.kind === 'enum' && !tRef) {
+    if (target.type === 'string' || target.type === 'number') return true
+  }
 
   if (tRef || sRef) {
     if (tRef && sRef) {
@@ -268,6 +272,7 @@ function expandObjectChildren(
   target: ProcessorTypeExpr,
   library: DataTypeLibrary | null | undefined,
   depth: number,
+  mode: BindingCompatibilityMode = 'strict',
 ): TypedBindingCascaderOption[] {
   if (depth >= MAX_DEPTH) return []
   const ref = namedRefOf(typeExpr)
@@ -300,12 +305,18 @@ function expandObjectChildren(
           ...createEmptyProcessorTypeExpr('json'),
           typeRef: boundId,
         }
-        const selectable = isTypeExprCompatible(boundExpr, target, library)
+        const selectable = isBindingTypeCompatible(
+          boundExpr,
+          target,
+          library,
+          mode,
+        )
         const nested = expandObjectChildren(
           boundExpr,
           target,
           library,
           depth + 1,
+          mode,
         )
         if (selectable || nested.length) {
           children.push({
@@ -319,7 +330,7 @@ function expandObjectChildren(
       }
     }
 
-    const selectable = isTypeExprCompatible(fieldExpr, target, library)
+    const selectable = isBindingTypeCompatible(fieldExpr, target, library, mode)
     let nested: TypedBindingCascaderOption[] = []
 
     if (fieldExpr.type === 'array') {
@@ -341,12 +352,18 @@ function expandObjectChildren(
         }
         continue
       }
-      const itemSelectable = isTypeExprCompatible(itemExpr, target, library)
+      const itemSelectable = isBindingTypeCompatible(
+        itemExpr,
+        target,
+        library,
+        mode,
+      )
       const itemNested = expandObjectChildren(
         itemExpr,
         target,
         library,
         depth + 1,
+        mode,
       )
       if (itemSelectable || itemNested.length) {
         nested = [
@@ -359,7 +376,7 @@ function expandObjectChildren(
         ]
       }
     } else {
-      nested = expandObjectChildren(fieldExpr, target, library, depth + 1)
+      nested = expandObjectChildren(fieldExpr, target, library, depth + 1, mode)
     }
 
     if (selectable || nested.length) {
@@ -379,9 +396,10 @@ function buildVarOption(
   param: MethodParam,
   target: ProcessorTypeExpr,
   library: DataTypeLibrary | null | undefined,
+  mode: BindingCompatibilityMode = 'strict',
 ): TypedBindingCascaderOption | null {
   const source = methodParamTypeExpr(param)
-  const selectable = isTypeExprCompatible(source, target, library)
+  const selectable = isBindingTypeCompatible(source, target, library, mode)
   let children: TypedBindingCascaderOption[] = []
 
   if (source.type === 'array') {
@@ -400,8 +418,19 @@ function buildVarOption(
       genericArgs: { ...(source.genericArgs ?? {}) },
     }
     if (!(isAnyExpr(itemExpr) && !namedRefOf(itemExpr))) {
-      const itemSelectable = isTypeExprCompatible(itemExpr, target, library)
-      const itemNested = expandObjectChildren(itemExpr, target, library, 1)
+      const itemSelectable = isBindingTypeCompatible(
+        itemExpr,
+        target,
+        library,
+        mode,
+      )
+      const itemNested = expandObjectChildren(
+        itemExpr,
+        target,
+        library,
+        1,
+        mode,
+      )
       if (itemSelectable || itemNested.length) {
         children = [
           {
@@ -414,7 +443,7 @@ function buildVarOption(
       }
     }
   } else {
-    children = expandObjectChildren(source, target, library, 1)
+    children = expandObjectChildren(source, target, library, 1, mode)
   }
 
   if (!selectable && !children.length) return null
@@ -432,13 +461,14 @@ export function buildTypedBindingCascaderOptions(
   target: ProcessorTypeExpr | null | undefined,
   library?: DataTypeLibrary | null,
   extraRoots?: TypedBindingCascaderOption[],
+  mode: BindingCompatibilityMode = 'strict',
 ): TypedBindingCascaderOption[] {
   const targetExpr = target ? cloneExpr(target) : createEmptyProcessorTypeExpr('any')
   const options: TypedBindingCascaderOption[] = []
   for (const v of ambientVars) {
     const name = v.name.trim()
     if (!name) continue
-    const opt = buildVarOption(v, targetExpr, library)
+    const opt = buildVarOption(v, targetExpr, library, mode)
     if (opt) options.push(opt)
   }
   if (extraRoots?.length) {
@@ -530,6 +560,36 @@ function isQueryParamCompatibleWithTarget(
     )
   }
   return false
+}
+
+export type BindingCompatibilityMode = 'strict' | 'scalar-loose'
+
+/** 绑定兼容：strict 严格类型；scalar-loose 额外允许 string/number/boolean 互通 */
+export function isBindingTypeCompatible(
+  source: ProcessorTypeExpr,
+  target: ProcessorTypeExpr,
+  library?: DataTypeLibrary | null,
+  mode: BindingCompatibilityMode = 'strict',
+): boolean {
+  if (isTypeExprCompatible(source, target, library)) return true
+  if (mode !== 'scalar-loose') return false
+
+  // 源为枚举：按 string/number 再试（与目标标量互通）
+  const sRef = namedRefOf(source)
+  const sDef = sRef ? findDataTypeDef(library, sRef) : null
+  if (sDef?.kind === 'enum') {
+    return (
+      isQueryParamCompatibleWithTarget('string', target, library) ||
+      isQueryParamCompatibleWithTarget('number', target, library)
+    )
+  }
+
+  const s = (source.type || '').trim()
+  if (sRef || s === 'array' || s === 'map' || s === 'json' || s === 'object') {
+    return false
+  }
+  if (s !== 'string' && s !== 'number' && s !== 'boolean') return false
+  return isQueryParamCompatibleWithTarget(s, target, library)
 }
 
 /** 表达式 → cascader 路径段 */
@@ -635,12 +695,101 @@ export function buildFlatSelectableBindingOptions(
   targetType: ProcessorTypeExpr | null | undefined,
   library?: DataTypeLibrary | null,
   extraRoots?: TypedBindingCascaderOption[],
+  mode: BindingCompatibilityMode = 'strict',
 ): Array<{ value: string; label: string }> {
   const tree = buildTypedBindingCascaderOptions(
     ambientVars,
     targetType,
     library,
     extraRoots,
+    mode,
   )
   return flattenSelectableOptions(tree)
+}
+
+/** 组件 $props 入参级联根（排除 api 类型） */
+export function buildPropsBindingRoot(
+  defs:
+    | Array<{
+        name: string
+        type?: string
+        typeRef?: string
+        remark?: string
+        itemType?: string
+        itemTypeRef?: string
+        itemItemType?: string
+        itemItemTypeRef?: string
+        genericArgs?: Record<string, string>
+      }>
+    | null
+    | undefined,
+  target: ProcessorTypeExpr | null | undefined,
+  library?: DataTypeLibrary | null,
+  mode: BindingCompatibilityMode = 'scalar-loose',
+): TypedBindingCascaderOption | null {
+  if (!defs?.length) return null
+  const targetExpr = target
+    ? cloneExpr(target)
+    : createEmptyProcessorTypeExpr('any')
+  const ambient: MethodParam[] = []
+  for (const def of defs) {
+    const name = def.name.trim()
+    if (!name || def.type === 'api' || def.type === 'ref') continue
+    ambient.push({
+      name,
+      type:
+        def.type === 'number'
+          ? 'number'
+          : def.type === 'boolean'
+            ? 'boolean'
+            : def.type === 'array'
+              ? 'array'
+              : def.type === 'json' || def.typeRef
+                ? 'object'
+                : def.type === 'map'
+                  ? 'map'
+                  : def.type === 'any'
+                    ? 'any'
+                    : 'string',
+      typeExpr: {
+        ...createEmptyProcessorTypeExpr(
+          def.typeRef
+            ? 'json'
+            : def.type === 'array'
+              ? 'array'
+              : def.type === 'json'
+                ? 'json'
+                : def.type === 'map'
+                  ? 'map'
+                  : def.type === 'number' ||
+                      def.type === 'boolean' ||
+                      def.type === 'string' ||
+                      def.type === 'any'
+                    ? def.type
+                    : 'string',
+        ),
+        typeRef: def.typeRef || '',
+        itemType: def.itemType || '',
+        itemTypeRef: def.itemTypeRef || '',
+        itemItemType: def.itemItemType || '',
+        itemItemTypeRef: def.itemItemTypeRef || '',
+        genericArgs: { ...(def.genericArgs ?? {}) },
+      },
+    })
+  }
+  if (!ambient.length) return null
+  const children = buildTypedBindingCascaderOptions(
+    ambient,
+    targetExpr,
+    library,
+    undefined,
+    mode,
+  )
+  if (!children.length) return null
+  return {
+    value: '$props',
+    label: '$props（组件入参）',
+    selectable: false,
+    children,
+  }
 }

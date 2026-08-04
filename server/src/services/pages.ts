@@ -328,6 +328,14 @@ function defaultValue(type: DataField['type']) {
   }
 }
 
+/** undefined 才回落默认值；显式 null 保留 */
+function fieldValueOrDefault(
+  value: unknown,
+  type: DataField['type'],
+): unknown {
+  return value !== undefined ? value : defaultValue(type)
+}
+
 function resolveObjectSubFieldValue(item: ObjectSubField): unknown {
   if (item.type === 'array') {
     return (item.arrayFields ?? []).map(resolveArraySubFieldValue)
@@ -335,7 +343,7 @@ function resolveObjectSubFieldValue(item: ObjectSubField): unknown {
   if (item.type === 'json') {
     return buildObjectValue(item.objectFields ?? [])
   }
-  return item.value ?? defaultValue(item.type)
+  return fieldValueOrDefault(item.value, item.type)
 }
 
 function resolveArraySubFieldValue(item: ArraySubField): unknown {
@@ -345,7 +353,7 @@ function resolveArraySubFieldValue(item: ArraySubField): unknown {
   if (item.type === 'json') {
     return buildObjectValue(item.objectFields ?? [])
   }
-  return item.value ?? defaultValue(item.type)
+  return fieldValueOrDefault(item.value, item.type)
 }
 
 function buildObjectValue(items: ObjectSubField[]): Record<string, unknown> {
@@ -406,7 +414,7 @@ function normalizeObjectSubField(raw: unknown): ObjectSubField | null {
     name: s.name.trim(),
     type: s.type,
     ...(typeRef ? { typeRef } : {}),
-    value: s.value ?? defaultValue(s.type),
+    value: fieldValueOrDefault(s.value, s.type) as ObjectSubField['value'],
   }
 }
 
@@ -451,7 +459,7 @@ function normalizeArraySubField(raw: unknown): ArraySubField | null {
   return {
     type: s.type,
     ...(typeRef ? { typeRef } : {}),
-    value: s.value ?? defaultValue(s.type),
+    value: fieldValueOrDefault(s.value, s.type) as ArraySubField['value'],
   }
 }
 

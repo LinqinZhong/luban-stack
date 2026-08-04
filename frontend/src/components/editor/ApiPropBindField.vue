@@ -19,6 +19,7 @@ import {
 import type { DataField } from '../../types/page-data'
 import type { DataTypeLibrary } from '../../types/data-types'
 import type { PageQueryParamDef } from '../../types/page-query'
+import type { ComponentPropDef } from '../../types/component'
 import {
   dataFieldsToAmbientVars,
   type MethodParam,
@@ -35,6 +36,7 @@ import {
 } from '../../utils/api-prop'
 import {
   buildFlatSelectableBindingOptions,
+  buildPropsBindingRoot,
   buildQueryBindingRoot,
 } from '../../utils/typed-binding-paths'
 
@@ -43,8 +45,10 @@ const props = defineProps<{
   projectPath: string
   apiParams?: MethodParam[] | null
   apiReturnType?: ProcessorTypeExpr | null
-  /** 页面数据池（入参绑定可选） */
+  /** 页面/组件数据池（入参绑定可选） */
   dataFields?: DataField[] | null
+  /** 编辑组件时：$props 亦可绑定 */
+  componentProps?: ComponentPropDef[] | null
   pageQueryParams?: PageQueryParamDef[] | null
   typeLibrary?: DataTypeLibrary | null
 }>()
@@ -181,13 +185,22 @@ const bindingAmbientVars = computed((): MethodParam[] =>
   dataFieldsToAmbientVars(props.dataFields ?? [], props.typeLibrary),
 )
 
-function queryExtraRoots(targetType: ProcessorTypeExpr) {
-  const root = buildQueryBindingRoot(
+function bindingExtraRoots(targetType: ProcessorTypeExpr) {
+  const roots = []
+  const query = buildQueryBindingRoot(
     props.pageQueryParams,
     targetType,
     props.typeLibrary,
   )
-  return root ? [root] : []
+  if (query) roots.push(query)
+  const dollarProps = buildPropsBindingRoot(
+    props.componentProps,
+    targetType,
+    props.typeLibrary,
+    'scalar-loose',
+  )
+  if (dollarProps) roots.push(dollarProps)
+  return roots
 }
 
 function bindingOptionsFor(inp: ServiceApiParam) {
@@ -196,7 +209,8 @@ function bindingOptionsFor(inp: ServiceApiParam) {
     bindingAmbientVars.value,
     target,
     props.typeLibrary,
-    queryExtraRoots(target),
+    bindingExtraRoots(target),
+    'scalar-loose',
   )
 }
 
@@ -467,7 +481,7 @@ watch(selectedApi, (api) => {
                   :model-value="paramSelectValue(inp.varName)"
                   filterable
                   clearable
-                  placeholder="选择数据池 / $query"
+                  placeholder="选择数据池 / $query / $props"
                   @update:model-value="
                     onParamSelectChange(inp.varName, $event as string | null)
                   "

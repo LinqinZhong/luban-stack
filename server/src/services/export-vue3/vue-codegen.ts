@@ -575,8 +575,11 @@ function flexClasses(tag: string, attrs: Record<string, string>): string {
   // 与编辑器 mapGravityMain / mapGravityCross 一致
   const gravity = (attrs.gravity ?? '').toLowerCase().trim()
   if (gravity) {
+    const isSpaceBetween =
+      gravity.includes('space_between') || gravity.includes('space-between')
     if (horizontal) {
-      if (gravity.includes('right') || gravity.includes('end')) classes.push('justify-end')
+      if (isSpaceBetween) classes.push('justify-between')
+      else if (gravity.includes('right') || gravity.includes('end')) classes.push('justify-end')
       else if (gravity.includes('left') || gravity.includes('start')) classes.push('justify-start')
       else if (gravity.includes('center_horizontal') || gravity === 'center') {
         classes.push('justify-center')
@@ -584,11 +587,16 @@ function flexClasses(tag: string, attrs: Record<string, string>): string {
 
       if (gravity.includes('bottom')) classes.push('items-end')
       else if (gravity.includes('top')) classes.push('items-start')
-      else if (gravity.includes('center_vertical') || gravity === 'center') {
+      else if (
+        gravity.includes('center_vertical') ||
+        gravity === 'center' ||
+        (isSpaceBetween && gravity.includes('center'))
+      ) {
         classes.push('items-center')
       }
     } else {
-      if (gravity.includes('bottom')) classes.push('justify-end')
+      if (isSpaceBetween) classes.push('justify-between')
+      else if (gravity.includes('bottom')) classes.push('justify-end')
       else if (gravity.includes('top')) classes.push('justify-start')
       else if (gravity.includes('center_vertical') || gravity === 'center') {
         classes.push('justify-center')
@@ -596,7 +604,11 @@ function flexClasses(tag: string, attrs: Record<string, string>): string {
 
       if (gravity.includes('right') || gravity.includes('end')) classes.push('items-end')
       else if (gravity.includes('left') || gravity.includes('start')) classes.push('items-start')
-      else if (gravity.includes('center_horizontal') || gravity === 'center') {
+      else if (
+        gravity.includes('center_horizontal') ||
+        gravity === 'center' ||
+        (isSpaceBetween && gravity.includes('center'))
+      ) {
         classes.push('items-center')
       }
     }

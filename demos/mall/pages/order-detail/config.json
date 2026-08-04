@@ -1,0 +1,13 @@
+{
+  "name": "订单详情",
+  "title": "订单详情",
+  "queryParams": [
+    {
+      "name": "id",
+      "type": "number",
+      "remark": "订单ID",
+      "required": true,
+      "defaultValue": 0
+    }
+  ]
+}

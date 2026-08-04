@@ -1,0 +1,10 @@
+{
+  "name": "订单列表",
+  "title": "订单列表",
+  "statusBar": {
+    "textStyle": "black",
+    "backgroundColor": "#ffffff",
+    "cover": false,
+    "navigationBar": false
+  }
+}

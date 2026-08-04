@@ -1,0 +1,160 @@
+{
+  "fields": [
+    {
+      "name": "currentTab",
+      "type": "string",
+      "remark": "当前选中Tab(null=全部)",
+      "value": null,
+      "binding": ""
+    },
+    {
+      "name": "orders",
+      "type": "array",
+      "remark": "订单数据",
+      "value": [],
+      "binding": "",
+      "itemType": "json"
+    },
+    {
+      "name": "tabItems",
+      "type": "array",
+      "remark": "Tab选项(status数字)",
+      "value": [
+        {
+          "key": null,
+          "label": "全部"
+        },
+        {
+          "key": 0,
+          "label": "待付款"
+        },
+        {
+          "key": 1,
+          "label": "待发货"
+        },
+        {
+          "key": 2,
+          "label": "待收货"
+        },
+        {
+          "key": 3,
+          "label": "已完成"
+        }
+      ],
+      "binding": "",
+      "itemType": "json",
+      "arrayFields": [
+        {
+          "type": "json",
+          "objectFields": [
+            {
+              "name": "key",
+              "type": "string",
+              "value": null
+            },
+            {
+              "name": "label",
+              "type": "string",
+              "value": "全部"
+            }
+          ]
+        },
+        {
+          "type": "json",
+          "objectFields": [
+            {
+              "name": "key",
+              "type": "number",
+              "value": 0
+            },
+            {
+              "name": "label",
+              "type": "string",
+              "value": "待付款"
+            }
+          ]
+        },
+        {
+          "type": "json",
+          "objectFields": [
+            {
+              "name": "key",
+              "type": "number",
+              "value": 1
+            },
+            {
+              "name": "label",
+              "type": "string",
+              "value": "待发货"
+            }
+          ]
+        },
+        {
+          "type": "json",
+          "objectFields": [
+            {
+              "name": "key",
+              "type": "number",
+              "value": 2
+            },
+            {
+              "name": "label",
+              "type": "string",
+              "value": "待收货"
+            }
+          ]
+        },
+        {
+          "type": "json",
+          "objectFields": [
+            {
+              "name": "key",
+              "type": "number",
+              "value": 3
+            },
+            {
+              "name": "label",
+              "type": "string",
+              "value": "已完成"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "orderListLoading",
+      "type": "boolean",
+      "remark": "加载中",
+      "value": false,
+      "binding": ""
+    },
+    {
+      "name": "currentPage",
+      "type": "number",
+      "remark": "当前页码",
+      "value": 1,
+      "binding": ""
+    },
+    {
+      "name": "pageSize",
+      "type": "number",
+      "remark": "每页条数",
+      "value": 10,
+      "binding": ""
+    },
+    {
+      "name": "hasMore",
+      "type": "boolean",
+      "remark": "是否有更多",
+      "value": true,
+      "binding": ""
+    },
+    {
+      "name": "pageRef",
+      "type": "ref",
+      "remark": "",
+      "value": "0:LinearLayout/2:LinearLayout/0:Component",
+      "binding": ""
+    }
+  ]
+}

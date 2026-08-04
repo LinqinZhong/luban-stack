@@ -484,6 +484,14 @@ export function valueToObjectFields(value: Record<string, unknown>): ObjectSubFi
   })
 }
 
+/** undefined 才回落默认值；显式 null 保留 */
+function fieldValueOrDefault(
+  value: DataFieldValue | undefined,
+  type: DataFieldType,
+): DataFieldValue {
+  return value !== undefined ? value : defaultValue(type)
+}
+
 export function resolveObjectSubFieldValue(item: ObjectSubField): DataFieldValue {
   if (item.type === 'array') {
     return (item.arrayFields ?? []).map(resolveArraySubFieldValue)
@@ -491,7 +499,7 @@ export function resolveObjectSubFieldValue(item: ObjectSubField): DataFieldValue
   if (item.type === 'json') {
     return buildObjectValue(item.objectFields ?? [])
   }
-  return item.value ?? defaultValue(item.type)
+  return fieldValueOrDefault(item.value, item.type)
 }
 
 export function resolveArraySubFieldValue(item: ArraySubField): DataFieldValue {
@@ -501,7 +509,7 @@ export function resolveArraySubFieldValue(item: ArraySubField): DataFieldValue {
   if (item.type === 'json') {
     return buildObjectValue(item.objectFields ?? [])
   }
-  return item.value ?? defaultValue(item.type)
+  return fieldValueOrDefault(item.value, item.type)
 }
 
 export function buildObjectValue(items: ObjectSubField[]): Record<string, unknown> {
@@ -517,26 +525,98 @@ export function buildArrayValue(items: ArraySubField[]): unknown[] {
   return items.map(resolveArraySubFieldValue)
 }
 
+/** 保留 arrayFields/objectFields 上的展示类型（icon/color 等），数据以 value 为准 */
+function preserveScalarDisplayType(
+  meta: { type: DataFieldType; typeRef?: string } | undefined,
+  derived: { type: DataFieldType; typeRef?: string; value?: DataFieldValue },
+): { type: DataFieldType; typeRef?: string; value?: DataFieldValue } {
+  if (!meta) return derived
+  const displayTypes: DataFieldType[] = [
+    'icon',
+    'color',
+    'time',
+    'date',
+    'datetime',
+    'resource',
+  ]
+  if (
+    displayTypes.includes(meta.type) &&
+    (derived.type === 'string' || typeof derived.value === 'string')
+  ) {
+    return { type: meta.type, typeRef: meta.typeRef, value: derived.value }
+  }
+  return derived
+}
+
 export function resolveObjectFields(
   fields: ObjectSubField[] | undefined,
   fallbackValue: unknown,
 ): ObjectSubField[] {
-  if (fields?.length) return fields
   if (fallbackValue && typeof fallbackValue === 'object' && !Array.isArray(fallbackValue)) {
-    return valueToObjectFields(fallbackValue as Record<string, unknown>)
+    const fromValue = valueToObjectFields(fallbackValue as Record<string, unknown>)
+    if (!fields?.length) return fromValue
+    const byName = new Map(
+      fields.filter((f) => f.name.trim()).map((f) => [f.name.trim(), f] as const),
+    )
+    return fromValue.map((v) => {
+      const meta = byName.get(v.name.trim())
+      if (v.type === 'json' || v.type === 'array') {
+        return {
+          ...v,
+          typeRef: meta?.type === v.type ? meta.typeRef : v.typeRef,
+          itemType: meta?.type === 'array' ? meta.itemType : v.itemType,
+          itemTypeRef: meta?.type === 'array' ? meta.itemTypeRef : v.itemTypeRef,
+        }
+      }
+      const kept = preserveScalarDisplayType(meta, v)
+      return { name: v.name, ...kept }
+    })
   }
-  return []
+  return fields?.length ? fields : []
 }
 
 export function resolveArrayFields(
   fields: ArraySubField[] | undefined,
   fallbackValue: unknown,
 ): ArraySubField[] {
-  if (fields?.length) return fields
+  // value 与预览同源，为权威数据；arrayFields 仅补充类型元数据
   if (Array.isArray(fallbackValue)) {
-    return valueToArrayFields(fallbackValue)
+    const fromValue = valueToArrayFields(fallbackValue)
+    if (!fields?.length) return fromValue
+    return fromValue.map((v, i) => {
+      const meta = fields[i]
+      if (v.type === 'json') {
+        const metaFields = meta?.type === 'json' ? meta.objectFields : undefined
+        const objectFields = (v.objectFields ?? []).map((of) => {
+          const mf = metaFields?.find((x) => x.name.trim() === of.name.trim())
+          if (of.type === 'json' || of.type === 'array') {
+            return {
+              ...of,
+              typeRef: mf?.type === of.type ? mf.typeRef : of.typeRef,
+            }
+          }
+          const kept = preserveScalarDisplayType(mf, of)
+          return { name: of.name, ...kept }
+        })
+        return {
+          type: 'json' as const,
+          typeRef: meta?.type === 'json' ? meta.typeRef : v.typeRef,
+          objectFields,
+        }
+      }
+      if (v.type === 'array') {
+        return {
+          type: 'array' as const,
+          itemType: meta?.type === 'array' ? meta.itemType : v.itemType,
+          itemTypeRef: meta?.type === 'array' ? meta.itemTypeRef : v.itemTypeRef,
+          arrayFields: v.arrayFields,
+        }
+      }
+      const kept = preserveScalarDisplayType(meta, v)
+      return kept
+    })
   }
-  return []
+  return fields?.length ? fields : []
 }
 
 /** 对象编辑器内部树节点 */
@@ -575,7 +655,7 @@ function arrayFieldsToEditorNodes(fields: ArraySubField[]): ObjectEditorNode[] {
     } else if (item.type === 'array') {
       node.children = arrayFieldsToEditorNodes(item.arrayFields ?? [])
     } else {
-      node.value = item.value ?? defaultValue(item.type)
+      node.value = fieldValueOrDefault(item.value, item.type)
     }
     return node
   })
@@ -594,7 +674,7 @@ export function objectFieldsToEditorNodes(fields: ObjectSubField[]): ObjectEdito
     } else if (item.type === 'array') {
       node.children = arrayFieldsToEditorNodes(item.arrayFields ?? [])
     } else {
-      node.value = item.value ?? defaultValue(item.type)
+      node.value = fieldValueOrDefault(item.value, item.type)
     }
     return node
   })
@@ -624,7 +704,7 @@ function editorNodeToArrayField(node: ObjectEditorNode): ArraySubField {
   return {
     type: node.type,
     typeRef: node.typeRef,
-    value: node.value ?? defaultValue(node.type),
+    value: fieldValueOrDefault(node.value, node.type),
   }
 }
 
@@ -651,7 +731,7 @@ function editorNodeToObjectField(node: ObjectEditorNode): ObjectSubField {
     name: node.name,
     type: node.type,
     typeRef: node.typeRef,
-    value: node.value ?? defaultValue(node.type),
+    value: fieldValueOrDefault(node.value, node.type),
   }
 }
 

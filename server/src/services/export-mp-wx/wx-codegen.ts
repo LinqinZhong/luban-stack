@@ -1270,6 +1270,9 @@ function toWxmlText(raw: string): string {
 function normalizeExpr(expr: string): string {
   // WXML {{}} 统一出口：Number/String/Boolean/Array.isArray → util.*（WXS）
   let e = rewriteWxmlGlobalCalls(expr)
+  // 数据池字段直接挂在 page/component data 上，无 $data 命名空间
+  if (e === '$data') return e
+  if (e.startsWith('$data.')) e = e.slice('$data.'.length)
   if (e === '$props' || e === 'props') return '$props'
   if (e.startsWith('$props.')) return e.slice('$props.'.length)
   if (e.startsWith('props.')) return e.slice('props.'.length)
@@ -1813,8 +1816,13 @@ function flexClasses(attrs: Record<string, string>, reg: ClassRegistry): string[
   const gravity = (attrs.gravity || '').toLowerCase().trim()
   if (!gravity) return classes
 
+  const isSpaceBetween =
+    gravity.includes('space_between') || gravity.includes('space-between')
+
   if (horizontal) {
-    if (gravity.includes('right') || gravity.includes('end')) {
+    if (isSpaceBetween) {
+      classes.push(reg.use('justify-between'))
+    } else if (gravity.includes('right') || gravity.includes('end')) {
       classes.push(reg.use('justify-end'))
     } else if (gravity.includes('left') || gravity.includes('start')) {
       classes.push(reg.use('justify-start'))
@@ -1826,11 +1834,17 @@ function flexClasses(attrs: Record<string, string>, reg: ClassRegistry): string[
       classes.push(reg.use('items-end'))
     } else if (gravity.includes('top')) {
       classes.push(reg.use('items-start'))
-    } else if (gravity.includes('center_vertical') || gravity === 'center') {
+    } else if (
+      gravity.includes('center_vertical') ||
+      gravity === 'center' ||
+      (isSpaceBetween && gravity.includes('center'))
+    ) {
       classes.push(reg.use('items-center'))
     }
   } else {
-    if (gravity.includes('bottom')) {
+    if (isSpaceBetween) {
+      classes.push(reg.use('justify-between'))
+    } else if (gravity.includes('bottom')) {
       classes.push(reg.use('justify-end'))
     } else if (gravity.includes('top')) {
       classes.push(reg.use('justify-start'))
@@ -1842,7 +1856,11 @@ function flexClasses(attrs: Record<string, string>, reg: ClassRegistry): string[
       classes.push(reg.use('items-end'))
     } else if (gravity.includes('left') || gravity.includes('start')) {
       classes.push(reg.use('items-start'))
-    } else if (gravity.includes('center_horizontal') || gravity === 'center') {
+    } else if (
+      gravity.includes('center_horizontal') ||
+      gravity === 'center' ||
+      (isSpaceBetween && gravity.includes('center'))
+    ) {
       classes.push(reg.use('items-center'))
     }
   }

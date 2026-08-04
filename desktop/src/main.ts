@@ -136,6 +136,68 @@ function stopServerProcess(): void {
   }
 }
 
+function attachWindowOpenHandler(win: BrowserWindow): void {
+  win.webContents.setWindowOpenHandler(({ url, features }) => {
+    // 允许同源 AI 助手等弹窗；其它链接拒绝
+    let parsed: URL
+    try {
+      parsed = new URL(url)
+    } catch {
+      return { action: 'deny' }
+    }
+    const current = win.webContents.getURL()
+    let sameOrigin = false
+    try {
+      sameOrigin = new URL(current).origin === parsed.origin
+    } catch {
+      sameOrigin = parsed.protocol === 'http:' || parsed.protocol === 'https:'
+    }
+    if (!sameOrigin) return { action: 'deny' }
+
+    const opts: Electron.BrowserWindowConstructorOptions = {
+      width: 420,
+      height: 720,
+      minWidth: 360,
+      minHeight: 480,
+      show: true,
+      icon: appIconPath(),
+      autoHideMenuBar: true,
+      webPreferences: {
+        preload: path.join(__dirname, 'preload.js'),
+        contextIsolation: true,
+        nodeIntegration: false,
+        sandbox: false,
+      },
+      title: 'AI 助手',
+    }
+
+    // 解析 window.open features（width/height/left/top）
+    if (features) {
+      for (const part of features.split(',')) {
+        const [rawKey, rawVal] = part.split('=')
+        const key = rawKey?.trim()
+        const val = Number(rawVal?.trim())
+        if (!key || !Number.isFinite(val)) continue
+        if (key === 'width') opts.width = val
+        if (key === 'height') opts.height = val
+        if (key === 'left') opts.x = val
+        if (key === 'top') opts.y = val
+      }
+    }
+
+    return {
+      action: 'allow',
+      overrideBrowserWindowOptions: opts,
+      outlivesOpener: true,
+    }
+  })
+
+  win.webContents.on('did-create-window', (child) => {
+    attachWindowOpenHandler(child)
+    child.setMenu(null)
+  })
+}
+
 function createWindow(uiUrl: string): BrowserWindow {
   const win = new BrowserWindow({
     width: 1440,
@@ -153,6 +215,7 @@ function createWindow(uiUrl: string): BrowserWindow {
     title: 'LubanStack',
   })
 
+  attachWindowOpenHandler(win)
   win.once('ready-to-show', () => win.show())
   void win.loadURL(uiUrl)
 

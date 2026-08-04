@@ -1,0 +1,378 @@
+{
+  "id": "order",
+  "types": [
+    {
+      "id": "Order",
+      "name": "Order",
+      "kind": "interface",
+      "remark": "订单实体",
+      "tableName": "order",
+      "category": "entity",
+      "generics": [],
+      "fields": [
+        {
+          "id": "field_msdu37j0_y4n72w",
+          "name": "id",
+          "type": {
+            "intersections": [
+              {
+                "alternatives": [
+                  {
+                    "kind": "string"
+                  }
+                ]
+              }
+            ]
+          },
+          "remark": "主键",
+          "optional": false
+        },
+        {
+          "id": "field_msdu37j0_v1yv98",
+          "name": "order_no",
+          "type": {
+            "intersections": [
+              {
+                "alternatives": [
+                  {
+                    "kind": "string"
+                  }
+                ]
+              }
+            ]
+          },
+          "remark": "订单编号",
+          "optional": false
+        },
+        {
+          "id": "field_msdu37j0_ql6pgm",
+          "name": "user_id",
+          "type": {
+            "intersections": [
+              {
+                "alternatives": [
+                  {
+                    "kind": "string"
+                  }
+                ]
+              }
+            ]
+          },
+          "remark": "用户ID",
+          "optional": false
+        },
+        {
+          "id": "field_msdu37j0_4i4puc",
+          "name": "status",
+          "type": {
+            "intersections": [
+              {
+                "alternatives": [
+                  {
+                    "kind": "string"
+                  }
+                ]
+              }
+            ]
+          },
+          "remark": "0待付款1待发货2待收货3已完成",
+          "optional": false
+        },
+        {
+          "id": "field_msdu37j0_vmmigj",
+          "name": "goods",
+          "type": {
+            "intersections": [
+              {
+                "alternatives": [
+                  {
+                    "kind": "string"
+                  }
+                ]
+              }
+            ]
+          },
+          "remark": "商品明细数组",
+          "optional": false
+        },
+        {
+          "id": "field_msdu37j0_a2ua2w",
+          "name": "total_amount",
+          "type": {
+            "intersections": [
+              {
+                "alternatives": [
+                  {
+                    "kind": "string"
+                  }
+                ]
+              }
+            ]
+          },
+          "remark": "总金额",
+          "optional": false
+        },
+        {
+          "id": "field_msdu37j0_xhh5qi",
+          "name": "payment_amount",
+          "type": {
+            "intersections": [
+              {
+                "alternatives": [
+                  {
+                    "kind": "string"
+                  }
+                ]
+              }
+            ]
+          },
+          "remark": "实付金额",
+          "optional": false
+        },
+        {
+          "id": "field_msdu37j0_zndgt5",
+          "name": "create_time",
+          "type": {
+            "intersections": [
+              {
+                "alternatives": [
+                  {
+                    "kind": "string"
+                  }
+                ]
+              }
+            ]
+          },
+          "remark": "创建时间",
+          "optional": false
+        },
+        {
+          "id": "field_msdu37j0_pkyqqb",
+          "name": "payment_time",
+          "type": {
+            "intersections": [
+              {
+                "alternatives": [
+                  {
+                    "kind": "string"
+                  }
+                ]
+              }
+            ]
+          },
+          "remark": "支付时间",
+          "optional": false
+        }
+      ],
+      "enumMembers": [],
+      "combination": {
+        "intersections": [
+          {
+            "alternatives": [
+              {
+                "kind": "string"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "OrderVo",
+      "name": "OrderVo",
+      "kind": "interface",
+      "remark": "订单返回对象",
+      "tableName": "",
+      "category": "vo",
+      "generics": [],
+      "fields": [
+        {
+          "id": "field_msdu39ul_urvdbk",
+          "name": "id",
+          "type": {
+            "intersections": [
+              {
+                "alternatives": [
+                  {
+                    "kind": "string"
+                  }
+                ]
+              }
+            ]
+          },
+          "remark": "主键",
+          "optional": false
+        },
+        {
+          "id": "field_msdu39ul_5xpctx",
+          "name": "order_no",
+          "type": {
+            "intersections": [
+              {
+                "alternatives": [
+                  {
+                    "kind": "string"
+                  }
+                ]
+              }
+            ]
+          },
+          "remark": "订单编号",
+          "optional": false
+        },
+        {
+          "id": "field_msdu39ul_4vruhw",
+          "name": "user_id",
+          "type": {
+            "intersections": [
+              {
+                "alternatives": [
+                  {
+                    "kind": "string"
+                  }
+                ]
+              }
+            ]
+          },
+          "remark": "用户ID",
+          "optional": false
+        },
+        {
+          "id": "field_msdu39ul_xuwtif",
+          "name": "status",
+          "type": {
+            "intersections": [
+              {
+                "alternatives": [
+                  {
+                    "kind": "string"
+                  }
+                ]
+              }
+            ]
+          },
+          "remark": "状态",
+          "optional": false
+        },
+        {
+          "id": "field_msdu39ul_1a21hr",
+          "name": "statusText",
+          "type": {
+            "intersections": [
+              {
+                "alternatives": [
+                  {
+                    "kind": "string"
+                  }
+                ]
+              }
+            ]
+          },
+          "remark": "状态文本",
+          "optional": false
+        },
+        {
+          "id": "field_msdu39ul_3gc5iu",
+          "name": "goods",
+          "type": {
+            "intersections": [
+              {
+                "alternatives": [
+                  {
+                    "kind": "array",
+                    "item": {
+                      "kind": "named",
+                      "ref": "type_mrnx6ke8_4d7vry"
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          "remark": "商品明细",
+          "optional": false
+        },
+        {
+          "id": "field_msdu39ul_e409ns",
+          "name": "total_amount",
+          "type": {
+            "intersections": [
+              {
+                "alternatives": [
+                  {
+                    "kind": "string"
+                  }
+                ]
+              }
+            ]
+          },
+          "remark": "总金额",
+          "optional": false
+        },
+        {
+          "id": "field_msdu39ul_vc1c0d",
+          "name": "payment_amount",
+          "type": {
+            "intersections": [
+              {
+                "alternatives": [
+                  {
+                    "kind": "string"
+                  }
+                ]
+              }
+            ]
+          },
+          "remark": "实付金额",
+          "optional": false
+        },
+        {
+          "id": "field_msdu39ul_6gfm9u",
+          "name": "create_time",
+          "type": {
+            "intersections": [
+              {
+                "alternatives": [
+                  {
+                    "kind": "string"
+                  }
+                ]
+              }
+            ]
+          },
+          "remark": "创建时间",
+          "optional": false
+        },
+        {
+          "id": "field_msdu39ul_e61xof",
+          "name": "payment_time",
+          "type": {
+            "intersections": [
+              {
+                "alternatives": [
+                  {
+                    "kind": "string"
+                  }
+                ]
+              }
+            ]
+          },
+          "remark": "支付时间",
+          "optional": false
+        }
+      ],
+      "enumMembers": [],
+      "combination": {
+        "intersections": [
+          {
+            "alternatives": [
+              {
+                "kind": "string"
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,165 @@
+{
+  "id": "OrderBiz",
+  "name": "订单业务",
+  "remark": "订单业务逻辑",
+  "entityRef": "",
+  "dataProcessorRef": "",
+  "methods": [
+    {
+      "id": "list",
+      "name": "list",
+      "remark": "分页查询订单列表(含statusText)",
+      "scope": "public",
+      "params": [
+        {
+          "id": "param_status",
+          "name": "status",
+          "remark": "状态筛选",
+          "typeExpr": {
+            "type": "number",
+            "typeRef": "",
+            "itemType": "",
+            "itemTypeRef": "",
+            "itemItemType": "",
+            "itemItemTypeRef": "",
+            "keyType": "",
+            "genericArgs": {}
+          },
+          "required": false
+        },
+        {
+          "id": "param_page",
+          "name": "page",
+          "remark": "分页",
+          "typeExpr": {
+            "type": "json",
+            "typeRef": "type_common_QueryPageDto",
+            "itemType": "",
+            "itemTypeRef": "",
+            "itemItemType": "",
+            "itemItemTypeRef": "",
+            "keyType": "",
+            "genericArgs": {}
+          },
+          "required": true
+        }
+      ],
+      "output": {
+        "type": "json",
+        "typeRef": "type_common_QueryPageVo",
+        "itemType": "",
+        "itemTypeRef": "",
+        "itemItemType": "",
+        "itemItemTypeRef": "",
+        "keyType": "",
+        "genericArgs": {
+          "T": "OrderVo"
+        }
+      },
+      "dataConfig": {
+        "source": "mysql",
+        "operation": "query",
+        "queryFields": [],
+        "sql": "",
+        "fieldMappings": [],
+        "batchSourceParam": "",
+        "pageParam": "",
+        "conditionGroups": []
+      },
+      "debugParams": {
+        "page": {
+          "current": 1,
+          "pageSize": 10
+        }
+      },
+      "flow": {
+        "nodes": [
+          {
+            "id": "start",
+            "kind": "start",
+            "position": {
+              "x": 280,
+              "y": 40
+            },
+            "data": {}
+          },
+          {
+            "id": "input_page",
+            "kind": "input",
+            "position": {
+              "x": 240,
+              "y": 130
+            },
+            "data": {
+              "serviceId": "svc_mrqdgnhb_3ktq2g",
+              "dataSource": "data",
+              "dataProcessorId": "OrderData",
+              "dataMethodId": "page",
+              "varName": "records",
+              "methodLabel": "OrderData.page",
+              "paramBindings": {
+                "status": "status",
+                "page": "page"
+              },
+              "outputTypeExpr": {
+                "type": "array",
+                "itemType": "json",
+                "itemTypeRef": "Order"
+              }
+            }
+          },
+          {
+            "id": "input_count",
+            "kind": "input",
+            "position": {
+              "x": 240,
+              "y": 230
+            },
+            "data": {
+              "serviceId": "svc_mrqdgnhb_3ktq2g",
+              "dataSource": "data",
+              "dataProcessorId": "OrderData",
+              "dataMethodId": "count",
+              "varName": "total",
+              "methodLabel": "OrderData.count",
+              "paramBindings": {
+                "status": "status"
+              },
+              "outputTypeExpr": {
+                "type": "number"
+              }
+            }
+          },
+          {
+            "id": "end",
+            "kind": "end",
+            "position": {
+              "x": 280,
+              "y": 330
+            },
+            "data": {
+              "returnExpr": "{\n  records: records,\n  total: total,\n  current: page.current || 1,\n  pageSize: page.pageSize || 10,\n  hasNext: (page.current || 1) * (page.pageSize || 10) < Number(total || 0)\n}"
+            }
+          }
+        ],
+        "edges": [
+          {
+            "id": "e1",
+            "source": "start",
+            "target": "input_page"
+          },
+          {
+            "id": "e2",
+            "source": "input_page",
+            "target": "input_count"
+          },
+          {
+            "id": "e3",
+            "source": "input_count",
+            "target": "end"
+          }
+        ]
+      }
+    }
+  ]
+}

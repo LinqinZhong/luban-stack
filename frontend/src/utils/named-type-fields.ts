@@ -152,7 +152,10 @@ export function objectFieldsFromTypeRef(
         return {
           name,
           type: resolved.type,
-          value: pickExistingValue(prev, resolved.type) ?? defaultValue(resolved.type),
+          value: (() => {
+            const v = pickExistingValue(prev, resolved.type)
+            return v !== undefined ? v : defaultValue(resolved.type)
+          })(),
         }
       }
 
@@ -183,7 +186,10 @@ export function objectFieldsFromTypeRef(
       return {
         name,
         type: mapped.type,
-        value: pickExistingValue(prev, mapped.type) ?? defaultValue(mapped.type),
+        value: (() => {
+          const v = pickExistingValue(prev, mapped.type)
+          return v !== undefined ? v : defaultValue(mapped.type)
+        })(),
       }
     })
 }

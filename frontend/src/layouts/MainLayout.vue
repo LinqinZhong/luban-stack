@@ -1,15 +1,18 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { SwitchButton } from '@element-plus/icons-vue'
+import { ChatDotRound, SwitchButton } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { useProjectStore } from '../stores/project'
+import { useWorkspaceSettingsStore } from '../stores/workspace-settings'
+import { useAiAssistantStore } from '../stores/ai-assistant'
 import {
   buildProject,
   getBuildSchemes,
   type BuildScheme,
 } from '../api/projects'
 import WorkspaceSettingsButton from '../components/editor/WorkspaceSettingsButton.vue'
+import AiAssistantPanel from '../components/editor/AiAssistantPanel.vue'
 import BuildSchemeDialog from '../components/editor/BuildSchemeDialog.vue'
 import BuildSchemeIcon from '../components/icons/BuildSchemeIcon.vue'
 import HammerIcon from '../components/icons/HammerIcon.vue'
@@ -28,7 +31,18 @@ type BuildTarget = {
 
 const router = useRouter()
 const projectStore = useProjectStore()
+const workspaceSettings = useWorkspaceSettingsStore()
+const aiAssistant = useAiAssistantStore()
+const showAiButton = computed(() => workspaceSettings.aiAssistantEnabled)
+const aiPanelVisible = computed({
+  get: () => aiAssistant.panelOpen,
+  set: (open: boolean) => aiAssistant.setPanelOpen(open),
+})
 const building = ref(false)
+
+watch(showAiButton, (enabled) => {
+  if (!enabled) aiAssistant.setPanelOpen(false)
+})
 const buildingKey = ref('')
 const buildingLabel = ref('')
 const schemeDialogVisible = ref(false)
@@ -190,7 +204,19 @@ function onDialogClosed() {
         <span class="title">{{ pageTitle }}</span>
       </div>
       <div class="header-actions">
-        <WorkspaceSettingsButton ref="settingsButtonRef" />
+        <el-tooltip
+          v-if="showAiButton"
+          content="AI助手"
+          placement="bottom"
+          :enterable="false"
+        >
+          <el-button
+            class="header-icon-btn"
+            :icon="ChatDotRound"
+            @click="aiAssistant.togglePanel()"
+          />
+        </el-tooltip>
+        <WorkspaceSettingsButton />
         <el-tooltip content="配置构建方案" placement="bottom" :enterable="false">
           <el-button
             class="header-icon-btn"
@@ -222,6 +248,8 @@ function onDialogClosed() {
     <main class="main">
       <router-view />
     </main>
+
+    <AiAssistantPanel v-model="aiPanelVisible" />
 
     <BuildSchemeDialog
       v-if="projectStore.path"

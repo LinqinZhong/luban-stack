@@ -1,0 +1,111 @@
+{
+  "name": "order",
+  "remark": "订单表",
+  "columns": [
+    {
+      "name": "id",
+      "type": "bigint",
+      "nullable": false,
+      "primaryKey": true,
+      "autoIncrement": true,
+      "defaultValue": "",
+      "comment": "主键"
+    },
+    {
+      "name": "order_no",
+      "type": "varchar(32)",
+      "nullable": false,
+      "primaryKey": false,
+      "autoIncrement": false,
+      "defaultValue": "",
+      "comment": "订单编号"
+    },
+    {
+      "name": "user_id",
+      "type": "bigint",
+      "nullable": false,
+      "primaryKey": false,
+      "autoIncrement": false,
+      "defaultValue": "",
+      "comment": "用户ID"
+    },
+    {
+      "name": "status",
+      "type": "tinyint",
+      "nullable": false,
+      "primaryKey": false,
+      "autoIncrement": false,
+      "defaultValue": "0",
+      "comment": "状态0待付款1待发货2待收货3已完成"
+    },
+    {
+      "name": "goods",
+      "type": "json",
+      "nullable": true,
+      "primaryKey": false,
+      "autoIncrement": false,
+      "defaultValue": "",
+      "comment": "商品明细JSON"
+    },
+    {
+      "name": "total_amount",
+      "type": "decimal(10,2)",
+      "nullable": false,
+      "primaryKey": false,
+      "autoIncrement": false,
+      "defaultValue": "0.00",
+      "comment": "总金额"
+    },
+    {
+      "name": "payment_amount",
+      "type": "decimal(10,2)",
+      "nullable": false,
+      "primaryKey": false,
+      "autoIncrement": false,
+      "defaultValue": "0.00",
+      "comment": "实付金额"
+    },
+    {
+      "name": "create_time",
+      "type": "datetime",
+      "nullable": true,
+      "primaryKey": false,
+      "autoIncrement": false,
+      "defaultValue": "",
+      "comment": "创建时间"
+    },
+    {
+      "name": "payment_time",
+      "type": "datetime",
+      "nullable": true,
+      "primaryKey": false,
+      "autoIncrement": false,
+      "defaultValue": "",
+      "comment": "支付时间"
+    }
+  ],
+  "indexes": [
+    {
+      "name": "uk_order_no",
+      "columns": [
+        "order_no"
+      ],
+      "remark": "订单编号唯一"
+    },
+    {
+      "name": "idx_user_id",
+      "columns": [
+        "user_id"
+      ],
+      "remark": "用户ID"
+    },
+    {
+      "name": "idx_status",
+      "columns": [
+        "status"
+      ],
+      "remark": "状态"
+    }
+  ],
+  "syncedAt": 1785798106659
+}

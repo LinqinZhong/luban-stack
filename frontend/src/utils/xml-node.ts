@@ -928,6 +928,7 @@ export const GRAVITY_OPTIONS = [
   { label: 'bottom', value: 'bottom' },
   { label: 'center_horizontal', value: 'center_horizontal' },
   { label: 'center_vertical', value: 'center_vertical' },
+  { label: '两边对齐/居中', value: 'space_between center' },
 ] as const
 
 export const RELATIVE_BOOL_ATTRS = [

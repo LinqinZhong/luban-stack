@@ -257,6 +257,12 @@ function handleTypeChange(payload: TypeSelectPayload) {
   }
   const node = selectedNode.value
   if (!node) return
+  if (payload.isNull) {
+    // 保留原类型便于再改回；值置 null
+    node.value = null
+    node.children = []
+    return
+  }
   node.type = payload.type
   node.typeRef = payload.typeRef
   node.value = defaultValue(payload.type)
@@ -384,12 +390,16 @@ function handleSave() {
             :library="typeLibrary"
             :composable="selectedNode.isArrayItem"
             :nested="!selectedNode.isArrayItem"
+            allow-null
+            :null-selected="selectedNode.value === null"
             @change="handleTypeChange"
           />
         </div>
         <div v-else class="field-row">
           <label>数据类型</label>
-          <span class="readonly-text">{{ typeLabel(selectedNode.type) }}</span>
+          <span class="readonly-text">{{
+            selectedNode.value === null ? 'NULL' : typeLabel(selectedNode.type)
+          }}</span>
         </div>
 
         <el-alert
@@ -401,8 +411,12 @@ function handleSave() {
           class="legacy-alert"
         />
 
+        <div v-if="selectedNode.value === null" class="field-row">
+          <label>数据值</label>
+          <span class="null-value-hint">null</span>
+        </div>
         <div
-          v-if="selectedNode.type === 'string' || selectedNode.type === 'any'"
+          v-else-if="selectedNode.type === 'string' || selectedNode.type === 'any'"
           class="field-row"
         >
           <label>数据值</label>
@@ -557,6 +571,12 @@ function handleSave() {
 .readonly-text {
   font-size: 13px;
   color: #334155;
+}
+
+.null-value-hint {
+  font-size: 13px;
+  color: #94a3b8;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
 
 .editor-layout {

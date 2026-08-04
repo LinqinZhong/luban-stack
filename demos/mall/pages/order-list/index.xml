@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?><LinearLayout orientation="vertical" width="match_parent" height="match_parent" background="#f5f5f5">
+  <Component componentId="TitleBar" width="match_parent" height="wrap_content" name="订单列表标题栏" title="订单列表" showBack="true" background="#ffffff" color="#000000"/>
+  <Component componentId="TabBar" width="match_parent" height="wrap_content" name="订单Tab栏" items="{tabItems}" value="{currentTab}" activeColor="#e6a23c" inactiveColor="#606266" background="#ffffff" change="[{&quot;id&quot;:&quot;bind_order_tab_change&quot;,&quot;method&quot;:&quot;__custom__&quot;,&quot;args&quot;:{},&quot;body&quot;:&quot;setData('currentTab', value)\npageRef.reset()&quot;}]"/>
+  <LinearLayout orientation="vertical" width="match_parent" height="match_parent" padding="8" weight="1">
+    
+  <Component componentId="Pager" width="match_parent" height="wrap_content" name="订单分页器" fetchApi="{&quot;serviceId&quot;:&quot;svc_mrqdgnhb_3ktq2g&quot;,&quot;controllerId&quot;:&quot;OrderController&quot;,&quot;apiId&quot;:&quot;list&quot;,&quot;paramBindings&quot;:{&quot;status&quot;:{&quot;source&quot;:&quot;binding&quot;,&quot;binding&quot;:&quot;currentTab&quot;}}}" data="{orders}" loading="{orderListLoading}"><Component componentId="OrderCard" width="match_parent" height="wrap_content" slot="default" name="订单卡片" marginBottom="12" order="{item}" repeat="orders"/></Component></LinearLayout>
+</LinearLayout>

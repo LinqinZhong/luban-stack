@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, reactive, ref } from 'vue'
 import { Delete, EditPen, Setting } from '@element-plus/icons-vue'
 import ArrayFieldsDialog from './ArrayFieldsDialog.vue'
 import ComputedBindingDialog from './ComputedBindingDialog.vue'
@@ -206,6 +206,39 @@ function updateField(index: number, patch: Partial<DataField>) {
   fields.value = next
 }
 
+/** 无数据源时：不勾选 = value 为 null；勾选时暂存以便恢复 */
+const unboundValueStash = reactive<Record<string, unknown>>({})
+
+function unboundValueStashKey(index: number): string {
+  const name = fields.value[index]?.name?.trim()
+  return name ? `n:${name}` : `i:${index}`
+}
+
+function hasUnboundValue(row: DataField): boolean {
+  return !row.binding && row.value !== null
+}
+
+function setUnboundValueEnabled(index: number, enabled: boolean) {
+  const row = fields.value[index]
+  if (!row || row.binding) return
+  const key = unboundValueStashKey(index)
+  if (enabled) {
+    const restored = unboundValueStash[key]
+    updateField(index, {
+      value:
+        restored !== undefined
+          ? (restored as DataField['value'])
+          : defaultValue(row.type),
+    })
+    delete unboundValueStash[key]
+  } else {
+    if (row.value !== null) {
+      unboundValueStash[key] = row.value
+    }
+    updateField(index, { value: null })
+  }
+}
+
 function handleTypeChange(index: number, payload: TypeSelectPayload) {
   if (payload.cleared || payload.type === 'void' || payload.type === 'generic') return
   const type = payload.type
@@ -243,7 +276,7 @@ function handleTypeChange(index: number, payload: TypeSelectPayload) {
       type === 'array' && itemType === 'array' ? itemItemType || 'string' : undefined,
     itemItemTypeRef:
       type === 'array' && itemType === 'array' ? itemItemTypeRef : undefined,
-    value: defaultValue(type),
+    value: prev?.value === null ? null : defaultValue(type),
     arrayFields: undefined,
     objectFields: undefined,
     ...(type === 'ref'
@@ -284,6 +317,8 @@ function addField() {
 defineExpose({ addField })
 
 function removeField(index: number) {
+  const key = unboundValueStashKey(index)
+  delete unboundValueStash[key]
   fields.value = fields.value.filter((_, i) => i !== index)
 }
 
@@ -582,7 +617,7 @@ function saveOssBinding(config: OssBindingConfig) {
           </template>
         </el-table-column>
 
-        <el-table-column label="值" min-width="180">
+        <el-table-column label="值" min-width="220">
           <template #default="{ row, $index }">
             <div v-if="row.binding === 'computed'" class="complex-value">
               <span class="value-preview">计算 · {{ computedValueSummary(row) }}</span>
@@ -621,99 +656,111 @@ function saveOssBinding(config: OssBindingConfig) {
                 选择
               </el-button>
             </div>
-            <div v-else-if="row.type === 'resource'" class="resource-value">
+            <div v-else class="value-cell">
+              <el-checkbox
+                :model-value="hasUnboundValue(row)"
+                title="勾选=有值；不勾选=null"
+                @update:model-value="setUnboundValueEnabled($index, $event === true)"
+              />
+              <span v-if="!hasUnboundValue(row)" class="null-hint">null</span>
+              <div v-else-if="row.type === 'resource'" class="resource-value">
+                <el-input
+                  :model-value="colorSafeString(row.value)"
+                  placeholder="资源外链 URI"
+                  @update:model-value="updateField($index, { value: $event })"
+                />
+                <el-button
+                  type="primary"
+                  link
+                  @click="openOssPicker($index)"
+                >
+                  对象存储
+                </el-button>
+              </div>
               <el-input
-                :model-value="colorSafeString(row.value)"
-                placeholder="资源外链 URI"
+                v-else-if="row.type === 'string'"
+                :model-value="String(row.value ?? '')"
+                placeholder="值"
                 @update:model-value="updateField($index, { value: $event })"
               />
-              <el-button
-                type="primary"
-                link
-                @click="openOssPicker($index)"
+              <el-input-number
+                v-else-if="row.type === 'number'"
+                :model-value="Number(row.value ?? 0)"
+                controls-position="right"
+                @update:model-value="updateField($index, { value: Number($event ?? 0) })"
+              />
+              <el-select
+                v-else-if="row.type === 'boolean'"
+                :model-value="row.value === true"
+                style="width: 100%"
+                @update:model-value="updateField($index, { value: $event === true })"
               >
-                对象存储
-              </el-button>
+                <el-option label="true" :value="true" />
+                <el-option label="false" :value="false" />
+              </el-select>
+              <DateTimeValueInput
+                v-else-if="row.type === 'time' || row.type === 'date' || row.type === 'datetime'"
+                :kind="row.type"
+                size="default"
+                :model-value="colorSafeString(row.value)"
+                @update:model-value="updateField($index, { value: $event })"
+              />
+              <IconValueSelect
+                v-else-if="row.type === 'icon'"
+                :model-value="colorSafeString(row.value)"
+                :options="iconOptions"
+                @update:model-value="updateField($index, { value: $event })"
+              />
+              <ColorPicker
+                v-else-if="row.type === 'color'"
+                :model-value="colorSafeString(row.value)"
+                placeholder="#409eff / rgba(...)"
+                @update:model-value="updateField($index, { value: $event })"
+              />
+              <el-tree-select
+                v-else-if="row.type === 'ref'"
+                :model-value="colorSafeString(row.value) || undefined"
+                :data="widgetRefOptions"
+                filterable
+                clearable
+                check-strictly
+                default-expand-all
+                :render-after-expand="false"
+                placeholder="选择控件节点"
+                style="width: 100%"
+                @update:model-value="
+                  updateField($index, { value: $event == null ? '' : String($event) })
+                "
+              />
+              <div v-else-if="row.type === 'json'" class="complex-value">
+                <span class="value-preview">{{ objectFieldCount(row) }} 个字段</span>
+                <el-button
+                  type="primary"
+                  link
+                  :icon="EditPen"
+                  @click="openObjectEditor($index)"
+                >
+                  编辑
+                </el-button>
+              </div>
+              <div v-else-if="row.type === 'array'" class="complex-value">
+                <span class="value-preview">{{ arrayItemCount(row) }} 项</span>
+                <el-button
+                  type="primary"
+                  link
+                  :icon="EditPen"
+                  @click="openArrayEditor($index)"
+                >
+                  编辑
+                </el-button>
+              </div>
+              <el-input
+                v-else
+                :model-value="colorSafeString(row.value)"
+                placeholder="值"
+                @update:model-value="updateField($index, { value: $event })"
+              />
             </div>
-            <el-input
-              v-else-if="row.type === 'string'"
-              :model-value="String(row.value ?? '')"
-              placeholder="值"
-              @update:model-value="updateField($index, { value: $event })"
-            />
-            <el-input-number
-              v-else-if="row.type === 'number'"
-              :model-value="Number(row.value ?? 0)"
-              controls-position="right"
-              @update:model-value="updateField($index, { value: Number($event ?? 0) })"
-            />
-            <el-switch
-              v-else-if="row.type === 'boolean'"
-              :model-value="Boolean(row.value)"
-              @update:model-value="updateField($index, { value: $event })"
-            />
-            <DateTimeValueInput
-              v-else-if="row.type === 'time' || row.type === 'date' || row.type === 'datetime'"
-              :kind="row.type"
-              size="default"
-              :model-value="colorSafeString(row.value)"
-              @update:model-value="updateField($index, { value: $event })"
-            />
-            <IconValueSelect
-              v-else-if="row.type === 'icon'"
-              :model-value="colorSafeString(row.value)"
-              :options="iconOptions"
-              @update:model-value="updateField($index, { value: $event })"
-            />
-            <ColorPicker
-              v-else-if="row.type === 'color'"
-              :model-value="colorSafeString(row.value)"
-              placeholder="#409eff / rgba(...)"
-              @update:model-value="updateField($index, { value: $event })"
-            />
-            <el-tree-select
-              v-else-if="row.type === 'ref'"
-              :model-value="colorSafeString(row.value) || undefined"
-              :data="widgetRefOptions"
-              filterable
-              clearable
-              check-strictly
-              default-expand-all
-              :render-after-expand="false"
-              placeholder="选择控件节点"
-              style="width: 100%"
-              @update:model-value="
-                updateField($index, { value: $event == null ? '' : String($event) })
-              "
-            />
-            <div v-else-if="row.type === 'json'" class="complex-value">
-              <span class="value-preview">{{ objectFieldCount(row) }} 个字段</span>
-              <el-button
-                type="primary"
-                link
-                :icon="EditPen"
-                @click="openObjectEditor($index)"
-              >
-                编辑
-              </el-button>
-            </div>
-            <div v-else-if="row.type === 'array'" class="complex-value">
-              <span class="value-preview">{{ arrayItemCount(row) }} 项</span>
-              <el-button
-                type="primary"
-                link
-                :icon="EditPen"
-                @click="openArrayEditor($index)"
-              >
-                编辑
-              </el-button>
-            </div>
-            <el-input
-              v-else
-              :model-value="colorSafeString(row.value)"
-              placeholder="值"
-              @update:model-value="updateField($index, { value: $event })"
-            />
           </template>
         </el-table-column>
 
@@ -829,6 +876,25 @@ function saveOssBinding(config: OssBindingConfig) {
 .type-generic-btn {
   flex-shrink: 0;
   padding: 0 2px;
+}
+
+.value-cell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  width: 100%;
+}
+
+.value-cell > :not(.el-checkbox):not(.null-hint) {
+  flex: 1;
+  min-width: 0;
+}
+
+.null-hint {
+  font-size: 13px;
+  color: #94a3b8;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
 
 .complex-value {

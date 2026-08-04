@@ -1,0 +1,214 @@
+{
+  "id": "OrderController",
+  "name": "订单",
+  "path": "/order",
+  "remark": "订单接口",
+  "apis": [
+    {
+      "id": "list",
+      "name": "订单列表",
+      "path": "/list",
+      "remark": "分页查询订单",
+      "method": "GET",
+      "inputs": [
+        {
+          "id": "ain_status",
+          "varName": "status",
+          "location": "query",
+          "type": "number",
+          "typeRef": "",
+          "genericArgs": {},
+          "required": false,
+          "remark": "状态筛选"
+        },
+        {
+          "id": "ain_page",
+          "varName": "page",
+          "location": "query",
+          "type": "json",
+          "typeRef": "type_common_QueryPageDto",
+          "genericArgs": {},
+          "required": true,
+          "remark": "分页参数"
+        }
+      ],
+      "output": {
+        "type": "json",
+        "typeRef": "type_common_QueryPageVo",
+        "itemType": "",
+        "itemTypeRef": "",
+        "itemItemType": "",
+        "itemItemTypeRef": "",
+        "keyType": "",
+        "genericArgs": {
+          "T": "OrderVo"
+        }
+      },
+      "requireAuth": false,
+      "scope": "public",
+      "debugParams": {
+        "status": null,
+        "page": {
+          "current": 1,
+          "pageSize": 10
+        }
+      },
+      "flow": {
+        "nodes": [
+          {
+            "id": "start",
+            "kind": "start",
+            "position": {
+              "x": 280,
+              "y": 40
+            },
+            "data": {}
+          },
+          {
+            "id": "input_biz",
+            "kind": "input",
+            "position": {
+              "x": 240,
+              "y": 150
+            },
+            "data": {
+              "serviceId": "svc_mrqdgnhb_3ktq2g",
+              "dataSource": "business",
+              "dataProcessorId": "OrderBiz",
+              "dataMethodId": "list",
+              "varName": "result",
+              "methodLabel": "OrderBiz.list",
+              "paramBindings": {
+                "status": "status",
+                "page": "page"
+              },
+              "outputTypeExpr": {
+                "type": "json",
+                "typeRef": "type_common_QueryPageVo",
+                "genericArgs": {
+                  "T": "OrderVo"
+                }
+              }
+            }
+          },
+          {
+            "id": "end",
+            "kind": "end",
+            "position": {
+              "x": 280,
+              "y": 270
+            },
+            "data": {
+              "returnExpr": "result"
+            }
+          }
+        ],
+        "edges": [
+          {
+            "id": "e1",
+            "source": "start",
+            "target": "input_biz"
+          },
+          {
+            "id": "e2",
+            "source": "input_biz",
+            "target": "end"
+          }
+        ]
+      }
+    },
+    {
+      "id": "detail",
+      "name": "订单详情",
+      "path": "/detail",
+      "remark": "查询单个订单",
+      "method": "GET",
+      "inputs": [
+        {
+          "id": "ain_id",
+          "varName": "id",
+          "location": "query",
+          "type": "number",
+          "typeRef": "",
+          "genericArgs": {},
+          "required": true,
+          "remark": "订单ID"
+        }
+      ],
+      "output": {
+        "type": "json",
+        "typeRef": "OrderVo",
+        "itemType": "",
+        "itemTypeRef": "",
+        "itemItemType": "",
+        "itemItemTypeRef": "",
+        "keyType": "",
+        "genericArgs": {}
+      },
+      "requireAuth": false,
+      "scope": "public",
+      "debugParams": {
+        "id": 2
+      },
+      "flow": {
+        "nodes": [
+          {
+            "id": "start",
+            "kind": "start",
+            "position": {
+              "x": 280,
+              "y": 40
+            },
+            "data": {}
+          },
+          {
+            "id": "input_data",
+            "kind": "input",
+            "position": {
+              "x": 240,
+              "y": 150
+            },
+            "data": {
+              "serviceId": "svc_mrqdgnhb_3ktq2g",
+              "dataSource": "data",
+              "dataProcessorId": "OrderData",
+              "dataMethodId": "findById",
+              "varName": "order",
+              "methodLabel": "OrderData.findById",
+              "paramBindings": {
+                "id": "id"
+              },
+              "outputTypeExpr": {
+                "type": "json",
+                "typeRef": "Order"
+              }
+            }
+          },
+          {
+            "id": "end",
+            "kind": "end",
+            "position": {
+              "x": 280,
+              "y": 270
+            },
+            "data": {
+              "returnExpr": "order"
+            }
+          }
+        ],
+        "edges": [
+          {
+            "id": "e1",
+            "source": "start",
+            "target": "input_data"
+          },
+          {
+            "id": "e2",
+            "source": "input_data",
+            "target": "end"
+          }
+        ]
+      }
+    }
+  ]
+}

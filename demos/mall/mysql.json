@@ -29,7 +29,7 @@
           "name": "goods_remark",
           "remark": "商品评价",
           "engine": "InnoDB",
-          "rows": 0
+          "rows": 13
         },
         {
           "name": "user",
@@ -38,7 +38,7 @@
           "rows": 0
         }
       ],
-      "lastTestedAt": 1785402227066
+      "lastTestedAt": 1785797787461
     }
   ]
 }

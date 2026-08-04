@@ -111,20 +111,6 @@ const emit = defineEmits<{
   contextmenu: [payload: { nodeId: string; x: number; y: number }]
 }>()
 
-function handleWidgetContextMenu(event: MouseEvent) {
-  if (!props.selectable) return
-  const target = event.target
-  if (!(target instanceof Element)) return
-  const host = target.closest('[data-widget-node-id]')
-  if (!(host instanceof HTMLElement)) return
-  const nodeId = host.dataset.widgetNodeId?.trim()
-  if (!nodeId) return
-  event.preventDefault()
-  event.stopPropagation()
-  emit('select', nodeId)
-  emit('contextmenu', { nodeId, x: event.clientX, y: event.clientY })
-}
-
 const fallbackModalStack = createModalStack()
 const modalHostRef = ref<HTMLElement | null>(null)
 const badgeHostRef = ref<HTMLElement | null>(null)
@@ -686,6 +672,25 @@ function handleHover(id: string) {
 
 function clearHover() {
   hoveredNodeId.value = ''
+}
+
+function handleWidgetContextMenu(event: MouseEvent) {
+  if (!props.selectable) return
+  const target = event.target
+  if (!(target instanceof Element)) return
+  const host = target.closest('[data-widget-node-id]')
+  if (!(host instanceof HTMLElement)) return
+  if (!host.dataset.widgetNodeId?.trim()) return
+  // 悬停红框节点：右键切换选中并打开其菜单；否则保持当前选中，只打开菜单
+  const hovered = hoveredNodeId.value.trim()
+  const nodeId = hovered || props.selectedId?.trim()
+  if (!nodeId) return
+  event.preventDefault()
+  event.stopPropagation()
+  if (hovered && hovered !== props.selectedId) {
+    emit('select', hovered)
+  }
+  emit('contextmenu', { nodeId, x: event.clientX, y: event.clientY })
 }
 
 function handlePhoneClick(event: MouseEvent) {

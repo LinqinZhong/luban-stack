@@ -23,7 +23,11 @@ export type TypeSelectPayload = {
   keyType?: MapKeyType
   /** clearable + emptyOnClear ???? true */
   cleared?: boolean
+  /** 选中顶部 NULL：字段值应为 null */
+  isNull?: boolean
 }
+
+const NULL_OPTION_VALUE = '__null__'
 
 interface CascaderNode {
   value: string
@@ -53,6 +57,10 @@ const props = withDefaults(
     allowNamed?: boolean
     /** ???? void??????? */
     allowVoid?: boolean
+    /** 顶部增加 NULL（对象字段值可为空） */
+    allowNull?: boolean
+    /** 当前值为 null 时选中 NULL */
+    nullSelected?: boolean
     /** ??????????????????????????? any? */
     allowAny?: boolean
     /** ????? cleared: true???????? */
@@ -72,6 +80,8 @@ const props = withDefaults(
     allowRef: false,
     allowNamed: true,
     allowVoid: false,
+    allowNull: false,
+    nullSelected: false,
     allowAny: false,
     emptyOnClear: false,
     empty: false,
@@ -193,10 +203,14 @@ function buildCascaderOptions(arrayDepth: number, forArrayElement = false): Casc
 
 const options = computed(() => {
   const nodes = buildCascaderOptions(2, false)
-  if (props.allowVoid) {
-    return [{ value: 'void', label: 'void' }, ...nodes]
+  const head: CascaderNode[] = []
+  if (props.allowNull) {
+    head.push({ value: NULL_OPTION_VALUE, label: 'NULL' })
   }
-  return nodes
+  if (props.allowVoid) {
+    head.push({ value: 'void', label: 'void' })
+  }
+  return head.length ? [...head, ...nodes] : nodes
 })
 
 function findNamedPath(typeRef: string): string[] {
@@ -238,6 +252,7 @@ function encodeValuePath(): string[] {
 }
 
 const cascaderValue = computed<string[]>(() => {
+  if (props.nullSelected && props.allowNull) return [NULL_OPTION_VALUE]
   if (props.type === 'map') {
     if (props.mapLeaf) return ['map']
     const key: MapKeyType = props.keyType === 'number' ? 'number' : 'string'
@@ -313,6 +328,9 @@ function decodeValuePath(path: string[]): Pick<
 
 function decodePath(path: string[]): TypeSelectPayload {
   if (!path.length) return { type: 'string' }
+  if (path[0] === NULL_OPTION_VALUE) {
+    return { type: 'string', isNull: true }
+  }
   if (path[0] === 'map') {
     // ????????????/?????? ??? ? ???
     if (path.length === 1 || props.mapLeaf) {

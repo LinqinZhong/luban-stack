@@ -317,6 +317,11 @@ export async function createProject(options: {
     await writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`, 'utf-8')
     await mkdir(path.join(projectPath, 'pages'), { recursive: true })
     await mkdir(path.join(projectPath, 'components'), { recursive: true })
+    await writeFile(
+      path.join(projectPath, '.gitignore'),
+      '.lubanstack/ai-assistant-log/\n',
+      'utf-8',
+    )
     await ensureIconLibraryFile(projectPath)
     await ensureColorPaletteFile(projectPath)
     await ensureDataTypeLibraryFile(projectPath)

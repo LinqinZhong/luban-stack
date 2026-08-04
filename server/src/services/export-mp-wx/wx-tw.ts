@@ -29,6 +29,7 @@ const TW_KNOWN: Record<string, string> = {
   'justify-start': 'justify-content:flex-start',
   'justify-center': 'justify-content:center',
   'justify-end': 'justify-content:flex-end',
+  'justify-between': 'justify-content:space-between',
   absolute: 'position:absolute',
   relative: 'position:relative',
   'left-0': 'left:0',

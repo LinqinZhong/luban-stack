@@ -40,7 +40,15 @@ type ObjectFieldForm = {
   remark: string
   kind: FieldKind
   enumOptions: string[]
+  /** kind=json 且具名 interface 时，展开子字段 */
+  nestedFields?: ObjectFieldForm[]
+  /** kind=array 且元素为对象时，元素字段 */
+  itemFields?: ObjectFieldForm[]
+  itemKind?: FieldKind
+  itemEnumOptions?: string[]
 }
+
+const MAX_OBJECT_FIELD_DEPTH = 3
 
 type PropFormModel = {
   def: ComponentPropDef
@@ -125,9 +133,9 @@ function isReadonlyDataField(field: DataField): boolean {
   return isComputedField(field) || field.type === 'ref' || field.type === 'api'
 }
 
-/** json / array 支持 null（未加载）；用勾选表示「有值」 */
+/** 可编辑字段用勾选表示「有值」；不勾选 = null */
 function supportsNullToggle(field: DataField): boolean {
-  return field.type === 'json' || field.type === 'array'
+  return !isReadonlyDataField(field)
 }
 
 function isDataFieldPresent(field: DataField): boolean {
@@ -140,6 +148,9 @@ const dataFieldNullStash = reactive<Record<string, DataFieldValue>>({})
 function defaultPresentDataFieldValue(form: DataFieldFormModel): DataFieldValue {
   const field = form.field
   if (field.type === 'array') return []
+  if (field.type === 'number') return 0
+  if (field.type === 'boolean') return false
+  if (field.type === 'map') return {}
   if (field.type === 'json') {
     const ref = field.typeRef?.trim()
     if (ref && props.typeLibrary) {
@@ -166,7 +177,7 @@ function defaultPresentDataFieldValue(form: DataFieldFormModel): DataFieldValue 
     }
     return {}
   }
-  return field.value as DataFieldValue
+  return ''
 }
 
 function setDataFieldPresent(form: DataFieldFormModel, present: boolean) {
@@ -228,8 +239,55 @@ type DataFieldFormModel = {
   readonly: boolean
 }
 
+function enrichObjectFieldForm(
+  base: ObjectFieldForm,
+  mapped: {
+    type?: string
+    typeRef?: string
+    itemType?: string
+    itemTypeRef?: string
+  },
+  depth: number,
+): ObjectFieldForm {
+  if (depth >= MAX_OBJECT_FIELD_DEPTH) return base
+  if (mapped.type === 'array') {
+    const row: ObjectFieldForm = { ...base, kind: 'array' }
+    const itemRef = mapped.itemTypeRef?.trim() || ''
+    if (itemRef) {
+      const itemFields = objectFieldsOf(itemRef, depth + 1)
+      if (itemFields.length) {
+        row.itemFields = itemFields
+        return row
+      }
+      const named = findDataTypeDef(props.typeLibrary, itemRef)
+      if (named?.kind === 'enum') {
+        row.itemKind = 'enum'
+        row.itemEnumOptions = named.enumMembers.map((m) => m.name).filter(Boolean)
+        return row
+      }
+    }
+    const info = fieldKindFromType(mapped.itemType, itemRef || undefined)
+    row.itemKind = info.kind
+    row.itemEnumOptions = info.enumOptions
+    return row
+  }
+  if (mapped.type === 'json' && mapped.typeRef?.trim()) {
+    const nested = objectFieldsOf(mapped.typeRef.trim(), depth + 1)
+    if (nested.length) return { ...base, kind: 'json', nestedFields: nested }
+  }
+  return base
+}
+
 function objectFieldsFromSubFields(
-  subs: Array<{ name: string; type?: string; remark?: string; typeRef?: string }> | undefined,
+  subs: Array<{
+    name: string
+    type?: string
+    remark?: string
+    typeRef?: string
+    itemType?: string
+    itemTypeRef?: string
+  }> | undefined,
+  depth = 0,
 ): ObjectFieldForm[] {
   if (!subs?.length) return []
   return subs
@@ -237,12 +295,22 @@ function objectFieldsFromSubFields(
       const name = f.name.trim()
       if (!name) return null
       const info = fieldKindFromType(f.type, f.typeRef)
-      return {
+      const base: ObjectFieldForm = {
         name,
         remark: f.remark?.trim() || '',
         kind: info.kind,
         enumOptions: info.enumOptions,
       }
+      return enrichObjectFieldForm(
+        base,
+        {
+          type: f.type,
+          typeRef: f.typeRef,
+          itemType: f.itemType,
+          itemTypeRef: f.itemTypeRef,
+        },
+        depth,
+      )
     })
     .filter((x): x is ObjectFieldForm => Boolean(x))
 }
@@ -400,8 +468,8 @@ const dataFieldForms = computed(() =>
 /** 数据池字段：行内展开编辑（同时最多一个） */
 const expandedInlineFieldName = ref('')
 
-function isInlineExpandableField(field: DataField): boolean {
-  return field.type !== 'boolean'
+function isInlineExpandableField(_field: DataField): boolean {
+  return true
 }
 
 function toggleInlineExpand(form: DataFieldFormModel) {
@@ -475,6 +543,34 @@ function setDataObjectField(
   onDataFieldInput(form.field, base)
 }
 
+function setDataNestedObjectField(
+  form: DataFieldFormModel,
+  parentField: string,
+  childName: string,
+  value: unknown,
+) {
+  if (form.readonly) return
+  const parent = dataObjectFieldValue(form.field, parentField)
+  const base =
+    parent && typeof parent === 'object' && !Array.isArray(parent)
+      ? { ...(parent as Record<string, unknown>) }
+      : {}
+  base[childName] = value
+  setDataObjectField(form, parentField, base)
+}
+
+function dataNestedObjectFieldValue(
+  field: DataField,
+  parentField: string,
+  childName: string,
+): unknown {
+  const parent = dataObjectFieldValue(field, parentField)
+  if (parent && typeof parent === 'object' && !Array.isArray(parent)) {
+    return (parent as Record<string, unknown>)[childName]
+  }
+  return undefined
+}
+
 function onDataObjectFieldJsonBlur(
   form: DataFieldFormModel,
   fieldName: string,
@@ -520,7 +616,8 @@ function fieldKindFromType(
   return { kind: 'string', enumOptions: [] }
 }
 
-function objectFieldsOf(typeRef: string): ObjectFieldForm[] {
+function objectFieldsOf(typeRef: string, depth = 0): ObjectFieldForm[] {
+  if (depth >= MAX_OBJECT_FIELD_DEPTH) return []
   const def = findDataTypeDef(props.typeLibrary, typeRef)
   if (!def || def.kind !== 'interface') return []
   return def.fields
@@ -529,12 +626,13 @@ function objectFieldsOf(typeRef: string): ObjectFieldForm[] {
       if (!name) return null
       const mapped = typeExprToDataFieldType(f.type, props.typeLibrary)
       const info = fieldKindFromType(mapped.type, mapped.typeRef)
-      return {
+      const base: ObjectFieldForm = {
         name,
         remark: f.remark?.trim() || '',
         kind: info.kind,
         enumOptions: info.enumOptions,
       }
+      return enrichObjectFieldForm(base, mapped, depth)
     })
     .filter((x): x is ObjectFieldForm => Boolean(x))
 }
@@ -819,10 +917,50 @@ function objectFieldValue(def: ComponentPropDef, fieldName: string): unknown {
   return undefined
 }
 
+function getNestedArrayItems(
+  owner: ComponentPropDef | DataField,
+  fieldName: string,
+  isProp: boolean,
+): unknown[] {
+  const raw = isProp
+    ? objectFieldValue(owner as ComponentPropDef, fieldName)
+    : dataObjectFieldValue(owner as DataField, fieldName)
+  return Array.isArray(raw) ? raw : []
+}
+
+function setNestedObjectField(
+  def: ComponentPropDef,
+  parentField: string,
+  childName: string,
+  value: unknown,
+) {
+  const parent = objectFieldValue(def, parentField)
+  const base =
+    parent && typeof parent === 'object' && !Array.isArray(parent)
+      ? { ...(parent as Record<string, unknown>) }
+      : {}
+  base[childName] = value
+  setObjectField(def, parentField, base)
+}
+
+function nestedObjectFieldValue(
+  def: ComponentPropDef,
+  parentField: string,
+  childName: string,
+): unknown {
+  const parent = objectFieldValue(def, parentField)
+  if (parent && typeof parent === 'object' && !Array.isArray(parent)) {
+    return (parent as Record<string, unknown>)[childName]
+  }
+  return undefined
+}
+
 const itemDialogVisible = ref(false)
 const itemDialogTitle = ref('')
 const itemEditDef = ref<ComponentPropDef | null>(null)
 const itemEditDataField = ref<DataField | null>(null)
+/** 编辑对象内嵌数组时的字段名（如 order.goods） */
+const itemEditNestedKey = ref('')
 const itemEditIndex = ref(-1)
 const itemEditFields = ref<ObjectFieldForm[]>([])
 const itemEditIsObject = ref(true)
@@ -836,40 +974,32 @@ function clearItemEditDraft() {
   for (const key of Object.keys(itemEditDraft)) delete itemEditDraft[key]
 }
 
-function openAddArrayItem(form: PropFormModel) {
-  itemEditDef.value = form.def
-  itemEditDataField.value = null
-  itemEditReadonly.value = false
-  itemEditIndex.value = -1
-  itemEditFields.value = form.fields
-  itemEditIsObject.value = form.fields.length > 0
-  itemEditKind.value = form.itemKind || 'string'
-  itemEditEnumOptions.value = form.itemEnumOptions || []
-  itemDialogTitle.value = `添加 · ${form.def.name}`
+function beginItemDialog(options: {
+  def?: ComponentPropDef | null
+  dataField?: DataField | null
+  nestedKey?: string
+  index: number
+  fields: ObjectFieldForm[]
+  itemKind?: FieldKind
+  itemEnumOptions?: string[]
+  title: string
+  readonly?: boolean
+  current?: unknown
+}) {
+  itemEditDef.value = options.def ?? null
+  itemEditDataField.value = options.dataField ?? null
+  itemEditNestedKey.value = options.nestedKey?.trim() || ''
+  itemEditReadonly.value = Boolean(options.readonly)
+  itemEditIndex.value = options.index
+  itemEditFields.value = options.fields
+  itemEditIsObject.value = options.fields.length > 0
+  itemEditKind.value = options.itemKind || 'string'
+  itemEditEnumOptions.value = options.itemEnumOptions || []
+  itemDialogTitle.value = options.title
   clearItemEditDraft()
   if (itemEditIsObject.value) {
-    Object.assign(itemEditDraft, buildObjectDefault(form.fields))
-  } else {
-    itemEditScalar.value = defaultForKind(itemEditKind.value)
-  }
-  itemDialogVisible.value = true
-}
-
-function openEditArrayItem(form: PropFormModel, index: number) {
-  const items = getArrayItems(form.def)
-  const current = items[index]
-  itemEditDef.value = form.def
-  itemEditDataField.value = null
-  itemEditReadonly.value = false
-  itemEditIndex.value = index
-  itemEditFields.value = form.fields
-  itemEditIsObject.value = form.fields.length > 0
-  itemEditKind.value = form.itemKind || 'string'
-  itemEditEnumOptions.value = form.itemEnumOptions || []
-  itemDialogTitle.value = `编辑 · ${form.def.name}[${index}]`
-  clearItemEditDraft()
-  if (itemEditIsObject.value) {
-    const base = buildObjectDefault(form.fields)
+    const base = buildObjectDefault(options.fields)
+    const current = options.current
     if (current && typeof current === 'object' && !Array.isArray(current)) {
       Object.assign(itemEditDraft, base, current as Record<string, unknown>)
     } else {
@@ -877,56 +1007,119 @@ function openEditArrayItem(form: PropFormModel, index: number) {
     }
   } else {
     itemEditScalar.value =
-      current !== undefined ? current : defaultForKind(itemEditKind.value)
+      options.current !== undefined
+        ? options.current
+        : defaultForKind(itemEditKind.value)
   }
   itemDialogVisible.value = true
+}
+
+function openAddArrayItem(form: PropFormModel) {
+  beginItemDialog({
+    def: form.def,
+    index: -1,
+    fields: form.fields,
+    itemKind: form.itemKind,
+    itemEnumOptions: form.itemEnumOptions,
+    title: `添加 · ${form.def.name}`,
+  })
+}
+
+function openEditArrayItem(form: PropFormModel, index: number) {
+  beginItemDialog({
+    def: form.def,
+    index,
+    fields: form.fields,
+    itemKind: form.itemKind,
+    itemEnumOptions: form.itemEnumOptions,
+    title: `编辑 · ${form.def.name}[${index}]`,
+    current: getArrayItems(form.def)[index],
+  })
+}
+
+function openAddNestedArrayItem(
+  owner: ComponentPropDef | DataField,
+  field: ObjectFieldForm,
+  isProp: boolean,
+  readonly = false,
+) {
+  if (readonly) return
+  beginItemDialog({
+    def: isProp ? (owner as ComponentPropDef) : null,
+    dataField: isProp ? null : (owner as DataField),
+    nestedKey: field.name,
+    index: -1,
+    fields: field.itemFields ?? [],
+    itemKind: field.itemKind,
+    itemEnumOptions: field.itemEnumOptions,
+    title: `添加 · ${field.name}`,
+  })
+}
+
+function openEditNestedArrayItem(
+  owner: ComponentPropDef | DataField,
+  field: ObjectFieldForm,
+  index: number,
+  isProp: boolean,
+  readonly = false,
+) {
+  const items = getNestedArrayItems(owner, field.name, isProp)
+  beginItemDialog({
+    def: isProp ? (owner as ComponentPropDef) : null,
+    dataField: isProp ? null : (owner as DataField),
+    nestedKey: field.name,
+    index,
+    fields: field.itemFields ?? [],
+    itemKind: field.itemKind,
+    itemEnumOptions: field.itemEnumOptions,
+    title: `${readonly ? '查看' : '编辑'} · ${field.name}[${index}]`,
+    readonly,
+    current: items[index],
+  })
+}
+
+function removeNestedArrayItem(
+  owner: ComponentPropDef | DataField,
+  fieldName: string,
+  index: number,
+  isProp: boolean,
+  readonly = false,
+) {
+  if (readonly) return
+  const next = [...getNestedArrayItems(owner, fieldName, isProp)]
+  next.splice(index, 1)
+  if (isProp) setObjectField(owner as ComponentPropDef, fieldName, next)
+  else {
+    const form = dataFieldForms.value.find(
+      (f) => f.field.name === (owner as DataField).name,
+    )
+    if (form) setDataObjectField(form, fieldName, next)
+  }
 }
 
 function openAddDataArrayItem(form: DataFieldFormModel) {
   if (form.readonly) return
-  itemEditDef.value = null
-  itemEditDataField.value = form.field
-  itemEditReadonly.value = false
-  itemEditIndex.value = -1
-  itemEditFields.value = form.fields
-  itemEditIsObject.value = form.fields.length > 0
-  itemEditKind.value = form.itemKind || 'string'
-  itemEditEnumOptions.value = form.itemEnumOptions || []
-  itemDialogTitle.value = `添加 · ${form.field.name}`
-  clearItemEditDraft()
-  if (itemEditIsObject.value) {
-    Object.assign(itemEditDraft, buildObjectDefault(form.fields))
-  } else {
-    itemEditScalar.value = defaultForKind(itemEditKind.value)
-  }
-  itemDialogVisible.value = true
+  beginItemDialog({
+    dataField: form.field,
+    index: -1,
+    fields: form.fields,
+    itemKind: form.itemKind,
+    itemEnumOptions: form.itemEnumOptions,
+    title: `添加 · ${form.field.name}`,
+  })
 }
 
 function openEditDataArrayItem(form: DataFieldFormModel, index: number) {
-  const items = getDataArrayItems(form.field)
-  const current = items[index]
-  itemEditDef.value = null
-  itemEditDataField.value = form.field
-  itemEditReadonly.value = form.readonly
-  itemEditIndex.value = index
-  itemEditFields.value = form.fields
-  itemEditIsObject.value = form.fields.length > 0
-  itemEditKind.value = form.itemKind || 'string'
-  itemEditEnumOptions.value = form.itemEnumOptions || []
-  itemDialogTitle.value = `${form.readonly ? '查看' : '编辑'} · ${form.field.name}[${index}]`
-  clearItemEditDraft()
-  if (itemEditIsObject.value) {
-    const base = buildObjectDefault(form.fields)
-    if (current && typeof current === 'object' && !Array.isArray(current)) {
-      Object.assign(itemEditDraft, base, current as Record<string, unknown>)
-    } else {
-      Object.assign(itemEditDraft, base)
-    }
-  } else {
-    itemEditScalar.value =
-      current !== undefined ? current : defaultForKind(itemEditKind.value)
-  }
-  itemDialogVisible.value = true
+  beginItemDialog({
+    dataField: form.field,
+    index,
+    fields: form.fields,
+    itemKind: form.itemKind,
+    itemEnumOptions: form.itemEnumOptions,
+    title: `${form.readonly ? '查看' : '编辑'} · ${form.field.name}[${index}]`,
+    readonly: form.readonly,
+    current: getDataArrayItems(form.field)[index],
+  })
 }
 
 function removeArrayItem(def: ComponentPropDef, index: number) {
@@ -967,23 +1160,39 @@ function saveItemDialog() {
   const value = itemEditIsObject.value
     ? { ...itemEditDraft }
     : itemEditScalar.value
+  const nestedKey = itemEditNestedKey.value
 
   if (itemEditDataField.value) {
     const field = itemEditDataField.value
-    const next = [...getDataArrayItems(field)]
-    if (itemEditIndex.value >= 0) next[itemEditIndex.value] = value
-    else next.push(value)
-    onDataFieldInput(field, next)
+    if (nestedKey) {
+      const next = [...getNestedArrayItems(field, nestedKey, false)]
+      if (itemEditIndex.value >= 0) next[itemEditIndex.value] = value
+      else next.push(value)
+      const form = dataFieldForms.value.find((f) => f.field.name === field.name)
+      if (form) setDataObjectField(form, nestedKey, next)
+    } else {
+      const next = [...getDataArrayItems(field)]
+      if (itemEditIndex.value >= 0) next[itemEditIndex.value] = value
+      else next.push(value)
+      onDataFieldInput(field, next)
+    }
     itemDialogVisible.value = false
     return
   }
 
   const def = itemEditDef.value
   if (!def) return
-  const next = [...getArrayItems(def)]
-  if (itemEditIndex.value >= 0) next[itemEditIndex.value] = value
-  else next.push(value)
-  onPropInput(def, next)
+  if (nestedKey) {
+    const next = [...getNestedArrayItems(def, nestedKey, true)]
+    if (itemEditIndex.value >= 0) next[itemEditIndex.value] = value
+    else next.push(value)
+    setObjectField(def, nestedKey, next)
+  } else {
+    const next = [...getArrayItems(def)]
+    if (itemEditIndex.value >= 0) next[itemEditIndex.value] = value
+    else next.push(value)
+    onPropInput(def, next)
+  }
   itemDialogVisible.value = false
 }
 
@@ -1189,6 +1398,7 @@ watch(
                 :api-params="form.def.apiParams"
                 :api-return-type="form.def.apiReturnType"
                 :data-fields="dataFields"
+                :component-props="config?.props"
                 :type-library="typeLibrary"
                 @update:model-value="onPropInput(form.def, $event)"
               />
@@ -1244,6 +1454,161 @@ watch(
                       :value="opt"
                     />
                   </el-select>
+                  <div
+                    v-else-if="
+                      field.kind === 'json' && field.nestedFields?.length
+                    "
+                    class="nested-object-fields"
+                  >
+                    <div
+                      v-for="sub in field.nestedFields"
+                      :key="sub.name"
+                      class="object-field"
+                    >
+                      <div class="object-field-label">
+                        <span class="prop-name">{{ sub.name }}</span>
+                        <span v-if="sub.remark" class="prop-type">{{
+                          sub.remark
+                        }}</span>
+                      </div>
+                      <el-switch
+                        v-if="sub.kind === 'boolean'"
+                        :model-value="
+                          nestedObjectFieldValue(
+                            form.def,
+                            field.name,
+                            sub.name,
+                          ) === true
+                        "
+                        @update:model-value="
+                          setNestedObjectField(
+                            form.def,
+                            field.name,
+                            sub.name,
+                            $event === true,
+                          )
+                        "
+                      />
+                      <el-input-number
+                        v-else-if="sub.kind === 'number'"
+                        :model-value="
+                          Number(
+                            nestedObjectFieldValue(
+                              form.def,
+                              field.name,
+                              sub.name,
+                            ) ?? 0,
+                          )
+                        "
+                        controls-position="right"
+                        style="width: 100%"
+                        @update:model-value="
+                          setNestedObjectField(
+                            form.def,
+                            field.name,
+                            sub.name,
+                            $event ?? 0,
+                          )
+                        "
+                      />
+                      <el-input
+                        v-else
+                        :model-value="
+                          String(
+                            nestedObjectFieldValue(
+                              form.def,
+                              field.name,
+                              sub.name,
+                            ) ?? '',
+                          )
+                        "
+                        @update:model-value="
+                          setNestedObjectField(
+                            form.def,
+                            field.name,
+                            sub.name,
+                            String($event ?? ''),
+                          )
+                        "
+                      />
+                    </div>
+                  </div>
+                  <div
+                    v-else-if="
+                      field.kind === 'array' &&
+                      (field.itemFields?.length ||
+                        (field.itemKind && field.itemKind !== 'json'))
+                    "
+                    class="array-list"
+                  >
+                    <div
+                      v-if="
+                        !getNestedArrayItems(form.def, field.name, true).length
+                      "
+                      class="array-empty"
+                    >
+                      暂无数据，点击下方添加
+                    </div>
+                    <div
+                      v-for="(item, index) in getNestedArrayItems(
+                        form.def,
+                        field.name,
+                        true,
+                      )"
+                      :key="`${form.def.name}-${field.name}-${index}`"
+                      class="array-item"
+                      @click="
+                        openEditNestedArrayItem(form.def, field, index, true)
+                      "
+                    >
+                      <div class="array-item-main">
+                        <span class="array-index">{{ index + 1 }}</span>
+                        <span class="array-summary">{{
+                          summarizeItem(item, field.itemFields ?? [])
+                        }}</span>
+                      </div>
+                      <div class="array-item-actions" @click.stop>
+                        <el-button
+                          type="primary"
+                          link
+                          :icon="EditPen"
+                          @click="
+                            openEditNestedArrayItem(
+                              form.def,
+                              field,
+                              index,
+                              true,
+                            )
+                          "
+                        />
+                        <el-button
+                          type="danger"
+                          link
+                          :icon="Delete"
+                          @click="
+                            removeNestedArrayItem(
+                              form.def,
+                              field.name,
+                              index,
+                              true,
+                            )
+                          "
+                        />
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      class="array-item array-add-item"
+                      @click="openAddNestedArrayItem(form.def, field, true)"
+                    >
+                      <div class="array-item-main">
+                        <span class="array-index array-add-icon">
+                          <el-icon :size="12"><Plus /></el-icon>
+                        </span>
+                        <span class="array-summary array-add-label">添加</span>
+                      </div>
+                    </button>
+                  </div>
                   <el-input
                     v-else-if="field.kind === 'json' || field.kind === 'array'"
                     type="textarea"
@@ -1456,21 +1821,8 @@ watch(
                   <el-icon :size="14"><Connection /></el-icon>
                 </span>
                 <el-checkbox
-                  v-else-if="form.field.type === 'boolean'"
-                  :model-value="form.field.value === true"
-                  :disabled="form.readonly"
-                  title="布尔值"
-                  @update:model-value="
-                    onDataFieldInput(form.field, $event === true)
-                  "
-                />
-                <el-checkbox
                   v-else
-                  :model-value="
-                    supportsNullToggle(form.field)
-                      ? isDataFieldPresent(form.field)
-                      : true
-                  "
+                  :model-value="isDataFieldPresent(form.field)"
                   :disabled="
                     form.readonly || !supportsNullToggle(form.field)
                   "
@@ -1519,8 +1871,20 @@ watch(
               </div>
 
               <template v-else-if="form.mode === 'scalar'">
+                <el-select
+                  v-if="form.field.type === 'boolean'"
+                  :model-value="form.field.value === true"
+                  :disabled="form.readonly"
+                  style="width: 100%"
+                  @update:model-value="
+                    onDataFieldInput(form.field, $event === true)
+                  "
+                >
+                  <el-option label="true" :value="true" />
+                  <el-option label="false" :value="false" />
+                </el-select>
                 <el-input-number
-                  v-if="form.field.type === 'number'"
+                  v-else-if="form.field.type === 'number'"
                   :model-value="Number(form.field.value ?? 0)"
                   :disabled="form.readonly"
                   controls-position="right"
@@ -1634,6 +1998,173 @@ watch(
                       :value="opt"
                     />
                   </el-select>
+                  <div
+                    v-else-if="sub.kind === 'json' && sub.nestedFields?.length"
+                    class="nested-object-fields"
+                  >
+                    <div
+                      v-for="child in sub.nestedFields"
+                      :key="child.name"
+                      class="object-field"
+                    >
+                      <div class="object-field-label">
+                        <span class="prop-name">{{ child.name }}</span>
+                        <span v-if="child.remark" class="prop-type">{{
+                          child.remark
+                        }}</span>
+                      </div>
+                      <el-switch
+                        v-if="child.kind === 'boolean'"
+                        :model-value="
+                          dataNestedObjectFieldValue(
+                            form.field,
+                            sub.name,
+                            child.name,
+                          ) === true
+                        "
+                        :disabled="form.readonly"
+                        @update:model-value="
+                          setDataNestedObjectField(
+                            form,
+                            sub.name,
+                            child.name,
+                            $event === true,
+                          )
+                        "
+                      />
+                      <el-input-number
+                        v-else-if="child.kind === 'number'"
+                        :model-value="
+                          Number(
+                            dataNestedObjectFieldValue(
+                              form.field,
+                              sub.name,
+                              child.name,
+                            ) ?? 0,
+                          )
+                        "
+                        :disabled="form.readonly"
+                        controls-position="right"
+                        style="width: 100%"
+                        @update:model-value="
+                          setDataNestedObjectField(
+                            form,
+                            sub.name,
+                            child.name,
+                            $event ?? 0,
+                          )
+                        "
+                      />
+                      <el-input
+                        v-else
+                        :readonly="form.readonly"
+                        :model-value="
+                          String(
+                            dataNestedObjectFieldValue(
+                              form.field,
+                              sub.name,
+                              child.name,
+                            ) ?? '',
+                          )
+                        "
+                        @update:model-value="
+                          setDataNestedObjectField(
+                            form,
+                            sub.name,
+                            child.name,
+                            String($event ?? ''),
+                          )
+                        "
+                      />
+                    </div>
+                  </div>
+                  <div
+                    v-else-if="
+                      sub.kind === 'array' &&
+                      (sub.itemFields?.length ||
+                        (sub.itemKind && sub.itemKind !== 'json'))
+                    "
+                    class="array-list"
+                  >
+                    <div
+                      v-if="
+                        !getNestedArrayItems(form.field, sub.name, false).length
+                      "
+                      class="array-empty"
+                    >
+                      暂无数据{{ form.readonly ? '' : '，点击下方添加' }}
+                    </div>
+                    <div
+                      v-for="(item, index) in getNestedArrayItems(
+                        form.field,
+                        sub.name,
+                        false,
+                      )"
+                      :key="`${form.field.name}-${sub.name}-${index}`"
+                      class="array-item"
+                      @click="
+                        openEditNestedArrayItem(
+                          form.field,
+                          sub,
+                          index,
+                          false,
+                          form.readonly,
+                        )
+                      "
+                    >
+                      <div class="array-item-main">
+                        <span class="array-index">{{ index + 1 }}</span>
+                        <span class="array-summary">{{
+                          summarizeItem(item, sub.itemFields ?? [])
+                        }}</span>
+                      </div>
+                      <div class="array-item-actions" @click.stop>
+                        <el-button
+                          type="primary"
+                          link
+                          :icon="EditPen"
+                          @click="
+                            openEditNestedArrayItem(
+                              form.field,
+                              sub,
+                              index,
+                              false,
+                              form.readonly,
+                            )
+                          "
+                        />
+                        <el-button
+                          v-if="!form.readonly"
+                          type="danger"
+                          link
+                          :icon="Delete"
+                          @click="
+                            removeNestedArrayItem(
+                              form.field,
+                              sub.name,
+                              index,
+                              false,
+                            )
+                          "
+                        />
+                      </div>
+                    </div>
+                    <button
+                      v-if="!form.readonly"
+                      type="button"
+                      class="array-item array-add-item"
+                      @click="
+                        openAddNestedArrayItem(form.field, sub, false)
+                      "
+                    >
+                      <div class="array-item-main">
+                        <span class="array-index array-add-icon">
+                          <el-icon :size="12"><Plus /></el-icon>
+                        </span>
+                        <span class="array-summary array-add-label">添加</span>
+                      </div>
+                    </button>
+                  </div>
                   <el-input
                     v-else-if="sub.kind === 'json' || sub.kind === 'array'"
                     type="textarea"
@@ -2170,9 +2701,20 @@ watch(
 }
 
 .data-field-inline-editor .object-fields,
-.data-field-inline-editor .array-list {
-  max-height: 280px;
-  overflow: auto;
+.data-field-inline-editor .array-list,
+.data-field-inline-editor .nested-object-fields {
+  max-height: none;
+  overflow: visible;
+}
+
+.nested-object-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid #ebeef5;
+  border-radius: 8px;
+  background: #fafbfc;
 }
 
 .data-field-color-picker.is-readonly {

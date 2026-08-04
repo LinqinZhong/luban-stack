@@ -122,6 +122,8 @@ import PropsPanel, { type PropsTab } from '../components/editor/PropsPanel.vue'
 import PageCanvas from '../components/xml/PageCanvas.vue'
 import WidgetTree from '../components/xml/WidgetTree.vue'
 import { useProjectStore } from '../stores/project'
+import { useWorkspaceSettingsStore } from '../stores/workspace-settings'
+import { useAiAssistantStore } from '../stores/ai-assistant'
 import {
   buildEmitAmbientDeclarations,
   buildLocalMethodsAmbientDeclarations,
@@ -246,6 +248,8 @@ type WorkspaceMode =
   | 'lifecycle'
 
 const projectStore = useProjectStore()
+const workspaceSettings = useWorkspaceSettingsStore()
+const aiAssistant = useAiAssistantStore()
 
 type ResourceKind = 'page' | 'component'
 type ProjectNav = 'datatypes' | 'mysql' | 'oss' | 'icons' | 'palette'
@@ -1341,6 +1345,7 @@ type WidgetCtxCommand =
   | 'moveDown'
   | 'pasteSibling'
   | 'pasteChild'
+  | 'mentionAi'
 
 const widgetCtxMenu = ref<{
   visible: boolean
@@ -1392,6 +1397,13 @@ const widgetCtxCanPasteChild = computed(() => {
   )
 })
 
+const widgetCtxCanMentionAi = computed(
+  () =>
+    workspaceSettings.aiAssistantEnabled &&
+    Boolean(widgetCtxMenu.value.nodeId) &&
+    !isSlotOutletNodeId(widgetCtxMenu.value.nodeId),
+)
+
 function closeWidgetCtxMenu() {
   widgetCtxMenu.value = { visible: false, x: 0, y: 0, nodeId: '' }
 }
@@ -1399,11 +1411,10 @@ function closeWidgetCtxMenu() {
 function openWidgetCtxMenu(payload: { nodeId: string; x: number; y: number }) {
   if (!isEditMode.value || !activeDoc.value) return
   if (!payload.nodeId || isSlotOutletNodeId(payload.nodeId)) return
-  selectedNodeId.value = payload.nodeId
   widgetCtxClipboardTick.value += 1
   const pad = 8
   const menuW = 160
-  const menuH = 220
+  const menuH = 260
   const x = Math.min(payload.x, window.innerWidth - menuW - pad)
   const y = Math.min(payload.y, window.innerHeight - menuH - pad)
   widgetCtxMenu.value = {
@@ -4223,10 +4234,136 @@ async function handlePasteWidget(mode: 'sibling' | 'child') {
   }
 }
 
+function handleMentionWidgetToAi(nodeId: string) {
+  if (!workspaceSettings.aiAssistantEnabled) {
+    ElMessage.warning('请先在设置中开启 AI 助手')
+    return
+  }
+  if (!activeDoc.value) return
+  const resourceScope = isPageResource.value ? 'page' : 'component'
+  const resourceId = isPageResource.value
+    ? activePageId.value
+    : activeComponentId.value
+  if (!resourceId || !nodeId.trim()) {
+    ElMessage.warning('无法识别该节点')
+    return
+  }
+  try {
+    const root = parsePageXml(activeDoc.value.xml)
+    if (!findXmlNodeById(root, nodeId)) {
+      ElMessage.warning('无法识别该节点')
+      return
+    }
+  } catch {
+    ElMessage.warning('无法识别该节点')
+    return
+  }
+  aiAssistant.addWidgetMention({
+    nodeId,
+    resourceScope,
+    resourceId,
+  })
+}
+
+watch(
+  () => aiAssistant.pendingSelect,
+  (target) => {
+    if (!target) return
+    const { scope, resourceId, nodeId } = target
+    aiAssistant.clearPendingSelect()
+    void (async () => {
+      try {
+        if (scope === 'page') {
+          if (
+            !isPageResource.value ||
+            activePageId.value !== resourceId
+          ) {
+            await openPage(resourceId)
+          }
+        } else if (
+          !isComponentResource.value ||
+          activeComponentId.value !== resourceId
+        ) {
+          await openComponent(resourceId)
+        }
+        selectedNodeId.value = nodeId
+      } catch (err) {
+        ElMessage.error(err instanceof Error ? err.message : '定位节点失败')
+      }
+    })()
+  },
+)
+
+watch(
+  [resourceKind, activePageId, activeComponentId],
+  () => {
+    if (resourceKind.value === 'page' && activePageId.value) {
+      aiAssistant.setActiveResource({ scope: 'page', id: activePageId.value })
+      return
+    }
+    if (resourceKind.value === 'component' && activeComponentId.value) {
+      aiAssistant.setActiveResource({
+        scope: 'component',
+        id: activeComponentId.value,
+      })
+      return
+    }
+    aiAssistant.setActiveResource(null)
+  },
+  { immediate: true },
+)
+
+async function reloadActiveAfterAiEdit() {
+  if (!projectStore.path) return
+  try {
+    if (isPageResource.value && activePageId.value) {
+      const detail = await getPage(projectStore.path, activePageId.value)
+      const migrated = migrateLegacyMaskToModal(detail.xml)
+      activePage.value = migrated.changed
+        ? { ...detail, xml: migrated.xml }
+        : detail
+      if (migrated.changed) await handleXmlUpdate(migrated.xml)
+    } else if (isComponentResource.value && activeComponentId.value) {
+      const detail = await getComponent(
+        projectStore.path,
+        activeComponentId.value,
+      )
+      const migrated = migrateLegacyMaskToModal(detail.xml)
+      activeComponent.value = migrated.changed
+        ? { ...detail, xml: migrated.xml }
+        : detail
+      if (migrated.changed) await handleXmlUpdate(migrated.xml)
+    }
+    await Promise.all([
+      refreshComponentMap(),
+      loadIconLibrary(),
+      loadColorPalette(),
+      loadDataTypeLibrary(),
+      loadMysqlLibrary(),
+      loadOssLibrary(),
+      loadBackendServiceLibrary(),
+    ])
+  } catch (err) {
+    ElMessage.error(err instanceof Error ? err.message : '刷新 AI 改动失败')
+  }
+}
+
+watch(
+  () => aiAssistant.resourceEpoch,
+  (epoch, prev) => {
+    if (!epoch || epoch === prev) return
+    void reloadActiveAfterAiEdit()
+  },
+)
+
 async function handleWidgetCtxCommand(command: WidgetCtxCommand) {
   const nodeId = widgetCtxMenu.value.nodeId
   closeWidgetCtxMenu()
   if (!nodeId) return
+  if (command === 'mentionAi') {
+    handleMentionWidgetToAi(nodeId)
+    return
+  }
   selectedNodeId.value = nodeId
   if (command === 'copy') {
     handleCopyWidget(nodeId)
@@ -5199,6 +5336,15 @@ watch(
           @click="handleWidgetCtxCommand('pasteChild')"
         >
           粘贴为子级
+        </button>
+        <div class="widget-ctx-divider" />
+        <button
+          type="button"
+          class="widget-ctx-item"
+          :disabled="!widgetCtxCanMentionAi"
+          @click="handleWidgetCtxCommand('mentionAi')"
+        >
+          提及给AI助手
         </button>
       </div>
     </Teleport>

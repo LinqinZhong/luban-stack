@@ -140,10 +140,8 @@ function buildObjectDefault(fields: ObjectFieldForm[]): Record<string, unknown> 
   return out
 }
 
-/** 不勾选时提交的值：数字 0、布尔 false、其余 null */
-function disabledParamValue(form: ParamFormModel): unknown {
-  if (form.kind === 'number') return 0
-  if (form.kind === 'boolean') return false
+/** 不勾选时提交 null（含数字 / 布尔） */
+function disabledParamValue(_form: ParamFormModel): unknown {
   return null
 }
 
@@ -158,9 +156,7 @@ function defaultEnabledParamValue(form: ParamFormModel): unknown {
   return ''
 }
 
-function disabledParamHint(form: ParamFormModel): string {
-  if (form.kind === 'number') return '0'
-  if (form.kind === 'boolean') return 'false'
+function disabledParamHint(_form: ParamFormModel): string {
   return 'null'
 }
 
@@ -434,12 +430,11 @@ function syncDraftFromMethod(options?: { clearResults?: boolean }) {
   for (const form of paramForms.value) {
     const name = form.param.name.trim()
     const prev = saved[name]
-    // 数字/布尔无法从 0/false 区分「未勾选」，默认勾选；其余 null 视为未勾选
-    const canInferOff =
-      form.kind !== 'number' &&
-      form.kind !== 'boolean' &&
+    // 持久化为 null → 视为未勾选（各类型统一）
+    if (
+      Object.prototype.hasOwnProperty.call(saved, name) &&
       prev === null
-    if (canInferOff) {
+    ) {
       draft[name] = disabledParamValue(form)
       paramEnabled[name] = false
       continue

@@ -9,17 +9,25 @@ import {
   joinBindingPath,
   splitBindingPath,
   toElCascaderOptions,
+  type BindingCompatibilityMode,
 } from '../../../utils/typed-binding-paths'
 
-const props = defineProps<{
-  modelValue: string
-  ambientVars: MethodParam[]
-  targetType: ProcessorTypeExpr | null | undefined
-  typeLibrary?: DataTypeLibrary | null
-  placeholder?: string
-  /** 额外根节点（如 $query） */
-  extraRoots?: import('../../../utils/typed-binding-paths').TypedBindingCascaderOption[]
-}>()
+const props = withDefaults(
+  defineProps<{
+    modelValue: string
+    ambientVars: MethodParam[]
+    targetType: ProcessorTypeExpr | null | undefined
+    typeLibrary?: DataTypeLibrary | null
+    placeholder?: string
+    /** 额外根节点（如 $query） */
+    extraRoots?: import('../../../utils/typed-binding-paths').TypedBindingCascaderOption[]
+    /** 类型兼容模式：API 入参等场景可用 scalar-loose */
+    compatibility?: BindingCompatibilityMode
+  }>(),
+  {
+    compatibility: 'strict',
+  },
+)
 
 const emit = defineEmits<{
   'update:modelValue': [value: string]
@@ -31,6 +39,7 @@ const rawOptions = computed(() =>
     props.targetType,
     props.typeLibrary,
     props.extraRoots,
+    props.compatibility,
   ),
 )
 

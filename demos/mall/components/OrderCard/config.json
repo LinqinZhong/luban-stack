@@ -1,0 +1,52 @@
+{
+  "name": "订单卡片",
+  "title": "订单卡片",
+  "width": "match_parent",
+  "height": "wrap_content",
+  "props": [
+    {
+      "name": "order",
+      "type": "json",
+      "remark": "订单数据对象",
+      "defaultValue": {},
+      "twoWay": false,
+      "required": true,
+      "typeRef": "OrderVo"
+    }
+  ],
+  "events": [
+    {
+      "name": "itemClick",
+      "params": [
+        {
+          "name": "orderId",
+          "type": "string"
+        }
+      ]
+    }
+  ],
+  "exposedMethods": [],
+  "debugProps": {
+    "order": {
+      "orderId": "20240315001",
+      "status": "pending",
+      "statusText": "待付款",
+      "goods": [
+        {
+          "id": "",
+          "name": "商品名称",
+          "price": 9.9,
+          "stock": 0,
+          "img": "",
+          "deliveryFee": 0,
+          "quantity": 2,
+          "spec": "5kg装"
+        }
+      ],
+      "totalAmount": 79.8,
+      "createTime": "2024-03-15 14:30",
+      "paymentAmount": 79.8,
+      "paymentTime": "2024-03-15 14:35"
+    }
+  }
+}

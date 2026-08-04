@@ -166,12 +166,26 @@ export function applyEditRepeatPreviewScope(
   return withRepeatItemScope(node, items[0], 0)
 }
 
+function normalizeRepeatListKey(name: string): string {
+  let key = name.trim()
+  if (!key) return ''
+  // 兼容 {filteredOrders} / {$data.filteredOrders}
+  if (
+    (key.startsWith('{') && key.endsWith('}')) ||
+    (key.startsWith('{{') && key.endsWith('}}'))
+  ) {
+    key = key.replace(/^\{\{?/, '').replace(/\}\}?$/, '').trim()
+  }
+  if (key.startsWith('$data.')) key = key.slice('$data.'.length).trim()
+  return key
+}
+
 function resolveArrayValue(
   pageData: PageData | undefined,
   name: string,
   dollarProps?: Record<string, unknown>,
 ): unknown[] {
-  const key = name.trim()
+  const key = normalizeRepeatListKey(name)
   if (!key) return []
   if (key.startsWith('$props.')) {
     const path = key.slice('$props.'.length).trim()

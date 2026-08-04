@@ -268,18 +268,36 @@ function toDraftItem(item: ArraySubField): DraftItem {
   }
 }
 
-/** 锁定元素类型时，把项强制对齐到父级数组声明 */
+/** 从数组项取出对象字段（兼容只落在 value / 只落在 objectFields） */
+function existingObjectFieldsOf(item: ArraySubField): ObjectSubField[] {
+  if (item.type === 'json') {
+    return resolveObjectFields(item.objectFields, item.value)
+  }
+  if (item.value && typeof item.value === 'object' && !Array.isArray(item.value)) {
+    return resolveObjectFields(undefined, item.value)
+  }
+  return []
+}
+
+/** 锁定元素类型时，把项强制对齐到父级数组声明（保留已有对象内容） */
 function applyLockedTypeToItem(item: ArraySubField): ArraySubField {
   const shape = resolveDefaultItemShape()
-  if (shape.type === 'json' && shape.typeRef) {
+  if (shape.type === 'json') {
+    const existing = existingObjectFieldsOf(item)
+    if (shape.typeRef) {
+      return {
+        type: 'json',
+        typeRef: shape.typeRef,
+        objectFields: objectFieldsFromTypeRef(
+          shape.typeRef,
+          props.typeLibrary,
+          existing,
+        ),
+      }
+    }
     return {
       type: 'json',
-      typeRef: shape.typeRef,
-      objectFields: objectFieldsFromTypeRef(
-        shape.typeRef,
-        props.typeLibrary,
-        item.type === 'json' ? item.objectFields : undefined,
-      ),
+      objectFields: existing,
     }
   }
   if (shape.type === 'array') {
@@ -489,7 +507,17 @@ const canPaste = computed(() => {
 })
 
 function objectContentPreview(item: DraftItem): string {
-  const obj = buildObjectValue(item.objectFields ?? [])
+  const fromFields = item.objectFields?.length
+    ? buildObjectValue(item.objectFields)
+    : null
+  const fromValue =
+    item.value && typeof item.value === 'object' && !Array.isArray(item.value)
+      ? (item.value as Record<string, unknown>)
+      : null
+  const obj =
+    fromFields && Object.keys(fromFields).length
+      ? fromFields
+      : (fromValue ?? fromFields ?? {})
   try {
     return JSON.stringify(obj)
   } catch {

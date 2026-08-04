@@ -1,0 +1,266 @@
+{
+  "id": "OrderData",
+  "name": "订单数据",
+  "remark": "订单数据层",
+  "entityRef": "Order",
+  "dataProcessorRef": "",
+  "methods": [
+    {
+      "id": "page",
+      "name": "page",
+      "remark": "分页查询订单",
+      "scope": "public",
+      "params": [
+        {
+          "id": "param_status",
+          "name": "status",
+          "remark": "状态筛选",
+          "typeExpr": {
+            "type": "number",
+            "typeRef": "",
+            "itemType": "",
+            "itemTypeRef": "",
+            "itemItemType": "",
+            "itemItemTypeRef": "",
+            "keyType": "",
+            "genericArgs": {}
+          },
+          "required": false
+        },
+        {
+          "id": "param_page",
+          "name": "page",
+          "remark": "分页参数",
+          "typeExpr": {
+            "type": "json",
+            "typeRef": "type_common_QueryPageDto",
+            "itemType": "",
+            "itemTypeRef": "",
+            "itemItemType": "",
+            "itemItemTypeRef": "",
+            "keyType": "",
+            "genericArgs": {}
+          },
+          "required": true
+        }
+      ],
+      "output": {
+        "type": "array",
+        "typeRef": "",
+        "itemType": "json",
+        "itemTypeRef": "Order",
+        "itemItemType": "",
+        "itemItemTypeRef": "",
+        "keyType": "",
+        "genericArgs": {}
+      },
+      "dataConfig": {
+        "source": "mysql",
+        "operation": "query",
+        "queryFields": [
+          "id",
+          "order_no",
+          "user_id",
+          "status",
+          "goods",
+          "total_amount",
+          "payment_amount",
+          "payment_time"
+        ],
+        "sql": "",
+        "fieldMappings": [],
+        "batchSourceParam": "",
+        "pageParam": "page",
+        "conditionGroups": [
+          {
+            "id": "cg_msdu3x7d_9kpy86",
+            "conditions": [
+              {
+                "id": "cond_msdu3x7d_kfgn0j",
+                "field": "status",
+                "customField": "",
+                "op": "eq",
+                "valueKind": "param",
+                "value": "status",
+                "valueTo": ""
+              }
+            ]
+          }
+        ]
+      },
+      "debugParams": {
+        "status": null,
+        "page": {
+          "current": 1,
+          "pageSize": 10
+        }
+      },
+      "flow": {
+        "nodes": [
+          {
+            "id": "start",
+            "kind": "start",
+            "position": {
+              "x": 280,
+              "y": 40
+            },
+            "data": {}
+          }
+        ],
+        "edges": []
+      }
+    },
+    {
+      "id": "count",
+      "name": "count",
+      "remark": "统计订单数量",
+      "scope": "public",
+      "params": [
+        {
+          "id": "param_status",
+          "name": "status",
+          "remark": "状态筛选",
+          "typeExpr": {
+            "type": "number",
+            "typeRef": "",
+            "itemType": "",
+            "itemTypeRef": "",
+            "itemItemType": "",
+            "itemItemTypeRef": "",
+            "keyType": "",
+            "genericArgs": {}
+          },
+          "required": false
+        }
+      ],
+      "output": {
+        "type": "number",
+        "typeRef": "",
+        "itemType": "",
+        "itemTypeRef": "",
+        "itemItemType": "",
+        "itemItemTypeRef": "",
+        "keyType": "",
+        "genericArgs": {}
+      },
+      "dataConfig": {
+        "source": "mysql",
+        "operation": "custom",
+        "queryFields": [],
+        "sql": "SELECT COUNT(id) AS cnt FROM {TABLE_NAME} WHERE 1=1\n<if test=\"status != null\">\n  AND status = #{status}\n</if>",
+        "fieldMappings": [
+          {
+            "field": "value",
+            "column": "cnt"
+          }
+        ],
+        "batchSourceParam": "",
+        "pageParam": "",
+        "conditionGroups": []
+      },
+      "debugParams": {
+        "status": 0
+      },
+      "flow": {
+        "nodes": [
+          {
+            "id": "start",
+            "kind": "start",
+            "position": {
+              "x": 280,
+              "y": 40
+            },
+            "data": {}
+          }
+        ],
+        "edges": []
+      }
+    },
+    {
+      "id": "findById",
+      "name": "findById",
+      "remark": "根据ID查询订单",
+      "scope": "public",
+      "params": [
+        {
+          "id": "param_id",
+          "name": "id",
+          "remark": "订单主键ID",
+          "typeExpr": {
+            "type": "number",
+            "typeRef": "",
+            "itemType": "",
+            "itemTypeRef": "",
+            "itemItemType": "",
+            "itemItemTypeRef": "",
+            "keyType": "",
+            "genericArgs": {}
+          },
+          "required": true
+        }
+      ],
+      "output": {
+        "type": "json",
+        "typeRef": "Order",
+        "itemType": "",
+        "itemTypeRef": "",
+        "itemItemType": "",
+        "itemItemTypeRef": "",
+        "keyType": "",
+        "genericArgs": {}
+      },
+      "dataConfig": {
+        "source": "mysql",
+        "operation": "query",
+        "queryFields": [
+          "id",
+          "order_no",
+          "user_id",
+          "status",
+          "goods",
+          "total_amount",
+          "payment_amount",
+          "create_time",
+          "payment_time"
+        ],
+        "sql": "",
+        "fieldMappings": [],
+        "batchSourceParam": "",
+        "pageParam": "",
+        "conditionGroups": [
+          {
+            "id": "cg_msdu41b0_wn2epi",
+            "conditions": [
+              {
+                "id": "cond_msdu41b0_rf2l6s",
+                "field": "id",
+                "customField": "",
+                "op": "eq",
+                "valueKind": "literal",
+                "value": "#{id}",
+                "valueTo": ""
+              }
+            ]
+          }
+        ]
+      },
+      "debugParams": {
+        "id": 1
+      },
+      "flow": {
+        "nodes": [
+          {
+            "id": "start",
+            "kind": "start",
+            "position": {
+              "x": 280,
+              "y": 40
+            },
+            "data": {}
+          }
+        ],
+        "edges": []
+      }
+    }
+  ]
+}

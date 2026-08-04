@@ -13,6 +13,12 @@ const router = createRouter({
       meta: { title: '选择项目' },
     },
     {
+      path: '/ai-assistant',
+      name: 'ai-assistant',
+      component: () => import('../views/AiAssistantView.vue'),
+      meta: { title: 'AI 助手', requiresProject: true },
+    },
+    {
       path: '/',
       component: MainLayout,
       meta: { requiresProject: true },

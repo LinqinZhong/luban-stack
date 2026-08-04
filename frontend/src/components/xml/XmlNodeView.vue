@@ -634,11 +634,16 @@ const textStyle = computed(() => ({
   ...layoutStyle.value,
   color: attrs.value.textColor || '#303133',
   fontSize: `${parseNumber(attrs.value.textSize, 14)}px`,
-  textAlign: (attrs.value.gravity?.includes('center')
-    ? 'center'
-    : attrs.value.gravity?.includes('right')
-      ? 'right'
-      : 'left') as 'left' | 'center' | 'right',
+  textAlign: (attrs.value.textAlign
+    ? attrs.value.textAlign
+    : attrs.value.gravity?.includes('space_between') ||
+        attrs.value.gravity?.includes('space-between')
+      ? 'left'
+      : attrs.value.gravity?.includes('center')
+        ? 'center'
+        : attrs.value.gravity?.includes('right')
+          ? 'right'
+          : 'left') as 'left' | 'center' | 'right',
   whiteSpace: 'pre-wrap' as const,
   wordBreak: 'break-word' as const,
   ...rotateStyle(attrs.value),
@@ -1299,7 +1304,10 @@ const relativeStyle = computed(() => {
 
 function mapGravityMain(gravity: string | undefined, horizontal: boolean) {
   if (!gravity) return 'flex-start'
-  const g = gravity.toLowerCase()
+  const g = gravity.toLowerCase().trim()
+  if (g.includes('space_between') || g.includes('space-between')) {
+    return 'space-between'
+  }
 
   if (horizontal) {
     if (g.includes('right') || g.includes('end')) return 'flex-end'
@@ -1316,7 +1324,20 @@ function mapGravityMain(gravity: string | undefined, horizontal: boolean) {
 
 function mapGravityCross(gravity: string | undefined, horizontal: boolean) {
   if (!gravity) return 'stretch'
-  const g = gravity.toLowerCase()
+  const g = gravity.toLowerCase().trim()
+  // space_between center：主轴两端对齐，交叉轴居中
+  if (g.includes('space_between') || g.includes('space-between')) {
+    if (g.includes('bottom')) return 'flex-end'
+    if (g.includes('top')) return 'flex-start'
+    if (
+      g.includes('center') ||
+      g.includes('center_vertical') ||
+      g.includes('center_horizontal')
+    ) {
+      return 'center'
+    }
+    return 'stretch'
+  }
 
   if (horizontal) {
     if (g.includes('bottom')) return 'flex-end'

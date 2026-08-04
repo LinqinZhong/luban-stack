@@ -145,9 +145,28 @@ function coerceApiInputValue(
   return value
 }
 
+function isConfiguredInput(
+  cfg: ControllerInputParamConfig | undefined,
+): boolean {
+  if (!cfg) return false
+  if (cfg.source === 'literal') return true
+  return Boolean((cfg.binding ?? '').trim())
+}
+
+function isMissingApiInput(
+  value: unknown,
+  inp: { type?: string; typeRef?: string },
+): boolean {
+  return (
+    value === undefined ||
+    value === null ||
+    (!(inp.type === 'json' || inp.typeRef) && value === '')
+  )
+}
+
 /**
  * 按 API inputs + 绑定配置组装 flow 初始 scope。
- * 无配置回退 api.debugParams；必填缺失则抛错。
+ * 无配置回退 api.debugParams；已绑定（含显式 null）必须覆盖调试默认值。
  */
 export function assembleControllerApiScope(
   api: ServiceApi,
@@ -160,18 +179,23 @@ export function assembleControllerApiScope(
   for (const inp of api.inputs ?? []) {
     const name = inp.varName.trim()
     if (!name) continue
-    const value = resolveInputValue(inputs?.[name], name, api, pageScope)
-    const missing =
-      value === undefined ||
-      value === null ||
-      (!(inp.type === 'json' || inp.typeRef) && value === '')
-    if (missing) {
-      if (inp.required) {
+    const cfg = inputs?.[name]
+    const value = resolveInputValue(cfg, name, api, pageScope)
+
+    if (isConfiguredInput(cfg)) {
+      // 已绑定：null/空串表示「不传筛选」，绝不能回落 debugParams（如 status:1）
+      if (inp.required && isMissingApiInput(value, inp)) {
         throw new Error(`${name}不能为空`)
       }
-      if (value === undefined) continue
+      scope[name] =
+        value === undefined ? null : coerceApiInputValue(value, inp)
+      continue
     }
-    scope[name] = coerceApiInputValue(value, inp)
+
+    const current = scope[name]
+    if (inp.required && isMissingApiInput(current, inp)) {
+      throw new Error(`${name}不能为空`)
+    }
   }
   return scope
 }
