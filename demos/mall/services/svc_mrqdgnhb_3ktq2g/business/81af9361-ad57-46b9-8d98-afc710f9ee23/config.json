@@ -1,0 +1,570 @@
+{
+  "id": "81af9361-ad57-46b9-8d98-afc710f9ee23",
+  "name": "OrderBiz",
+  "remark": "订单业务逻辑",
+  "entityRef": "",
+  "dataProcessorRef": "b0c8558e-5392-4e61-8dd2-c87f24d13095",
+  "methods": [
+    {
+      "id": "list",
+      "name": "list",
+      "remark": "分页查询订单列表(含statusText)",
+      "scope": "public",
+      "params": [
+        {
+          "id": "param_status",
+          "name": "status",
+          "remark": "状态筛选",
+          "typeExpr": {
+            "type": "number",
+            "typeRef": "",
+            "itemType": "",
+            "itemTypeRef": "",
+            "itemItemType": "",
+            "itemItemTypeRef": "",
+            "keyType": "",
+            "genericArgs": {}
+          },
+          "required": false
+        },
+        {
+          "id": "param_page",
+          "name": "page",
+          "remark": "分页",
+          "typeExpr": {
+            "type": "json",
+            "typeRef": "type_common_QueryPageDto",
+            "itemType": "",
+            "itemTypeRef": "",
+            "itemItemType": "",
+            "itemItemTypeRef": "",
+            "keyType": "",
+            "genericArgs": {}
+          },
+          "required": true
+        }
+      ],
+      "output": {
+        "type": "json",
+        "typeRef": "type_common_QueryPageVo",
+        "itemType": "",
+        "itemTypeRef": "",
+        "itemItemType": "",
+        "itemItemTypeRef": "",
+        "keyType": "",
+        "genericArgs": {
+          "T": "OrderVo"
+        }
+      },
+      "dataConfig": {
+        "source": "mysql",
+        "operation": "query",
+        "queryFields": [],
+        "sql": "",
+        "fieldMappings": [],
+        "batchSourceParam": "",
+        "pageParam": "",
+        "conditionGroups": [],
+        "httpRequest": {
+          "apiUrl": "",
+          "httpMethod": "GET",
+          "mediaType": "application/json",
+          "bodyVarName": "",
+          "responseBodyType": "json",
+          "parseCode": "",
+          "headers": [],
+          "queryParams": [],
+          "formParams": []
+        }
+      },
+      "debugParams": {
+        "status": 0,
+        "page": {
+          "current": 2,
+          "pageSize": 10
+        }
+      },
+      "flow": {
+        "nodes": [
+          {
+            "id": "start",
+            "kind": "start",
+            "position": {
+              "x": 280,
+              "y": 40
+            },
+            "data": {}
+          },
+          {
+            "id": "input_page",
+            "kind": "input",
+            "position": {
+              "x": -18.54865208995362,
+              "y": 356.8284267715038
+            },
+            "data": {
+              "serviceId": "svc_mrqdgnhb_3ktq2g",
+              "dataSource": "data",
+              "dataProcessorId": "b0c8558e-5392-4e61-8dd2-c87f24d13095",
+              "dataMethodId": "preset_pageBy_idx_status",
+              "varName": "records",
+              "methodLabel": "订单数据.pageByStatus",
+              "paramBindings": {
+                "pageDto": "page",
+                "status": "status"
+              },
+              "outputTypeExpr": {
+                "type": "array",
+                "typeRef": "",
+                "itemType": "json",
+                "itemTypeRef": "Order",
+                "itemItemType": "",
+                "itemItemTypeRef": "",
+                "keyType": "",
+                "genericArgs": {}
+              },
+              "channel": "local",
+              "headerField": "",
+              "printExpr": "",
+              "network": {
+                "apiUrl": "",
+                "httpMethod": "GET",
+                "mediaType": "application/json",
+                "bodyVarName": "",
+                "headers": [],
+                "queryParams": [],
+                "formParams": [],
+                "responseBodyType": "string",
+                "responseBodyVarName": "",
+                "responseHeaderVarName": "",
+                "statusCodeVarName": ""
+              }
+            }
+          },
+          {
+            "id": "input_count",
+            "kind": "input",
+            "position": {
+              "x": 224,
+              "y": 108.99347170183877
+            },
+            "data": {
+              "serviceId": "svc_mrqdgnhb_3ktq2g",
+              "dataSource": "data",
+              "dataProcessorId": "b0c8558e-5392-4e61-8dd2-c87f24d13095",
+              "dataMethodId": "preset_countBy_idx_status",
+              "varName": "total",
+              "methodLabel": "订单数据.countByStatus",
+              "paramBindings": {
+                "status": "status"
+              },
+              "outputTypeExpr": {
+                "type": "number",
+                "typeRef": "",
+                "itemType": "",
+                "itemTypeRef": "",
+                "itemItemType": "",
+                "itemItemTypeRef": "",
+                "keyType": "",
+                "genericArgs": {}
+              },
+              "channel": "local",
+              "headerField": "",
+              "printExpr": "",
+              "network": {
+                "apiUrl": "",
+                "httpMethod": "GET",
+                "mediaType": "application/json",
+                "bodyVarName": "",
+                "headers": [],
+                "queryParams": [],
+                "formParams": [],
+                "responseBodyType": "string",
+                "responseBodyVarName": "",
+                "responseHeaderVarName": "",
+                "statusCodeVarName": ""
+              }
+            }
+          },
+          {
+            "id": "end",
+            "kind": "end",
+            "position": {
+              "x": 270.16719503614974,
+              "y": 570.9710303455554
+            },
+            "data": {
+              "returnExpr": "{\n  records: records,\n  total: total,\n  current: page.current || 1,\n  pageSize: page.pageSize || 10,\n  hasNext: (page.current || 1) * (page.pageSize || 10) < Number(total || 0)\n}"
+            }
+          },
+          {
+            "id": "branch_msex1sas_r5iz",
+            "kind": "branch",
+            "position": {
+              "x": 250,
+              "y": 248.1455840943535
+            },
+            "data": {
+              "expression": "total === 0",
+              "printExpr": ""
+            }
+          },
+          {
+            "id": "end_msex25gl_gb33",
+            "kind": "end",
+            "position": {
+              "x": 586.9030679956,
+              "y": 356.8284267715038
+            },
+            "data": {
+              "returnExpr": "",
+              "printExpr": ""
+            }
+          },
+          {
+            "id": "pageMap_msex2cb1_2npw",
+            "kind": "pageMap",
+            "position": {
+              "x": 18.95134791004638,
+              "y": 471.3983601782573
+            },
+            "data": {
+              "sourceKind": "array",
+              "sourcePath": "records",
+              "currentExpr": "page.current",
+              "pageSizeExpr": "page.pageSize",
+              "totalExpr": "total",
+              "hasNextExpr": "",
+              "targetTypeRef": "type_common_QueryPageVo",
+              "targetGenericArgs": {
+                "T": "OrderVo"
+              },
+              "targetVarName": "res",
+              "fieldMappings": [
+                {
+                  "targetField": "id",
+                  "sourceField": "id"
+                },
+                {
+                  "targetField": "order_no",
+                  "sourceField": "order_no"
+                },
+                {
+                  "targetField": "user_id",
+                  "sourceField": "user_id"
+                },
+                {
+                  "targetField": "status",
+                  "sourceField": "status"
+                },
+                {
+                  "targetField": "statusText",
+                  "sourceField": ""
+                },
+                {
+                  "targetField": "goods",
+                  "sourceField": "goods"
+                },
+                {
+                  "targetField": "total_amount",
+                  "sourceField": "total_amount"
+                },
+                {
+                  "targetField": "payment_amount",
+                  "sourceField": "payment_amount"
+                },
+                {
+                  "targetField": "create_time",
+                  "sourceField": "create_time"
+                },
+                {
+                  "targetField": "payment_time",
+                  "sourceField": "payment_time"
+                }
+              ],
+              "description": "",
+              "printExpr": ""
+            }
+          }
+        ],
+        "edges": [
+          {
+            "id": "e_start_default_input_count_msex191o",
+            "source": "start",
+            "target": "input_count"
+          },
+          {
+            "id": "edge_msex1sas_ksm4",
+            "source": "input_count",
+            "target": "branch_msex1sas_r5iz"
+          },
+          {
+            "id": "edge_msex25gl_6cws",
+            "source": "branch_msex1sas_r5iz",
+            "target": "end_msex25gl_gb33",
+            "sourceHandle": "true",
+            "label": "是"
+          },
+          {
+            "id": "e_branch_msex1sas_r5iz_false_input_page_msex28m3",
+            "source": "branch_msex1sas_r5iz",
+            "target": "input_page",
+            "sourceHandle": "false",
+            "label": "否"
+          },
+          {
+            "id": "edge_msex2cb1_23j9",
+            "source": "input_page",
+            "target": "pageMap_msex2cb1_2npw"
+          },
+          {
+            "id": "e_pageMap_msex2cb1_2npw_default_end_msex3xym",
+            "source": "pageMap_msex2cb1_2npw",
+            "target": "end"
+          }
+        ]
+      }
+    },
+    {
+      "id": "method_msewf40h_jppj1v",
+      "name": "one",
+      "remark": "获取商品详情",
+      "scope": "public",
+      "params": [
+        {
+          "id": "param_msewfkgn_ufkye2",
+          "name": "id",
+          "remark": "",
+          "typeExpr": {
+            "type": "number",
+            "typeRef": "",
+            "itemType": "",
+            "itemTypeRef": "",
+            "itemItemType": "",
+            "itemItemTypeRef": "",
+            "keyType": "",
+            "genericArgs": {}
+          },
+          "required": false
+        }
+      ],
+      "output": {
+        "type": "json",
+        "typeRef": "OrderVo",
+        "itemType": "",
+        "itemTypeRef": "",
+        "itemItemType": "",
+        "itemItemTypeRef": "",
+        "keyType": "",
+        "genericArgs": {}
+      },
+      "dataConfig": {
+        "source": "mysql",
+        "operation": "query",
+        "queryFields": [],
+        "sql": "",
+        "fieldMappings": [],
+        "batchSourceParam": "",
+        "pageParam": "",
+        "conditionGroups": [],
+        "httpRequest": {
+          "apiUrl": "",
+          "httpMethod": "GET",
+          "mediaType": "application/json",
+          "bodyVarName": "",
+          "responseBodyType": "json",
+          "parseCode": "",
+          "headers": [],
+          "queryParams": [],
+          "formParams": []
+        }
+      },
+      "debugParams": {
+        "id": 1
+      },
+      "flow": {
+        "nodes": [
+          {
+            "id": "start",
+            "kind": "start",
+            "position": {
+              "x": 280,
+              "y": 40
+            },
+            "data": {}
+          },
+          {
+            "id": "input_msewh57d_jewd",
+            "kind": "input",
+            "position": {
+              "x": 238,
+              "y": 153.50906007900005
+            },
+            "data": {
+              "serviceId": "svc_mrqdgnhb_3ktq2g",
+              "dataSource": "data",
+              "dataProcessorId": "b0c8558e-5392-4e61-8dd2-c87f24d13095",
+              "dataMethodId": "preset_oneById",
+              "headerField": "",
+              "varName": "order",
+              "methodLabel": "订单数据.oneById",
+              "paramBindings": {
+                "id": "id"
+              },
+              "printExpr": "",
+              "channel": "local",
+              "outputTypeExpr": {
+                "type": "json",
+                "typeRef": "Order",
+                "itemType": "",
+                "itemTypeRef": "",
+                "itemItemType": "",
+                "itemItemTypeRef": "",
+                "keyType": "",
+                "genericArgs": {}
+              },
+              "network": {
+                "apiUrl": "",
+                "httpMethod": "GET",
+                "mediaType": "application/json",
+                "bodyVarName": "",
+                "headers": [],
+                "queryParams": [],
+                "formParams": [],
+                "responseBodyType": "string",
+                "responseBodyVarName": "",
+                "responseHeaderVarName": "",
+                "statusCodeVarName": ""
+              }
+            }
+          },
+          {
+            "id": "branch_msewhk7m_s88p",
+            "kind": "branch",
+            "position": {
+              "x": 250,
+              "y": 272.77695246750443
+            },
+            "data": {
+              "expression": "order == null",
+              "printExpr": ""
+            }
+          },
+          {
+            "id": "throw_msewhvze_5t5x",
+            "kind": "throw",
+            "position": {
+              "x": 463,
+              "y": 410.77695246750443
+            },
+            "data": {
+              "messageExpr": "\"商品不存在\"",
+              "printExpr": ""
+            }
+          },
+          {
+            "id": "end_msewibjo_7v3t",
+            "kind": "end",
+            "position": {
+              "x": 80.74874371859292,
+              "y": 654.2995655328311
+            },
+            "data": {
+              "returnExpr": "orderVo",
+              "printExpr": ""
+            }
+          },
+          {
+            "id": "objectMap_msewp01c_4nfi",
+            "kind": "objectMap",
+            "position": {
+              "x": 54.74874371859292,
+              "y": 498.5678391959799
+            },
+            "data": {
+              "sourcePath": "order",
+              "targetTypeRef": "OrderVo",
+              "targetGenericArgs": {},
+              "targetVarName": "orderVo",
+              "fieldMappings": [
+                {
+                  "targetField": "id",
+                  "sourceField": "id"
+                },
+                {
+                  "targetField": "order_no",
+                  "sourceField": "order_no"
+                },
+                {
+                  "targetField": "user_id",
+                  "sourceField": "user_id"
+                },
+                {
+                  "targetField": "status",
+                  "sourceField": "status"
+                },
+                {
+                  "targetField": "statusText",
+                  "sourceField": ""
+                },
+                {
+                  "targetField": "goods",
+                  "sourceField": "goods"
+                },
+                {
+                  "targetField": "total_amount",
+                  "sourceField": "total_amount"
+                },
+                {
+                  "targetField": "payment_amount",
+                  "sourceField": "payment_amount"
+                },
+                {
+                  "targetField": "create_time",
+                  "sourceField": "create_time"
+                },
+                {
+                  "targetField": "payment_time",
+                  "sourceField": "payment_time"
+                }
+              ],
+              "description": "",
+              "printExpr": ""
+            }
+          }
+        ],
+        "edges": [
+          {
+            "id": "edge_msewh57d_k74h",
+            "source": "start",
+            "target": "input_msewh57d_jewd"
+          },
+          {
+            "id": "edge_msewhk7n_ouet",
+            "source": "input_msewh57d_jewd",
+            "target": "branch_msewhk7m_s88p"
+          },
+          {
+            "id": "edge_msewhvzf_b1xm",
+            "source": "branch_msewhk7m_s88p",
+            "target": "throw_msewhvze_5t5x",
+            "sourceHandle": "true",
+            "label": "是"
+          },
+          {
+            "id": "e_branch_msewhk7m_s88p_false_objectMap_msewp01c_4nfi_msewp3g8",
+            "source": "branch_msewhk7m_s88p",
+            "target": "objectMap_msewp01c_4nfi",
+            "sourceHandle": "false",
+            "label": "否"
+          },
+          {
+            "id": "e_objectMap_msewp01c_4nfi_default_end_msewibjo_7v3t_msewp73c",
+            "source": "objectMap_msewp01c_4nfi",
+            "target": "end_msewibjo_7v3t"
+          }
+        ]
+      }
+    }
+  ]
+}

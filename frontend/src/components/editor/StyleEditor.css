@@ -1,0 +1,31 @@
+.style-editor {
+  min-width: 0;
+}
+
+.section-title {
+  margin: 8px 0 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #909399;
+}
+
+.section-title:first-child {
+  margin-top: 0;
+}
+
+.size-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+}
+
+.quad-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.style-editor .ant-form-item {
+  margin-bottom: 8px;
+}

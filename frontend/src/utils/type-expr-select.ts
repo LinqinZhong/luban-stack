@@ -1,4 +1,4 @@
-import type { TypeSelectPayload } from '../components/editor/DataFieldTypeTreeSelect.vue'
+import type { TypeSelectPayload } from '../components/editor/data-field-type-select'
 import {
   createEmptyClearedTypeExpr,
   isTypeExprCleared,
@@ -14,7 +14,6 @@ export const TYPE_EXPR_EXCLUDE_TYPES: DataFieldType[] = [
   'ref',
   'api',
   'json',
-  'resource',
 ]
 
 function leafAtomFromPayload(
@@ -36,7 +35,8 @@ function leafAtomFromPayload(
     type === 'any' ||
     type === 'time' ||
     type === 'date' ||
-    type === 'datetime'
+    type === 'datetime' ||
+    type === 'resource'
   ) {
     return { kind: type }
   }
@@ -110,7 +110,8 @@ function leafPayloadFromAtom(atom: TypeAtom): {
     atom.kind === 'any' ||
     atom.kind === 'time' ||
     atom.kind === 'date' ||
-    atom.kind === 'datetime'
+    atom.kind === 'datetime' ||
+    atom.kind === 'resource'
   ) {
     return { type: atom.kind }
   }

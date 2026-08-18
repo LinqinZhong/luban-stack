@@ -1,0 +1,754 @@
+﻿.stage {
+  position: relative;
+  height: 100%;
+  overflow: hidden;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  background:
+    linear-gradient(90deg, rgba(15, 23, 42, 0.04) 1px, transparent 1px),
+    linear-gradient(rgba(15, 23, 42, 0.04) 1px, transparent 1px);
+  background-size: 16px 16px;
+  background-color: #e8edf3;
+  cursor: default;
+  /* 空白区交给双指缩放/平移；手机框内由 .phone 恢复触控滚动 */
+  touch-action: none;
+}
+
+/* 预览：系统手型光标（pointer），不用自定义蓝点 */
+.stage.is-preview .phone,
+.stage.is-preview .phone * {
+  cursor: pointer;
+}
+
+.stage.is-preview .phone .overlay-scroll-body.is-drag-scrolling,
+.stage.is-preview .phone .overlay-scroll-body.is-drag-scrolling * {
+  cursor: grabbing;
+}
+
+.stage.is-preview .color-pick-ignore,
+.stage.is-preview .color-pick-ignore button,
+.stage.is-preview .color-pick-ignore .ant-btn,
+.stage.is-preview .inspect-callout,
+.stage.is-preview .inspect-callout button {
+  cursor: pointer;
+}
+
+.stage.panning,
+.stage.panning * {
+  cursor: grabbing !important;
+}
+
+.stage-world {
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 24px;
+  width: 100%;
+  height: 100%;
+  min-width: 100%;
+  min-height: 100%;
+  box-sizing: border-box;
+}
+
+.stage-world.is-component {
+  align-items: center;
+}
+
+.phone-slot.is-framed {
+  display: flex;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  justify-content: flex-start;
+  align-items: flex-start;
+}
+
+.phone-slot:not(.is-framed) {
+  display: contents;
+}
+
+/* 与原先 .phone 作为 stage-world 子项时一致：占满高度，否则内部 flex:1 页面层会塌成 0 */
+.phone-shell {
+  position: relative;
+  flex-shrink: 0;
+  height: 100%;
+  box-sizing: border-box;
+  overflow: visible;
+}
+
+/* 小于屏宽/屏高时 shell 随内容，才能在 phone-slot 内真正居中 */
+.phone-slot.is-framed .phone-shell {
+  max-width: 100%;
+  max-height: 100%;
+  box-sizing: border-box;
+}
+.phone-slot.is-framed:not(.center-x) .phone-shell {
+  width: 100%;
+}
+.phone-slot.is-framed:not(.center-y) .phone-shell {
+  height: 100%;
+}
+.phone-slot.is-framed.center-x .phone-shell {
+  width: auto;
+}
+.phone-slot.is-framed.center-y .phone-shell {
+  height: auto;
+}
+
+.stage-inspect-host {
+  position: absolute;
+  inset: 0;
+  z-index: 7;
+  pointer-events: none;
+  overflow: visible;
+}
+
+.stage-inspect-host .inspect-callout {
+  pointer-events: auto;
+}
+
+.phone-slot.center-x {
+  justify-content: center;
+}
+
+.phone-slot.center-y {
+  align-items: center;
+}
+
+.stage-toolbar {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  z-index: 2;
+  display: flex;
+  gap: 8px;
+}
+
+.btn-plus-bug span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.plus-bug-icon {
+  display: inline-flex;
+  width: 18px;
+  height: 18px;
+  line-height: 0;
+}
+
+.plus-bug-icon svg {
+  display: block;
+}
+
+.stage-status {
+  --ctrl-h: 28px;
+  position: absolute;
+  right: 16px;
+  /* 避开底部悬浮模式 tab */
+  bottom: 64px;
+  /* 低于检视层；空白处穿透，避免挡住操纵杆 */
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  pointer-events: none;
+}
+
+.stage-status > * {
+  pointer-events: auto;
+}
+
+.scene-tabs {
+  display: inline-flex;
+  align-items: stretch;
+  box-sizing: border-box;
+  height: var(--ctrl-h);
+  padding: 2px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid #e4e7ed;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.06);
+}
+
+.scene-tab {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  border: none;
+  background: transparent;
+  color: #606266;
+  font-size: 12px;
+  line-height: 1;
+  padding: 0 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.scene-tab:hover {
+  color: #303133;
+}
+
+.scene-tab.active {
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+  font-weight: 600;
+}
+
+.tool-tab {
+  width: 28px;
+  padding: 0;
+}
+
+.tool-icon {
+  display: block;
+  width: 14px;
+  height: 14px;
+}
+
+.zoom-label {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: var(--ctrl-h);
+  min-width: 48px;
+  padding: 0 10px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid #e4e7ed;
+  color: #606266;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  user-select: none;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.06);
+}
+
+.stage-status .pan-reset {
+  box-sizing: border-box;
+  width: var(--ctrl-h);
+  height: var(--ctrl-h);
+  min-height: var(--ctrl-h);
+  padding: 0;
+  opacity: 0.35;
+  transition: opacity 0.15s ease;
+}
+
+.stage-status .pan-reset.visible {
+  opacity: 1;
+}
+
+/* 系统状态栏：时间 · 信号 · Wi‑Fi · 电量 */
+.device-status-bar {
+  flex-shrink: 0;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 12px 0 16px;
+  background: #fff;
+  color: #111;
+  pointer-events: none;
+  z-index: 6;
+  box-sizing: border-box;
+  outline: calc(1px / var(--canvas-zoom, 1)) solid transparent;
+  outline-offset: calc(-1px / var(--canvas-zoom, 1));
+  transition: outline-color 0.12s ease;
+}
+
+.device-status-bar.selectable {
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+.device-status-bar.selectable:hover {
+  outline-color: rgba(var(--color-primary-rgb), 0.55);
+}
+
+.device-status-bar.selected {
+  outline-color: var(--color-primary);
+}
+
+.device-status-bar.cover {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  flex-shrink: 0;
+}
+
+/* 微信原生标题栏（navigationBar）：标题按屏宽绝对居中（勿用不对称 padding + flex，会偏左） */
+.device-navigation-bar {
+  position: relative;
+  flex-shrink: 0;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  box-sizing: border-box;
+  pointer-events: none;
+  z-index: 6;
+  outline: calc(1px / var(--canvas-zoom, 1)) solid transparent;
+  outline-offset: calc(-1px / var(--canvas-zoom, 1));
+  transition: outline-color 0.12s ease;
+}
+
+.device-navigation-bar.selectable {
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+.device-navigation-bar.selectable:hover {
+  outline-color: rgba(var(--color-primary-rgb), 0.55);
+}
+
+.device-navigation-bar.selected {
+  outline-color: var(--color-primary);
+}
+
+.device-navigation-bar.cover {
+  position: absolute;
+  top: 22px;
+  left: 0;
+  right: 0;
+}
+
+.nav-title {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  /* 两侧对称留白，避免文字顶到胶囊；视觉中心仍在屏幕中线 */
+  max-width: min(60%, calc(100% - 180px));
+  font-size: 16px;
+  font-weight: 500;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: center;
+}
+
+.status-time {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.status-trailing {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.status-icon {
+  display: block;
+  flex-shrink: 0;
+  color: inherit;
+}
+
+.status-signal {
+  width: 14px;
+  height: 10px;
+}
+
+.status-wifi {
+  width: 13px;
+  height: 10px;
+}
+
+.status-battery {
+  width: 22px;
+  height: 10px;
+}
+
+/* 小程序标题栏胶囊：三点 · 关闭环；位置尺寸与 device-info EDITOR_MENU_BUTTON 对齐 */
+.mp-capsule {
+  position: absolute;
+  top: 30px;
+  right: 7px;
+  z-index: 8;
+  display: inline-flex;
+  align-items: center;
+  height: 28px;
+  padding: 0 2px;
+  border-radius: 14px;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  background: rgba(255, 255, 255, 0.6);
+  box-sizing: border-box;
+  pointer-events: none;
+}
+
+.mp-capsule.light {
+  border-color: rgba(255, 255, 255, 0.25);
+  background: rgba(0, 0, 0, 0.15);
+}
+
+.mp-capsule.light .mp-capsule-more::before {
+  background: #fff;
+  box-shadow:
+    -6px 0 0 -0.5px #fff,
+    6px 0 0 -0.5px #fff;
+}
+
+.mp-capsule.light .mp-capsule-divider {
+  background: rgba(255, 255, 255, 0.35);
+}
+
+.mp-capsule.light .mp-capsule-close::before {
+  border-color: #fff;
+}
+
+.mp-capsule.light .mp-capsule-close::after {
+  background: #fff;
+}
+
+.mp-capsule-more,
+.mp-capsule-close {
+  position: relative;
+  width: 36px;
+  height: 28px;
+  flex-shrink: 0;
+}
+
+/* 三点：中间略大 */
+.mp-capsule-more::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 4px;
+  height: 4px;
+  margin: -2px 0 0 -2px;
+  border-radius: 50%;
+  background: #111;
+  box-shadow:
+    -6px 0 0 -0.5px #111,
+    6px 0 0 -0.5px #111;
+}
+
+.mp-capsule-divider {
+  width: 1px;
+  height: 16px;
+  background: rgba(0, 0, 0, 0.12);
+  flex-shrink: 0;
+}
+
+/* 关闭：外环 + 实心圆心 */
+.mp-capsule-close::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 15px;
+  height: 15px;
+  margin: -7.5px 0 0 -7.5px;
+  border-radius: 50%;
+  border: 2.5px solid #111;
+  box-sizing: border-box;
+}
+
+.mp-capsule-close::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 5px;
+  height: 5px;
+  margin: -2.5px 0 0 -2.5px;
+  border-radius: 50%;
+  background: #111;
+}
+
+.phone.has-status-bar > .phone-page-layer > .select-shell {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.phone.status-bar-cover > .phone-page-layer > .select-shell {
+  /* 重叠时页面仍铺满手机框，状态栏浮层不占流 */
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.phone-page-layer {
+  position: relative;
+  z-index: 0;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  /* 困住页面内任意 z-index，避免压过角标/手指光标 */
+  isolation: isolate;
+}
+
+.phone.is-miniprogram {
+  border-radius: 0;
+}
+
+.phone {
+  position: relative;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 667px;
+  height: 100%;
+  background: #fff;
+  border: 1px solid #d0d7de;
+  box-shadow: 0 12px 40px rgba(15, 23, 42, 0.08);
+  overflow: hidden;
+  user-select: none;
+  -webkit-user-select: none;
+  /* 覆盖 .stage 的 touch-action:none，保留机内滚动/点击 */
+  touch-action: auto;
+}
+
+.phone.is-preview {
+  cursor: pointer;
+  touch-action: auto;
+  /* 平板/触控按住时去掉系统浅蓝高亮遮罩 */
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+}
+
+.phone.is-preview * {
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+}
+
+.phone.is-preview .overlay-scroll-body.is-drag-scrolling,
+.phone.is-preview .overlay-scroll-body.is-drag-scrolling * {
+  cursor: grabbing;
+}
+
+.phone-modal-host {
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.phone-modal-host .modal-overlay {
+  pointer-events: auto;
+}
+
+.phone-screen-frame {
+  position: absolute;
+  inset: 0;
+  z-index: 200;
+  pointer-events: none;
+  box-sizing: border-box;
+  border: calc(1px / var(--canvas-zoom, 1)) dashed var(--color-primary);
+}
+
+.phone-badge-host {
+  position: absolute;
+  inset: 0;
+  z-index: 100040;
+  pointer-events: none;
+  overflow: visible;
+}
+
+.phone-badge-host .badge-stack {
+  pointer-events: auto;
+}
+
+.distance-guides {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 30;
+  overflow: visible;
+}
+
+.align-guides {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.align-guide {
+  position: absolute;
+  pointer-events: none;
+  box-sizing: border-box;
+}
+
+.align-guide.h {
+  left: 0;
+  right: 0;
+  height: 0;
+  border-top: 1px dashed transparent;
+}
+
+.align-guide.v {
+  top: 0;
+  bottom: 0;
+  width: 0;
+  border-left: 1px dashed transparent;
+}
+
+.align-guide.selected {
+  border-color: #d48806;
+}
+
+.align-guide.hovered {
+  border-color: #c41d7f;
+}
+
+.distance-guide {
+  position: absolute;
+  pointer-events: none;
+  color: #f5222d;
+}
+
+.distance-guide .distance-line {
+  position: absolute;
+  background: #f5222d;
+}
+
+.distance-guide.left .distance-line,
+.distance-guide.right .distance-line,
+.distance-guide.h .distance-line {
+  left: 0;
+  right: 0;
+  top: 0;
+  height: calc(1px / var(--canvas-zoom, 1));
+  transform: translateY(-50%);
+}
+
+.distance-guide.top .distance-line,
+.distance-guide.bottom .distance-line,
+.distance-guide.v .distance-line {
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: calc(1px / var(--canvas-zoom, 1));
+  transform: translateX(-50%);
+}
+
+.distance-guide .distance-label {
+  position: absolute;
+  z-index: 1;
+  padding: 0 calc(3px / var(--canvas-zoom, 1));
+  font-size: calc(11px / var(--canvas-zoom, 1));
+  font-weight: 600;
+  line-height: calc(14px / var(--canvas-zoom, 1));
+  color: #f5222d;
+  background: rgba(255, 255, 255, 0.92);
+  white-space: nowrap;
+  user-select: none;
+}
+
+.distance-guide.left .distance-label,
+.distance-guide.right .distance-label,
+.distance-guide.h .distance-label {
+  left: 50%;
+  top: 0;
+  transform: translate(-50%, calc(-100% - 2px / var(--canvas-zoom, 1)));
+}
+
+.distance-guide.top .distance-label,
+.distance-guide.bottom .distance-label,
+.distance-guide.v .distance-label {
+  left: 0;
+  top: 50%;
+  transform: translate(calc(100% + 2px / var(--canvas-zoom, 1)), -50%);
+}
+
+.size-label {
+  position: absolute;
+  z-index: 2;
+  transform: translateX(-50%);
+  padding: calc(1px / var(--canvas-zoom, 1)) calc(6px / var(--canvas-zoom, 1));
+  border-radius: calc(3px / var(--canvas-zoom, 1));
+  font-size: calc(11px / var(--canvas-zoom, 1));
+  font-weight: 600;
+  line-height: calc(16px / var(--canvas-zoom, 1));
+  color: #fff;
+  background: #f5222d;
+  white-space: nowrap;
+  user-select: none;
+  pointer-events: none;
+}
+
+/* ?????????? Swiper ?????????? */
+.phone.is-edit {
+  overflow: visible;
+}
+
+.phone-toast {
+  position: absolute;
+  left: 50%;
+  bottom: 72px;
+  z-index: 100;
+  transform: translateX(-50%);
+  max-width: calc(100% - 48px);
+  padding: 10px 16px;
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.86);
+  color: #fff;
+  font-size: 14px;
+  line-height: 1.4;
+  text-align: center;
+  word-break: break-word;
+  pointer-events: none;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.2);
+}
+
+.phone-toast-enter-active,
+.phone-toast-leave-active {
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.phone-toast-enter-from,
+.phone-toast-leave-to {
+  opacity: 0;
+  transform: translateX(-50%) translateY(8px);
+}
+
+.phone.is-fit-content {
+  height: auto;
+  min-height: 0;
+  /* 组件画布：去掉整机边框，只保留内容框 */
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+}
+
+/* width=wrap_content：框随内容，避免 flex 子项 stretch 把宽度撑回屏宽 */
+.phone.is-width-fit-content > .phone-page-layer {
+  flex: 0 0 auto;
+  align-self: flex-start;
+  width: fit-content;
+  max-width: 100%;
+}
+
+.phone.is-picking {
+  cursor: crosshair;
+}
+
+.pick-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 12px;
+  background: rgba(15, 23, 42, 0.08);
+  color: #303133;
+  font-size: 13px;
+  cursor: crosshair;
+}

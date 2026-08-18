@@ -1,0 +1,105 @@
+.inspect-callout {
+  position: absolute;
+  pointer-events: auto;
+  z-index: 100060;
+  overflow: visible;
+  display: flex;
+  align-items: center;
+}
+
+.inspect-callout.active {
+  z-index: 100070;
+}
+
+.inspect-leader {
+  position: absolute;
+  display: block;
+  overflow: visible;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.inspect-path {
+  stroke: #94a3b8;
+  stroke-width: 1.5;
+  pointer-events: none;
+}
+
+.inspect-callout.active .inspect-path {
+  stroke: #d48806;
+}
+
+.inspect-chip {
+  position: relative;
+  z-index: 1;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  pointer-events: auto;
+  line-height: 0;
+}
+
+.inspect-callout.side-left .inspect-chip {
+  flex-direction: row-reverse;
+}
+
+.inspect-btn {
+  box-sizing: border-box;
+  flex-shrink: 0;
+  border-radius: 999px;
+  border: 1.5px solid rgba(255, 255, 255, 0.92);
+  background: #94a3b8;
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.22);
+}
+
+.inspect-chip:hover .inspect-btn {
+  background: #64748b;
+}
+
+.inspect-callout.active .inspect-btn {
+  background: #d48806;
+  box-shadow: 0 0 0 2px rgba(212, 136, 6, 0.4);
+}
+
+.inspect-callout.active .inspect-chip:hover .inspect-btn {
+  background: #b8740a;
+}
+
+.inspect-btn-icon {
+  width: 62%;
+  height: 62%;
+  display: block;
+  pointer-events: none;
+}
+
+.inspect-label {
+  max-width: 88px;
+  padding: 0 2px;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.2;
+  color: #64748b;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-shadow:
+    0 0 3px #fff,
+    0 0 3px #fff,
+    0 1px 2px rgba(255, 255, 255, 0.9);
+  pointer-events: none;
+  user-select: none;
+}
+
+.inspect-callout.active .inspect-label {
+  color: #d48806;
+}

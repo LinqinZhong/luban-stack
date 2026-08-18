@@ -20,7 +20,7 @@ export type DataFieldType =
   | 'ref'
   /** 后端控制器 API（组件参数） */
   | 'api'
-  /** 资源外链 URI（值类型等价 type URI = string） */
+  /** 互联网资源 Resource（底层为字符串） */
   | 'resource'
 
 /** 映射键类型 */

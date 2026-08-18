@@ -1,0 +1,29 @@
+.event-badge {
+  box-sizing: border-box;
+  flex-shrink: 0;
+  background: #f97316;
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 0;
+  overflow: hidden;
+  pointer-events: none;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.2);
+}
+
+.event-badge.clickable {
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+.event-badge.clickable:hover {
+  background: #ea580c;
+}
+
+.event-badge-icon {
+  width: 0.68em;
+  height: 0.68em;
+  display: block;
+  flex-shrink: 0;
+}

@@ -19,7 +19,7 @@
       "remark": "当前选中 key",
       "defaultValue": "",
       "twoWay": false,
-      "required": true
+      "required": false
     },
     {
       "name": "activeColor",
@@ -81,7 +81,7 @@
         "count": 1
       }
     ],
-    "value": "all",
+    "value": null,
     "activeColor": "primary",
     "inactiveColor": "#606266",
     "background": "#ffffff"

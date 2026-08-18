@@ -1,9 +1,29 @@
-import type { InjectionKey, Ref } from 'vue'
+import { createContext, useContext, useMemo } from 'react'
 
 export type FlowDebugInject = {
-  cursorId: Ref<string | null | undefined>
-  visitedIds: Ref<string[] | undefined>
-  printByNode: Ref<Record<string, string> | undefined>
+  cursorId: string | null | undefined
+  visitedIds: string[] | undefined
+  printByNode: Record<string, string> | undefined
 }
 
-export const FLOW_DEBUG_KEY: InjectionKey<FlowDebugInject> = Symbol('method-flow-debug')
+export const FlowDebugContext = createContext<FlowDebugInject | null>(null)
+
+export function useFlowDebug() {
+  return useContext(FlowDebugContext)
+}
+
+export function useFlowDebugNode(nodeId: string) {
+  const debug = useFlowDebug()
+  return useMemo(() => {
+    const isDebugCursor = Boolean(debug?.cursorId) && debug?.cursorId === nodeId
+    const isDebugVisited = Boolean(debug?.visitedIds?.includes(nodeId))
+    const debugClass = [
+      'flow-debug-target',
+      isDebugCursor ? 'is-debug-cursor' : '',
+      isDebugVisited ? 'is-debug-visited' : '',
+    ]
+      .filter(Boolean)
+      .join(' ')
+    return { isDebugCursor, isDebugVisited, debugClass }
+  }, [debug, nodeId])
+}

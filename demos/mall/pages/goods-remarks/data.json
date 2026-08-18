@@ -25,7 +25,7 @@
       "computeBody": "",
       "controllerBinding": {
         "serviceId": "svc_mrqdgnhb_3ktq2g",
-        "controllerId": "cms8ol9you9yc",
+        "controllerId": "149a5478-ed53-42bb-9a72-dc38cae7233c",
         "apiId": "api_ms8qizo4_2ab7bq",
         "parseBody": "return data\n",
         "onLoading": "",

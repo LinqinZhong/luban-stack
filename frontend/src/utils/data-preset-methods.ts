@@ -227,7 +227,8 @@ export function buildPresetMethods(options: {
   indexes?: MysqlIndexDef[]
 }): ProcessorMethod[] {
   const { entity, columns, indexes = [] } = options
-  if (!entity?.id) return []
+  // 未绑定表名时不生成数据库预置方法
+  if (!entity?.id || !entity.tableName?.trim()) return []
 
   const entityId = entity.id
   const logicDeleteCol = columns.find((c) => c.logicDelete)

@@ -1,6 +1,6 @@
 import type { DataTypeDef, TypeExpr } from '../types/data-types.js'
 
-/** 字段类型是否为数组（如 URI[] / string[]） */
+/** 字段类型是否为数组（如 Resource[] / string[]） */
 export function isArrayTypeExpr(expr: TypeExpr | null | undefined): boolean {
   const atom = expr?.intersections?.[0]?.alternatives?.[0]
   return atom?.kind === 'array'

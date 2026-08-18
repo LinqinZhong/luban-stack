@@ -192,17 +192,48 @@ function coercePropValue(type: DataFieldType, raw: unknown): DataFieldValue {
   }
 }
 
+/** 是否配置了可用的默认值（空字符串视为未配置） */
+export function hasConfiguredPropDefault(def: ComponentPropDef): boolean {
+  const v = def.defaultValue
+  if (v === undefined || v === null) return false
+  if (typeof v === 'string' && !v.trim()) return false
+  return true
+}
+
+/**
+ * 入参未传时的回落值：有配置默认值则用默认值，否则 null。
+ * （不再用类型占位 '' / 0 / false 冒充「已传」）
+ */
+export function resolveUnpassedPropValue(def: ComponentPropDef): DataFieldValue {
+  if (!hasConfiguredPropDefault(def)) return null
+  return normalizePropDefaultValue(def.type, def.defaultValue)
+}
+
 function defaultsFromDefs(defs: ComponentPropDef[]): Record<string, unknown> {
   const result: Record<string, unknown> = {}
   for (const def of defs) {
     const name = def.name.trim()
     if (!name) continue
-    result[name] =
-      def.defaultValue !== undefined
-        ? normalizePropDefaultValue(def.type, def.defaultValue)
-        : defaultValue(def.type)
+    result[name] = resolveUnpassedPropValue(def)
   }
   return result
+}
+
+/**
+ * 将调试覆盖合并进 $props。
+ * `null` 表示「不传」：保留未传回落（默认值或 null），不写入显式 null 覆盖默认值。
+ */
+export function mergePropDebugOverrides(
+  base: Record<string, unknown>,
+  overrides: Record<string, unknown> | null | undefined,
+): Record<string, unknown> {
+  if (!overrides) return { ...base }
+  const out = { ...base }
+  for (const [key, value] of Object.entries(overrides)) {
+    if (value === null) continue
+    out[key] = value
+  }
+  return out
 }
 
 /**

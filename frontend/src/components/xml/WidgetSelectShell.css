@@ -1,0 +1,97 @@
+﻿.select-shell {
+  overflow: visible;
+}
+
+/* 压过任何布局 display:flex，保证 vShow 隐藏真正生效 */
+.select-shell.is-vshow-hidden {
+  display: none !important;
+}
+
+.margin-box {
+  position: relative;
+  overflow: visible;
+}
+
+.content-box {
+  overflow: visible;
+}
+
+/* 边框按 1/zoom 反缩放，屏幕上始终约 1px；黄色一律虚线 */
+.content-box.selected,
+.content-box.inspecting {
+  outline: calc(1px / var(--canvas-zoom, 1)) dashed #d48806;
+  outline-offset: calc(-1px / var(--canvas-zoom, 1));
+  background-color: rgba(212, 136, 6, 0.08);
+}
+
+.content-box.hovered {
+  outline: calc(1px / var(--canvas-zoom, 1)) solid #c41d7f;
+  outline-offset: calc(-1px / var(--canvas-zoom, 1));
+}
+
+.frame-content,
+.frame-margin {
+  position: absolute;
+  pointer-events: none;
+  box-sizing: border-box;
+  z-index: 20;
+}
+
+.frame-content {
+  inset: 0;
+}
+
+.frame-content.selected,
+.frame-content.inspecting {
+  border: calc(1px / var(--canvas-zoom, 1)) dashed #d48806;
+}
+
+.frame-content.hovered {
+  border: calc(1px / var(--canvas-zoom, 1)) solid #c41d7f;
+}
+
+.frame-margin {
+  inset: 0;
+}
+
+.frame-margin.selected,
+.frame-margin.inspecting {
+  border: calc(1px / var(--canvas-zoom, 1)) dashed #d48806;
+}
+
+.frame-margin.hovered {
+  border: calc(1px / var(--canvas-zoom, 1)) dashed #c41d7f;
+}
+
+.badge-stack {
+  position: absolute;
+  top: 0;
+  right: 0;
+  z-index: 100040;
+  transform: translate(50%, -50%);
+  display: flex;
+  align-items: center;
+  gap: calc(4px / max(var(--canvas-zoom, 1), 1));
+  pointer-events: none;
+}
+
+.badge-stack > * {
+  pointer-events: auto;
+}
+
+.inspect-local {
+  position: absolute;
+  top: 50%;
+  z-index: 100050;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
+
+.inspect-local.side-right {
+  right: 0;
+}
+
+.inspect-local.side-left {
+  left: 0;
+}

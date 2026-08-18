@@ -86,8 +86,7 @@
               {
                 "alternatives": [
                   {
-                    "kind": "named",
-                    "ref": "type_common_URI"
+                    "kind": "resource"
                   }
                 ]
               }
@@ -231,8 +230,7 @@
                   {
                     "kind": "array",
                     "item": {
-                      "kind": "named",
-                      "ref": "type_common_URI"
+                      "kind": "resource"
                     }
                   }
                 ]
@@ -375,8 +373,7 @@
               {
                 "alternatives": [
                   {
-                    "kind": "named",
-                    "ref": "type_common_URI"
+                    "kind": "resource"
                   }
                 ]
               }
@@ -395,8 +392,7 @@
                   {
                     "kind": "array",
                     "item": {
-                      "kind": "named",
-                      "ref": "type_common_URI"
+                      "kind": "resource"
                     }
                   }
                 ]

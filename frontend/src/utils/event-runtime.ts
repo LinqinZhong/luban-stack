@@ -376,10 +376,21 @@ async function runBuiltin(
     return true
   }
   if (name === 'setData') {
+    const propRaw = args.prop
+    if (propRaw != null && typeof propRaw === 'object') {
+      ctx.onUnknownMethod?.(
+        "setData 用法错误：应为 setData('字段名', 值)，不能传对象",
+      )
+      return true
+    }
     const prop = str('prop').trim()
     if (!prop) return true
     const field = findField(ctx.pageData, prop)
-    const type = field?.type ?? 'string'
+    if (!field) {
+      ctx.onUnknownMethod?.(`数据池不存在字段：${prop}`)
+      return true
+    }
+    const type = field.type ?? 'string'
     const rawValue = args.value
     const value =
       typeof rawValue === 'string'
@@ -467,17 +478,31 @@ function buildCustomScope(ctx: RunEventBindingsContext): Record<string, unknown>
       ctx.navigateTo(String(to ?? ''), params),
     navigateBack: () => ctx.navigateBack(),
     setData: (prop: string, value: unknown) => {
-      const name = String(prop ?? '').trim()
+      // 禁止 setData({ prop, value })：对象会被 String 成 "[object Object]"
+      if (prop != null && typeof prop === 'object') {
+        throw new Error(
+          "setData 用法错误：应为 setData('字段名', 值)，不能传对象 setData({prop, value})",
+        )
+      }
+      if (typeof prop !== 'string') {
+        throw new Error(
+          `setData 用法错误：第一个参数必须是字段名字符串，实际是 ${typeof prop}`,
+        )
+      }
+      const name = prop.trim()
       if (!name) return
       const live = livePageData(ctx)
       const field = findField(live, name)
+      if (!field) {
+        throw new Error(`数据池不存在字段：${name}`)
+      }
       const next: DataFieldValue =
-        typeof value === 'string' && field
+        typeof value === 'string'
           ? coerceFieldValue(field.type, value)
           : (value as DataFieldValue)
       // 先判等再写入：若先改 field.value 再交给宿主，宿主 sameJson 会误判跳过，
       // 计算字段（如 pullText 依赖 refreshing）就不会重算，界面停在「刷新中...」
-      if (field && sameJson(field.value, next)) return
+      if (sameJson(field.value, next)) return
       ctx.setData(name, next)
       // 宿主替换引用后，再同步旧快照上的同名字段，保证同链读取一致
       const after = findField(livePageData(ctx), name)

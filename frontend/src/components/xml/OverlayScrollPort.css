@@ -1,0 +1,64 @@
+﻿.overlay-scroll-port:not(.is-enabled) {
+  display: contents;
+}
+
+.overlay-scroll-body {
+  box-sizing: border-box;
+}
+
+.overlay-scroll-port.is-enabled {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 0%;
+  width: 100%;
+  min-height: 0;
+  min-width: 0;
+  align-self: stretch;
+  overflow: hidden;
+}
+
+.overlay-scroll-body.is-scrollable {
+  flex: 1 1 0%;
+  width: 100%;
+  min-height: 0 !important;
+  min-width: 0;
+  align-self: stretch;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
+  -webkit-overflow-scrolling: touch;
+  /* 隐藏原生滚动条，避免占用布局宽度 */
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.overlay-scroll-body.is-drag-scrolling {
+  cursor: grabbing;
+  user-select: none;
+}
+
+.overlay-scroll-body.is-scrollable::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
+}
+
+.overlay-scroll-thumb {
+  position: absolute;
+  top: 0;
+  right: 2px;
+  width: 3px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.32);
+  opacity: 0;
+  pointer-events: none;
+  z-index: 35;
+  transition: opacity 0.18s ease;
+  will-change: transform, opacity;
+}
+
+.overlay-scroll-thumb.is-visible {
+  opacity: 1;
+}

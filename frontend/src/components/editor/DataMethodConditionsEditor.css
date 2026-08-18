@@ -1,0 +1,146 @@
+.data-method-conditions {
+  width: 100%;
+}
+
+.cond-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.cond-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  min-width: 0;
+}
+
+.cond-tab {
+  font-size: 12px;
+  color: #606266;
+  background: #f2f3f5;
+  border-radius: 4px;
+  padding: 2px 8px;
+}
+
+.cond-hint {
+  font-size: 12px;
+  color: #909399;
+}
+
+.cond-group {
+  border: 1px solid #ebeef5;
+  border-radius: 6px;
+  padding: 10px;
+  margin-bottom: 10px;
+  background: #fafafa;
+}
+
+.cond-group-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.cond-group-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #303133;
+}
+
+.cond-group-logic {
+  font-size: 12px;
+  color: #909399;
+}
+
+.cond-group-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.cond-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.cond-row .ant-select-selector,
+.cond-row .ant-input {
+  min-height: 32px;
+}
+
+.cond-row .ant-input-number {
+  width: 140px;
+}
+
+.cond-row .ant-picker {
+  width: 180px;
+}
+
+.cond-row .ant-switch {
+  margin: 0 4px;
+}
+
+.cond-field {
+  width: 140px;
+}
+
+.cond-custom {
+  width: 120px;
+}
+
+.cond-op {
+  width: 110px;
+}
+
+.cond-kind {
+  width: 100px;
+}
+
+.cond-value {
+  min-width: 140px;
+  flex: 1 1 140px;
+}
+
+.cond-value + .cond-value {
+  flex: 1 1 120px;
+}
+
+.cond-value .ant-input,
+.cond-value .ant-input-number,
+.cond-value.ant-picker {
+  width: 100%;
+}
+
+.cond-enable {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.cond-del {
+  flex: 0 0 auto;
+}
+
+.cond-or {
+  text-align: center;
+  font-size: 12px;
+  font-weight: 600;
+  color: #909399;
+  margin: 4px 0 8px;
+}
+
+.empty-box {
+  padding: 12px;
+  font-size: 12px;
+  color: #909399;
+  background: #f5f7fa;
+  border-radius: 6px;
+}

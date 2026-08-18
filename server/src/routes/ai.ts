@@ -1,10 +1,7 @@
 import { Router } from 'express'
 import { loadAiDocsPrompt } from '../services/ai-docs.js'
-import {
-  streamAiChat,
-  type AiApiType,
-  type AiChatMessage,
-} from '../services/ai-chat.js'
+import { streamAiChat, type AiApiType, type AiChatMessage } from '../services/ai-chat.js'
+import { streamCursorAgent } from '../services/ai-cursor-agent.js'
 import {
   acquireAiAssistantLock,
   deleteAiAssistantLog,
@@ -139,6 +136,76 @@ router.post('/chat', async (req, res) => {
     }
     res.status(500).json({
       message: err instanceof Error ? err.message : 'AI 请求失败',
+    })
+  }
+})
+
+/** Cursor 智能体：在项目目录本地执行，流式回传 */
+router.post('/cursor-agent', async (req, res) => {
+  try {
+    const body = req.body ?? {}
+    const apiKey = typeof body.apiKey === 'string' ? body.apiKey : ''
+    const modelId = typeof body.modelId === 'string' ? body.modelId : ''
+    const projectPath =
+      typeof body.projectPath === 'string' ? body.projectPath.trim() : ''
+    const prompt = typeof body.prompt === 'string' ? body.prompt : ''
+
+    if (!projectPath) {
+      res.status(400).json({ message: '请提供 projectPath' })
+      return
+    }
+    if (!prompt.trim()) {
+      res.status(400).json({ message: 'prompt 不能为空' })
+      return
+    }
+    if (!apiKey.trim()) {
+      res.status(400).json({ message: '请提供 Cursor API Key' })
+      return
+    }
+
+    res.setHeader('Content-Type', 'text/event-stream; charset=utf-8')
+    res.setHeader('Cache-Control', 'no-cache, no-transform')
+    res.setHeader('Connection', 'keep-alive')
+    res.setHeader('X-Accel-Buffering', 'no')
+    res.flushHeaders?.()
+
+    const writeEvent = (payload: unknown) => {
+      res.write(`data: ${JSON.stringify(payload)}\n\n`)
+      const flushable = res as typeof res & { flush?: () => void }
+      flushable.flush?.()
+    }
+
+    // 注意：不要用 req.on('close')。POST body 读完后 Node 会立刻
+    // 把 IncomingMessage 标成 close/destroyed，会误取消仍在进行的 SSE。
+    const ac = new AbortController()
+    res.on('close', () => {
+      if (!res.writableEnded) ac.abort()
+    })
+
+    for await (const event of streamCursorAgent({
+      apiKey,
+      modelId,
+      projectPath,
+      prompt,
+      signal: ac.signal,
+    })) {
+      writeEvent(event)
+      if (event.type === 'error' || event.type === 'done') break
+    }
+    res.end()
+  } catch (err) {
+    if (res.headersSent) {
+      res.write(
+        `data: ${JSON.stringify({
+          type: 'error',
+          message: err instanceof Error ? err.message : 'Cursor 智能体失败',
+        })}\n\n`,
+      )
+      res.end()
+      return
+    }
+    res.status(500).json({
+      message: err instanceof Error ? err.message : 'Cursor 智能体失败',
     })
   }
 })

@@ -20,7 +20,7 @@ export type DataFieldType =
   | 'ref'
   /** 后端控制器 API（组件参数：可调用；父级绑定具体接口） */
   | 'api'
-  /** 资源外链 URI（值类型等价 type URI = string） */
+  /** 互联网资源 Resource（底层为字符串） */
   | 'resource'
 
 /** 映射键类型 */
@@ -78,7 +78,7 @@ export interface OssBindingConfig {
   connectionId: string
   bucketName: string
   objectKey: string
-  /** 资源外链 URI */
+  /** 资源地址（互联网资源） */
   url: string
 }
 
@@ -192,7 +192,7 @@ export const DATA_FIELD_TYPE_OPTIONS: { label: string; value: DataFieldType }[] 
   { label: '日期时间', value: 'datetime' },
   { label: '图标', value: 'icon' },
   { label: '颜色', value: 'color' },
-  { label: '资源', value: 'resource' },
+  { label: 'Resource', value: 'resource' },
   { label: 'object', value: 'json' },
   { label: '[]', value: 'array' },
   { label: '映射', value: 'map' },
@@ -226,7 +226,7 @@ export const NESTED_FIELD_TYPE_OPTIONS: { label: string; value: DataFieldType }[
   { label: '日期时间', value: 'datetime' },
   { label: '图标', value: 'icon' },
   { label: '颜色', value: 'color' },
-  { label: '资源', value: 'resource' },
+  { label: 'Resource', value: 'resource' },
   { label: '[]', value: 'array' },
   { label: '映射', value: 'map' },
 ]
@@ -525,25 +525,50 @@ export function buildArrayValue(items: ArraySubField[]): unknown[] {
   return items.map(resolveArraySubFieldValue)
 }
 
+/** 以字符串存储、需靠 meta 还原的展示类型 */
+const STRINGISH_DISPLAY_TYPES: DataFieldType[] = [
+  'icon',
+  'color',
+  'time',
+  'date',
+  'datetime',
+  'resource',
+]
+
 /** 保留 arrayFields/objectFields 上的展示类型（icon/color 等），数据以 value 为准 */
 function preserveScalarDisplayType(
-  meta: { type: DataFieldType; typeRef?: string } | undefined,
+  meta: {
+    type: DataFieldType
+    typeRef?: string
+    keyType?: MapKeyType
+    value?: DataFieldValue
+  } | undefined,
   derived: { type: DataFieldType; typeRef?: string; value?: DataFieldValue },
-): { type: DataFieldType; typeRef?: string; value?: DataFieldValue } {
+): {
+  type: DataFieldType
+  typeRef?: string
+  keyType?: MapKeyType
+  value?: DataFieldValue
+} {
   if (!meta) return derived
-  const displayTypes: DataFieldType[] = [
-    'icon',
-    'color',
-    'time',
-    'date',
-    'datetime',
-    'resource',
-  ]
+  // any / ref / api：值形态多变，始终保留声明类型
+  if (meta.type === 'any' || meta.type === 'ref' || meta.type === 'api') {
+    return {
+      type: meta.type,
+      typeRef: meta.typeRef,
+      value: derived.value !== undefined ? derived.value : meta.value,
+    }
+  }
+  // icon/color/time 等：仅当 JSON 值仍是字符串时保留，否则视为代码模式改了类型
   if (
-    displayTypes.includes(meta.type) &&
+    STRINGISH_DISPLAY_TYPES.includes(meta.type) &&
     (derived.type === 'string' || typeof derived.value === 'string')
   ) {
-    return { type: meta.type, typeRef: meta.typeRef, value: derived.value }
+    return {
+      type: meta.type,
+      typeRef: meta.typeRef,
+      value: derived.value,
+    }
   }
   return derived
 }
@@ -553,21 +578,54 @@ export function resolveObjectFields(
   fallbackValue: unknown,
 ): ObjectSubField[] {
   if (fallbackValue && typeof fallbackValue === 'object' && !Array.isArray(fallbackValue)) {
-    const fromValue = valueToObjectFields(fallbackValue as Record<string, unknown>)
+    const obj = fallbackValue as Record<string, unknown>
+    const fromValue = valueToObjectFields(obj)
     if (!fields?.length) return fromValue
     const byName = new Map(
       fields.filter((f) => f.name.trim()).map((f) => [f.name.trim(), f] as const),
     )
     return fromValue.map((v) => {
       const meta = byName.get(v.name.trim())
-      if (v.type === 'json' || v.type === 'array') {
+      if (!meta) return v
+
+      // map 的值是普通 object，推断会变成 json，需按 meta 还原
+      if (meta.type === 'map') {
         return {
-          ...v,
-          typeRef: meta?.type === v.type ? meta.typeRef : v.typeRef,
-          itemType: meta?.type === 'array' ? meta.itemType : v.itemType,
-          itemTypeRef: meta?.type === 'array' ? meta.itemTypeRef : v.itemTypeRef,
+          name: v.name,
+          type: 'map' as const,
+          keyType: meta.keyType,
+          itemType: meta.itemType,
+          itemTypeRef: meta.itemTypeRef,
+          value: (obj[v.name] as DataFieldValue) ?? meta.value ?? {},
         }
       }
+
+      if (meta.type === 'json' || v.type === 'json') {
+        return {
+          name: v.name,
+          type: 'json' as const,
+          typeRef: meta.type === 'json' ? meta.typeRef : v.typeRef,
+          objectFields: resolveObjectFields(
+            meta.type === 'json' ? meta.objectFields : undefined,
+            obj[v.name],
+          ),
+        }
+      }
+
+      if (meta.type === 'array' || v.type === 'array') {
+        return {
+          name: v.name,
+          type: 'array' as const,
+          typeRef: meta.type === 'array' ? meta.typeRef : v.typeRef,
+          itemType: meta.type === 'array' ? meta.itemType : v.itemType,
+          itemTypeRef: meta.type === 'array' ? meta.itemTypeRef : v.itemTypeRef,
+          arrayFields: resolveArrayFields(
+            meta.type === 'array' ? meta.arrayFields : undefined,
+            obj[v.name],
+          ),
+        }
+      }
+
       const kept = preserveScalarDisplayType(meta, v)
       return { name: v.name, ...kept }
     })
@@ -585,31 +643,34 @@ export function resolveArrayFields(
     if (!fields?.length) return fromValue
     return fromValue.map((v, i) => {
       const meta = fields[i]
-      if (v.type === 'json') {
-        const metaFields = meta?.type === 'json' ? meta.objectFields : undefined
-        const objectFields = (v.objectFields ?? []).map((of) => {
-          const mf = metaFields?.find((x) => x.name.trim() === of.name.trim())
-          if (of.type === 'json' || of.type === 'array') {
-            return {
-              ...of,
-              typeRef: mf?.type === of.type ? mf.typeRef : of.typeRef,
-            }
-          }
-          const kept = preserveScalarDisplayType(mf, of)
-          return { name: of.name, ...kept }
-        })
+      if (meta?.type === 'map') {
+        return {
+          type: 'map' as const,
+          keyType: meta.keyType,
+          itemType: meta.itemType,
+          itemTypeRef: meta.itemTypeRef,
+          value: (fallbackValue[i] as DataFieldValue) ?? meta.value ?? {},
+        }
+      }
+      if (v.type === 'json' || meta?.type === 'json') {
         return {
           type: 'json' as const,
           typeRef: meta?.type === 'json' ? meta.typeRef : v.typeRef,
-          objectFields,
+          objectFields: resolveObjectFields(
+            meta?.type === 'json' ? meta.objectFields : undefined,
+            fallbackValue[i],
+          ),
         }
       }
-      if (v.type === 'array') {
+      if (v.type === 'array' || meta?.type === 'array') {
         return {
           type: 'array' as const,
           itemType: meta?.type === 'array' ? meta.itemType : v.itemType,
           itemTypeRef: meta?.type === 'array' ? meta.itemTypeRef : v.itemTypeRef,
-          arrayFields: v.arrayFields,
+          arrayFields: resolveArrayFields(
+            meta?.type === 'array' ? meta.arrayFields : undefined,
+            fallbackValue[i],
+          ),
         }
       }
       const kept = preserveScalarDisplayType(meta, v)
@@ -630,6 +691,25 @@ export interface ObjectEditorNode {
   itemTypeRef?: string
   children: ObjectEditorNode[]
   isArrayItem: boolean
+  /** 来自具名类型展开的子字段：结构锁定，仅允许改值 */
+  schemaLocked?: boolean
+}
+
+/** 递归标记编辑器节点为结构锁定（具名类型展开的子树） */
+export function markEditorNodesSchemaLocked(nodes: ObjectEditorNode[], locked = true) {
+  for (const node of nodes) {
+    node.schemaLocked = locked
+    if (node.type === 'array') {
+      // 数组字段本身锁定；元素可增删，仅锁定元素内部的对象结构
+      for (const item of node.children) {
+        if (item.type === 'json' || item.type === 'array') {
+          markEditorNodesSchemaLocked(item.children, locked)
+        }
+      }
+      continue
+    }
+    if (node.children.length) markEditorNodesSchemaLocked(node.children, locked)
+  }
 }
 
 export function createEditorNode(isArrayItem = false): ObjectEditorNode {
@@ -743,6 +823,22 @@ export function typeLabel(type: DataFieldType): string {
   return DATA_FIELD_TYPE_OPTIONS.find((item) => item.value === type)?.label ?? type
 }
 
+/** 代码风格类型名：string / number / Resource；具名类型优先用可读名 */
+export function typeCodeLabel(
+  type: DataFieldType,
+  typeRef?: string | null,
+): string {
+  const ref = typeRef?.trim()
+  if (type === 'resource' || ref === 'type_common_URI') return 'Resource'
+  if (ref) {
+    if (type === 'array') return arrayTypeLabel(ref)
+    return ref
+  }
+  // 匿名对象：内部存 json，展示用 object（树节点可再隐藏后缀）
+  if (type === 'json') return 'object'
+  return type
+}
+
 /** 数组类型展示：GoodsRemarkVo[] / string[][]；无元素类型时为 [] / [][] */
 export function arrayTypeLabel(itemLabel?: string, depth = 1): string {
   const n = Math.max(1, depth)
@@ -751,10 +847,197 @@ export function arrayTypeLabel(itemLabel?: string, depth = 1): string {
   return `${leaf}${'[]'.repeat(n)}`
 }
 
-export function editorNodeTreeLabel(node: ObjectEditorNode, index: number): string {
-  if (node.isArrayItem) {
-    return `[${index}] · ${typeLabel(node.type)}`
+export function editorNodeTreeParts(
+  node: ObjectEditorNode,
+  index: number,
+): { name: string; type: string } {
+  const name = node.isArrayItem
+    ? `[${index}]`
+    : node.name.trim() || '未命名字段'
+  // 匿名对象：树节点只显示字段名，不跟类型
+  if (node.type === 'json' && !node.typeRef?.trim()) {
+    return { name, type: '' }
   }
-  const name = node.name.trim() || '未命名字段'
-  return `${name} · ${typeLabel(node.type)}`
+  return { name, type: typeCodeLabel(node.type, node.typeRef) }
+}
+
+export function editorNodeTreeLabel(node: ObjectEditorNode, index: number): string {
+  const { name, type } = editorNodeTreeParts(node, index)
+  return `${name}: ${type}`
+}
+
+/**
+ * AI 助手写入数据池字段时的强制纠偏。
+ * - array/json：把误写成 JSON 文本的 value 解析成真实数组/对象
+ * - number/boolean：把 "10" / "false" 等字符串收成真正标量
+ * - computed：要求非空 computeBody，禁止空壳计算字段
+ * 无法安全纠偏时抛错，避免静默落盘成「0 项」或运行期类型错乱。
+ */
+export function coerceAiFieldValue(
+  name: string,
+  type: DataFieldType,
+  raw: unknown,
+): DataFieldValue {
+  if (raw === undefined) return defaultValue(type)
+
+  if (type === 'array') {
+    if (raw === null) return []
+    if (Array.isArray(raw)) return raw
+    if (typeof raw === 'string') {
+      const trimmed = raw.trim()
+      if (!trimmed) return []
+      try {
+        const parsed = JSON.parse(trimmed) as unknown
+        if (!Array.isArray(parsed)) {
+          throw new Error('not-array')
+        }
+        return parsed
+      } catch {
+        throw new Error(
+          `字段 ${name} 类型为 array 时，value 必须是 JSON 数组字面量，不能是字符串。正确：[{"emoji":"🍎","name":"苹果"}]；错误："[{\\"emoji\\":...}]"。`,
+        )
+      }
+    }
+    throw new Error(`字段 ${name} 类型为 array 时 value 无效：${summarizeBadValue(raw)}`)
+  }
+
+  if (type === 'json' || type === 'map') {
+    if (raw === null) return {}
+    if (typeof raw === 'object' && !Array.isArray(raw)) {
+      return raw as Record<string, unknown>
+    }
+    if (typeof raw === 'string') {
+      const trimmed = raw.trim()
+      if (!trimmed) return {}
+      try {
+        const parsed = JSON.parse(trimmed) as unknown
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+          throw new Error('not-object')
+        }
+        return parsed as Record<string, unknown>
+      } catch {
+        throw new Error(
+          `字段 ${name} 类型为 ${type} 时，value 必须是 JSON 对象，不能是字符串化的 JSON。`,
+        )
+      }
+    }
+    throw new Error(`字段 ${name} 类型为 ${type} 时 value 无效：${summarizeBadValue(raw)}`)
+  }
+
+  if (type === 'boolean') {
+    if (typeof raw === 'boolean') return raw
+    if (raw === 'true' || raw === 'false') return raw === 'true'
+    if (raw === 1 || raw === 0) return raw === 1
+    throw new Error(
+      `字段 ${name} 类型为 boolean 时 value 须为 true/false。收到：${summarizeBadValue(raw)}`,
+    )
+  }
+
+  if (type === 'number') {
+    if (typeof raw === 'number' && Number.isFinite(raw)) return raw
+    if (typeof raw === 'string' && raw.trim() !== '') {
+      const n = Number(raw)
+      if (Number.isFinite(n)) return n
+    }
+    if (raw === null) return 0
+    throw new Error(
+      `字段 ${name} 类型为 number 时 value 须为数字。收到：${summarizeBadValue(raw)}`,
+    )
+  }
+
+  if (raw === null) return defaultValue(type)
+  return raw as DataFieldValue
+}
+
+function summarizeBadValue(raw: unknown): string {
+  try {
+    const text = JSON.stringify(raw)
+    return text.length > 120 ? `${text.slice(0, 120)}…` : text
+  } catch {
+    return String(raw)
+  }
+}
+
+function inferArrayItemType(value: unknown[]): DataFieldType {
+  if (!value.length) return 'string'
+  const first = value[0]
+  if (Array.isArray(first)) return 'array'
+  if (first && typeof first === 'object') return 'json'
+  if (typeof first === 'number') return 'number'
+  if (typeof first === 'boolean') return 'boolean'
+  return 'string'
+}
+
+/** 供 upsert_data_field 使用：规范化并纠偏 AI 传入的字段定义 */
+export function normalizeAiDataField(raw: Record<string, unknown>): DataField {
+  const name = typeof raw.name === 'string' ? raw.name.trim() : ''
+  if (!name) throw new Error('field.name 不能为空')
+  const typeRaw = typeof raw.type === 'string' ? raw.type.trim() : 'string'
+  const allowed = DATA_FIELD_TYPE_OPTIONS.some((o) => o.value === typeRaw)
+  if (!allowed) {
+    throw new Error(`不支持的字段类型：${typeRaw}`)
+  }
+  const type = typeRaw as DataFieldType
+  const remark = typeof raw.remark === 'string' ? raw.remark : ''
+  const value = coerceAiFieldValue(name, type, raw.value)
+
+  const field: DataField = { name, type, remark, value }
+
+  if ('binding' in raw) {
+    field.binding = normalizeDataSourceBinding(raw.binding)
+  }
+  if ('computeBody' in raw) {
+    field.computeBody =
+      typeof raw.computeBody === 'string' ? raw.computeBody : ''
+  }
+  if (field.binding === 'computed') {
+    const body = (field.computeBody ?? '').trim()
+    if (!body) {
+      throw new Error(
+        `字段 ${name} 绑定为 computed 时必须提供非空 computeBody（方法体须 return 计算值）。禁止只建空字段名却自称计算字段。`,
+      )
+    }
+  }
+
+  if (typeof raw.typeRef === 'string') field.typeRef = raw.typeRef
+  if (raw.genericArgs && typeof raw.genericArgs === 'object') {
+    field.genericArgs = raw.genericArgs as Record<string, string>
+  }
+  if (raw.controllerBinding && typeof raw.controllerBinding === 'object') {
+    field.controllerBinding = raw.controllerBinding as ControllerBindingConfig
+  }
+  if (raw.ossBinding && typeof raw.ossBinding === 'object') {
+    field.ossBinding = raw.ossBinding as OssBindingConfig
+  }
+  if (Array.isArray(raw.objectFields)) {
+    field.objectFields = raw.objectFields as ObjectSubField[]
+  }
+  if (typeof raw.itemType === 'string' && raw.itemType.trim()) {
+    field.itemType = raw.itemType.trim() as DataFieldType
+  }
+  if (typeof raw.itemTypeRef === 'string') field.itemTypeRef = raw.itemTypeRef
+  if (typeof raw.itemItemType === 'string') {
+    field.itemItemType = raw.itemItemType as DataFieldType
+  }
+  if (typeof raw.itemItemTypeRef === 'string') {
+    field.itemItemTypeRef = raw.itemItemTypeRef
+  }
+  if (typeof raw.keyType === 'string') {
+    field.keyType = raw.keyType as MapKeyType
+  }
+
+  if (type === 'array' && Array.isArray(value)) {
+    if (!field.itemType) field.itemType = inferArrayItemType(value)
+    if (Array.isArray(raw.arrayFields) && raw.arrayFields.length) {
+      field.arrayFields = raw.arrayFields as ArraySubField[]
+    } else if (value.length) {
+      field.arrayFields = valueToArrayFields(value)
+    } else {
+      field.arrayFields = []
+    }
+  } else if (Array.isArray(raw.arrayFields)) {
+    field.arrayFields = raw.arrayFields as ArraySubField[]
+  }
+
+  return field
 }

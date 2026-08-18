@@ -1,0 +1,106 @@
+.api-prop-bind {
+  width: 100%;
+}
+
+.summary-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.summary-text {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  color: #606266;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bind-form {
+  padding-right: 4px;
+}
+
+.hint {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: #94a3b8;
+  line-height: 1.4;
+}
+
+.param-bindings {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.param-row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.param-row.is-formal .param-name {
+  color: #a8abb2;
+  background: #f0f2f5;
+}
+
+.param-name {
+  flex: 0 0 132px;
+  box-sizing: border-box;
+  height: 32px;
+  padding: 0 8px;
+  border: 1px solid #dcdfe6;
+  border-radius: 4px;
+  background: #f5f7fa;
+  font-size: 13px;
+  color: #606266;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.param-bind-row {
+  flex: 1 1 0;
+  min-width: 0;
+  width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.param-source {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.param-literal {
+  flex: 1 1 0;
+  min-width: 80px;
+}
+
+.req {
+  font-style: normal;
+  color: #f56c6c;
+}
+
+.param-type {
+  font-style: normal;
+  font-size: 11px;
+  color: #909399;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.param-bind {
+  flex: 1 1 0;
+  min-width: 0;
+  width: 0;
+}

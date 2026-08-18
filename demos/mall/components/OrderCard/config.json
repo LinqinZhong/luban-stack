@@ -19,8 +19,9 @@
       "name": "itemClick",
       "params": [
         {
-          "name": "orderId",
-          "type": "string"
+          "name": "item",
+          "type": "object",
+          "typeRef": "OrderVo"
         }
       ]
     }

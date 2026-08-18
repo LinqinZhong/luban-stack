@@ -9,7 +9,11 @@ export type BackendLayerProcState = {
   processorId: string
   methodId: string
   /** 业务层：打开的工作流 */
-  flowEditing: { processorId: string; methodId: string } | null
+  flowEditing: {
+    processorId: string
+    methodId: string
+    focusNodeId?: string
+  } | null
 }
 
 export type BackendServiceUiState = {

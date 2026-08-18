@@ -46,6 +46,28 @@ export type ControllerBindingRuntimeOptions = {
   pageScope?: Record<string, unknown>
   /** 具名类型库：回填 json 字段时补齐 interface 缺省值（如 number → 0） */
   typeLibrary?: DataTypeLibrary | null
+  /** 记录控制器字段拉取过程（调试面板「获取日志」） */
+  onFetchLog?: (entry: ControllerFetchLogEntry) => void
+}
+
+/** 控制器字段一次拉取的调试日志 */
+export type ControllerFetchLogEntry = {
+  id: string
+  fieldName: string
+  time: string
+  status: 'success' | 'error'
+  serviceId: string
+  controllerId: string
+  apiId: string
+  apiName?: string
+  /** 实际传入 flow 的入参 */
+  inputs: Record<string, unknown>
+  /** 解析前原始返回 */
+  raw?: unknown
+  /** parseBody 后写入数据池的值 */
+  result?: unknown
+  error?: string
+  durationMs: number
 }
 
 function cloneValue<T>(value: T): T {
@@ -271,7 +293,7 @@ async function fetchApiData(
 /** 工作区「模拟 API 延迟」：预览返回前再等一段时间 */
 async function applyPreviewApiLatency() {
   try {
-    const ms = useWorkspaceSettingsStore().apiLatencyMs
+    const ms = useWorkspaceSettingsStore.getState().apiLatencyMs
     if (typeof ms === 'number' && ms > 0) {
       await new Promise((resolve) => setTimeout(resolve, ms))
     }
@@ -287,10 +309,11 @@ async function loadOneField(
   cache: Map<string, ServiceBundle>,
   pageScope: Record<string, unknown>,
 ): Promise<DataFieldValue> {
-  const { projectPath, runEvents, dryRun = true } = options
+  const { projectPath, runEvents, dryRun = true, onFetchLog } = options
   const serviceId = cfg.serviceId.trim()
   const controllerId = cfg.controllerId.trim()
   const apiId = cfg.apiId.trim()
+  const fieldName = field.name.trim() || '?'
   if (!serviceId || !controllerId || !apiId) {
     throw new Error('控制器绑定未选择完整 API')
   }
@@ -299,17 +322,23 @@ async function loadOneField(
     await runEvents(cfg.onLoading, undefined, { hook: 'onLoading' })
   }
 
+  const started = Date.now()
+  let loggedInputs: Record<string, unknown> = {}
+  let apiName = ''
+
   try {
     const bundle = await loadServiceBundle(projectPath, serviceId, cache)
     const api = findApi(bundle.controllers, controllerId, apiId)
     if (!api) {
       throw new Error('找不到绑定的 API（可能已被删除）')
     }
+    apiName = api.name?.trim() || api.id
     const initialScope = assembleControllerApiScope(
       api,
       cfg.inputs,
       pageScope,
     )
+    loggedInputs = cloneValue(initialScope)
     const raw = await fetchApiData(
       projectPath,
       serviceId,
@@ -332,11 +361,39 @@ async function loadOneField(
             options.typeLibrary,
           )
         : parsed
+    onFetchLog?.({
+      id: `${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
+      fieldName,
+      time: new Date().toLocaleTimeString(),
+      status: 'success',
+      serviceId,
+      controllerId,
+      apiId,
+      apiName,
+      inputs: loggedInputs,
+      raw: cloneValue(raw),
+      result: cloneValue(filled),
+      durationMs: Date.now() - started,
+    })
     if (cfg.onSuccess.trim() && runEvents) {
       await runEvents(cfg.onSuccess, { res: filled }, { hook: 'onSuccess' })
     }
     return filled as DataFieldValue
   } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    onFetchLog?.({
+      id: `${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
+      fieldName,
+      time: new Date().toLocaleTimeString(),
+      status: 'error',
+      serviceId,
+      controllerId,
+      apiId,
+      apiName: apiName || undefined,
+      inputs: loggedInputs,
+      error: message,
+      durationMs: Date.now() - started,
+    })
     if (cfg.onError.trim() && runEvents) {
       await runEvents(cfg.onError, { res: err }, { hook: 'onError' })
     }

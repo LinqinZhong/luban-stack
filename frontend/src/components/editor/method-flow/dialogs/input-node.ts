@@ -1,4 +1,7 @@
-import type { ProcessorTypeExpr } from '../../../../types/backend-services'
+import type {
+  DataMethodConditionGroup,
+  ProcessorTypeExpr,
+} from '../../../../types/backend-services'
 import {
   createEmptyNetworkInputConfig,
   normalizeIoChannel,
@@ -63,6 +66,10 @@ export type InputNodeForm = {
   methodLabel: string
   /** 方法入参名 → 表达式 */
   paramBindings: Record<string, string>
+  /**
+   * 调用数据层 query/delete/update 时额外传入的查询条件（与方法内条件 AND）
+   */
+  conditionGroups: DataMethodConditionGroup[]
   printExpr: string
   /** 落盘的方法出参类型，供 ambient / 跨模块解析 */
   outputTypeExpr?: ProcessorTypeExpr | null
@@ -93,7 +100,8 @@ export function normalizeInputDataSource(
 export function createEmptyInputNodeForm(
   partial?: Partial<InputNodeForm>,
 ): InputNodeForm {
-  const { network, channel, paramBindings, ...rest } = partial ?? {}
+  const { network, channel, paramBindings, conditionGroups, ...rest } =
+    partial ?? {}
   return {
     channel: normalizeIoChannel(channel),
     serviceId: '',
@@ -104,6 +112,12 @@ export function createEmptyInputNodeForm(
     varName: '',
     methodLabel: '',
     paramBindings: { ...(paramBindings ?? {}) },
+    conditionGroups: Array.isArray(conditionGroups)
+      ? conditionGroups.map((g) => ({
+          ...g,
+          conditions: (g.conditions ?? []).map((c) => ({ ...c })),
+        }))
+      : [],
     printExpr: '',
     outputTypeExpr: null,
     ...rest,

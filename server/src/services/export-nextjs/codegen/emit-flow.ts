@@ -208,7 +208,7 @@ export function collectExternalInjectDeps(
 
 type EmitParamRow = {
   name: string
-  valueKind: 'variable' | 'constant'
+  valueKind: 'variable' | 'constant' | 'computed'
   value: string
   constantType?: string
 }
@@ -223,7 +223,12 @@ function readEmitParamRows(raw: unknown): EmitParamRow[] {
     if (!name) continue
     out.push({
       name,
-      valueKind: row.valueKind === 'variable' ? 'variable' : 'constant',
+      valueKind:
+        row.valueKind === 'variable'
+          ? 'variable'
+          : row.valueKind === 'computed'
+            ? 'computed'
+            : 'constant',
       value: row.value == null ? '' : String(row.value),
       constantType:
         typeof row.constantType === 'string' ? row.constantType : 'string',
@@ -236,6 +241,14 @@ function emitParamValueExpr(row: EmitParamRow): string {
   if (row.valueKind === 'variable') {
     const v = row.value.trim()
     return v ? safeIdent(v, 'v') : 'undefined'
+  }
+  if (row.valueKind === 'computed') {
+    const body = row.value.trim()
+    if (!body) return '""'
+    const hasReturn = /\breturn\b/.test(body)
+    const inner = hasReturn ? body : `return (${body});`
+    // IIFE；依赖外层作用域变量
+    return `((() => { ${inner} })())`
   }
   if (row.constantType === 'number') {
     const n = Number(row.value)
@@ -461,7 +474,7 @@ function emitNodeBlock(
   if (node.kind === 'input') {
     if (str(data, 'channel') === 'network') {
       return joinNodeCode(
-        `${comment}${emitNetworkHttpBlock(pad, data, { awaitResult: true })}`,
+        `${comment}${pad}throw new Error('输入节点已不再支持网络类型，请改为调用数据层外部接口方法');\n`,
         emitNext(),
       )
     }
@@ -490,7 +503,7 @@ function emitNodeBlock(
   if (node.kind === 'output') {
     if (str(data, 'channel') === 'network') {
       return joinNodeCode(
-        `${comment}${emitNetworkHttpBlock(pad, data, { awaitResult: false })}`,
+        `${comment}${pad}throw new Error('输出节点已不再支持网络类型，请改为调用数据层外部接口方法');\n`,
         emitNext(),
       )
     }

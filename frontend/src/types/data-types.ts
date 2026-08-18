@@ -15,7 +15,16 @@ export const DATA_TYPE_KIND_OPTIONS: Array<{ label: string; value: DataTypeKind 
   { label: '数字', value: 'number' },
   { label: '字符串', value: 'string' },
   { label: '布尔值', value: 'boolean' },
-  { label: '接口', value: 'interface' },
+  { label: '对象', value: 'interface' },
+  { label: '枚举', value: 'enum' },
+]
+
+/** 数据类型表可选：仅对象 / 枚举 */
+export const DATA_TYPE_TABLE_KIND_OPTIONS: Array<{
+  label: string
+  value: Extract<DataTypeKind, 'interface' | 'enum'>
+}> = [
+  { label: '对象', value: 'interface' },
   { label: '枚举', value: 'enum' },
 ]
 
@@ -40,6 +49,8 @@ export type TypeAtomKind =
   | 'time'
   | 'date'
   | 'datetime'
+  /** 互联网资源（底层 string） */
+  | 'resource'
   | 'named'
   | 'generic'
   | 'any'
@@ -198,7 +209,7 @@ export const COMMON_PRESET_TYPE_IDS = [
   'type_common_Result',
   'type_common_QueryPageDto',
   'type_common_QueryPageVo',
-  'type_common_URI',
+  'type_common_HttpResponse',
 ] as const
 
 /** 系统预设类型名 */
@@ -207,8 +218,13 @@ export const COMMON_PRESET_TYPE_NAMES = [
   'Result',
   'QueryPageDto',
   'QueryPageVo',
+  'HttpResponse',
+  /** 已废弃：请用特殊类型 Resource，禁止再建同名自定义类型 */
   'URI',
 ] as const
+
+/** 外部接口响应包装类型 id */
+export const HTTP_RESPONSE_TYPE_ID = 'type_common_HttpResponse'
 
 const COMMON_PRESET_ID_SET = new Set<string>(COMMON_PRESET_TYPE_IDS)
 const COMMON_PRESET_NAME_SET = new Set<string>(COMMON_PRESET_TYPE_NAMES)
@@ -250,6 +266,16 @@ function typeArrayExpr(item: TypeAtom): TypeExpr {
   }
 }
 
+/** 映射类型：如 Map<string, string> */
+function typeMapExpr(
+  key: 'string' | 'number',
+  item: TypeAtom,
+): TypeExpr {
+  return {
+    intersections: [{ alternatives: [{ kind: 'map', key, item }] }],
+  }
+}
+
 function field(
   id: string,
   name: string,
@@ -265,6 +291,7 @@ export function createCommonDataTypeGroup(): DataTypeGroup {
   const resultId = 'type_common_Result'
   const queryPageDtoId = 'type_common_QueryPageDto'
   const queryPageVoId = 'type_common_QueryPageVo'
+  const httpResponseId = HTTP_RESPONSE_TYPE_ID
 
   const resultCode: DataTypeDef = {
     id: resultCodeId,
@@ -409,15 +436,41 @@ export function createCommonDataTypeGroup(): DataTypeGroup {
     combination: createEmptyTypeExpr(),
   }
 
-  const uri: DataTypeDef = {
-    id: 'type_common_URI',
-    name: 'URI',
-    kind: 'string',
-    remark: '资源外链（type URI = string）',
+  const httpResponse: DataTypeDef = {
+    id: httpResponseId,
+    name: 'HttpResponse',
+    kind: 'interface',
+    remark: '外部接口 HTTP 响应包装；泛型 T 为响应体类型',
     tableName: '',
     category: 'other',
-    generics: [],
-    fields: [],
+    generics: [
+      {
+        id: 'gen_common_HttpResponse_T',
+        name: 'T',
+        constraint: null,
+        default: null,
+      },
+    ],
+    fields: [
+      field(
+        'field_common_HttpResponse_status',
+        'status',
+        typeAtomExpr('number'),
+        'HTTP 状态码',
+      ),
+      field(
+        'field_common_HttpResponse_headers',
+        'headers',
+        typeMapExpr('string', { kind: 'string' }),
+        '响应头',
+      ),
+      field(
+        'field_common_HttpResponse_body',
+        'body',
+        typeAtomExpr('generic', 'T'),
+        '响应体',
+      ),
+    ],
     enumMembers: [],
     combination: createEmptyTypeExpr(),
   }
@@ -425,7 +478,7 @@ export function createCommonDataTypeGroup(): DataTypeGroup {
   return {
     id: 'group_common',
     name: COMMON_GROUP_NAME,
-    types: [resultCode, result, queryPageDto, queryPageVo, uri],
+    types: [resultCode, result, queryPageDto, queryPageVo, httpResponse],
   }
 }
 
@@ -443,6 +496,8 @@ export function ensureCommonGroupFirst(groups: DataTypeGroup[]): DataTypeGroup[]
   const nextTypes: DataTypeDef[] = []
 
   for (const t of existing.types) {
+    // 废弃自定义类型 URI，改用特殊类型 resource
+    if (t.id === 'type_common_URI' || t.name.trim() === 'URI') continue
     const sys = presetById.get(t.id) ?? presetByName.get(t.name)
     if (sys && (t.id === sys.id || t.name === sys.name)) {
       nextTypes.push(JSON.parse(JSON.stringify(sys)) as DataTypeDef)
@@ -518,6 +573,7 @@ function normalizeAtom(input: unknown): TypeAtom {
     'time',
     'date',
     'datetime',
+    'resource',
     'named',
     'generic',
     'any',
@@ -541,6 +597,13 @@ function normalizeAtom(input: unknown): TypeAtom {
     }
   }
   const ref = typeof input.ref === 'string' ? input.ref.trim() : ''
+  // 旧版具名 URI → 特殊类型 resource
+  if (
+    safeKind === 'named' &&
+    (ref === 'type_common_URI' || ref === 'URI')
+  ) {
+    return { kind: 'resource' }
+  }
   return {
     kind: safeKind,
     ...(safeKind === 'named' || safeKind === 'generic' ? { ref } : {}),
@@ -762,6 +825,7 @@ export function selectValueToTypeExpr(value: string): TypeExpr {
     'time',
     'date',
     'datetime',
+    'resource',
     'any',
   ]
   return {
@@ -787,6 +851,7 @@ function formatAtomPreview(
     return namedLookup?.(id) || id || '?'
   }
   if (atom.kind === 'generic') return atom.ref || 'T'
+  if (atom.kind === 'resource') return 'Resource'
   return atom.kind
 }
 

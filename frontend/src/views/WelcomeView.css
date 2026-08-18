@@ -1,0 +1,119 @@
+.welcome {
+  height: 100%;
+  overflow: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background:
+    radial-gradient(circle at top left, #d4e4ff 0%, transparent 42%),
+    radial-gradient(circle at bottom right, #e2e8f0 0%, transparent 45%),
+    linear-gradient(160deg, #f8fafc 0%, #eef2f7 100%);
+}
+
+.panel {
+  width: min(480px, 100%);
+  padding: 48px 40px;
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid #e5e7eb;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.brand-mark {
+  flex-shrink: 0;
+}
+
+.brand-text h1 {
+  margin: 0;
+  font-size: 36px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: #0f172a;
+  line-height: 1.15;
+}
+
+.brand-text p {
+  margin: 6px 0 0;
+  color: #64748b;
+  font-size: 15px;
+}
+
+.actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 36px;
+}
+
+.recent {
+  margin-top: 28px;
+  padding-top: 20px;
+  border-top: 1px solid #e5e7eb;
+  color: #475569;
+  font-size: 14px;
+}
+
+.recent p {
+  margin: 0 0 6px;
+}
+
+.path {
+  color: #94a3b8;
+  word-break: break-all;
+  font-size: 12px;
+}
+
+.hint {
+  margin: 0 0 12px;
+  color: #64748b;
+  font-size: 13px;
+}
+
+.path-row {
+  display: flex;
+  gap: 8px;
+}
+
+.path-row.full {
+  width: 100%;
+}
+
+.unit {
+  margin-left: 8px;
+  color: #94a3b8;
+}
+
+.browser-toolbar {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.browser-list {
+  max-height: 360px;
+  overflow: auto;
+  border: 1px solid #ebeef5;
+}
+
+.browser-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 0;
+  border-bottom: 1px solid #f2f3f5;
+  background: #fff;
+  text-align: left;
+  cursor: pointer;
+  color: #303133;
+}
+
+.browser-item:hover,
+.browser-item:focus {
+  background: #f5f7fa;
+}

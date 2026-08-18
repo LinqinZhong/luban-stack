@@ -15,6 +15,7 @@ import {
   getDataTypeLibrary,
   getIconLibrary,
   getMysqlLibrary,
+  getMysqlLocalTableSchema,
   getMysqlTableColumns,
   getOssLibrary,
   getServiceControllers,
@@ -56,11 +57,22 @@ import type { IconDefinition } from '../types/icon-library'
 import type { PaletteColor } from '../types/color-palette'
 import type { DataTypeDef, DataTypeGroup } from '../types/data-types'
 import type { MysqlConnectionPayload, MysqlTableDef } from '../types/mysql'
-import type { BackendService } from '../types/backend-services'
+import type {
+  BackendService,
+  ProcessorMethod,
+  ProcessorTypeExpr,
+} from '../types/backend-services'
 import { createEmptySshConfig } from '../types/mysql'
 import { isValidIconId } from '../types/icon-library'
 import { isValidPaletteColorName } from '../types/color-palette'
 import { isValidServiceId } from '../types/backend-services'
+import {
+  buildPresetMethods,
+  isPresetMethodId,
+  listPresetMethodNames,
+  mergePresetAndCustomMethods,
+  STATIC_PRESET_METHOD_NAMES,
+} from '../utils/data-preset-methods'
 
 export type AiToolDef = {
   name: string
@@ -112,6 +124,147 @@ function summarize(data: unknown, max = 4000): string {
   } catch {
     return String(data)
   }
+}
+
+function findTypeDefByRef(
+  library: Awaited<ReturnType<typeof getDataTypeLibrary>>,
+  ref: string,
+): DataTypeDef | null {
+  const id = ref.trim()
+  if (!id) return null
+  for (const group of library.groups ?? []) {
+    const hit = group.types.find((t) => t.id === id || t.name === id)
+    if (hit) return hit
+  }
+  return null
+}
+
+function compactTypeExpr(expr: ProcessorTypeExpr | undefined | null): string {
+  if (!expr) return 'any'
+  if (expr.type === 'array') {
+    const item = (expr.itemTypeRef || expr.itemType || 'any').trim() || 'any'
+    return `${item}[]`
+  }
+  const ref = (expr.typeRef || '').trim()
+  if (ref) return ref
+  return (expr.type || 'any').trim() || 'any'
+}
+
+/** 给 AI 看的方法摘要（预置+自定义），避免 dataConfig/flow 撑爆上下文 */
+function compactMethodsForAi(methods: ProcessorMethod[]) {
+  return methods.map((m) => ({
+    id: m.id,
+    name: m.name,
+    remark: m.remark || '',
+    source: m.preset ? 'preset' : 'custom',
+    params: (m.params ?? []).map((p) => ({
+      name: p.name,
+      type: compactTypeExpr(p.typeExpr),
+      required: p.required !== false,
+    })),
+    output: compactTypeExpr(m.output),
+  }))
+}
+
+async function enrichDataProcessorsForAi(
+  projectPath: string,
+  processors: ServiceProcessor[],
+): Promise<
+  Array<{
+    id: string
+    name: string
+    remark: string
+    entityRef: string
+    dataProcessorRef: string
+    methods: ReturnType<typeof compactMethodsForAi>
+  }>
+> {
+  const typeLib = await getDataTypeLibrary(projectPath)
+  const schemaCache = new Map<
+    string,
+    { columns: import('../types/mysql').MysqlColumnDef[]; indexes: import('../types/mysql').MysqlIndexDef[] }
+  >()
+
+  async function loadSchema(tableName: string) {
+    const name = tableName.trim()
+    if (!name) return { columns: [], indexes: [] }
+    const cached = schemaCache.get(name)
+    if (cached) return cached
+    try {
+      const res = await getMysqlLocalTableSchema({
+        projectPath,
+        tableName: name,
+      })
+      const schema = {
+        columns: res.columns ?? [],
+        indexes: res.indexes ?? [],
+      }
+      schemaCache.set(name, schema)
+      return schema
+    } catch {
+      const empty = { columns: [], indexes: [] }
+      schemaCache.set(name, empty)
+      return empty
+    }
+  }
+
+  const result = []
+  for (const proc of processors) {
+    const entity = findTypeDefByRef(typeLib, proc.entityRef || '')
+    const table = entity?.tableName?.trim() || ''
+    const schema = table ? await loadSchema(table) : { columns: [], indexes: [] }
+    const presets = buildPresetMethods({
+      entity,
+      columns: schema.columns,
+      indexes: schema.indexes,
+    }).filter((m) => !m.disabled)
+    const methods = mergePresetAndCustomMethods(presets, proc.methods ?? [])
+    result.push({
+      id: proc.id,
+      name: proc.name,
+      remark: proc.remark || '',
+      entityRef: proc.entityRef || '',
+      dataProcessorRef: proc.dataProcessorRef || '',
+      methods: compactMethodsForAi(methods),
+    })
+  }
+  return result
+}
+
+async function listDataLayerReservedMethodNames(
+  projectPath: string,
+  processor: ServiceProcessor,
+): Promise<string[]> {
+  const typeLib = await getDataTypeLibrary(projectPath)
+  const entity = findTypeDefByRef(typeLib, processor.entityRef || '')
+  const table = entity?.tableName?.trim() || ''
+  let columns: import('../types/mysql').MysqlColumnDef[] = []
+  let indexes: import('../types/mysql').MysqlIndexDef[] = []
+  if (table) {
+    try {
+      const res = await getMysqlLocalTableSchema({ projectPath, tableName: table })
+      columns = res.columns ?? []
+      indexes = res.indexes ?? []
+    } catch {
+      /* ignore */
+    }
+  }
+  const fromSchema = listPresetMethodNames(columns, indexes)
+  const fromPresets = buildPresetMethods({ entity, columns, indexes })
+    .filter((m) => !m.disabled)
+    .map((m) => m.name.trim())
+    .filter(Boolean)
+  const fromCustom = (processor.methods ?? [])
+    .map((m) => m.name.trim())
+    .filter(Boolean)
+  return [
+    ...new Set([
+      ...STATIC_PRESET_METHOD_NAMES,
+      ...fromSchema,
+      ...fromPresets,
+      ...fromCustom,
+    ]),
+  ]
 }
 
 function mysqlPayloadFromConfig(db: MysqlDatabaseConfig): MysqlConnectionPayload {
@@ -482,8 +635,9 @@ export const PLATFORM_AI_TOOL_CATALOG: AiToolDef[] = [
   {
     name: 'get_service_processors',
     label: '读取处理器',
-    description: '通过接口读取 business 或 data 层处理器',
-    argsHint: '{ "serviceId": "order", "layer": "business" }',
+    description:
+      '通过接口读取 business 或 data 层处理器。data 层 methods 含预置方法（page/oneById/save 等，source=preset）与自定义方法；写新方法前必须先读此列表，有可用的直接复用，禁止重复创建',
+    argsHint: '{ "serviceId": "order", "layer": "data" }',
   },
   {
     name: 'upsert_service_processor',
@@ -502,9 +656,10 @@ export const PLATFORM_AI_TOOL_CATALOG: AiToolDef[] = [
   {
     name: 'upsert_processor_method',
     label: '新增或更新处理方法',
-    description: '通过接口在处理器内 upsert 方法',
+    description:
+      '通过接口在处理器内 upsert 方法。数据层：先 get_service_processors，有现成预置/自定义方法能满足需求时禁止再写；不可占用预置方法名',
     argsHint:
-      '{ "serviceId": "order", "layer": "data", "processorId": "OrderData", "method": { "id": "findById", "name": "findById", "remark": "", "scope": "public", "params": [], "debugParams": {} } }',
+      '{ "serviceId": "order", "layer": "data", "processorId": "OrderData", "method": { "id": "customQuery", "name": "customQuery", "remark": "", "scope": "public", "params": [], "debugParams": {} } }',
   },
   {
     name: 'delete_processor_method',
@@ -1137,7 +1292,7 @@ export async function executePlatformAiTool(options: {
           contentBase64,
           contentType: optionalString(args, 'contentType'),
         })
-        return { ok: true, result: summarize({ connectionId, bucketName, key, ...res }) }
+        return { ok: true, result: summarize({ ...res, connectionId, bucketName, key }) }
       }
       case 'delete_oss_object': {
         const connectionId = requireString(args, 'connectionId')
@@ -1149,7 +1304,7 @@ export async function executePlatformAiTool(options: {
           bucketName,
           key,
         })
-        return { ok: true, result: summarize({ connectionId, bucketName, key, ...res }) }
+        return { ok: true, result: summarize({ ...res, connectionId, bucketName, key }) }
       }
       case 'sign_oss_object': {
         const connectionId = requireString(args, 'connectionId')
@@ -1338,7 +1493,37 @@ export async function executePlatformAiTool(options: {
         const serviceId = requireString(args, 'serviceId')
         const layer = requireLayer(args)
         const res = await getServiceProcessors(projectPath, serviceId, layer)
-        return { ok: true, result: summarize({ layer, processors: res.processors }) }
+        if (layer === 'data') {
+          const processors = await enrichDataProcessorsForAi(
+            projectPath,
+            res.processors,
+          )
+          return {
+            ok: true,
+            result: summarize(
+              {
+                layer,
+                note: 'methods 含预置(source=preset)+自定义(source=custom)；有可用方法请直接复用，勿重复创建',
+                processors,
+              },
+              12000,
+            ),
+          }
+        }
+        return {
+          ok: true,
+          result: summarize({
+            layer,
+            processors: res.processors.map((p) => ({
+              id: p.id,
+              name: p.name,
+              remark: p.remark || '',
+              entityRef: p.entityRef || '',
+              dataProcessorRef: p.dataProcessorRef || '',
+              methods: compactMethodsForAi(p.methods ?? []),
+            })),
+          }),
+        }
       }
       case 'upsert_service_processor': {
         const serviceId = requireString(args, 'serviceId')
@@ -1412,6 +1597,7 @@ export async function executePlatformAiTool(options: {
         const method = requireObject(args, 'method') as Record<string, unknown>
         const methodId = String(method.id ?? '').trim()
         if (!methodId) throw new Error('method.id 不能为空')
+        const methodName = String(method.name ?? '').trim()
         const res = await getServiceProcessors(projectPath, serviceId, layer)
         const processors = res.processors.map((p) => ({
           ...p,
@@ -1420,6 +1606,35 @@ export async function executePlatformAiTool(options: {
         const processor = processors.find((p) => p.id === processorId)
         if (!processor) throw new Error(`未找到处理器：${processorId}`)
         const idx = processor.methods.findIndex((m) => m.id === methodId)
+
+        if (layer === 'data') {
+          if (isPresetMethodId(methodId)) {
+            throw new Error(
+              `「${methodId}」是数据层预置方法，不可覆盖或另存。请 get_service_processors(layer=data) 查看并直接复用`,
+            )
+          }
+          if (methodName) {
+            const reserved = await listDataLayerReservedMethodNames(
+              projectPath,
+              processor,
+            )
+            const nameTaken = reserved.some(
+              (n) => n.toLowerCase() === methodName.toLowerCase(),
+            )
+            if (nameTaken) {
+              const self =
+                idx >= 0 &&
+                processor.methods[idx]?.name.trim().toLowerCase() ===
+                  methodName.toLowerCase()
+              if (!self) {
+                throw new Error(
+                  `方法名「${methodName}」已存在于数据层预置或自定义方法中。请先 get_service_processors(layer=data) 查看并直接复用，不要重复创建`,
+                )
+              }
+            }
+          }
+        }
+
         const next = {
           ...(idx >= 0 ? processor.methods[idx] : {}),
           ...method,

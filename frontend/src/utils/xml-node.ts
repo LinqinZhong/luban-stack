@@ -342,11 +342,9 @@ function createWidgetElement(doc: Document, tag: WidgetTag): Element {
     el.setAttribute('orientation', 'vertical')
     el.setAttribute('width', 'match_parent')
     el.setAttribute('height', 'wrap_content')
-    el.setAttribute('padding', '8')
   } else if (tag === 'RelativeLayout') {
     el.setAttribute('width', 'match_parent')
     el.setAttribute('height', '120')
-    el.setAttribute('padding', '8')
   } else if (tag === 'Swiper') {
     el.setAttribute('width', 'match_parent')
     el.setAttribute('height', '160')
@@ -567,7 +565,9 @@ export function removeWidget(
 
   const el = elementAtPath(doc, nodeId)
   if (!el?.parentElement) {
-    throw new Error('未找到要删除的节点')
+    throw new Error(
+      `未找到要删除的节点：${nodeId}。增删改后兄弟下标会变，请先重新读取页面树再删`,
+    )
   }
 
   const parent = el.parentElement
@@ -861,9 +861,19 @@ export function moveWidgetSibling(
   }
 }
 
+const TOUCH_EVENT_PARAMS = [
+  { name: 'clientX', type: 'number' },
+  { name: 'clientY', type: 'number' },
+  { name: 'pageX', type: 'number' },
+  { name: 'pageY', type: 'number' },
+] as const
+
 export const INTERACTION_EVENTS = [
   { key: 'onClick', label: '点击' },
   { key: 'onLongClick', label: '长按' },
+  { key: 'onTouchStart', label: '触摸开始', params: TOUCH_EVENT_PARAMS },
+  { key: 'onTouchMove', label: '触摸移动', params: TOUCH_EVENT_PARAMS },
+  { key: 'onTouchEnd', label: '触摸结束', params: TOUCH_EVENT_PARAMS },
 ] as const
 
 const SCROLL_EVENT_PARAMS = [
@@ -875,21 +885,11 @@ const SCROLL_EVENT_PARAMS = [
   { name: 'clientWidth', type: 'number' },
 ] as const
 
-const TOUCH_EVENT_PARAMS = [
-  { name: 'clientX', type: 'number' },
-  { name: 'clientY', type: 'number' },
-  { name: 'pageX', type: 'number' },
-  { name: 'pageY', type: 'number' },
-] as const
-
 /** 仅 overflow=scroll 的布局容器可配置 */
 export const SCROLL_INTERACTION_EVENTS = [
   { key: 'onScroll', label: '滚动', params: SCROLL_EVENT_PARAMS },
   { key: 'onScrollToLower', label: '触底', params: SCROLL_EVENT_PARAMS },
   { key: 'onScrollToUpper', label: '触顶', params: SCROLL_EVENT_PARAMS },
-  { key: 'onTouchStart', label: '触摸开始', params: TOUCH_EVENT_PARAMS },
-  { key: 'onTouchMove', label: '触摸移动', params: TOUCH_EVENT_PARAMS },
-  { key: 'onTouchEnd', label: '触摸结束', params: TOUCH_EVENT_PARAMS },
 ] as const
 
 /** @deprecated 使用 SCROLL_INTERACTION_EVENTS */
@@ -904,8 +904,52 @@ export function interactionEventParams(
   key: string,
 ): Array<{ name: string; type: 'number' | 'string' | 'boolean' | 'object' | 'array' | 'any' }> {
   const scroll = SCROLL_INTERACTION_EVENTS.find((item) => item.key === key)
-  if (!scroll) return []
-  return scroll.params.map((item) => ({ name: item.name, type: item.type }))
+  if (scroll) {
+    return scroll.params.map((item) => ({ name: item.name, type: item.type }))
+  }
+  const touch = INTERACTION_EVENTS.find(
+    (item) => item.key === key && 'params' in item,
+  ) as { params?: readonly { name: string; type: 'number' }[] } | undefined
+  if (touch?.params) {
+    return touch.params.map((item) => ({ name: item.name, type: item.type }))
+  }
+  return []
+}
+
+export const PRESS_FEEDBACK_OPTIONS = [
+  { label: '无', value: 'none' },
+  { label: '缩放', value: 'scale' },
+  { label: '波纹', value: 'ripple' },
+  { label: '波纹+缩放', value: 'rippleScale' },
+] as const
+
+export type PressFeedbackMode = (typeof PRESS_FEEDBACK_OPTIONS)[number]['value']
+
+/** 默认波纹色：灰色半透明 */
+export const DEFAULT_PRESS_RIPPLE_COLOR = 'rgba(0, 0, 0, 0.22)'
+
+/** 规范化 Button pressFeedback；兼容旧值 true/false */
+export function normalizePressFeedbackMode(
+  raw: string | undefined | null,
+): PressFeedbackMode {
+  const v = (raw ?? '').trim().toLowerCase()
+  if (!v || v === 'none' || v === 'false' || v === '0') return 'none'
+  if (v === 'scale') return 'scale'
+  if (v === 'ripple') return 'ripple'
+  if (v === 'ripplescale' || v === 'ripple+scale' || v === 'ripple_scale') {
+    return 'rippleScale'
+  }
+  // 旧开关 true → 波纹+缩放
+  if (v === 'true' || v === '1' || v === 'on') return 'rippleScale'
+  return 'none'
+}
+
+export function pressFeedbackHasScale(mode: PressFeedbackMode): boolean {
+  return mode === 'scale' || mode === 'rippleScale'
+}
+
+export function pressFeedbackHasRipple(mode: PressFeedbackMode): boolean {
+  return mode === 'ripple' || mode === 'rippleScale'
 }
 
 export const SIZE_OPTIONS = [

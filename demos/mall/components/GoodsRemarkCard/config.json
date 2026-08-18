@@ -51,8 +51,7 @@
       "defaultValue": [],
       "twoWay": false,
       "required": true,
-      "itemType": "json",
-      "itemTypeRef": "type_common_URI"
+      "itemType": "resource"
     }
   ],
   "events": [],

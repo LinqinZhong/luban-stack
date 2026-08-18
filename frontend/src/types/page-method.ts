@@ -184,7 +184,7 @@ function primitiveTsType(type: DataFieldType | undefined | null): string {
     case 'api':
       return 'string'
     case 'resource':
-      return 'URI'
+      return 'string'
     default:
       return 'string'
   }

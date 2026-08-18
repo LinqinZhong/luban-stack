@@ -1,0 +1,557 @@
+{
+  "id": "c322f921-d88d-48ca-ac09-e91c70c60f21",
+  "name": "GoodsRemark",
+  "remark": "",
+  "entityRef": "",
+  "dataProcessorRef": "0c8b7147-f77c-4d72-9ee6-b1df6b6788f0",
+  "methods": [
+    {
+      "id": "method_ms6nkt2n_5f3g3k",
+      "name": "page",
+      "remark": "",
+      "scope": "public",
+      "params": [
+        {
+          "id": "param_ms6nlu2g_avsjlk",
+          "name": "goodsId",
+          "remark": "",
+          "typeExpr": {
+            "type": "number",
+            "typeRef": "",
+            "itemType": "",
+            "itemTypeRef": "",
+            "itemItemType": "",
+            "itemItemTypeRef": "",
+            "keyType": "",
+            "genericArgs": {}
+          },
+          "required": false
+        },
+        {
+          "id": "param_ms6nm568_266hyg",
+          "name": "page",
+          "remark": "",
+          "typeExpr": {
+            "type": "json",
+            "typeRef": "type_common_QueryPageDto",
+            "itemType": "",
+            "itemTypeRef": "",
+            "itemItemType": "",
+            "itemItemTypeRef": "",
+            "keyType": "",
+            "genericArgs": {}
+          },
+          "required": false
+        },
+        {
+          "id": "param_ms7remark_biz_type",
+          "name": "type",
+          "remark": "评价类型 all/good/mid/bad",
+          "typeExpr": {
+            "type": "string",
+            "typeRef": "",
+            "itemType": "",
+            "itemTypeRef": "",
+            "itemItemType": "",
+            "itemItemTypeRef": "",
+            "keyType": "",
+            "genericArgs": {}
+          },
+          "required": false
+        }
+      ],
+      "output": {
+        "type": "json",
+        "typeRef": "type_common_QueryPageVo",
+        "itemType": "",
+        "itemTypeRef": "",
+        "itemItemType": "",
+        "itemItemTypeRef": "",
+        "keyType": "",
+        "genericArgs": {
+          "T": "type_ms6gqu8j_vm3j3p"
+        }
+      },
+      "dataConfig": {
+        "source": "mysql",
+        "operation": "query",
+        "queryFields": [],
+        "sql": "",
+        "fieldMappings": [],
+        "batchSourceParam": "",
+        "pageParam": "",
+        "conditionGroups": [],
+        "httpRequest": {
+          "apiUrl": "",
+          "httpMethod": "GET",
+          "mediaType": "application/json",
+          "bodyVarName": "",
+          "responseBodyType": "json",
+          "parseCode": "",
+          "headers": [],
+          "queryParams": [],
+          "formParams": []
+        }
+      },
+      "debugParams": {
+        "goodsId": 38,
+        "page": {
+          "current": 1,
+          "pageSize": 10
+        },
+        "type": "all"
+      },
+      "flow": {
+        "nodes": [
+          {
+            "id": "start",
+            "kind": "start",
+            "position": {
+              "x": 266.1451669368846,
+              "y": -55.66432353103484
+            },
+            "data": {}
+          },
+          {
+            "id": "input_ms6nqm79_1thq",
+            "kind": "input",
+            "position": {
+              "x": 180.1451669368846,
+              "y": 54.549770031515564
+            },
+            "data": {
+              "serviceId": "svc_mrqdgnhb_3ktq2g",
+              "dataSource": "data",
+              "dataProcessorId": "0c8b7147-f77c-4d72-9ee6-b1df6b6788f0",
+              "dataMethodId": "method_ms7remark_cnt_type",
+              "headerField": "",
+              "varName": "total",
+              "methodLabel": "goodsRemark.countByGoodsIdAndType",
+              "paramBindings": {
+                "goodsId": "goodsId",
+                "type": "type"
+              },
+              "printExpr": "",
+              "outputTypeExpr": {
+                "type": "number",
+                "typeRef": "",
+                "itemType": "",
+                "itemTypeRef": "",
+                "itemItemType": "",
+                "itemItemTypeRef": "",
+                "keyType": "",
+                "genericArgs": {}
+              }
+            }
+          },
+          {
+            "id": "branch_ms6nr9gc_3cu9",
+            "kind": "branch",
+            "position": {
+              "x": 236.1451669368846,
+              "y": 224.78451766783266
+            },
+            "data": {
+              "expression": "total > 0",
+              "printExpr": ""
+            }
+          },
+          {
+            "id": "input_ms6nrscd_z6lh",
+            "kind": "input",
+            "position": {
+              "x": 354.1451669368846,
+              "y": 415.7845176678327
+            },
+            "data": {
+              "serviceId": "svc_mrqdgnhb_3ktq2g",
+              "dataSource": "data",
+              "dataProcessorId": "0c8b7147-f77c-4d72-9ee6-b1df6b6788f0",
+              "dataMethodId": "method_ms7remark_page_type",
+              "headerField": "",
+              "varName": "remarkList",
+              "methodLabel": "goodsRemark.typedPageByGoodsId",
+              "paramBindings": {
+                "pageDto": "page",
+                "goodsId": "goodsId",
+                "type": "type"
+              },
+              "printExpr": "",
+              "outputTypeExpr": {
+                "type": "array",
+                "typeRef": "",
+                "itemType": "json",
+                "itemTypeRef": "type_ms6go08q_0dezt9",
+                "itemItemType": "",
+                "itemItemTypeRef": "",
+                "keyType": "",
+                "genericArgs": {}
+              }
+            }
+          },
+          {
+            "id": "pageMap_ms6p27xn_ng4f",
+            "kind": "pageMap",
+            "position": {
+              "x": 388.6451669368846,
+              "y": 642.7094828856558
+            },
+            "data": {
+              "sourceKind": "array",
+              "sourcePath": "remarkList",
+              "currentExpr": "page.current",
+              "pageSizeExpr": "page.pageSize",
+              "totalExpr": "total",
+              "hasNextExpr": "",
+              "targetTypeRef": "type_common_QueryPageVo",
+              "targetGenericArgs": {
+                "T": "type_ms6gqu8j_vm3j3p"
+              },
+              "targetVarName": "remarkPage",
+              "fieldMappings": [
+                {
+                  "targetField": "id",
+                  "sourceField": "id"
+                },
+                {
+                  "targetField": "goodsId",
+                  "sourceField": "goodsId"
+                },
+                {
+                  "targetField": "content",
+                  "sourceField": "content"
+                },
+                {
+                  "targetField": "score",
+                  "sourceField": "score"
+                },
+                {
+                  "targetField": "userId",
+                  "sourceField": "userId"
+                },
+                {
+                  "targetField": "avatar",
+                  "sourceField": ""
+                },
+                {
+                  "targetField": "images",
+                  "sourceField": "images"
+                },
+                {
+                  "targetField": "nickname",
+                  "sourceField": ""
+                },
+                {
+                  "targetField": "time",
+                  "sourceField": "createdAt"
+                }
+              ],
+              "description": "",
+              "printExpr": ""
+            }
+          },
+          {
+            "id": "end_ms6p4nbw_aq8o",
+            "kind": "end",
+            "position": {
+              "x": 575.6451669368845,
+              "y": 1201.2407153792515
+            },
+            "data": {
+              "returnExpr": "remarkPage",
+              "printExpr": ""
+            }
+          },
+          {
+            "id": "end_ms6pavgy_60nj",
+            "kind": "end",
+            "position": {
+              "x": -5.171273102874075,
+              "y": 372.7845176678327
+            },
+            "data": {
+              "returnExpr": "",
+              "printExpr": ""
+            }
+          },
+          {
+            "id": "action_ms7gg8vb_pbhp",
+            "kind": "action",
+            "position": {
+              "x": 414.1451669368846,
+              "y": 555.5180661779111
+            },
+            "data": {
+              "code": "const ids = new Set();\nremarkList.forEach((r) => {\n  ids.add(r.userId)\n})\nreturn [...ids];",
+              "description": "收集ID",
+              "printExpr": "",
+              "outputType": "array",
+              "outputTypeRef": "",
+              "outputItemType": "number",
+              "outputItemTypeRef": "",
+              "outputItemItemType": "",
+              "outputItemItemTypeRef": "",
+              "outputGenericArgs": {},
+              "outputVarName": "userIds"
+            }
+          },
+          {
+            "id": "input_ms7ghxow_22ic",
+            "kind": "input",
+            "position": {
+              "x": 512.1451669368845,
+              "y": 913.0917599039872
+            },
+            "data": {
+              "serviceId": "user",
+              "dataSource": "data",
+              "dataProcessorId": "b5b270a0-2456-4181-b592-f144c275bbb7",
+              "dataMethodId": "method_ms7b6u6v_h1agz5",
+              "headerField": "",
+              "varName": "userAvatarMap",
+              "methodLabel": "user.userMapByIds",
+              "paramBindings": {
+                "ids": "userIds"
+              },
+              "printExpr": "",
+              "outputTypeExpr": {
+                "type": "map",
+                "typeRef": "",
+                "itemType": "json",
+                "itemTypeRef": "type_ms7af53o_7bwxrd",
+                "itemItemType": "",
+                "itemItemTypeRef": "",
+                "keyType": "number",
+                "genericArgs": {}
+              }
+            }
+          },
+          {
+            "id": "action_ms7gl3ws_dfgx",
+            "kind": "action",
+            "position": {
+              "x": 536.1451669368845,
+              "y": 1037.7031260510678
+            },
+            "data": {
+              "code": "remarkPage.records.filter((remark) => {\n  const user  = userAvatarMap.get(remark.userId)\n  if(!user) return\n  remark.avatar = user.avatar\n  remark.nickname = user.nickname\n})",
+              "description": "",
+              "printExpr": "",
+              "outputType": "void",
+              "outputTypeRef": "",
+              "outputItemType": "",
+              "outputItemTypeRef": "",
+              "outputItemItemType": "",
+              "outputItemItemTypeRef": "",
+              "outputGenericArgs": {},
+              "outputVarName": ""
+            }
+          },
+          {
+            "id": "branch_ms7gmzdp_8tpg",
+            "kind": "branch",
+            "position": {
+              "x": 410.1451669368846,
+              "y": 733.1475688772513
+            },
+            "data": {
+              "expression": "userIds.length > 0",
+              "printExpr": ""
+            }
+          }
+        ],
+        "edges": [
+          {
+            "id": "edge_ms6nqm79_305k",
+            "source": "start",
+            "target": "input_ms6nqm79_1thq"
+          },
+          {
+            "id": "edge_ms6nr9gc_ff9a",
+            "source": "input_ms6nqm79_1thq",
+            "target": "branch_ms6nr9gc_3cu9"
+          },
+          {
+            "id": "e_branch_ms6nr9gc_3cu9_true_input_ms6nrscd_z6lh_ms6nrwol",
+            "source": "branch_ms6nr9gc_3cu9",
+            "target": "input_ms6nrscd_z6lh",
+            "sourceHandle": "true",
+            "label": "是"
+          },
+          {
+            "id": "e_branch_ms6nr9gc_3cu9_false_end_ms6pavgy_60nj_ms6paz50",
+            "source": "branch_ms6nr9gc_3cu9",
+            "target": "end_ms6pavgy_60nj",
+            "sourceHandle": "false",
+            "label": "否"
+          },
+          {
+            "id": "edge_ms7gl3ws_zkte",
+            "source": "input_ms7ghxow_22ic",
+            "target": "action_ms7gl3ws_dfgx"
+          },
+          {
+            "id": "e_input_ms6nrscd_z6lh_default_action_ms7gg8vb_pbhp_ms7gm4ik",
+            "source": "input_ms6nrscd_z6lh",
+            "target": "action_ms7gg8vb_pbhp"
+          },
+          {
+            "id": "e_branch_ms7gmzdp_8tpg_true_input_ms7ghxow_22ic_ms7gnmty",
+            "source": "branch_ms7gmzdp_8tpg",
+            "target": "input_ms7ghxow_22ic",
+            "sourceHandle": "true",
+            "label": "是"
+          },
+          {
+            "id": "e_action_ms7gg8vb_pbhp_default_pageMap_ms6p27xn_ng4f_ms7gq2i0",
+            "source": "action_ms7gg8vb_pbhp",
+            "target": "pageMap_ms6p27xn_ng4f"
+          },
+          {
+            "id": "e_pageMap_ms6p27xn_ng4f_default_branch_ms7gmzdp_8tpg_ms7gqhre",
+            "source": "pageMap_ms6p27xn_ng4f",
+            "target": "branch_ms7gmzdp_8tpg"
+          },
+          {
+            "id": "e_branch_ms7gmzdp_8tpg_false_end_ms6p4nbw_aq8o_ms7gqv9u",
+            "source": "branch_ms7gmzdp_8tpg",
+            "target": "end_ms6p4nbw_aq8o",
+            "sourceHandle": "false",
+            "label": "否"
+          },
+          {
+            "id": "e_action_ms7gl3ws_dfgx_default_end_ms6p4nbw_aq8o_ms7gqy4p",
+            "source": "action_ms7gl3ws_dfgx",
+            "target": "end_ms6p4nbw_aq8o"
+          }
+        ]
+      }
+    },
+    {
+      "id": "method_ms7remark_biz_counts",
+      "name": "counts",
+      "remark": "商品评价各类型数量",
+      "scope": "public",
+      "params": [
+        {
+          "id": "param_ms7remark_biz_cnt_gid",
+          "name": "goodsId",
+          "remark": "商品 ID",
+          "typeExpr": {
+            "type": "number",
+            "typeRef": "",
+            "itemType": "",
+            "itemTypeRef": "",
+            "itemItemType": "",
+            "itemItemTypeRef": "",
+            "keyType": "",
+            "genericArgs": {}
+          },
+          "required": true
+        }
+      ],
+      "output": {
+        "type": "json",
+        "typeRef": "type_ms7remark_count_vo",
+        "itemType": "",
+        "itemTypeRef": "",
+        "itemItemType": "",
+        "itemItemTypeRef": "",
+        "keyType": "",
+        "genericArgs": {}
+      },
+      "dataConfig": {
+        "source": "mysql",
+        "operation": "query",
+        "queryFields": [],
+        "sql": "",
+        "fieldMappings": [],
+        "batchSourceParam": "",
+        "pageParam": "",
+        "conditionGroups": [],
+        "httpRequest": {
+          "apiUrl": "",
+          "httpMethod": "GET",
+          "mediaType": "application/json",
+          "bodyVarName": "",
+          "responseBodyType": "json",
+          "parseCode": "",
+          "headers": [],
+          "queryParams": [],
+          "formParams": []
+        }
+      },
+      "debugParams": {
+        "goodsId": 37
+      },
+      "flow": {
+        "nodes": [
+          {
+            "id": "start",
+            "kind": "start",
+            "position": {
+              "x": 331,
+              "y": 41.5
+            },
+            "data": {}
+          },
+          {
+            "id": "input_ms7remark_cntg01",
+            "kind": "input",
+            "position": {
+              "x": 245,
+              "y": 160
+            },
+            "data": {
+              "serviceId": "svc_mrqdgnhb_3ktq2g",
+              "dataSource": "data",
+              "dataProcessorId": "0c8b7147-f77c-4d72-9ee6-b1df6b6788f0",
+              "dataMethodId": "method_ms7remark_cnt_group",
+              "headerField": "",
+              "varName": "counts",
+              "methodLabel": "goodsRemark.countGroupByGoodsId",
+              "paramBindings": {
+                "goodsId": "goodsId"
+              },
+              "printExpr": "",
+              "outputTypeExpr": {
+                "type": "json",
+                "typeRef": "type_ms7remark_count_vo",
+                "itemType": "",
+                "itemTypeRef": "",
+                "itemItemType": "",
+                "itemItemTypeRef": "",
+                "keyType": "",
+                "genericArgs": {}
+              }
+            }
+          },
+          {
+            "id": "end_ms7remark_cntg01",
+            "kind": "end",
+            "position": {
+              "x": 331,
+              "y": 305
+            },
+            "data": {
+              "returnExpr": "counts",
+              "printExpr": ""
+            }
+          }
+        ],
+        "edges": [
+          {
+            "id": "edge_ms7remark_cntg_e1",
+            "source": "start",
+            "target": "input_ms7remark_cntg01"
+          },
+          {
+            "id": "edge_ms7remark_cntg_e2",
+            "source": "input_ms7remark_cntg01",
+            "target": "end_ms7remark_cntg01"
+          }
+        ]
+      }
+    }
+  ]
+}

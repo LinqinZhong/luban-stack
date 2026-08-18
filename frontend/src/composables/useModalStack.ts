@@ -1,74 +1,108 @@
-import { computed, ref, type ComputedRef, type InjectionKey, type Ref } from 'vue'
+import {
+  createContext,
+  useMemo,
+  useSyncExternalStore,
+  type RefObject,
+} from 'react'
 
 export interface ModalStackApi {
-  /** Modal 打开栈（栈顶为当前可见） */
-  stack: Ref<string[]>
-  top: ComputedRef<string | null>
+  readonly stack: string[]
+  readonly top: string | null
   open: (name: string) => void
   /** 无参：关闭栈顶；有 name：弹出到该层（含自身） */
   close: (name?: string) => void
   closeAll: () => void
   isTop: (name: string) => boolean
+  subscribe: (fn: () => void) => () => void
 }
 
-export const MODAL_STACK_KEY: InjectionKey<ModalStackApi> = Symbol('lubanModalStack')
-export const MODAL_HOST_KEY: InjectionKey<Ref<HTMLElement | null>> = Symbol('lubanModalHost')
-/** 编辑态角标挂载层（需高于屏幕虚线框） */
-export const BADGE_HOST_KEY: InjectionKey<Ref<HTMLElement | null>> = Symbol('lubanBadgeHost')
+export const ModalStackContext = createContext<ModalStackApi | null>(null)
+export const ModalHostContext = createContext<RefObject<HTMLElement | null> | null>(
+  null,
+)
+export const BadgeHostContext = createContext<RefObject<HTMLElement | null> | null>(
+  null,
+)
+
 /** 编辑态测量模式：select 普通选中；measure 显示间距与尺寸 */
 export type CanvasToolMode = 'select' | 'measure'
-export const CANVAS_TOOL_MODE_KEY: InjectionKey<Ref<CanvasToolMode>> =
-  Symbol('lubanCanvasToolMode')
+export const CanvasToolModeContext = createContext<CanvasToolMode>('select')
 
 /** 预览检视：纯净模式不显示组件操纵杆；组件模式显示 */
 export type PreviewInspectMode = 'clean' | 'component'
-export const PREVIEW_INSPECT_MODE_KEY: InjectionKey<Ref<PreviewInspectMode>> =
-  Symbol('lubanPreviewInspectMode')
+export const PreviewInspectModeContext = createContext<PreviewInspectMode>('clean')
 
-/** 预览检视：按 Component 节点 id 覆盖实例入参（调试面板修改，不要求「可更新」） */
-export const PREVIEW_INSTANCE_PROP_OVERRIDES_KEY: InjectionKey<
-  Ref<Record<string, Record<string, unknown>>>
-> = Symbol('lubanPreviewInstancePropOverrides')
+/** 预览检视：按 Component 节点 id 覆盖实例入参 */
+export const PreviewInstancePropOverridesContext = createContext<
+  Record<string, Record<string, unknown>>
+>({})
 
 /**
  * 页面级 Modal 堆栈：同一时刻仅栈顶可见；
  * open 会将同名项移到栈顶（其余层暂隐，关闭时可恢复）。
  */
 export function createModalStack(): ModalStackApi {
-  const stack = ref<string[]>([])
-
-  const top = computed(() => {
-    const list = stack.value
-    return list.length ? list[list.length - 1]! : null
-  })
-
-  function open(name: string) {
-    const id = String(name ?? '').trim()
-    if (!id) return
-    stack.value = [...stack.value.filter((item) => item !== id), id]
+  let stack: string[] = []
+  const listeners = new Set<() => void>()
+  const notify = () => {
+    for (const fn of listeners) fn()
   }
 
-  function close(name?: string) {
-    const id = name == null ? '' : String(name).trim()
-    if (!id) {
-      if (stack.value.length) {
-        stack.value = stack.value.slice(0, -1)
+  const api: ModalStackApi = {
+    get stack() {
+      return stack
+    },
+    get top() {
+      return stack.length ? stack[stack.length - 1]! : null
+    },
+    open(name: string) {
+      const id = String(name ?? '').trim()
+      if (!id) return
+      stack = [...stack.filter((item) => item !== id), id]
+      notify()
+    },
+    close(name?: string) {
+      const id = name == null ? '' : String(name).trim()
+      if (!id) {
+        if (stack.length) {
+          stack = stack.slice(0, -1)
+          notify()
+        }
+        return
       }
-      return
-    }
-    const idx = stack.value.lastIndexOf(id)
-    if (idx < 0) return
-    stack.value = stack.value.slice(0, idx)
+      const idx = stack.lastIndexOf(id)
+      if (idx < 0) return
+      stack = stack.slice(0, idx)
+      notify()
+    },
+    closeAll() {
+      stack = []
+      notify()
+    },
+    isTop(name: string) {
+      const id = String(name ?? '').trim()
+      return Boolean(id) && api.top === id
+    },
+    subscribe(fn) {
+      listeners.add(fn)
+      return () => {
+        listeners.delete(fn)
+      }
+    },
   }
 
-  function closeAll() {
-    stack.value = []
-  }
+  return api
+}
 
-  function isTop(name: string) {
-    const id = String(name ?? '').trim()
-    return Boolean(id) && top.value === id
-  }
+export function useModalStackSnapshot(api: ModalStackApi | null) {
+  return useSyncExternalStore(
+    api?.subscribe ?? (() => () => {}),
+    () => api?.stack ?? EMPTY_STACK,
+  )
+}
 
-  return { stack, top, open, close, closeAll, isTop }
+const EMPTY_STACK: string[] = []
+
+export function useModalStackFactory() {
+  return useMemo(() => createModalStack(), [])
 }

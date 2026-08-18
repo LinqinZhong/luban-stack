@@ -1,4 +1,4 @@
-import type { InjectionKey } from 'vue'
+import { createContext } from 'react'
 import type { DeviceInfo } from '../utils/device-info'
 
 /** 画布运行时能力（场景相关的 getDeviceInfo 等） */
@@ -8,6 +8,4 @@ export interface CanvasRuntimeApi {
   projectPath?: string
 }
 
-export const CANVAS_RUNTIME_KEY: InjectionKey<CanvasRuntimeApi> = Symbol(
-  'lubanCanvasRuntime',
-)
+export const CanvasRuntimeContext = createContext<CanvasRuntimeApi | null>(null)

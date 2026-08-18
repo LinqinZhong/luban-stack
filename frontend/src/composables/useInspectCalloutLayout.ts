@@ -1,21 +1,20 @@
-import { type InjectionKey, type Ref } from 'vue'
+import { createContext, type RefObject } from 'react'
 import type { PreviewInspectPayload } from '../types/preview-inspect'
 
 /** 组件检视操纵杆挂载层（在手机框外，避免被 overflow 裁切） */
-export const INSPECT_HOST_KEY: InjectionKey<Ref<HTMLElement | null>> = Symbol(
-  'lubanInspectHost',
+export const InspectHostContext = createContext<RefObject<HTMLElement | null> | null>(
+  null,
 )
 /** 手机框元素，用于计算「屏外」伸出长度 */
-export const PHONE_FRAME_KEY: InjectionKey<Ref<HTMLElement | null>> = Symbol(
-  'lubanPhoneFrame',
+export const PhoneFrameContext = createContext<RefObject<HTMLElement | null> | null>(
+  null,
 )
 /**
  * 打开组件检视（由 PageCanvas provide）。
- * 直接回调，避免 Fragment 等中间节点漏转发 @open-inspect。
  */
-export const OPEN_INSPECT_KEY: InjectionKey<
-  (payload: PreviewInspectPayload) => void
-> = Symbol('lubanOpenInspect')
+export const OpenInspectContext = createContext<
+  ((payload: PreviewInspectPayload) => void) | null
+>(null)
 
 export type InspectCalloutSide = 'left' | 'right'
 
@@ -71,7 +70,6 @@ export function upsertInspectCallout(input: {
   if (!id) return input.preferredY
   const btnSize = Math.max(12, input.btnSize)
   const prev = entries.get(id)
-  // 亚像素抖动不重算，避免每帧重排导致按钮点不中
   if (
     prev &&
     prev.side === input.side &&

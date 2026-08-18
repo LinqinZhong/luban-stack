@@ -61,6 +61,12 @@ import { exportVue3Project } from '../services/export-vue3.js'
 import { exportMpWxProject } from '../services/export-mp-wx.js'
 import { exportNestJsProject } from '../services/export-nextjs.js'
 import {
+  clearWechatPrivateKey,
+  getWechatPublishStatus,
+  publishMpWxProject,
+  saveWechatPrivateKey,
+} from '../services/wechat-publish.js'
+import {
   readBuildSchemeLibrary,
   writeBuildSchemeLibrary,
 } from '../services/build-schemes.js'
@@ -242,6 +248,81 @@ router.post('/export/mp-wx', async (req, res) => {
       return
     }
     const result = await exportMpWxProject(projectPath.trim())
+    res.json(result)
+  } catch (err) {
+    handleError(res, err)
+  }
+})
+
+router.get('/wechat-publish/status', async (req, res) => {
+  try {
+    const projectPath =
+      typeof req.query.projectPath === 'string' ? req.query.projectPath : ''
+    if (!projectPath.trim()) {
+      res.status(400).json({ message: '请提供 projectPath' })
+      return
+    }
+    const result = await getWechatPublishStatus(projectPath.trim())
+    res.json(result)
+  } catch (err) {
+    handleError(res, err)
+  }
+})
+
+router.put('/wechat-publish/private-key', async (req, res) => {
+  try {
+    const projectPath =
+      typeof req.body?.projectPath === 'string' ? req.body.projectPath : ''
+    const privateKey =
+      typeof req.body?.privateKey === 'string' ? req.body.privateKey : ''
+    if (!projectPath.trim()) {
+      res.status(400).json({ message: '请提供 projectPath' })
+      return
+    }
+    const result = await saveWechatPrivateKey(projectPath.trim(), privateKey)
+    res.json(result)
+  } catch (err) {
+    handleError(res, err)
+  }
+})
+
+router.delete('/wechat-publish/private-key', async (req, res) => {
+  try {
+    const projectPath =
+      typeof req.body?.projectPath === 'string'
+        ? req.body.projectPath
+        : typeof req.query.projectPath === 'string'
+          ? req.query.projectPath
+          : ''
+    if (!projectPath.trim()) {
+      res.status(400).json({ message: '请提供 projectPath' })
+      return
+    }
+    const result = await clearWechatPrivateKey(projectPath.trim())
+    res.json(result)
+  } catch (err) {
+    handleError(res, err)
+  }
+})
+
+router.post('/wechat-publish/upload', async (req, res) => {
+  try {
+    const projectPath =
+      typeof req.body?.projectPath === 'string' ? req.body.projectPath : ''
+    const version =
+      typeof req.body?.version === 'string' ? req.body.version : ''
+    const desc = typeof req.body?.desc === 'string' ? req.body.desc : ''
+    const rebuild = req.body?.rebuild !== false
+    if (!projectPath.trim()) {
+      res.status(400).json({ message: '请提供 projectPath' })
+      return
+    }
+    const result = await publishMpWxProject({
+      projectPath: projectPath.trim(),
+      version,
+      desc,
+      rebuild,
+    })
     res.json(result)
   } catch (err) {
     handleError(res, err)
@@ -591,6 +672,7 @@ router.post('/services/processors/debug', async (req, res) => {
       methodId,
       params,
       dryRun,
+      extraConditionGroups,
     } = req.body ?? {}
     if (!projectPath || typeof projectPath !== 'string' || !projectPath.trim()) {
       res.status(400).json({ message: '请提供 projectPath' })
@@ -617,6 +699,9 @@ router.post('/services/processors/debug', async (req, res) => {
         params && typeof params === 'object' && !Array.isArray(params)
           ? (params as Record<string, unknown>)
           : {},
+      extraConditionGroups: Array.isArray(extraConditionGroups)
+        ? extraConditionGroups
+        : [],
       dryRun: dryRun !== false,
     })
     // Map 无法经 JSON 传输，先摊成普通对象；前端再按出参类型还原为 Map

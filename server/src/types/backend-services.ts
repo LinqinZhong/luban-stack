@@ -193,7 +193,15 @@ export interface ServiceController {
 }
 
 export function isValidControllerId(id: string): boolean {
-  return /^[A-Za-z][A-Za-z0-9_-]*$/.test(id)
+  if (!id.trim()) return false
+  // 兼容旧目录 id（字母开头）
+  if (/^[A-Za-z][A-Za-z0-9_-]*$/.test(id)) return true
+  return isProcessorUuid(id)
+}
+
+/** 控制器显示名：英文大驼峰（与处理器同一规则） */
+export function isValidControllerName(name: string): boolean {
+  return isValidProcessorName(name)
 }
 
 function uid(prefix: string): string {
@@ -251,11 +259,12 @@ export function createEmptyServiceApi(name = ''): ServiceApi {
   }
 }
 
-export function createEmptyServiceController(name = '控制器'): ServiceController {
-  const id = `c${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`
+export function createEmptyServiceController(name = 'Controller'): ServiceController {
+  const id = newProcessorId()
+  const trimmed = name.trim()
   return {
     id,
-    name: name.trim() || id,
+    name: isValidControllerName(trimmed) ? trimmed : 'Controller',
     path: '',
     remark: '',
     apis: [],
@@ -453,7 +462,77 @@ export function processorLayerDirName(kind: ProcessorLayerKind): string {
 }
 
 export function isValidProcessorId(id: string): boolean {
-  return /^[A-Za-z][A-Za-z0-9_-]*$/.test(id)
+  if (!id.trim()) return false
+  // 兼容旧目录 id（字母开头）
+  if (/^[A-Za-z][A-Za-z0-9_-]*$/.test(id)) return true
+  // 新建：UUID
+  return isProcessorUuid(id)
+}
+
+/** 处理器目录 / 配置 id 是否为 UUID */
+export function isProcessorUuid(id: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+    id.trim(),
+  )
+}
+
+/** 处理器显示名：英文大驼峰，如 GoodsProcessor */
+export function isValidProcessorName(name: string): boolean {
+  return /^[A-Z][A-Za-z0-9]*$/.test(name)
+}
+
+/** 将任意字符串尽量转为英文大驼峰；失败则用 fallback */
+export function toPascalCaseProcessorName(
+  raw: string,
+  fallback = 'Processor',
+): string {
+  const s = (raw ?? '').trim()
+  if (isValidProcessorName(s)) return s
+
+  // camelCase / Pascal 片段：goodsRemark → GoodsRemark
+  if (/^[A-Za-z][A-Za-z0-9]*$/.test(s)) {
+    const pascal = s.charAt(0).toUpperCase() + s.slice(1)
+    if (isValidProcessorName(pascal)) return pascal
+  }
+
+  const parts = s
+    .split(/[^A-Za-z0-9]+/)
+    .map((p) => p.trim())
+    .filter((p) => /^[A-Za-z]/.test(p))
+  if (parts.length) {
+    const pascal = parts
+      .map((p) => p.charAt(0).toUpperCase() + p.slice(1))
+      .join('')
+    if (isValidProcessorName(pascal)) return pascal
+  }
+
+  const fb = (fallback ?? '').trim()
+  if (isValidProcessorName(fb)) return fb
+  if (/^[A-Za-z][A-Za-z0-9]*$/.test(fb)) {
+    const pascal = fb.charAt(0).toUpperCase() + fb.slice(1)
+    if (isValidProcessorName(pascal)) return pascal
+  }
+  const fbParts = fb
+    .split(/[^A-Za-z0-9]+/)
+    .filter((p) => /^[A-Za-z]/.test(p))
+  if (fbParts.length) {
+    const pascal = fbParts
+      .map((p) => p.charAt(0).toUpperCase() + p.slice(1))
+      .join('')
+    if (isValidProcessorName(pascal)) return pascal
+  }
+  return 'Processor'
+}
+
+export function newProcessorId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID()
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0
+    const v = c === 'x' ? r : (r & 0x3) | 0x8
+    return v.toString(16)
+  })
 }
 
 /** 方法入参 / 出参类型（级联：基础类型 + 数组 + types 分组） */
@@ -480,10 +559,10 @@ export interface ProcessorMethodParam {
   required?: boolean
 }
 
-/** 数据层方法：数据源种类（先实现 MySQL） */
-export type DataMethodSourceKind = 'mysql' | 'redis' | 'stream'
+/** 数据层方法：数据源种类 */
+export type DataMethodSourceKind = 'mysql' | 'http' | 'redis' | 'stream'
 
-/** 数据层方法：操作类型 */
+/** 数据层方法：操作类型（http 数据源忽略 operation，统一按外部请求执行） */
 export type DataMethodOperation =
   | 'query'
   | 'insert'
@@ -498,9 +577,151 @@ export const DATA_METHOD_SOURCE_OPTIONS: Array<{
   disabled?: boolean
 }> = [
   { label: 'MySQL', value: 'mysql' },
+  { label: '外部接口', value: 'http' },
   { label: 'Redis', value: 'redis', disabled: true },
   { label: '流', value: 'stream', disabled: true },
 ]
+
+/** 外部接口：请求参数行 */
+export type DataMethodHttpParamValueKind =
+  | 'variable'
+  | 'constant'
+  | 'computed'
+export type DataMethodHttpConstantType = 'string' | 'number' | 'boolean'
+export type DataMethodHttpMethod = 'GET' | 'POST' | 'DELETE' | 'PUT'
+export type DataMethodHttpResponseBodyType = 'string' | 'json'
+
+export interface DataMethodHttpParamRow {
+  name: string
+  valueKind: DataMethodHttpParamValueKind
+  value: string
+  constantType?: DataMethodHttpConstantType
+}
+
+/** 外部接口请求配置（存于 dataConfig.httpRequest） */
+export interface DataMethodHttpRequestConfig {
+  apiUrl: string
+  httpMethod: DataMethodHttpMethod
+  headers: DataMethodHttpParamRow[]
+  queryParams: DataMethodHttpParamRow[]
+  mediaType: string
+  formParams: DataMethodHttpParamRow[]
+  bodyVarName: string
+  responseBodyType: DataMethodHttpResponseBodyType
+  /**
+   * 响应解析：function parse(response: HttpResponse<any>): HttpResponse<T> 的方法体。
+   * 空则默认 JSON 松解析 + 按泛型 T（interface）列出全部字段（缺失为 null）。
+   */
+  parseCode: string
+}
+
+export const DATA_METHOD_HTTP_METHODS: DataMethodHttpMethod[] = [
+  'GET',
+  'POST',
+  'DELETE',
+  'PUT',
+]
+
+export function createEmptyDataMethodHttpParamRow(
+  partial?: Partial<DataMethodHttpParamRow>,
+): DataMethodHttpParamRow {
+  return {
+    name: '',
+    valueKind: 'constant',
+    value: '',
+    constantType: 'string',
+    ...partial,
+  }
+}
+
+export function createEmptyDataMethodHttpRequestConfig(
+  partial?: Partial<DataMethodHttpRequestConfig>,
+): DataMethodHttpRequestConfig {
+  const {
+    headers: headersIn,
+    queryParams: queryIn,
+    formParams: formIn,
+    ...rest
+  } = partial ?? {}
+  return {
+    apiUrl: '',
+    httpMethod: 'GET',
+    mediaType: 'application/json',
+    bodyVarName: '',
+    responseBodyType: 'json',
+    parseCode: '',
+    ...rest,
+    headers: (headersIn ?? []).map((r) => createEmptyDataMethodHttpParamRow(r)),
+    queryParams: (queryIn ?? []).map((r) => createEmptyDataMethodHttpParamRow(r)),
+    formParams: (formIn ?? []).map((r) => createEmptyDataMethodHttpParamRow(r)),
+  }
+}
+
+function normalizeHttpConstantType(raw: unknown): DataMethodHttpConstantType {
+  if (raw === 'number' || raw === 'boolean' || raw === 'string') return raw
+  return 'string'
+}
+
+function normalizeHttpParamRow(raw: unknown): DataMethodHttpParamRow | null {
+  if (!isPlainObject(raw)) return null
+  const name = typeof raw.name === 'string' ? raw.name.trim() : ''
+  const valueKind: DataMethodHttpParamValueKind =
+    raw.valueKind === 'variable'
+      ? 'variable'
+      : raw.valueKind === 'computed'
+        ? 'computed'
+        : 'constant'
+  const value =
+    typeof raw.value === 'string' ? raw.value : String(raw.value ?? '')
+  return {
+    name,
+    valueKind,
+    value,
+    constantType: normalizeHttpConstantType(raw.constantType),
+  }
+}
+
+function normalizeHttpParamRows(raw: unknown): DataMethodHttpParamRow[] {
+  if (!Array.isArray(raw)) return []
+  const out: DataMethodHttpParamRow[] = []
+  for (const item of raw) {
+    const row = normalizeHttpParamRow(item)
+    if (row) out.push(row)
+  }
+  return out
+}
+
+export function normalizeDataMethodHttpRequestConfig(
+  input: unknown,
+): DataMethodHttpRequestConfig {
+  const empty = createEmptyDataMethodHttpRequestConfig()
+  if (!isPlainObject(input)) return empty
+  const methodRaw =
+    typeof input.httpMethod === 'string'
+      ? input.httpMethod.toUpperCase()
+      : 'GET'
+  const httpMethod = (
+    DATA_METHOD_HTTP_METHODS.includes(methodRaw as DataMethodHttpMethod)
+      ? methodRaw
+      : 'GET'
+  ) as DataMethodHttpMethod
+  const responseBodyType: DataMethodHttpResponseBodyType =
+    input.responseBodyType === 'string' ? 'string' : 'json'
+  return createEmptyDataMethodHttpRequestConfig({
+    apiUrl: typeof input.apiUrl === 'string' ? input.apiUrl : '',
+    httpMethod,
+    headers: normalizeHttpParamRows(input.headers),
+    queryParams: normalizeHttpParamRows(input.queryParams),
+    mediaType:
+      typeof input.mediaType === 'string' && input.mediaType.trim()
+        ? input.mediaType.trim()
+        : 'application/json',
+    formParams: normalizeHttpParamRows(input.formParams),
+    bodyVarName: typeof input.bodyVarName === 'string' ? input.bodyVarName : '',
+    responseBodyType,
+    parseCode: typeof input.parseCode === 'string' ? input.parseCode : '',
+  })
+}
 
 export const DATA_METHOD_OPERATION_OPTIONS: Array<{
   label: string
@@ -561,21 +782,34 @@ export const DATA_METHOD_CONDITION_OP_OPTIONS: Array<{
   { label: '介于', value: 'between', needsValue: true, needsValueTo: true },
 ]
 
+/** 条件值来源：固定值 / 入参路径 */
 export type DataMethodConditionValueKind = 'literal' | 'param'
 
+/** 单条查询条件 */
 export interface DataMethodCondition {
   id: string
+  /** 实体字段名；`__custom__` 表示自定义列名 */
   field: string
   customField: string
   op: DataMethodConditionOp
   valueKind: DataMethodConditionValueKind
+  /** 固定值原文，或入参路径（如 pageDto.current） */
   value: string
+  /** between 上界 */
   valueTo: string
+  /**
+   * 启用条件：空=始终启用；非空时对入参/作用域求值为真才生效。
+   * 方法定义侧相对方法入参；调用侧相对流程变量。
+   */
+  enableCondition?: string
 }
 
+/** 条件分组：组内 AND，组间 OR */
 export interface DataMethodConditionGroup {
   id: string
   conditions: DataMethodCondition[]
+  /** 分组启用条件，语义同 DataMethodCondition.enableCondition */
+  enableCondition?: string
 }
 
 export const CUSTOM_CONDITION_FIELD = '__custom__'
@@ -589,6 +823,7 @@ export function createEmptyDataMethodCondition(): DataMethodCondition {
     valueKind: 'literal',
     value: '',
     valueTo: '',
+    enableCondition: '',
   }
 }
 
@@ -596,6 +831,7 @@ export function createEmptyDataMethodConditionGroup(): DataMethodConditionGroup 
   return {
     id: `cg_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
     conditions: [createEmptyDataMethodCondition()],
+    enableCondition: '',
   }
 }
 
@@ -621,6 +857,8 @@ function normalizeCondition(input: unknown): DataMethodCondition | null {
     valueKind: input.valueKind === 'param' ? 'param' : 'literal',
     value: typeof input.value === 'string' ? input.value : '',
     valueTo: typeof input.valueTo === 'string' ? input.valueTo : '',
+    enableCondition:
+      typeof input.enableCondition === 'string' ? input.enableCondition : '',
   }
 }
 
@@ -637,6 +875,8 @@ function normalizeConditionGroup(input: unknown): DataMethodConditionGroup | nul
         ? input.id.trim()
         : createEmptyDataMethodConditionGroup().id,
     conditions,
+    enableCondition:
+      typeof input.enableCondition === 'string' ? input.enableCondition : '',
   }
 }
 
@@ -656,6 +896,8 @@ export interface DataMethodConfig {
   pageParam: string
   /** 非插入操作的查询条件（组内 AND，组间 OR） */
   conditionGroups: DataMethodConditionGroup[]
+  /** 外部接口请求配置（source === 'http'） */
+  httpRequest: DataMethodHttpRequestConfig
 }
 
 export function createEmptyDataMethodConfig(): DataMethodConfig {
@@ -668,6 +910,7 @@ export function createEmptyDataMethodConfig(): DataMethodConfig {
     batchSourceParam: '',
     pageParam: '',
     conditionGroups: [],
+    httpRequest: createEmptyDataMethodHttpRequestConfig(),
   }
 }
 
@@ -676,6 +919,7 @@ export function normalizeDataMethodConfig(input: unknown): DataMethodConfig {
   if (!isPlainObject(input)) return empty
   const source =
     input.source === 'mysql' ||
+    input.source === 'http' ||
     input.source === 'redis' ||
     input.source === 'stream'
       ? input.source
@@ -722,6 +966,7 @@ export function normalizeDataMethodConfig(input: unknown): DataMethodConfig {
     pageParam:
       typeof input.pageParam === 'string' ? input.pageParam.trim() : '',
     conditionGroups,
+    httpRequest: normalizeDataMethodHttpRequestConfig(input.httpRequest),
   }
 }
 
@@ -1009,11 +1254,11 @@ export function createEmptyProcessorMethod(name = ''): ProcessorMethod {
   }
 }
 
-export function createEmptyServiceProcessor(name = '处理器'): ServiceProcessor {
-  const id = `p${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`
+export function createEmptyServiceProcessor(name = 'Processor'): ServiceProcessor {
+  const id = newProcessorId()
   return {
     id,
-    name: name.trim() || id,
+    name: name.trim() || 'Processor',
     remark: '',
     entityRef: '',
     dataProcessorRef: '',

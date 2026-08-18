@@ -1,3 +1,5 @@
+import { ProjectError } from './project.js'
+
 export type HttpProxyRequest = {
   url: string
   method: string
@@ -18,12 +20,25 @@ function assertHttpUrl(url: string): URL {
   try {
     parsed = new URL(url)
   } catch {
-    throw new Error(`无效的 API 地址：${url}`)
+    throw new ProjectError(`无效的 API 地址：${url}`)
   }
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-    throw new Error('仅支持 http/https 地址')
+    throw new ProjectError('仅支持 http/https 地址')
   }
   return parsed
+}
+
+function formatFetchFailure(err: unknown): string {
+  if (!(err instanceof Error)) return String(err)
+  const cause = (err as Error & { cause?: unknown }).cause
+  if (cause && typeof cause === 'object') {
+    const c = cause as { code?: string; message?: string }
+    if (c.code === 'ECONNREFUSED') return '连接被拒绝（目标服务未启动或地址/端口不正确）'
+    if (c.code === 'ENOTFOUND') return '域名无法解析'
+    if (c.code === 'ETIMEDOUT' || c.code === 'ECONNABORTED') return '连接超时'
+    if (typeof c.message === 'string' && c.message.trim()) return c.message.trim()
+  }
+  return err.message || '网络错误'
 }
 
 /**
@@ -33,7 +48,7 @@ export async function executeHttpProxy(
   req: HttpProxyRequest,
 ): Promise<HttpProxyResult> {
   const url = String(req.url ?? '').trim()
-  if (!url) throw new Error('请提供 API 地址')
+  if (!url) throw new ProjectError('请提供 API 地址')
   assertHttpUrl(url)
 
   const method = String(req.method ?? 'GET').trim().toUpperCase() || 'GET'
@@ -56,12 +71,25 @@ export async function executeHttpProxy(
     init.body = req.body
   }
 
-  const res = await fetch(url, init)
+  let res: Response
+  try {
+    res = await fetch(url, init)
+  } catch (err) {
+    throw new ProjectError(`外部接口请求失败：${formatFetchFailure(err)}`)
+  }
   const bodyText = await res.text()
   const outHeaders: Record<string, string> = {}
   res.headers.forEach((value, key) => {
     outHeaders[key] = value
   })
+  if (!res.ok) {
+    const snippet = bodyText.trim().slice(0, 300)
+    throw new ProjectError(
+      `外部接口请求失败（HTTP ${res.status}）${
+        snippet ? `：${snippet}` : ''
+      }`,
+    )
+  }
   return {
     status: res.status,
     headers: outHeaders,

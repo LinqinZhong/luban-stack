@@ -1,0 +1,113 @@
+.settings-tabs .el-tabs__header {
+  margin: 0 0 4px;
+}
+
+.settings-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 8px 0 4px;
+}
+
+.settings-empty {
+  padding: 24px 0;
+}
+
+.settings-block {
+  padding: 4px 2px 0;
+}
+
+.settings-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: #f8fafc;
+}
+
+.settings-row-stack {
+  flex-direction: column;
+  gap: 10px;
+}
+
+.settings-meta {
+  min-width: 0;
+  flex: 1;
+}
+
+.settings-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #303133;
+}
+
+.settings-desc {
+  margin-top: 4px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #909399;
+}
+
+.settings-desc code {
+  font-size: 11px;
+  padding: 0 4px;
+  border-radius: 4px;
+  background: #eef2f7;
+  color: #606266;
+}
+
+.settings-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.settings-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+
+.settings-field-col {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+}
+
+.key-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.latency-input {
+  width: 120px;
+}
+
+.unit {
+  font-size: 13px;
+  color: #606266;
+}
+
+.model-row {
+  align-items: center;
+}
+
+.model-actions {
+  gap: 6px;
+}
+
+.add-model-row {
+  display: flex;
+  justify-content: flex-start;
+  gap: 8px;
+  padding: 0 2px;
+}
+
+.model-form {
+  padding-top: 4px;
+}

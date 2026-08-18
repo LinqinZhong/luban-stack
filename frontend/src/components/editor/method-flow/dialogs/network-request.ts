@@ -3,7 +3,7 @@ export type IoChannel = 'local' | 'network'
 
 export type NetworkHttpMethod = 'GET' | 'POST' | 'DELETE' | 'PUT'
 
-export type NetworkParamValueKind = 'variable' | 'constant'
+export type NetworkParamValueKind = 'variable' | 'constant' | 'computed'
 
 export type NetworkConstantType = 'string' | 'number' | 'boolean'
 
@@ -126,7 +126,11 @@ export function normalizeNetworkParamRow(raw: unknown): NetworkParamRow | null {
   const row = raw as Record<string, unknown>
   const name = typeof row.name === 'string' ? row.name.trim() : ''
   const valueKind: NetworkParamValueKind =
-    row.valueKind === 'variable' ? 'variable' : 'constant'
+    row.valueKind === 'variable'
+      ? 'variable'
+      : row.valueKind === 'computed'
+        ? 'computed'
+        : 'constant'
   const value = typeof row.value === 'string' ? row.value : String(row.value ?? '')
   return {
     name,
@@ -217,7 +221,7 @@ export function validateNetworkParamRows(
     const row = rows[i]
     const name = row.name.trim()
     const hasValue =
-      row.valueKind === 'variable'
+      row.valueKind === 'variable' || row.valueKind === 'computed'
         ? Boolean(row.value.trim())
         : row.value !== ''
     if (!name && !hasValue) continue
@@ -225,8 +229,35 @@ export function validateNetworkParamRows(
     if (row.valueKind === 'variable' && !row.value.trim()) {
       return `${label}「${name}」请选择变量`
     }
+    if (row.valueKind === 'computed' && !row.value.trim()) {
+      return `${label}「${name}」请配置计算`
+    }
   }
   return ''
+}
+
+/** 求值计算型参数：存的是 function value(): string 方法体 */
+export function evalNetworkComputedValue(
+  expression: string,
+  scope: Record<string, unknown>,
+): string {
+  const body = expression.trim()
+  if (!body) return ''
+  try {
+    const keys = Object.keys(scope).filter((k) =>
+      /^[A-Za-z_$][\w$]*$/.test(k),
+    )
+    const values = keys.map((k) => scope[k])
+    const hasReturn = /\breturn\b/.test(body)
+    const inner = hasReturn ? body : `return (${body});`
+    const code = `"use strict";\nfunction value() {\n${inner}\n}\nreturn value();`
+    // eslint-disable-next-line no-new-func
+    const fn = new Function(...keys, code)
+    const result = fn(...values)
+    return result == null ? '' : String(result)
+  } catch {
+    return ''
+  }
 }
 
 export function coerceNetworkConstant(

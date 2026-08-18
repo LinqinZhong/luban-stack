@@ -110,6 +110,7 @@ function buildQuerySql(
   table: string,
   config: DataMethodConfig,
   params: Record<string, unknown>,
+  extraConditionGroups?: DataMethodConfig['conditionGroups'],
 ): { sql: string; current: number; pageSize: number; paginated: boolean } {
   const fields =
     config.queryFields.length > 0 ? config.queryFields : ['*']
@@ -129,7 +130,11 @@ function buildQuerySql(
           })
           .join(', ')
   const page = pickPageMeta(params, config.pageParam ?? '')
-  const where = buildWhereClause(config.conditionGroups, params)
+  const where = buildCombinedWhere(
+    config.conditionGroups,
+    extraConditionGroups,
+    params,
+  )
   let sql = `SELECT ${cols} FROM ${quoteIdent(table)}${where}`
   if (page.enabled) {
     const offset = (page.current - 1) * page.pageSize
@@ -143,6 +148,38 @@ function buildQuerySql(
   }
 }
 
+function andWhereSql(a: string, b: string): string {
+  const strip = (w: string) => w.replace(/^\s*WHERE\s+/i, '').trim()
+  const left = strip(a)
+  const right = strip(b)
+  if (!left && !right) return ''
+  if (!left) return ` WHERE ${right}`
+  if (!right) return ` WHERE ${left}`
+  return ` WHERE (${left}) AND (${right})`
+}
+
+function evalEnableCondition(
+  expression: string | undefined,
+  params: Record<string, unknown>,
+): boolean {
+  const body = (expression ?? '').trim()
+  if (!body) return true
+  try {
+    const keys = Object.keys(params).filter((k) =>
+      /^[A-Za-z_$][\w$]*$/.test(k),
+    )
+    const values = keys.map((k) => params[k])
+    const hasReturn = /\breturn\b/.test(body)
+    const inner = hasReturn ? body : `return (${body});`
+    const code = `"use strict";\nfunction condition() {\n${inner}\n}\nreturn condition();`
+    // eslint-disable-next-line no-new-func
+    const fn = new Function(...keys, code)
+    return Boolean(fn(...values))
+  } catch {
+    return false
+  }
+}
+
 function buildWhereClause(
   groups: DataMethodConfig['conditionGroups'],
   params: Record<string, unknown>,
@@ -151,8 +188,10 @@ function buildWhereClause(
 
   const groupSqls: string[] = []
   for (const group of groups) {
+    if (!evalEnableCondition(group.enableCondition, params)) continue
     const parts: string[] = []
     for (const cond of group.conditions ?? []) {
+      if (!evalEnableCondition(cond.enableCondition, params)) continue
       const colNameRaw =
         cond.field === CUSTOM_CONDITION_FIELD || cond.field === ''
           ? cond.customField.trim()
@@ -239,6 +278,17 @@ function buildWhereClause(
   if (!groupSqls.length) return ''
   if (groupSqls.length === 1) return ` WHERE ${groupSqls[0]}`
   return ` WHERE ${groupSqls.join(' OR ')}`
+}
+
+function buildCombinedWhere(
+  methodGroups: DataMethodConfig['conditionGroups'],
+  extraGroups: DataMethodConfig['conditionGroups'] | undefined,
+  params: Record<string, unknown>,
+): string {
+  return andWhereSql(
+    buildWhereClause(methodGroups, params),
+    buildWhereClause(extraGroups ?? [], params),
+  )
 }
 
 /**
@@ -405,8 +455,13 @@ function buildDeleteSql(
   table: string,
   config: DataMethodConfig,
   params: Record<string, unknown>,
+  extraConditionGroups?: DataMethodConfig['conditionGroups'],
 ): string {
-  const where = buildWhereClause(config.conditionGroups, params)
+  const where = buildCombinedWhere(
+    config.conditionGroups,
+    extraConditionGroups,
+    params,
+  )
   if (!where) {
     throw new ProjectError('删除操作必须配置有效的查询条件', 400)
   }
@@ -417,6 +472,7 @@ function buildUpdateSql(
   table: string,
   config: DataMethodConfig,
   params: Record<string, unknown>,
+  extraConditionGroups?: DataMethodConfig['conditionGroups'],
 ): string {
   const list = activeInsertMappings(config.fieldMappings)
   if (!list.length) {
@@ -426,7 +482,11 @@ function buildUpdateSql(
     (m) =>
       `${quoteIdent(camelToSnake(m.field))} = ${sqlLiteral(resolvePath(params, m.column))}`,
   )
-  const where = buildWhereClause(config.conditionGroups, params)
+  const where = buildCombinedWhere(
+    config.conditionGroups,
+    extraConditionGroups,
+    params,
+  )
   if (!where) {
     throw new ProjectError('修改操作必须配置有效的查询条件', 400)
   }
@@ -694,11 +754,14 @@ export async function debugDataLayerMethod(payload: {
   processorId: string
   methodId: string
   params?: Record<string, unknown>
+  /** 调用处额外条件，与方法内条件 AND */
+  extraConditionGroups?: DataMethodConfig['conditionGroups']
   /** 默认 true：写入在事务中执行后回滚 */
   dryRun?: boolean
 }): Promise<DataMethodDebugResult> {
   const { projectPath, serviceId, processorId, methodId } = payload
   const params = payload.params ?? {}
+  const extraConditionGroups = payload.extraConditionGroups ?? []
   const dryRun = payload.dryRun !== false
 
   const processors = await readServiceProcessors(projectPath, serviceId, 'data')
@@ -735,8 +798,47 @@ export async function debugDataLayerMethod(payload: {
   }
 
   const config = method.dataConfig
+  if (config.source === 'http') {
+    const http = config.httpRequest
+    if (!http?.apiUrl?.trim()) {
+      throw new ProjectError('请先配置外部接口地址', 400)
+    }
+    const { runNetworkRequest } = await import('./mp-gateway/network-http.js')
+    const { buildHttpMethodOutput } = await import('./http-response-parse.js')
+    const httpResult = await runNetworkRequest(
+      { network: http as unknown as Record<string, unknown> },
+      params,
+    )
+    let output
+    try {
+      output = buildHttpMethodOutput({
+        status: httpResult.status,
+        headers: httpResult.headers,
+        bodyText: httpResult.bodyText,
+        parseCode: http.parseCode,
+        bodyGenericT: method.output?.genericArgs?.T ?? '',
+        typeLibrary: typeLib,
+      })
+    } catch (err) {
+      throw new ProjectError(
+        err instanceof Error ? err.message : String(err),
+        400,
+      )
+    }
+    return {
+      sql: `${http.httpMethod} ${http.apiUrl}`,
+      raw: {
+        status: httpResult.status,
+        headers: httpResult.headers,
+        bodyText: httpResult.bodyText,
+      },
+      output,
+      dryRun: false,
+    }
+  }
+
   if (config.source !== 'mysql') {
-    throw new ProjectError('当前仅支持 MySQL 调试', 400)
+    throw new ProjectError(`当前不支持数据源「${config.source}」调试`, 400)
   }
 
   const service = services.services.find((s) => s.id === serviceId)
@@ -758,7 +860,7 @@ export async function debugDataLayerMethod(payload: {
   let isWrite = false
 
   if (config.operation === 'query') {
-    const built = buildQuerySql(table, config, params)
+    const built = buildQuerySql(table, config, params, extraConditionGroups)
     sql = built.sql
     current = built.current
     pageSize = built.pageSize
@@ -775,10 +877,10 @@ export async function debugDataLayerMethod(payload: {
     )
     isWrite = true
   } else if (config.operation === 'delete') {
-    sql = buildDeleteSql(table, config, params)
+    sql = buildDeleteSql(table, config, params, extraConditionGroups)
     isWrite = true
   } else if (config.operation === 'update') {
-    sql = buildUpdateSql(table, config, params)
+    sql = buildUpdateSql(table, config, params, extraConditionGroups)
     isWrite = true
   } else if (config.operation === 'custom') {
     if (!config.sql.trim()) throw new ProjectError('请先配置自定义 SQL', 400)

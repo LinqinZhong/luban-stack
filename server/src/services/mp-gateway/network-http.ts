@@ -80,6 +80,28 @@ function resolveParamRows(
       if (!varName) continue
       const v = scope[varName]
       out[name] = v == null ? '' : String(v)
+    } else if (row.valueKind === 'computed') {
+      const body =
+        typeof row.value === 'string' ? row.value.trim() : String(row.value ?? '')
+      if (!body) {
+        out[name] = ''
+        continue
+      }
+      try {
+        const keys = Object.keys(scope).filter((k) =>
+          /^[A-Za-z_$][\w$]*$/.test(k),
+        )
+        const values = keys.map((k) => scope[k])
+        const hasReturn = /\breturn\b/.test(body)
+        const inner = hasReturn ? body : `return (${body});`
+        const code = `"use strict";\nfunction value() {\n${inner}\n}\nreturn value();`
+        // eslint-disable-next-line no-new-func
+        const fn = new Function(...keys, code)
+        const result = fn(...values)
+        out[name] = result == null ? '' : String(result)
+      } catch {
+        out[name] = ''
+      }
     } else {
       const raw = row.value == null ? '' : String(row.value)
       out[name] = String(coerceConstant(raw, row.constantType))

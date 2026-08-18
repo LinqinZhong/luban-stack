@@ -70,7 +70,7 @@
     "reset"
   ],
   "debugProps": {
-    "fetchApi": "{\"serviceId\":\"svc_mrqdgnhb_3ktq2g\",\"controllerId\":\"cmrqed0jzshj7\",\"apiId\":\"api_mrqedc08_9iml1r\",\"paramBindings\":{\"keyword\":{\"source\":\"literal\",\"literal\":\"瓜\"}}}",
+    "fetchApi": "{\"serviceId\":\"svc_mrqdgnhb_3ktq2g\",\"controllerId\":\"b1381259-0eaf-4bf2-a96d-b30fb63c4b26\",\"apiId\":\"api_mrqedc08_9iml1r\",\"paramBindings\":{\"keyword\":{\"source\":\"literal\",\"literal\":\"瓜\"}}}",
     "params": {},
     "data": [
       {

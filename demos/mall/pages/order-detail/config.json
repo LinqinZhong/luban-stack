@@ -1,6 +1,12 @@
 {
   "name": "订单详情",
   "title": "订单详情",
+  "statusBar": {
+    "textStyle": "black",
+    "backgroundColor": "#ffffff",
+    "cover": false,
+    "navigationBar": false
+  },
   "queryParams": [
     {
       "name": "id",

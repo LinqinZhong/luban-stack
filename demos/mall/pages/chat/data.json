@@ -10,48 +10,19 @@
     },
     {
       "name": "messageList",
-      "type": "array",
+      "type": "map",
       "remark": "",
-      "value": [
-        {
-          "id": "1",
-          "name": "小明",
-          "content": "你好呀！",
-          "userId": "1"
-        }
-      ],
+      "value": {},
       "binding": "",
-      "computeBody": "",
-      "itemType": "json",
-      "itemTypeRef": "type_mrqq9v55_7fzo9v",
-      "arrayFields": [
-        {
-          "type": "json",
-          "typeRef": "type_mrqq9v55_7fzo9v",
-          "objectFields": [
-            {
-              "name": "id",
-              "type": "string",
-              "value": "1"
-            },
-            {
-              "name": "name",
-              "type": "string",
-              "value": "小明"
-            },
-            {
-              "name": "content",
-              "type": "string",
-              "value": "你好呀！"
-            },
-            {
-              "name": "userId",
-              "type": "string",
-              "value": "1"
-            }
-          ]
-        }
-      ]
+      "computeBody": ""
+    },
+    {
+      "name": "a",
+      "type": "json",
+      "remark": "",
+      "value": {},
+      "binding": "",
+      "computeBody": ""
     }
   ]
 }

@@ -1,0 +1,80 @@
+Vue 3 → React conversion rules for LubanStack frontend.
+
+SOURCE: c:\Users\raink\Desktop\workspace\voider\frontend.bak\src
+OUTPUT: c:\Users\raink\Desktop\workspace\voider\frontend\src
+
+Already converted (DO NOT overwrite):
+- stores/*, composables/*, ui/feedback.ts
+- components/icons/* (tsx)
+- components/editor/method-flow/helper-lines.ts
+- components/editor/method-flow/flow-debug-inject.ts
+- components/editor/method-flow/use-flow-debug-node.ts
+- views/WelcomeView.tsx, views/AiAssistantView.tsx
+- layouts/MainLayout.tsx
+- App.tsx, main.tsx
+
+Stack:
+- React 19 function components, default export
+- antd 5 (Button, Modal, Form, Input, Select, Tree, Cascader, Tabs, Tooltip, Dropdown, Switch, Radio, Checkbox, Table, Tag, Alert, Empty, Skeleton, InputNumber, ColorPicker, Upload, DatePicker, TimePicker, Collapse, Divider, Drawer, AutoComplete, Slider, TreeSelect, message)
+- ElMessage / ElMessageBox from `<relative>/ui/feedback`
+- Zustand stores: useProjectStore(), useAiAssistantStore(), useWorkspaceSettingsStore() — fields are plain values, mutate via setters (setPanelOpen, setComposerText, setAiAssistantEnabled, setApiLatencyMs). Outside React use Store.getState().
+- Vue Flow → @xyflow/react (ReactFlow, Background, Controls, Handle, Position, useNodesState, useEdgesState, useReactFlow). Import `@xyflow/react/dist/style.css` once in MethodFlowEditor.
+- monaco: @monaco-editor/react
+- Element Plus icons → @ant-design/icons (closest equivalent)
+- Local icons already exist as .tsx (no .vue)
+
+Props convention:
+- el-dialog v-model → open + onOpenChange
+- component v-model / modelValue → value + onChange
+- v-model:visible same as open/onOpenChange
+- kebab-case props become camelCase
+- defineEmits update:modelValue → onChange
+- defineExpose → forwardRef + useImperativeHandle
+- slots: default → children; named → extra props (footer, header)
+
+Template:
+- class → className, for → htmlFor
+- v-if → && / ternary; v-show → style.display or class
+- v-for → .map with key
+- @click → onClick, @keydown.stop → onKeyDown + stopPropagation
+- :style object stays style={{}}
+- Teleport → createPortal
+- v-html → dangerouslySetInnerHTML
+- router-view → Outlet (already in MainLayout)
+- useRouter/useRoute → useNavigate/useLocation/useSearchParams
+- nextTick → queueMicrotask
+- watch → useEffect; computed → useMemo
+- ref(x) → useState; DOM ref → useRef
+- reactive object → useState
+- provide/inject mapping:
+  MODAL_STACK_KEY → ModalStackContext (useModalStack.ts)
+  MODAL_HOST_KEY → ModalHostContext
+  BADGE_HOST_KEY → BadgeHostContext
+  CANVAS_TOOL_MODE_KEY → CanvasToolModeContext
+  PREVIEW_INSPECT_MODE_KEY → PreviewInspectModeContext
+  PREVIEW_INSTANCE_PROP_OVERRIDES_KEY → PreviewInstancePropOverridesContext
+  CANVAS_RUNTIME_KEY → CanvasRuntimeContext
+  COMPONENT_RENDER_MAP_KEY → ComponentRenderMapContext
+  COMPONENT_LIVE_PAGE_DATA_KEY → ComponentLivePageDataContext
+  COMPONENT_LIVE_DOLLAR_PROPS_KEY → ComponentLiveDollarPropsContext
+  PAGE_LIVE_PAGE_DATA_KEY → PageLivePageDataContext
+  INSPECT_HOST_KEY → InspectHostContext
+  PHONE_FRAME_KEY → PhoneFrameContext
+  OPEN_INSPECT_KEY → OpenInspectContext
+  FLOW_DEBUG_KEY → FlowDebugContext (value is { cursorId, visitedIds, printByNode } not refs)
+- colorPaletteState.value → useColorPaletteState() during render; getColorPaletteState() in event handlers; setColorPaletteState()
+- previewDataRevision.value → usePreviewDataRevision()
+- Vue Ref .value on DOM → .current
+- createModalStack() still exists and returns a mutable api with subscribe()
+
+Styles: extract <style> to sibling .css, import it. Keep class names. Drop :deep() (just use descendant selectors).
+
+Imports: drop .vue extensions. Use `import type` for types (verbatimModuleSyntax). Preserve business logic exactly. Do not add explanatory comments about the migration.
+
+WorkspaceSettingsButton must export:
+  export type WorkspaceSettingsButtonHandle = { open: (tab?: string) => void }
+  and be forwardRef.
+
+AiAssistantPanel props: open, onOpenChange, mode?: 'panel' | 'window', initialSessionId?: string
+
+BuildSchemeDialog props: open, onOpenChange, projectPath: string

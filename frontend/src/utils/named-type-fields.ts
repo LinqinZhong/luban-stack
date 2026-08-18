@@ -49,6 +49,8 @@ export function typeExprToDataFieldType(
       return { type: 'date' }
     case 'datetime':
       return { type: 'datetime' }
+    case 'resource':
+      return { type: 'resource' }
     case 'named':
       return resolveNamedTypeAsField(atom.ref ?? '', library)
     case 'any':
@@ -80,6 +82,10 @@ export function resolveNamedTypeAsField(
   typeRef: string,
   library: DataTypeLibrary | null | undefined,
 ): { type: DataFieldType; typeRef?: string } {
+  // 兼容旧项目中的 URI 具名类型
+  if (typeRef === 'type_common_URI' || typeRef === 'URI') {
+    return { type: 'resource' }
+  }
   const def = findDataTypeDef(library, typeRef)
   if (!def) return { type: 'json', typeRef }
   switch (def.kind) {
@@ -95,6 +101,7 @@ export function resolveNamedTypeAsField(
       }
       return { type: 'string' }
     case 'enum':
+      return { type: 'string', typeRef }
     default:
       return { type: 'string' }
   }
@@ -152,9 +159,20 @@ export function objectFieldsFromTypeRef(
         return {
           name,
           type: resolved.type,
+          typeRef: resolved.typeRef,
           value: (() => {
             const v = pickExistingValue(prev, resolved.type)
-            return v !== undefined ? v : defaultValue(resolved.type)
+            if (v !== undefined) return v
+            if (resolved.typeRef) {
+              const enumDef = findDataTypeDef(library, resolved.typeRef)
+              if (enumDef?.kind === 'enum') {
+                return (
+                  enumDef.enumMembers.find((m) => m.name.trim())?.name.trim() ??
+                  ''
+                )
+              }
+            }
+            return defaultValue(resolved.type)
           })(),
         }
       }

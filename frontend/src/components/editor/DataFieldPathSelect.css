@@ -1,0 +1,11 @@
+.field-path-select {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+}
+
+.index-input {
+  width: 72px;
+  flex-shrink: 0;
+}

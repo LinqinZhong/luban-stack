@@ -1,3 +1,29 @@
 {
-  "fields": []
+  "fields": [
+    {
+      "name": "order",
+      "type": "json",
+      "remark": "",
+      "value": null,
+      "binding": "controller",
+      "computeBody": "",
+      "controllerBinding": {
+        "serviceId": "svc_mrqdgnhb_3ktq2g",
+        "controllerId": "c6f75b40-9035-478e-8c1c-29943ee4aa62",
+        "apiId": "detail",
+        "parseBody": "// data 为接口 Result.data\n// return 的值写入本数据池字段\nreturn data\n",
+        "onLoading": "",
+        "onSuccess": "",
+        "onError": "",
+        "onFinally": "",
+        "inputs": {
+          "id": {
+            "source": "binding",
+            "binding": "$query.id"
+          }
+        }
+      },
+      "typeRef": "Order"
+    }
+  ]
 }

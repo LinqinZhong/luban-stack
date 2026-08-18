@@ -1,0 +1,60 @@
+.network-request-fields {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.param-list {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.param-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+}
+
+.param-name {
+  flex: 0 0 110px;
+  width: 110px;
+}
+
+.param-kind {
+  flex: 0 0 84px;
+  width: 84px;
+}
+
+.param-value {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.param-const {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  gap: 4px;
+}
+
+.const-type {
+  flex: 0 0 78px;
+  width: 78px;
+}
+
+.const-value {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.media-block {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}

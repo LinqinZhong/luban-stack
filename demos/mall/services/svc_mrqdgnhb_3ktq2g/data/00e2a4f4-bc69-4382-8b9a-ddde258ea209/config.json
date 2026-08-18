@@ -1,0 +1,83 @@
+{
+  "id": "00e2a4f4-bc69-4382-8b9a-ddde258ea209",
+  "name": "HttpTest",
+  "remark": "",
+  "entityRef": "type_msf6uazq_69ffr3",
+  "dataProcessorRef": "",
+  "methods": [
+    {
+      "id": "method_msf6y8p5_53vkhp",
+      "name": "get",
+      "remark": "",
+      "scope": "public",
+      "params": [
+        {
+          "id": "param_msf7e6ah_hq251f",
+          "name": "keyword",
+          "remark": "",
+          "typeExpr": {
+            "type": "string",
+            "typeRef": "",
+            "itemType": "",
+            "itemTypeRef": "",
+            "itemItemType": "",
+            "itemItemTypeRef": "",
+            "keyType": "",
+            "genericArgs": {}
+          },
+          "required": false
+        }
+      ],
+      "output": {
+        "type": "json",
+        "typeRef": "type_common_HttpResponse",
+        "itemType": "",
+        "itemTypeRef": "",
+        "itemItemType": "",
+        "itemItemTypeRef": "",
+        "keyType": "",
+        "genericArgs": {
+          "T": "type_mrnx6ke8_4d7vry"
+        }
+      },
+      "dataConfig": {
+        "source": "http",
+        "operation": "custom",
+        "queryFields": [],
+        "sql": "",
+        "fieldMappings": [],
+        "batchSourceParam": "",
+        "pageParam": "",
+        "conditionGroups": [],
+        "httpRequest": {
+          "apiUrl": "http://baidu.com",
+          "httpMethod": "GET",
+          "mediaType": "application/x-www-form-urlencoded",
+          "bodyVarName": "",
+          "responseBodyType": "json",
+          "parseCode": "",
+          "headers": [],
+          "queryParams": [],
+          "formParams": []
+        }
+      },
+      "debugParams": {
+        "keyword": ""
+      },
+      "flow": {
+        "nodes": [
+          {
+            "id": "start",
+            "kind": "start",
+            "position": {
+              "x": 280,
+              "y": 40
+            },
+            "data": {}
+          }
+        ],
+        "edges": []
+      }
+    }
+  ]
+}

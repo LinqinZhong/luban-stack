@@ -1,0 +1,89 @@
+.data-pool {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: #fff;
+}
+
+.data-pool-table {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 16px;
+}
+
+.type-cell {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  width: 100%;
+}
+
+.type-cell-select {
+  flex: 1;
+  min-width: 0;
+}
+
+.type-generic-btn {
+  flex-shrink: 0;
+  padding: 0 2px;
+}
+
+.value-cell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  width: 100%;
+}
+
+.value-cell > :not(.el-checkbox):not(.null-hint) {
+  flex: 1;
+  min-width: 0;
+}
+
+.null-hint {
+  font-size: 13px;
+  color: #94a3b8;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.complex-value {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.resource-value {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  width: 100%;
+}
+
+.resource-value .el-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.binding-disabled {
+  font-size: 13px;
+  color: #94a3b8;
+}
+
+.value-preview {
+  font-size: 13px;
+  color: #64748b;
+}
+
+.el-table {
+  width: 100%;
+}
+
+.el-input-number {
+  width: 100%;
+}

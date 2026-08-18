@@ -1,0 +1,186 @@
+﻿.widget.swiper,
+.widget.multi-window {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  box-sizing: border-box;
+}
+
+/* RelativeLayout：承载绝对定位子节点；高度跟父内容区（已扣 padding） */
+.relative-content {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  box-sizing: border-box;
+}
+
+.fragment-host {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.fragment-host.is-root {
+  flex: 1 1 auto;
+  min-height: 100%;
+  min-width: 0;
+}
+
+/* 仅当组件宿主被拉满时，定义树才跟着铺满；wrap_content 宿主勿强行 height:100% */
+.component-host {
+  min-width: 0;
+}
+.component-host > .fragment-host.is-root,
+.component-host > .select-shell {
+  width: 100%;
+  min-width: 0;
+  align-self: stretch;
+}
+
+/* 仅含 Modal：不占文档流 */
+.fragment-host.is-out-of-flow {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  min-height: 0;
+  overflow: visible;
+  pointer-events: none;
+}
+
+/* Modal 在原树中的锚点：独立出流，不挤开兄弟 */
+.modal-flow-anchor {
+  position: absolute;
+  width: 0;
+  height: 0;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.modal-empty {
+  width: 100%;
+  padding: 16px 8px;
+  font-size: 12px;
+  color: #909399;
+  text-align: center;
+  pointer-events: none;
+}
+
+/* 尺寸由 modalPanelStyle 控制（铺满弹层，相对布局根） */
+.modal-panel {
+  position: relative;
+}
+
+.component-title {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.component-id {
+  font-size: 11px;
+  color: #64748b;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+/* 尺寸主要由 slotFillStyle 控制；此处仅兜底 */
+.slot-fill {
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  box-sizing: border-box;
+}
+
+.slot-debug {
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  box-sizing: border-box;
+  outline: 1px dashed rgba(230, 162, 60, 0.55);
+  outline-offset: -1px;
+  border-radius: 4px;
+}
+
+.unsupported {
+  padding: 8px;
+  color: #f56c6c;
+  font-size: 12px;
+  border: 1px dashed #f56c6c;
+}
+
+.widget.button {
+  font-family: inherit;
+}
+
+.widget.button.is-press-scale:active {
+  transform: scale(0.97);
+  filter: brightness(1.12);
+}
+
+.widget.button.is-press-ripple::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: radial-gradient(
+    circle at center,
+    var(--press-ripple-color, rgba(0, 0, 0, 0.22)) 0%,
+    transparent 70%
+  );
+  opacity: 0;
+  transform: scale(0.6);
+  transition:
+    opacity 0.18s ease,
+    transform 0.18s ease;
+}
+
+.widget.button.is-press-ripple:active::after {
+  opacity: 1;
+  transform: scale(1.15);
+}
+
+.widget.input {
+  font-family: inherit;
+  box-sizing: border-box;
+}
+
+.widget.image {
+  vertical-align: top;
+  user-select: none;
+}
+
+.widget.icon {
+  vertical-align: top;
+  user-select: none;
+  overflow: visible;
+}
+
+.widget.icon-var-placeholder {
+  opacity: 0.72;
+}
+
+.widget.icon-placeholder {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 2px;
+}
+
+.widget.image-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #909399;
+  font-size: 12px;
+  border: 1px dashed #dcdfe6;
+  box-sizing: border-box;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 4px;
+}

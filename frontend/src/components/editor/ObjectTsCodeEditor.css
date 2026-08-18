@@ -1,0 +1,20 @@
+﻿.object-ts-editor {
+  width: 100%;
+  height: 100%;
+  min-height: 360px;
+  border: 1px solid #e4e7ed;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #fff;
+  position: relative;
+  z-index: 1;
+}
+
+.object-ts-editor .object-ts-shell-readonly {
+  background: #f5f7fa;
+  opacity: 0.92;
+}
+
+.object-ts-editor .object-ts-shell-readonly-margin {
+  background: #eef1f6;
+}

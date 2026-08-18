@@ -1,0 +1,90 @@
+﻿.widget-tree {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+  border-top: 1px solid #ebeef5;
+}
+
+.tree-header {
+  flex-shrink: 0;
+  height: 32px;
+  padding: 0 10px;
+  display: flex;
+  align-items: center;
+  font-size: 13px;
+  font-weight: 600;
+  color: #303133;
+  border-bottom: 1px solid #ebeef5;
+}
+
+.tree-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 4px;
+}
+
+.tree-node {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex: 1;
+  padding-right: 2px;
+}
+
+.tree-node.is-hidden .tree-label {
+  color: #c0c4cc;
+  text-decoration: line-through;
+}
+
+.tree-label {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  line-height: 1;
+}
+
+.eye-btn {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  margin-left: auto;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: #909399;
+  cursor: pointer;
+}
+
+.eye-btn:hover {
+  color: var(--color-primary);
+  background: var(--color-primary-soft);
+}
+
+.tree-node.is-hidden .eye-btn {
+  color: #c0c4cc;
+}
+
+.widget-tree .ant-tree-node-content-wrapper {
+  height: 26px;
+  line-height: 26px;
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  flex: 1;
+}
+
+.widget-tree .ant-tree-switcher {
+  cursor: pointer;
+  line-height: 26px;
+  width: 20px;
+}

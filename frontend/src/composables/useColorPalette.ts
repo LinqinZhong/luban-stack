@@ -1,10 +1,30 @@
-import { ref, type Ref } from 'vue'
+import { useSyncExternalStore } from 'react'
 import type { ColorPalette } from '../types/color-palette'
 import { createEmptyColorPalette } from '../types/color-palette'
 
-/** 项目调色板：WorkspaceView 写入；ColorPicker / 画布读取（含 teleport 弹层） */
-export const colorPaletteState: Ref<ColorPalette> = ref(createEmptyColorPalette())
+let palette: ColorPalette = createEmptyColorPalette()
+const listeners = new Set<() => void>()
 
-export function setColorPaletteState(palette: ColorPalette) {
-  colorPaletteState.value = palette
+function subscribe(fn: () => void) {
+  listeners.add(fn)
+  return () => {
+    listeners.delete(fn)
+  }
+}
+
+function getSnapshot() {
+  return palette
+}
+
+export function getColorPaletteState(): ColorPalette {
+  return palette
+}
+
+export function setColorPaletteState(next: ColorPalette) {
+  palette = next
+  for (const fn of listeners) fn()
+}
+
+export function useColorPaletteState(): ColorPalette {
+  return useSyncExternalStore(subscribe, getSnapshot)
 }

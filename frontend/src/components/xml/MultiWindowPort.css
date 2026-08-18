@@ -1,0 +1,121 @@
+﻿.multi-window-port {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+  box-sizing: border-box;
+  overflow: visible;
+}
+
+.multi-window-port.is-edit {
+  overflow: visible;
+}
+
+.multi-window-track {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 48px;
+  box-sizing: border-box;
+}
+
+.multi-window-pane {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  box-sizing: border-box;
+  overflow: visible;
+}
+
+/* 预览非激活窗：绝对定位叠层 + display:flex 时，强化隐藏，避免与 data 窗叠出「加载中」 */
+.multi-window-pane.is-preview-hidden {
+  display: none !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
+
+.multi-window-pane.editable {
+  position: relative;
+  inset: auto;
+  height: 100%;
+  border: 1px dashed #94a3b8;
+  border-radius: 8px;
+  background: rgba(148, 163, 184, 0.04);
+  overflow: visible;
+  box-sizing: border-box;
+}
+
+.multi-window-pane-screen {
+  /* 透传 pane 的 column flex，避免预览态 match_parent / flex:1 子节点高度塌缩 */
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  box-sizing: border-box;
+  overflow: visible;
+  position: relative;
+}
+
+.multi-window-pane.editable.active {
+  border-color: var(--color-primary);
+  background: rgba(var(--color-primary-rgb), 0.06);
+}
+
+.multi-window-pane.editable.unbound {
+  border-style: dashed;
+  border-color: #f59e0b;
+}
+
+.multi-window-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #94a3b8;
+  font-size: 12px;
+  pointer-events: none;
+}
+
+.multi-window-empty--edit {
+  position: relative;
+  inset: auto;
+  flex: 0 0 var(--pane-w, 160px);
+  width: var(--pane-w, 160px);
+  min-width: 120px;
+  height: 100%;
+  border: 1px dashed #cbd5e1;
+  border-radius: 8px;
+}
+
+.multi-window-add {
+  flex: 0 0 88px;
+  width: 88px;
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 1px dashed #94a3b8;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.92);
+  color: #64748b;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 8px;
+  box-sizing: border-box;
+}
+
+.multi-window-add:hover {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+  background: var(--color-primary-soft);
+}

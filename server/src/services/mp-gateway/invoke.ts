@@ -13,6 +13,8 @@ import {
   readServiceProcessors,
 } from '../backend-services.js'
 import { debugDataLayerMethod } from '../data-method-debug.js'
+import { resolveConditionGroupsForInvoke } from '../../utils/data-method-conditions.js'
+import type { DataMethodConditionGroup } from '../../types/backend-services.js'
 import { ProjectError } from '../project.js'
 import { joinControllerApiPath } from '../export-mp-wx/api-runtime.js'
 import {
@@ -25,11 +27,6 @@ import {
 } from '../../utils/object-map-flow.js'
 import { defaultEmptyReturnValue } from '../../utils/empty-return-value.js'
 import { coerceMapTypedOutput } from '../../utils/runtime-map.js'
-import {
-  applyNetworkInputResponse,
-  runNetworkRequest,
-} from './network-http.js'
-
 function asRecord(v: unknown): Record<string, unknown> {
   return v && typeof v === 'object' && !Array.isArray(v)
     ? (v as Record<string, unknown>)
@@ -278,9 +275,9 @@ async function executeNode(
 
   if (node.kind === 'input') {
     if (str(data, 'channel') === 'network') {
-      const httpResult = await runNetworkRequest(data, scope)
-      applyNetworkInputResponse(data, scope, httpResult)
-      return { scope, nextId: pickNext(ctx.flow, node, scope) }
+      throw new Error(
+        '输入节点已不再支持「网络」类型，请改为调用数据层外部接口方法',
+      )
     }
     const varName = str(data, 'varName')
     if (!varName) throw new Error('输入节点未配置变量名')
@@ -318,6 +315,12 @@ async function executeNode(
         processorId,
         methodId,
         params,
+        extraConditionGroups: resolveConditionGroupsForInvoke(
+          Array.isArray(data.conditionGroups)
+            ? (data.conditionGroups as DataMethodConditionGroup[])
+            : [],
+          scope,
+        ),
         dryRun: ctx.dryRun,
       })
       const method = findProcessorMethod(
@@ -356,13 +359,9 @@ async function executeNode(
 
   if (node.kind === 'output') {
     if (str(data, 'channel') === 'network') {
-      void runNetworkRequest(data, scope).catch((err) => {
-        console.warn(
-          '[invoke] 网络输出请求失败',
-          err instanceof Error ? err.message : err,
-        )
-      })
-      return { scope, nextId: pickNext(ctx.flow, node, scope) }
+      throw new Error(
+        '输出节点已不再支持「网络」类型，请改为调用数据层外部接口方法',
+      )
     }
     const processorId = str(data, 'dataProcessorId')
     const methodId = str(data, 'dataMethodId')

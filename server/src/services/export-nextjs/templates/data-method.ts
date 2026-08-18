@@ -8,6 +8,7 @@ export type DataMethodCondition = {
   valueKind: string
   value: string
   valueTo: string
+  enableCondition?: string
 }
 
 export type DataMethodConfig = {
@@ -18,7 +19,11 @@ export type DataMethodConfig = {
   fieldMappings: Array<{ field: string; column: string }>
   batchSourceParam: string
   pageParam: string
-  conditionGroups: Array<{ id?: string; conditions: DataMethodCondition[] }>
+  conditionGroups: Array<{
+    id?: string
+    enableCondition?: string
+    conditions: DataMethodCondition[]
+  }>
 }
 
 export type DataMethodOutputMeta = {
@@ -121,10 +126,30 @@ function buildWhereClause(
   params: Record<string, unknown>,
 ): string {
   if (!groups?.length) return ''
+  const evalEnable = (expression: string | undefined): boolean => {
+    const body = (expression ?? '').trim()
+    if (!body) return true
+    try {
+      const keys = Object.keys(params).filter((k) =>
+        /^[A-Za-z_$][\w$]*$/.test(k),
+      )
+      const values = keys.map((k) => params[k])
+      const hasReturn = /\breturn\b/.test(body)
+      const inner = hasReturn ? body : `return (${body});`
+      const code = `"use strict";\nfunction condition() {\n${inner}\n}\nreturn condition();`
+      // eslint-disable-next-line no-new-func
+      const fn = new Function(...keys, code)
+      return Boolean(fn(...values))
+    } catch {
+      return false
+    }
+  }
   const groupSqls: string[] = []
   for (const group of groups) {
+    if (!evalEnable(group.enableCondition)) continue
     const parts: string[] = []
     for (const cond of group.conditions ?? []) {
+      if (!evalEnable(cond.enableCondition)) continue
       const colNameRaw =
         !cond.field || cond.field === '__custom__'
           ? (cond.customField || '').trim()

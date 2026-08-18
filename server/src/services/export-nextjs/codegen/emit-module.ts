@@ -879,7 +879,7 @@ export function emitAllTypeFiles(
     for (const t of group.types ?? []) {
       collectNamedRefsFromType(t, refs)
     }
-    // Cross-group imports (e.g. URI from common)
+    // Cross-group imports (named types from other groups)
     const byGroup = new Map<string, Set<string>>()
     for (const ref of refs) {
       const name = idToName.get(ref)

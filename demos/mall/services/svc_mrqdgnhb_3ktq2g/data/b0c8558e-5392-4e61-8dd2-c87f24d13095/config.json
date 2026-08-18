@@ -1,0 +1,8 @@
+{
+  "id": "b0c8558e-5392-4e61-8dd2-c87f24d13095",
+  "name": "Order",
+  "remark": "订单数据层",
+  "entityRef": "Order",
+  "dataProcessorRef": "",
+  "methods": []
+}

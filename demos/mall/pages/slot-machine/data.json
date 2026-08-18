@@ -1,0 +1,271 @@
+{
+  "fields": [
+    {
+      "name": "emojiPool",
+      "type": "array",
+      "remark": "可选emoji池",
+      "value": [
+        "🍎",
+        "🍋",
+        "🍒",
+        "🍊",
+        "🍇",
+        "🍉",
+        "🍓",
+        "💰",
+        "💎",
+        "🔔",
+        "7️⃣",
+        "⭐"
+      ],
+      "binding": "",
+      "itemType": "string",
+      "arrayFields": [
+        {
+          "type": "string",
+          "value": "🍎"
+        },
+        {
+          "type": "string",
+          "value": "🍋"
+        },
+        {
+          "type": "string",
+          "value": "🍒"
+        },
+        {
+          "type": "string",
+          "value": "🍊"
+        },
+        {
+          "type": "string",
+          "value": "🍇"
+        },
+        {
+          "type": "string",
+          "value": "🍉"
+        },
+        {
+          "type": "string",
+          "value": "🍓"
+        },
+        {
+          "type": "string",
+          "value": "💰"
+        },
+        {
+          "type": "string",
+          "value": "💎"
+        },
+        {
+          "type": "string",
+          "value": "🔔"
+        },
+        {
+          "type": "string",
+          "value": "7️⃣"
+        },
+        {
+          "type": "string",
+          "value": "⭐"
+        }
+      ]
+    },
+    {
+      "name": "cells",
+      "type": "array",
+      "remark": "9个格子",
+      "value": [
+        {
+          "emoji": "🍎",
+          "index": 0
+        },
+        {
+          "emoji": "🍋",
+          "index": 1
+        },
+        {
+          "emoji": "🍒",
+          "index": 2
+        },
+        {
+          "emoji": "🍊",
+          "index": 3
+        },
+        {
+          "emoji": "🍇",
+          "index": 4
+        },
+        {
+          "emoji": "🍉",
+          "index": 5
+        },
+        {
+          "emoji": "🍓",
+          "index": 6
+        },
+        {
+          "emoji": "💰",
+          "index": 7
+        },
+        {
+          "emoji": "💎",
+          "index": 8
+        }
+      ],
+      "binding": "",
+      "itemType": "json",
+      "arrayFields": [
+        {
+          "type": "json",
+          "objectFields": [
+            {
+              "name": "emoji",
+              "type": "string",
+              "value": "🍎"
+            },
+            {
+              "name": "index",
+              "type": "number",
+              "value": 0
+            }
+          ]
+        },
+        {
+          "type": "json",
+          "objectFields": [
+            {
+              "name": "emoji",
+              "type": "string",
+              "value": "🍋"
+            },
+            {
+              "name": "index",
+              "type": "number",
+              "value": 1
+            }
+          ]
+        },
+        {
+          "type": "json",
+          "objectFields": [
+            {
+              "name": "emoji",
+              "type": "string",
+              "value": "🍒"
+            },
+            {
+              "name": "index",
+              "type": "number",
+              "value": 2
+            }
+          ]
+        },
+        {
+          "type": "json",
+          "objectFields": [
+            {
+              "name": "emoji",
+              "type": "string",
+              "value": "🍊"
+            },
+            {
+              "name": "index",
+              "type": "number",
+              "value": 3
+            }
+          ]
+        },
+        {
+          "type": "json",
+          "objectFields": [
+            {
+              "name": "emoji",
+              "type": "string",
+              "value": "🍇"
+            },
+            {
+              "name": "index",
+              "type": "number",
+              "value": 4
+            }
+          ]
+        },
+        {
+          "type": "json",
+          "objectFields": [
+            {
+              "name": "emoji",
+              "type": "string",
+              "value": "🍉"
+            },
+            {
+              "name": "index",
+              "type": "number",
+              "value": 5
+            }
+          ]
+        },
+        {
+          "type": "json",
+          "objectFields": [
+            {
+              "name": "emoji",
+              "type": "string",
+              "value": "🍓"
+            },
+            {
+              "name": "index",
+              "type": "number",
+              "value": 6
+            }
+          ]
+        },
+        {
+          "type": "json",
+          "objectFields": [
+            {
+              "name": "emoji",
+              "type": "string",
+              "value": "💰"
+            },
+            {
+              "name": "index",
+              "type": "number",
+              "value": 7
+            }
+          ]
+        },
+        {
+          "type": "json",
+          "objectFields": [
+            {
+              "name": "emoji",
+              "type": "string",
+              "value": "💎"
+            },
+            {
+              "name": "index",
+              "type": "number",
+              "value": 8
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "spinning",
+      "type": "boolean",
+      "remark": "是否滚动中",
+      "value": false,
+      "binding": ""
+    },
+    {
+      "name": "score",
+      "type": "number",
+      "remark": "得分",
+      "value": 0,
+      "binding": ""
+    }
+  ]
+}

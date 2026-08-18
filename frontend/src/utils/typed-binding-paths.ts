@@ -311,6 +311,14 @@ function expandObjectChildren(
           library,
           mode,
         )
+        if (selectable) {
+          children.push({
+            value: name,
+            label: name,
+            selectable: true,
+          })
+          continue
+        }
         const nested = expandObjectChildren(
           boundExpr,
           target,
@@ -318,12 +326,12 @@ function expandObjectChildren(
           depth + 1,
           mode,
         )
-        if (selectable || nested.length) {
+        if (nested.length) {
           children.push({
             value: name,
             label: name,
-            selectable,
-            ...(nested.length ? { children: nested } : {}),
+            selectable: false,
+            children: nested,
           })
         }
         continue
@@ -331,6 +339,16 @@ function expandObjectChildren(
     }
 
     const selectable = isBindingTypeCompatible(fieldExpr, target, library, mode)
+    // 字段本身已匹配目标类型：只可选该字段，不再往下钻
+    if (selectable) {
+      children.push({
+        value: name,
+        label: name,
+        selectable: true,
+      })
+      continue
+    }
+
     let nested: TypedBindingCascaderOption[] = []
 
     if (fieldExpr.type === 'array') {
@@ -343,13 +361,6 @@ function expandObjectChildren(
       }
       // 未绑定泛型会落成 any，禁止据此生成可选的 [0]
       if (isAnyExpr(itemExpr) && !namedRefOf(itemExpr)) {
-        if (selectable) {
-          children.push({
-            value: name,
-            label: name,
-            selectable: true,
-          })
-        }
         continue
       }
       const itemSelectable = isBindingTypeCompatible(
@@ -358,13 +369,15 @@ function expandObjectChildren(
         library,
         mode,
       )
-      const itemNested = expandObjectChildren(
-        itemExpr,
-        target,
-        library,
-        depth + 1,
-        mode,
-      )
+      const itemNested = itemSelectable
+        ? []
+        : expandObjectChildren(
+            itemExpr,
+            target,
+            library,
+            depth + 1,
+            mode,
+          )
       if (itemSelectable || itemNested.length) {
         nested = [
           {
@@ -379,12 +392,12 @@ function expandObjectChildren(
       nested = expandObjectChildren(fieldExpr, target, library, depth + 1, mode)
     }
 
-    if (selectable || nested.length) {
+    if (nested.length) {
       children.push({
         value: name,
         label: name,
-        selectable,
-        ...(nested.length ? { children: nested } : {}),
+        selectable: false,
+        children: nested,
       })
     }
   }
@@ -400,6 +413,15 @@ function buildVarOption(
 ): TypedBindingCascaderOption | null {
   const source = methodParamTypeExpr(param)
   const selectable = isBindingTypeCompatible(source, target, library, mode)
+  // 变量本身已匹配目标类型：只可选该变量，禁止再钻到 goods / [0] 等
+  if (selectable) {
+    return {
+      value: param.name,
+      label: param.name,
+      selectable: true,
+    }
+  }
+
   let children: TypedBindingCascaderOption[] = []
 
   if (source.type === 'array') {
@@ -424,13 +446,9 @@ function buildVarOption(
         library,
         mode,
       )
-      const itemNested = expandObjectChildren(
-        itemExpr,
-        target,
-        library,
-        1,
-        mode,
-      )
+      const itemNested = itemSelectable
+        ? []
+        : expandObjectChildren(itemExpr, target, library, 1, mode)
       if (itemSelectable || itemNested.length) {
         children = [
           {
@@ -446,12 +464,12 @@ function buildVarOption(
     children = expandObjectChildren(source, target, library, 1, mode)
   }
 
-  if (!selectable && !children.length) return null
+  if (!children.length) return null
   return {
     value: param.name,
     label: param.name,
-    selectable,
-    ...(children.length ? { children } : {}),
+    selectable: false,
+    children,
   }
 }
 
@@ -662,8 +680,8 @@ export function toElCascaderOptions(
     return {
       value: o.value,
       label: o.label,
-      // 中间节点保持可展开；仅无子级且不匹配时禁用（一般已被剪枝）
-      ...(!o.selectable && !children ? { disabled: true } : {}),
+      // 类型不匹配的不可选（仍可展开子级去选匹配字段）
+      ...(!o.selectable ? { disabled: true } : {}),
       ...(children ? { children } : {}),
     }
   })

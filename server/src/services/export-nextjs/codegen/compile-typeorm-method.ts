@@ -4,6 +4,7 @@ import type {
   DataMethodConfig,
   ProcessorMethod,
 } from '../../../types/backend-services.js'
+import type { DataTypeLibrary } from '../../../types/data-types.js'
 import { snakeToCamel } from '../../../utils/sql-naming.js'
 import { safeIdent } from './names.js'
 
@@ -31,6 +32,7 @@ export type CompileMethodOptions = {
   returnType?: string
   /** 实体/出参中声明为数组、库中为 varchar 的字段 */
   commaArrayFields?: string[]
+  typeLibrary?: DataTypeLibrary | null
 }
 
 function parseLiteral(raw: string): string {
@@ -846,6 +848,218 @@ function compileCustomMethod(
   return compileCustomSqlToTypeOrm(method, table, returnType, commaArrayFields)
 }
 
+function compileHttpMethod(
+  method: ProcessorMethod,
+  typeLibrary?: DataTypeLibrary | null,
+): string {
+  const http = method.dataConfig.httpRequest
+  const apiUrl = JSON.stringify(http?.apiUrl?.trim() || '')
+  const httpMethod = JSON.stringify(
+    (http?.httpMethod || 'GET').toUpperCase(),
+  )
+  const mediaType = JSON.stringify(http?.mediaType || 'application/json')
+  const bodyVar = (http?.bodyVarName || '').trim()
+  const bodyGeneric = JSON.stringify(
+    (method.output?.genericArgs?.T ?? '').trim(),
+  )
+  const parseCodeLit = JSON.stringify(http?.parseCode ?? '')
+  const interfaceFields = (() => {
+    const t = (method.output?.genericArgs?.T ?? '').trim()
+    if (!t || t === 'any' || !typeLibrary) return [] as string[]
+    for (const g of typeLibrary.groups ?? []) {
+      const def = g.types.find((x) => x.id === t || x.name === t)
+      if (def?.kind === 'interface') {
+        return (def.fields ?? [])
+          .map((f) => f.name.trim())
+          .filter(Boolean)
+      }
+    }
+    return [] as string[]
+  })()
+  const interfaceFieldsLit = JSON.stringify(interfaceFields)
+  const headers = JSON.stringify(http?.headers ?? [])
+  const queryParams = JSON.stringify(http?.queryParams ?? [])
+  const formParams = JSON.stringify(http?.formParams ?? [])
+  const bodyVarLit = JSON.stringify(bodyVar)
+  const scopeEntries = (method.params ?? [])
+    .map((p) => p.name.trim())
+    .filter(Boolean)
+    .map((n) => {
+      const id = safeIdent(n, 'param')
+      return `${JSON.stringify(n)}: ${id}`
+    })
+  const scopeInit = scopeEntries.length
+    ? `{ ${scopeEntries.join(', ')} }`
+    : '{}'
+  return `    const __scope: Record<string, unknown> = ${scopeInit}
+    type __HttpRow = { name: string; valueKind: string; value: string; constantType?: string }
+    const __rows = ${headers} as __HttpRow[]
+    const __query = ${queryParams} as __HttpRow[]
+    const __form = ${formParams} as __HttpRow[]
+    const resolveRow = (row: __HttpRow) => {
+      if (!row.name) return null
+      if (row.valueKind === 'variable') {
+        const v = __scope[row.value]
+        return [row.name, v == null ? '' : String(v)] as const
+      }
+      if (row.valueKind === 'computed') {
+        const body = String(row.value || '').trim()
+        if (!body) return [row.name, ''] as const
+        try {
+          const keys = Object.keys(__scope)
+          const values = Object.values(__scope)
+          const hasReturn = /\\breturn\\b/.test(body)
+          const inner = hasReturn ? body : 'return (' + body + ');'
+          const code = '"use strict";\\nfunction value() {\\n' + inner + '\\n}\\nreturn value();'
+          const fn = new Function(...keys, code)
+          const result = fn(...values)
+          return [row.name, result == null ? '' : String(result)] as const
+        } catch {
+          return [row.name, ''] as const
+        }
+      }
+      let c: string | number | boolean = row.value
+      if (row.constantType === 'number') c = Number(row.value) || 0
+      if (row.constantType === 'boolean') {
+        const t = String(row.value).trim().toLowerCase()
+        c = t === 'true' || t === '1'
+      }
+      return [row.name, String(c)] as const
+    }
+    let __urlRaw = ${apiUrl} as string
+    try {
+      const __fn = new Function(...Object.keys(__scope), 'return (' + __urlRaw + ')')
+      const __v = __fn(...Object.values(__scope))
+      if (typeof __v === 'string' && __v.trim()) __urlRaw = __v.trim()
+      else if (__v != null && typeof __v !== 'object') __urlRaw = String(__v)
+    } catch {
+      __urlRaw = __urlRaw.replace(/\\{([A-Za-z_][A-Za-z0-9_]*)\\}/g, (_m: string, n: string) => {
+        const v = __scope[n]
+        return v == null ? '' : String(v)
+      })
+    }
+    const __url = new URL(__urlRaw)
+    for (const row of __query) {
+      const pair = resolveRow(row)
+      if (pair) __url.searchParams.set(pair[0], pair[1])
+    }
+    const __headers: Record<string, string> = { 'Content-Type': ${mediaType} }
+    for (const row of __rows) {
+      const pair = resolveRow(row)
+      if (pair) __headers[pair[0]] = pair[1]
+    }
+    let __body: string | undefined
+    if (${mediaType} === 'application/x-www-form-urlencoded') {
+      const sp = new URLSearchParams()
+      for (const row of __form) {
+        const pair = resolveRow(row)
+        if (pair) sp.set(pair[0], pair[1])
+      }
+      __body = sp.toString()
+    } else if (${bodyVarLit}) {
+      const bv = __scope[${bodyVarLit}]
+      __body = typeof bv === 'string' ? bv : JSON.stringify(bv ?? null)
+    }
+    const __method = ${httpMethod}
+    let __res: Response
+    try {
+      __res = await fetch(__url, {
+        method: __method,
+        headers: __headers,
+        body: __method === 'GET' || __method === 'HEAD' ? undefined : __body,
+      })
+    } catch (err) {
+      throw new Error(
+        '外部接口请求失败：' + (err instanceof Error ? err.message : String(err)),
+      )
+    }
+    const __text = await __res.text()
+    if (!__res.ok) {
+      const __snippet = __text.trim().slice(0, 300)
+      throw new Error(
+        '外部接口请求失败（HTTP ' +
+          __res.status +
+          ')' +
+          (__snippet ? '：' + __snippet : ''),
+      )
+    }
+    let __looseBody: unknown = null
+    if (__text.trim()) {
+      try { __looseBody = JSON.parse(__text) } catch { __looseBody = __text }
+    }
+    let __resp: { status: number; headers: Record<string, string>; body: unknown } = {
+      status: __res.status,
+      headers: {},
+      body: __looseBody,
+    }
+    __res.headers.forEach((v, k) => { __resp.headers[k] = v })
+    const __parseCode = ${parseCodeLit} as string
+    if (__parseCode.trim()) {
+      try {
+        const __hasReturn = /\\breturn\\b/.test(__parseCode)
+        const __inner = __hasReturn ? __parseCode : ('return (' + __parseCode + ');')
+        const __pfn = new Function('response', '"use strict";\\nfunction parse(response) {\\n' + __inner + '\\n}\\nreturn parse(response);')
+        const __parsed = __pfn(__resp)
+        if (__parsed && typeof __parsed === 'object' && !Array.isArray(__parsed)) {
+          const __row = __parsed as Record<string, unknown>
+          const __st = Number(__row.status)
+          const __nh: Record<string, string> = {}
+          const __rh = __row.headers
+          if (__rh instanceof Map) {
+            __rh.forEach((v: unknown, k: unknown) => { __nh[String(k)] = v == null ? '' : String(v) })
+          } else if (__rh && typeof __rh === 'object') {
+            for (const [k, v] of Object.entries(__rh as Record<string, unknown>)) {
+              __nh[k] = v == null ? '' : String(v)
+            }
+          } else {
+            Object.assign(__nh, __resp.headers)
+          }
+          __resp = {
+            status: Number.isFinite(__st) ? __st : __resp.status,
+            headers: __nh,
+            body: Object.prototype.hasOwnProperty.call(__row, 'body') ? __row.body : __resp.body,
+          }
+        }
+      } catch (err) {
+        throw new Error('外部接口响应解析失败：' + (err instanceof Error ? err.message : String(err)))
+      }
+    }
+    const __t = ${bodyGeneric} as string
+    const __ifaceFields = ${interfaceFieldsLit} as string[]
+    let __mappedBody: unknown = __resp.body
+    if (__t && __t !== 'any') {
+      if (__t === 'string') __mappedBody = typeof __resp.body === 'string' ? __resp.body : null
+      else if (__t === 'number') __mappedBody = typeof __resp.body === 'number' && Number.isFinite(__resp.body) ? __resp.body : null
+      else if (__t === 'boolean') __mappedBody = typeof __resp.body === 'boolean' ? __resp.body : null
+      else if (__ifaceFields.length) {
+        const __project = (src: unknown): Record<string, unknown> => {
+          const row = src && typeof src === 'object' && !Array.isArray(src)
+            ? (src as Record<string, unknown>)
+            : null
+          const out: Record<string, unknown> = {}
+          for (const f of __ifaceFields) {
+            out[f] = row && Object.prototype.hasOwnProperty.call(row, f) ? row[f] : null
+          }
+          return out
+        }
+        if (Array.isArray(__resp.body)) {
+          __mappedBody = __resp.body.map((item: unknown) => __project(item))
+        } else {
+          __mappedBody = __project(__resp.body)
+        }
+      } else if (__resp.body == null || typeof __resp.body !== 'object') {
+        __mappedBody = null
+      } else {
+        __mappedBody = __resp.body
+      }
+    } else if (__mappedBody === undefined) {
+      __mappedBody = null
+    }
+    const __hdr = new Map<string, string>()
+    for (const [k, v] of Object.entries(__resp.headers)) __hdr.set(k, v)
+    return { status: __resp.status, headers: __hdr, body: __mappedBody }`
+}
+
 export function compileTypeOrmMethodBody(
   method: ProcessorMethod,
   table: string,
@@ -861,7 +1075,9 @@ export function compileTypeOrmMethodBody(
   let needsCommaArrayHelper = false
   let needsSqlBuilder = false
 
-  if (config.source !== 'mysql') {
+  if (config.source === 'http') {
+    body = compileHttpMethod(method, opts.typeLibrary)
+  } else if (config.source !== 'mysql') {
     body = `    throw new Error('暂不支持的数据源：${config.source}')`
   } else if (config.operation === 'query') {
     const compiled = compileQueryMethod(

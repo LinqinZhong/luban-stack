@@ -1,0 +1,168 @@
+.oss-panel {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: #fff;
+}
+
+.oss-panel .oss-spin,
+.oss-panel .ant-spin-nested-loading,
+.oss-panel .ant-spin-container {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.oss-body {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  overflow: hidden;
+}
+
+.conn-pane,
+.bucket-pane {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.conn-pane {
+  border-right: 1px solid #ebeef5;
+  background: #fafafa;
+}
+
+.pane-head {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 44px;
+  box-sizing: border-box;
+  padding: 0 12px;
+  border-bottom: 1px solid #ebeef5;
+  background: #fff;
+}
+
+.pane-title {
+  margin-right: auto;
+  font-size: 13px;
+  font-weight: 600;
+  color: #303133;
+  line-height: 1;
+}
+
+.pane-sub {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  color: #94a3b8;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.conn-list {
+  list-style: none;
+  margin: 0;
+  padding: 8px;
+  overflow: auto;
+  flex: 1;
+}
+
+.conn-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  list-style: none;
+  margin-bottom: 4px;
+}
+
+.conn-item:hover {
+  background: #f1f5f9;
+}
+
+.conn-item.active {
+  background: var(--color-primary-soft);
+  border-color: #b3d8ff;
+}
+
+.conn-meta {
+  flex: 1;
+  min-width: 0;
+}
+
+.conn-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: #303133;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.conn-sub-row {
+  margin-top: 6px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.conn-sub {
+  flex: 1;
+  min-width: 0;
+  font-size: 11px;
+  color: #94a3b8;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.conn-count {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: #94a3b8;
+  white-space: nowrap;
+}
+
+.table-wrap {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 12px;
+}
+
+.bucket-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.form-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.label {
+  width: 72px;
+  flex-shrink: 0;
+  padding-top: 6px;
+  font-size: 13px;
+  color: #606266;
+  text-align: right;
+}
+
+.content {
+  flex: 1;
+  min-width: 0;
+}

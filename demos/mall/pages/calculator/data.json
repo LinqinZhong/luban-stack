@@ -1,0 +1,18 @@
+{
+  "fields": [
+    {
+      "name": "display",
+      "type": "string",
+      "remark": "显示表达式",
+      "value": "0",
+      "binding": ""
+    },
+    {
+      "name": "pressedKey",
+      "type": "string",
+      "remark": "当前按压的按钮标识",
+      "value": "",
+      "binding": ""
+    }
+  ]
+}

@@ -1,6 +1,7 @@
 import { proxyHttpRequest } from '../../../api/projects'
 import {
   coerceNetworkConstant,
+  evalNetworkComputedValue,
   isFormUrlEncoded,
   normalizeNetworkInputConfig,
   normalizeNetworkRequestConfig,
@@ -56,6 +57,8 @@ function resolveParamRows(
       if (!varName) continue
       const v = scope[varName]
       out[name] = v == null ? '' : String(v)
+    } else if (row.valueKind === 'computed') {
+      out[name] = evalNetworkComputedValue(row.value, scope)
     } else {
       out[name] = String(
         coerceNetworkConstant(row.value, row.constantType ?? 'string'),
@@ -143,13 +146,33 @@ export async function executeNetworkHttpViaProxy(
   bodyText: string
 }> {
   const resolved = resolveNetworkHttpFromNodeData(data, scope)
-  return proxyHttpRequest({
-    url: resolved.url,
-    method: resolved.method,
-    headers: resolved.headers,
-    body: resolved.body,
-    contentType: resolved.contentType,
-  })
+  let result: {
+    status: number
+    headers: Record<string, string>
+    bodyText: string
+  }
+  try {
+    result = await proxyHttpRequest({
+      url: resolved.url,
+      method: resolved.method,
+      headers: resolved.headers,
+      body: resolved.body,
+      contentType: resolved.contentType,
+    })
+  } catch (err) {
+    throw new Error(
+      `外部接口请求失败：${err instanceof Error ? err.message : String(err)}`,
+    )
+  }
+  if (result.status < 200 || result.status >= 300) {
+    const snippet = (result.bodyText || '').trim().slice(0, 300)
+    throw new Error(
+      `外部接口请求失败（HTTP ${result.status}）${
+        snippet ? `：${snippet}` : ''
+      }`,
+    )
+  }
+  return result
 }
 
 export function applyNetworkInputToScope(

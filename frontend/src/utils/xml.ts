@@ -181,6 +181,18 @@ export function paddingStyle(attrs: Record<string, string>): Record<string, stri
   return style
 }
 
+/** 控件背景：正式属性是 background；兼容历史/AI 误写的 backgroundColor */
+export function resolveBackgroundAttr(
+  attrs: Record<string, string | undefined>,
+  fallback = '',
+): string {
+  const bg = (attrs.background ?? '').trim()
+  if (bg) return bg
+  const legacy = (attrs.backgroundColor ?? '').trim()
+  if (legacy) return legacy
+  return fallback
+}
+
 export function marginValues(attrs: Record<string, string>) {
   const all = parseNumber(attrs.margin, 0)
   return {

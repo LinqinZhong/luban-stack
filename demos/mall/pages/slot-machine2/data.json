@@ -1,0 +1,195 @@
+{
+  "fields": [
+    {
+      "name": "prizes",
+      "type": "array",
+      "remark": "奖品列表",
+      "value": [
+        {
+          "emoji": "🏆",
+          "name": "特等奖"
+        },
+        {
+          "emoji": "💎",
+          "name": "钻石"
+        },
+        {
+          "emoji": "🎁",
+          "name": "大礼包"
+        },
+        {
+          "emoji": "💰",
+          "name": "金币"
+        },
+        {
+          "emoji": "🎯",
+          "name": "幸运奖"
+        },
+        {
+          "emoji": "🌟",
+          "name": "星耀奖"
+        },
+        {
+          "emoji": "🎪",
+          "name": "欢乐奖"
+        },
+        {
+          "emoji": "🍀",
+          "name": "参与奖"
+        }
+      ],
+      "binding": "",
+      "itemType": "json",
+      "arrayFields": [
+        {
+          "type": "json",
+          "objectFields": [
+            {
+              "name": "emoji",
+              "type": "string",
+              "value": "🏆"
+            },
+            {
+              "name": "name",
+              "type": "string",
+              "value": "特等奖"
+            }
+          ]
+        },
+        {
+          "type": "json",
+          "objectFields": [
+            {
+              "name": "emoji",
+              "type": "string",
+              "value": "💎"
+            },
+            {
+              "name": "name",
+              "type": "string",
+              "value": "钻石"
+            }
+          ]
+        },
+        {
+          "type": "json",
+          "objectFields": [
+            {
+              "name": "emoji",
+              "type": "string",
+              "value": "🎁"
+            },
+            {
+              "name": "name",
+              "type": "string",
+              "value": "大礼包"
+            }
+          ]
+        },
+        {
+          "type": "json",
+          "objectFields": [
+            {
+              "name": "emoji",
+              "type": "string",
+              "value": "💰"
+            },
+            {
+              "name": "name",
+              "type": "string",
+              "value": "金币"
+            }
+          ]
+        },
+        {
+          "type": "json",
+          "objectFields": [
+            {
+              "name": "emoji",
+              "type": "string",
+              "value": "🎯"
+            },
+            {
+              "name": "name",
+              "type": "string",
+              "value": "幸运奖"
+            }
+          ]
+        },
+        {
+          "type": "json",
+          "objectFields": [
+            {
+              "name": "emoji",
+              "type": "string",
+              "value": "🌟"
+            },
+            {
+              "name": "name",
+              "type": "string",
+              "value": "星耀奖"
+            }
+          ]
+        },
+        {
+          "type": "json",
+          "objectFields": [
+            {
+              "name": "emoji",
+              "type": "string",
+              "value": "🎪"
+            },
+            {
+              "name": "name",
+              "type": "string",
+              "value": "欢乐奖"
+            }
+          ]
+        },
+        {
+          "type": "json",
+          "objectFields": [
+            {
+              "name": "emoji",
+              "type": "string",
+              "value": "🍀"
+            },
+            {
+              "name": "name",
+              "type": "string",
+              "value": "参与奖"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "activeIndex",
+      "type": "number",
+      "remark": "当前高亮奖品索引",
+      "value": 0,
+      "binding": ""
+    },
+    {
+      "name": "spinning",
+      "type": "boolean",
+      "remark": "是否正在抽奖",
+      "value": false,
+      "binding": ""
+    },
+    {
+      "name": "hintText",
+      "type": "string",
+      "remark": "提示文字",
+      "value": "点击中间按钮开始抽奖",
+      "binding": ""
+    },
+    {
+      "name": "chances",
+      "type": "number",
+      "remark": "剩余抽奖次数",
+      "value": 10,
+      "binding": ""
+    }
+  ]
+}

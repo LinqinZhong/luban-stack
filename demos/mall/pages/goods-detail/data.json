@@ -48,7 +48,7 @@
       "computeBody": "",
       "controllerBinding": {
         "serviceId": "svc_mrqdgnhb_3ktq2g",
-        "controllerId": "cmrqed0jzshj7",
+        "controllerId": "b1381259-0eaf-4bf2-a96d-b30fb63c4b26",
         "apiId": "api_ms4gstja_v6df39",
         "parseBody": "// data 为接口 Result.data\n// return 的值写入本数据池字段\nreturn data\n",
         "onLoading": "[{\"id\":\"bind_1785318194515_70vtk\",\"method\":\"setData\",\"args\":{\"prop\":\"loading\",\"value\":\"true\"}}]",
@@ -89,7 +89,7 @@
       "computeBody": "",
       "controllerBinding": {
         "serviceId": "svc_mrqdgnhb_3ktq2g",
-        "controllerId": "cms8ol9you9yc",
+        "controllerId": "149a5478-ed53-42bb-9a72-dc38cae7233c",
         "apiId": "api_ms8q37of_2dcaq6",
         "parseBody": "// data 为接口 Result.data\nreturn data\n",
         "onLoading": "",

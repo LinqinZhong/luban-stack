@@ -1,0 +1,103 @@
+.runtime-log {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+  border-top: 1px solid #ebeef5;
+}
+
+.log-header {
+  flex-shrink: 0;
+  height: 40px;
+  padding: 0 8px 0 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-weight: 600;
+  color: #303133;
+  border-bottom: 1px solid #ebeef5;
+}
+
+.log-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 8px;
+}
+
+.log-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.log-item {
+  border-radius: 8px;
+  padding: 8px 10px;
+  border: 1px solid #ebeef5;
+  background: #fafafa;
+}
+
+.log-item.is-error {
+  border-color: #fde2e2;
+  background: #fef0f0;
+}
+
+.log-item.is-warn {
+  border-color: #faecd8;
+  background: #fdf6ec;
+}
+
+.log-item.is-info {
+  border-color: #e9e9eb;
+  background: #f4f4f5;
+}
+
+.log-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.log-level {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.is-error .log-level {
+  color: #f56c6c;
+}
+
+.is-warn .log-level {
+  color: #e6a23c;
+}
+
+.is-info .log-level {
+  color: #909399;
+}
+
+.log-time {
+  font-size: 11px;
+  color: #a8abb2;
+  font-variant-numeric: tabular-nums;
+}
+
+.log-location {
+  font-size: 12px;
+  color: #606266;
+  margin-bottom: 4px;
+  word-break: break-all;
+}
+
+.log-message {
+  font-size: 13px;
+  color: #303133;
+  line-height: 1.45;
+  word-break: break-word;
+  white-space: pre-wrap;
+}

@@ -316,14 +316,78 @@
       }
     },
     {
-      "id": "type_common_URI",
-      "name": "URI",
-      "kind": "string",
-      "remark": "资源外链（type URI = string）",
+      "id": "type_common_HttpResponse",
+      "name": "HttpResponse",
+      "kind": "interface",
+      "remark": "外部接口 HTTP 响应包装；泛型 T 为响应体类型",
       "tableName": "",
       "category": "other",
-      "generics": [],
-      "fields": [],
+      "generics": [
+        {
+          "id": "gen_common_HttpResponse_T",
+          "name": "T",
+          "constraint": null,
+          "default": null
+        }
+      ],
+      "fields": [
+        {
+          "id": "field_common_HttpResponse_status",
+          "name": "status",
+          "type": {
+            "intersections": [
+              {
+                "alternatives": [
+                  {
+                    "kind": "number"
+                  }
+                ]
+              }
+            ]
+          },
+          "remark": "HTTP 状态码",
+          "optional": false
+        },
+        {
+          "id": "field_common_HttpResponse_headers",
+          "name": "headers",
+          "type": {
+            "intersections": [
+              {
+                "alternatives": [
+                  {
+                    "kind": "map",
+                    "key": "string",
+                    "item": {
+                      "kind": "string"
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          "remark": "响应头",
+          "optional": false
+        },
+        {
+          "id": "field_common_HttpResponse_body",
+          "name": "body",
+          "type": {
+            "intersections": [
+              {
+                "alternatives": [
+                  {
+                    "kind": "generic",
+                    "ref": "T"
+                  }
+                ]
+              }
+            ]
+          },
+          "remark": "响应体",
+          "optional": false
+        }
+      ],
       "enumMembers": [],
       "combination": {
         "intersections": [

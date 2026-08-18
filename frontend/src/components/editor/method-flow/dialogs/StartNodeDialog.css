@@ -1,0 +1,4 @@
+.flow-node-form .ant-form-item-control {
+  flex: 1;
+  min-width: 0;
+}

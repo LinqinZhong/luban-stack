@@ -1,0 +1,125 @@
+.readonly-fieldset {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+
+.section {
+  margin-bottom: 20px;
+}
+
+.section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.section-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #303133;
+}
+
+.section-hint {
+  margin: 0 0 8px;
+  font-size: 12px;
+  color: #94a3b8;
+  line-height: 1.4;
+}
+
+.generic-row,
+.field-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+  padding: 8px 10px;
+  border: 1px solid #ebeef5;
+  border-radius: 6px;
+  background: #fafafa;
+}
+
+.generic-summary {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: #94a3b8;
+}
+
+.optional-box {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid #dcdfe6;
+  border-radius: 4px;
+  background: #fff;
+  box-sizing: border-box;
+  flex-shrink: 0;
+}
+
+.optional-label {
+  font-size: 13px;
+  color: #606266;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.field-type-cell {
+  width: 220px;
+  flex-shrink: 0;
+}
+
+.field-type-cell.is-error .ant-select-selector,
+.field-type-cell.is-error .ant-input,
+.field-type-cell.is-error .ant-input-affix-wrapper {
+  box-shadow: 0 0 0 1px #f56c6c inset;
+}
+
+.preview {
+  margin-top: 8px;
+  font-size: 12px;
+  color: #94a3b8;
+  word-break: break-all;
+}
+
+.generic-form {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.generic-form-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.cfg-label {
+  width: 96px;
+  flex-shrink: 0;
+  padding-top: 6px;
+  font-size: 13px;
+  line-height: 20px;
+  color: #606266;
+  text-align: right;
+}
+
+.cfg-content {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.cfg-editor {
+  width: 100%;
+}

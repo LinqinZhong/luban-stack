@@ -1,0 +1,45 @@
+{
+  "id": "group_msf6u4qk_vcxrdu",
+  "types": [
+    {
+      "id": "type_msf6uazq_69ffr3",
+      "name": "Page",
+      "kind": "interface",
+      "remark": "",
+      "tableName": "",
+      "category": "entity",
+      "generics": [],
+      "fields": [
+        {
+          "id": "field_msf6uazq_msgcy1",
+          "name": "value",
+          "type": {
+            "intersections": [
+              {
+                "alternatives": [
+                  {
+                    "kind": "string"
+                  }
+                ]
+              }
+            ]
+          },
+          "remark": "",
+          "optional": false
+        }
+      ],
+      "enumMembers": [],
+      "combination": {
+        "intersections": [
+          {
+            "alternatives": [
+              {
+                "kind": "string"
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

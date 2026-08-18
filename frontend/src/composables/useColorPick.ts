@@ -1,9 +1,21 @@
-import { ref } from 'vue'
+import { useSyncExternalStore } from 'react'
 
 type PickCallback = (color: string) => void
 
-const picking = ref(false)
+let picking = false
 let activeCallback: PickCallback | null = null
+const listeners = new Set<() => void>()
+
+function subscribe(fn: () => void) {
+  listeners.add(fn)
+  return () => {
+    listeners.delete(fn)
+  }
+}
+
+function notify() {
+  for (const fn of listeners) fn()
+}
 
 function rgbToHex(color: string): string | null {
   const trimmed = color.trim()
@@ -35,11 +47,23 @@ function readColorFromElement(el: Element): string | null {
   return null
 }
 
+function setPicking(next: boolean) {
+  picking = next
+  notify()
+}
+
 export function useColorPick() {
+  const isPicking = useSyncExternalStore(
+    subscribe,
+    () => picking,
+  )
+
   async function startPick(callback: PickCallback) {
     if ('EyeDropper' in window) {
       try {
-        const dropper = new (window as Window & { EyeDropper: new () => { open: () => Promise<{ sRGBHex: string }> } }).EyeDropper()
+        const dropper = new (window as Window & {
+          EyeDropper: new () => { open: () => Promise<{ sRGBHex: string }> }
+        }).EyeDropper()
         const result = await dropper.open()
         callback(result.sRGBHex)
         return
@@ -48,12 +72,12 @@ export function useColorPick() {
       }
     }
 
-    picking.value = true
+    setPicking(true)
     activeCallback = callback
   }
 
   function cancelPick() {
-    picking.value = false
+    setPicking(false)
     activeCallback = null
   }
 
@@ -74,11 +98,49 @@ export function useColorPick() {
   }
 
   return {
-    picking,
+    picking: isPicking,
     startPick,
     cancelPick,
     pickFromPoint,
   }
 }
 
-export const colorPickState = useColorPick()
+export const colorPickState = {
+  get picking() {
+    return picking
+  },
+  async startPick(callback: PickCallback) {
+    if ('EyeDropper' in window) {
+      try {
+        const dropper = new (window as Window & {
+          EyeDropper: new () => { open: () => Promise<{ sRGBHex: string }> }
+        }).EyeDropper()
+        const result = await dropper.open()
+        callback(result.sRGBHex)
+        return
+      } catch {
+        return
+      }
+    }
+    setPicking(true)
+    activeCallback = callback
+  },
+  cancelPick() {
+    setPicking(false)
+    activeCallback = null
+  },
+  pickFromPoint(clientX: number, clientY: number) {
+    if (!activeCallback) return
+    const elements = document.elementsFromPoint(clientX, clientY)
+    for (const el of elements) {
+      if (el.classList.contains('color-pick-ignore')) continue
+      const color = readColorFromElement(el)
+      if (color) {
+        activeCallback(color)
+        this.cancelPick()
+        return
+      }
+    }
+    this.cancelPick()
+  },
+}

@@ -19,6 +19,26 @@
       "name": "text-secondary",
       "description": "次级文本色",
       "value": "#909399"
+    },
+    {
+      "name": "gold",
+      "description": "老虎机金色",
+      "value": "#ffd700"
+    },
+    {
+      "name": "dark-bg",
+      "description": "赌场深色背景",
+      "value": "#1a0a2e"
+    },
+    {
+      "name": "slot-bg",
+      "description": "滚轮深色背景",
+      "value": "#2d1b4e"
+    },
+    {
+      "name": "light-text",
+      "description": "深色背景上的浅文字",
+      "value": "#e0d8f0"
     }
   ]
 }

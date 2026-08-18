@@ -5,10 +5,10 @@
   "engineVersion": "1.0.0",
   "canvas": {
     "width": 375,
-    "scene": "miniprogram"
+    "scene": "h5"
   },
   "entryPage": "home",
-  "wechatAppId": "wx063d4987d9089a28",
+  "wechatAppId": "wx78ac22e61f72cba5",
   "apiBaseUrls": {
     "default": "http://127.0.0.1:3030",
     "shop": "http://127.0.0.1:3030"

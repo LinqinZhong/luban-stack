@@ -26,7 +26,8 @@ function atomToTs(atom: TypeAtom, idToName: IdToName): string {
   if (
     atom.kind === 'time' ||
     atom.kind === 'date' ||
-    atom.kind === 'datetime'
+    atom.kind === 'datetime' ||
+    atom.kind === 'resource'
   ) {
     return 'string'
   }
@@ -118,8 +119,8 @@ export function dataTypeToTs(def: DataTypeDef, idToName: IdToName): string {
   const name = def.name.trim() || 'Unnamed'
   const head = remarkComment(def.remark)
 
-  if (def.kind === 'string' && name === 'URI') {
-    return `${head}export type URI = string\n`
+  if (def.kind === 'string' && (name === 'URI' || def.id === 'type_common_URI')) {
+    return `${head}export type Resource = string\n`
   }
   if (def.kind === 'number' || def.kind === 'string' || def.kind === 'boolean') {
     return `${head}export type ${name} = ${def.kind}\n`

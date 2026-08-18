@@ -90,3 +90,59 @@ export async function* streamAiChat(
   }
   yield { type: 'done' }
 }
+
+export type CursorAgentStreamPayload = {
+  projectPath: string
+  apiKey: string
+  modelId?: string
+  prompt: string
+  signal?: AbortSignal
+}
+
+export async function* streamCursorAgent(
+  payload: CursorAgentStreamPayload,
+): AsyncGenerator<AiStreamEvent> {
+  const res = await fetch('/api/ai/cursor-agent', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    signal: payload.signal,
+    body: JSON.stringify({
+      projectPath: payload.projectPath,
+      apiKey: payload.apiKey,
+      modelId: payload.modelId,
+      prompt: payload.prompt,
+    }),
+  })
+
+  if (!res.ok) {
+    let message = `Cursor 智能体请求失败：${res.status}`
+    try {
+      const data = (await res.json()) as { message?: string }
+      if (data.message) message = data.message
+    } catch {
+      /* ignore */
+    }
+    yield { type: 'error', message }
+    return
+  }
+
+  if (!res.body) {
+    yield { type: 'error', message: 'Cursor 未返回流式响应' }
+    return
+  }
+
+  for await (const line of iterateSse(res.body)) {
+    const trimmed = line.trim()
+    if (!trimmed.startsWith('data:')) continue
+    const data = trimmed.slice(5).trim()
+    if (!data) continue
+    try {
+      const event = JSON.parse(data) as AiStreamEvent
+      yield event
+      if (event.type === 'done' || event.type === 'error') return
+    } catch {
+      /* ignore malformed chunk */
+    }
+  }
+  yield { type: 'done' }
+}

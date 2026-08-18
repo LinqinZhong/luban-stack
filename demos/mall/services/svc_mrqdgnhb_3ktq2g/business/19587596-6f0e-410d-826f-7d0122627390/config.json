@@ -1,0 +1,442 @@
+{
+  "id": "19587596-6f0e-410d-826f-7d0122627390",
+  "name": "Goods",
+  "remark": "",
+  "entityRef": "",
+  "dataProcessorRef": "2978f810-8c29-438c-8340-1382a6ee96d8",
+  "methods": [
+    {
+      "id": "method_mrqfxlh1_u651zc",
+      "name": "page",
+      "remark": "获取商品分页",
+      "scope": "public",
+      "params": [
+        {
+          "id": "param_mrqr5xd7_z4b74l",
+          "name": "page",
+          "remark": "分页",
+          "typeExpr": {
+            "type": "json",
+            "typeRef": "type_common_QueryPageDto",
+            "itemType": "",
+            "itemTypeRef": "",
+            "itemItemType": "",
+            "itemItemTypeRef": "",
+            "keyType": "",
+            "genericArgs": {}
+          },
+          "required": false
+        },
+        {
+          "id": "param_mrqr6f3m_334gcw",
+          "name": "keyword",
+          "remark": "关键词",
+          "typeExpr": {
+            "type": "string",
+            "typeRef": "",
+            "itemType": "",
+            "itemTypeRef": "",
+            "itemItemType": "",
+            "itemItemTypeRef": "",
+            "keyType": "",
+            "genericArgs": {}
+          },
+          "required": false
+        }
+      ],
+      "output": {
+        "type": "json",
+        "typeRef": "type_common_QueryPageVo",
+        "itemType": "",
+        "itemTypeRef": "",
+        "itemItemType": "",
+        "itemItemTypeRef": "",
+        "keyType": "",
+        "genericArgs": {
+          "T": "type_mrnx6ke8_4d7vry"
+        }
+      },
+      "dataConfig": {
+        "source": "mysql",
+        "operation": "query",
+        "queryFields": [],
+        "sql": "",
+        "fieldMappings": [],
+        "batchSourceParam": "",
+        "pageParam": "",
+        "conditionGroups": [],
+        "httpRequest": {
+          "apiUrl": "",
+          "httpMethod": "GET",
+          "mediaType": "application/json",
+          "bodyVarName": "",
+          "responseBodyType": "json",
+          "parseCode": "",
+          "headers": [],
+          "queryParams": [],
+          "formParams": []
+        }
+      },
+      "debugParams": {
+        "page": {
+          "current": 1,
+          "pageSize": 10
+        },
+        "keyword": null
+      },
+      "flow": {
+        "nodes": [
+          {
+            "id": "start",
+            "kind": "start",
+            "position": {
+              "x": 265.582202614797,
+              "y": -393.2112114544304
+            },
+            "data": {}
+          },
+          {
+            "id": "input_mrqr4yk2_68hx",
+            "kind": "input",
+            "position": {
+              "x": 218.08220261479698,
+              "y": -161.19849692258953
+            },
+            "data": {
+              "dataProcessorId": "2978f810-8c29-438c-8340-1382a6ee96d8",
+              "dataMethodId": "method_ms6qgzqr_xc9kza",
+              "varName": "total",
+              "methodLabel": "goods.countByKeyword",
+              "paramBindings": {
+                "keyword": "keyword"
+              },
+              "printExpr": "`共${total}条数据`",
+              "dataSource": "current_data",
+              "headerField": ""
+            }
+          },
+          {
+            "id": "branch_mrqrubd9_r4hx",
+            "kind": "branch",
+            "position": {
+              "x": 171.97988590664232,
+              "y": -26.17521562030996
+            },
+            "data": {
+              "expression": "total === 0",
+              "printExpr": ""
+            }
+          },
+          {
+            "id": "end_mrqruu4u_yw0t",
+            "kind": "end",
+            "position": {
+              "x": 551.2277418654869,
+              "y": 203.8655492097427
+            },
+            "data": {
+              "returnExpr": "",
+              "printExpr": ""
+            }
+          },
+          {
+            "id": "input_mrqsb2qc_atuv",
+            "kind": "input",
+            "position": {
+              "x": -97.24384981166068,
+              "y": 95.03469719121695
+            },
+            "data": {
+              "dataProcessorId": "2978f810-8c29-438c-8340-1382a6ee96d8",
+              "dataMethodId": "method_ms6qjd77_qyh4yw",
+              "varName": "goodsList",
+              "methodLabel": "goods.pageByKeyword",
+              "paramBindings": {
+                "keyword": "keyword",
+                "page": "page"
+              },
+              "dataSource": "current_data",
+              "headerField": "",
+              "printExpr": ""
+            }
+          },
+          {
+            "id": "define_mrqsbudf_tc70",
+            "kind": "define",
+            "position": {
+              "x": 200.58220261479698,
+              "y": -278.65904819649023
+            },
+            "data": {
+              "varName": "goodsPage",
+              "valueType": "object",
+              "valueTypeRef": "type_common_QueryPageVo",
+              "initExpr": "{\r\ncurrent: 0,\r\npageSize: 0,\r\nhasNext: false,\r\ntotal: 0,\r\nrecords: []\r\n}",
+              "description": "",
+              "valueGenericArgs": {},
+              "valueItemType": "",
+              "valueItemTypeRef": "",
+              "valueItemItemType": "",
+              "valueItemItemTypeRef": ""
+            }
+          },
+          {
+            "id": "pageMap_ms6qpsjg_0uy2",
+            "kind": "pageMap",
+            "position": {
+              "x": -23.417797385203016,
+              "y": 262.4897853342177
+            },
+            "data": {
+              "sourceKind": "array",
+              "sourcePath": "goodsList",
+              "currentExpr": "page.current",
+              "pageSizeExpr": "page.pageSize",
+              "totalExpr": "total",
+              "hasNextExpr": "",
+              "targetTypeRef": "type_common_QueryPageVo",
+              "targetGenericArgs": {
+                "T": "type_mrnx6ke8_4d7vry"
+              },
+              "targetVarName": "goodsPage",
+              "fieldMappings": [
+                {
+                  "targetField": "id",
+                  "sourceField": "id"
+                },
+                {
+                  "targetField": "name",
+                  "sourceField": "name"
+                },
+                {
+                  "targetField": "price",
+                  "sourceField": "price"
+                },
+                {
+                  "targetField": "stock",
+                  "sourceField": "stock"
+                },
+                {
+                  "targetField": "img",
+                  "sourceField": "img"
+                },
+                {
+                  "targetField": "deliveryFee",
+                  "sourceField": "deliveryFee"
+                }
+              ],
+              "description": "",
+              "printExpr": ""
+            }
+          },
+          {
+            "id": "end_ms6qr3gb_iyz8",
+            "kind": "end",
+            "position": {
+              "x": 237.58220261479698,
+              "y": 416.93623121169935
+            },
+            "data": {
+              "returnExpr": "goodsPage",
+              "printExpr": ""
+            }
+          }
+        ],
+        "edges": [
+          {
+            "id": "e_branch_mrqrubd9_r4hx_false_input_mrqsb2qc_atuv_mrqsb73v",
+            "source": "branch_mrqrubd9_r4hx",
+            "target": "input_mrqsb2qc_atuv",
+            "sourceHandle": "false",
+            "label": "否"
+          },
+          {
+            "id": "e_start_default_define_mrqsbudf_tc70_mrqsd3a4",
+            "source": "start",
+            "target": "define_mrqsbudf_tc70"
+          },
+          {
+            "id": "e_define_mrqsbudf_tc70_default_input_mrqr4yk2_68hx_mrqsd5m4",
+            "source": "define_mrqsbudf_tc70",
+            "target": "input_mrqr4yk2_68hx"
+          },
+          {
+            "id": "e_input_mrqr4yk2_68hx_default_branch_mrqrubd9_r4hx_mrqsdcmk",
+            "source": "input_mrqr4yk2_68hx",
+            "target": "branch_mrqrubd9_r4hx"
+          },
+          {
+            "id": "e_branch_mrqrubd9_r4hx_true_end_mrqruu4u_yw0t_mrri3ae2",
+            "source": "branch_mrqrubd9_r4hx",
+            "target": "end_mrqruu4u_yw0t",
+            "sourceHandle": "true",
+            "label": "是"
+          },
+          {
+            "id": "edge_ms6qpsjg_clki",
+            "source": "input_mrqsb2qc_atuv",
+            "target": "pageMap_ms6qpsjg_0uy2"
+          },
+          {
+            "id": "e_pageMap_ms6qpsjg_0uy2_default_end_ms6qr3gb_iyz8_ms6qr78j",
+            "source": "pageMap_ms6qpsjg_0uy2",
+            "target": "end_ms6qr3gb_iyz8"
+          }
+        ]
+      }
+    },
+    {
+      "id": "method_ms4esv8l_wj4x9p",
+      "name": "one",
+      "remark": "获取当个商品信息",
+      "scope": "public",
+      "params": [
+        {
+          "id": "param_ms4etbau_95i9zp",
+          "name": "id",
+          "remark": "",
+          "typeExpr": {
+            "type": "number",
+            "typeRef": "",
+            "itemType": "",
+            "itemTypeRef": "",
+            "itemItemType": "",
+            "itemItemTypeRef": "",
+            "keyType": "",
+            "genericArgs": {}
+          },
+          "required": false
+        }
+      ],
+      "output": {
+        "type": "json",
+        "typeRef": "type_mrnx6ke8_4d7vry",
+        "itemType": "",
+        "itemTypeRef": "",
+        "itemItemType": "",
+        "itemItemTypeRef": "",
+        "keyType": "",
+        "genericArgs": {}
+      },
+      "dataConfig": {
+        "source": "mysql",
+        "operation": "query",
+        "queryFields": [],
+        "sql": "",
+        "fieldMappings": [],
+        "batchSourceParam": "",
+        "pageParam": "",
+        "conditionGroups": [],
+        "httpRequest": {
+          "apiUrl": "",
+          "httpMethod": "GET",
+          "mediaType": "application/json",
+          "bodyVarName": "",
+          "responseBodyType": "json",
+          "parseCode": "",
+          "headers": [],
+          "queryParams": [],
+          "formParams": []
+        }
+      },
+      "debugParams": {
+        "id": 37
+      },
+      "flow": {
+        "nodes": [
+          {
+            "id": "start",
+            "kind": "start",
+            "position": {
+              "x": 286.5,
+              "y": -67.5
+            },
+            "data": {}
+          },
+          {
+            "id": "input_ms4ettf2_lz8m",
+            "kind": "input",
+            "position": {
+              "x": 240,
+              "y": 61.22605860690818
+            },
+            "data": {
+              "dataSource": "current_data",
+              "dataProcessorId": "2978f810-8c29-438c-8340-1382a6ee96d8",
+              "dataMethodId": "preset_oneById",
+              "headerField": "",
+              "varName": "goodsInfo",
+              "methodLabel": "goods.oneById",
+              "paramBindings": {
+                "id": "id"
+              },
+              "printExpr": ""
+            }
+          },
+          {
+            "id": "branch_ms4eu9hp_bghn",
+            "kind": "branch",
+            "position": {
+              "x": 256.5,
+              "y": 188.09385394307287
+            },
+            "data": {
+              "expression": "goodsInfo === null",
+              "printExpr": ""
+            }
+          },
+          {
+            "id": "end_ms4ex7wf_e4ny",
+            "kind": "end",
+            "position": {
+              "x": 172.6152896517472,
+              "y": 416.29350262645016
+            },
+            "data": {
+              "returnExpr": "goodsInfo",
+              "printExpr": ""
+            }
+          },
+          {
+            "id": "throw_ms4gr1zx_1976",
+            "kind": "throw",
+            "position": {
+              "x": 526.3579503101038,
+              "y": 416.29350262645016
+            },
+            "data": {
+              "messageExpr": "\"商品不存在\"",
+              "printExpr": ""
+            }
+          }
+        ],
+        "edges": [
+          {
+            "id": "edge_ms4ettf2_idr6",
+            "source": "start",
+            "target": "input_ms4ettf2_lz8m"
+          },
+          {
+            "id": "edge_ms4eu9hp_03qc",
+            "source": "input_ms4ettf2_lz8m",
+            "target": "branch_ms4eu9hp_bghn"
+          },
+          {
+            "id": "e_branch_ms4eu9hp_bghn_false_end_ms4ex7wf_e4ny_ms4exhr3",
+            "source": "branch_ms4eu9hp_bghn",
+            "target": "end_ms4ex7wf_e4ny",
+            "sourceHandle": "false",
+            "label": "否"
+          },
+          {
+            "id": "e_branch_ms4eu9hp_bghn_true_throw_ms4gr1zx_1976_ms4gr7no",
+            "source": "branch_ms4eu9hp_bghn",
+            "target": "throw_ms4gr1zx_1976",
+            "sourceHandle": "true",
+            "label": "是"
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,29 @@
+.repeat-badge {
+  box-sizing: border-box;
+  flex-shrink: 0;
+  background: #7c3aed;
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 0;
+  overflow: hidden;
+  pointer-events: none;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.2);
+}
+
+.repeat-badge.clickable {
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+.repeat-badge.clickable:hover {
+  background: #6d28d9;
+}
+
+.repeat-badge-icon {
+  width: 0.68em;
+  height: 0.68em;
+  display: block;
+  flex-shrink: 0;
+}

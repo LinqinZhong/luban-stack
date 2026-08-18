@@ -88,6 +88,7 @@ function emitTypeOrmMethod(
   table: string,
   idToName: IdToName,
   commaArrayFields: string[],
+  typeLibrary: DataTypeLibrary,
 ): {
   code: string
   imports: string[]
@@ -99,6 +100,7 @@ function emitTypeOrmMethod(
   const compiled = compileTypeOrmMethodBody(method, table, {
     returnType,
     commaArrayFields,
+    typeLibrary,
   })
 
   const remark = methodJsDoc(
@@ -216,7 +218,13 @@ export function emitRepositoryFile(options: {
   const commaArrayFields = [...outputArrayFields]
 
   for (const m of methodsToEmit) {
-    const emitted = emitTypeOrmMethod(m, table, idToName, commaArrayFields)
+    const emitted = emitTypeOrmMethod(
+      m,
+      table,
+      idToName,
+      commaArrayFields,
+      typeLibrary,
+    )
     methodBlocks.push(emitted.code)
     for (const imp of emitted.imports) allTypeOrmImports.add(imp)
     if (emitted.needsCommaArrayHelper) needsCommaArrayHelper = true

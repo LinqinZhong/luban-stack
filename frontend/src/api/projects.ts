@@ -1,4 +1,4 @@
-﻿import { request } from './index'
+import { request } from './index'
 import type { IconDefinition, IconLibrary } from '../types/icon-library'
 import type { ColorPalette, PaletteColor } from '../types/color-palette'
 import type { DataTypeGroup, DataTypeLibrary } from '../types/data-types'
@@ -20,6 +20,7 @@ import type {
   BackendService,
   BackendServiceLibrary,
   ProcessorLayerKind,
+  ServiceApi,
   ServiceController,
   ServiceProcessor,
 } from '../types/backend-services'
@@ -33,6 +34,7 @@ export type {
   BackendService,
   BackendServiceLibrary,
   ProcessorLayerKind,
+  ServiceApi,
   ServiceController,
   ServiceProcessor,
 }
@@ -259,6 +261,8 @@ export function debugDataLayerMethod(payload: {
   processorId: string
   methodId: string
   params: Record<string, unknown>
+  /** 调用处额外条件，与方法内条件 AND */
+  extraConditionGroups?: import('../types/backend-services').DataMethodConditionGroup[]
   /** 默认 true：写入在事务中执行后回滚 */
   dryRun?: boolean
 }) {
@@ -769,6 +773,52 @@ export function buildProject(payload: {
     backends: Array<{ name: string; outputPath: string; routes: number }>
     frontends: Array<{ name: string; type: string; outputPath: string }>
   }>('/api/projects/build', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export type WechatPublishStatus = {
+  wechatAppId: string
+  hasPrivateKey: boolean
+  projectVersion: string
+}
+
+export function getWechatPublishStatus(projectPath: string) {
+  return request<WechatPublishStatus>(
+    `/api/projects/wechat-publish/status?projectPath=${encodeURIComponent(projectPath)}`,
+  )
+}
+
+export function saveWechatPrivateKey(payload: {
+  projectPath: string
+  privateKey: string
+}) {
+  return request<{ ok: true }>('/api/projects/wechat-publish/private-key', {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  })
+}
+
+export function clearWechatPrivateKey(projectPath: string) {
+  return request<{ ok: true }>('/api/projects/wechat-publish/private-key', {
+    method: 'DELETE',
+    body: JSON.stringify({ projectPath }),
+  })
+}
+
+export function uploadWechatMp(payload: {
+  projectPath: string
+  version: string
+  desc?: string
+  rebuild?: boolean
+}) {
+  return request<{
+    outputPath: string
+    appid: string
+    version: string
+    desc: string
+  }>('/api/projects/wechat-publish/upload', {
     method: 'POST',
     body: JSON.stringify(payload),
   })

@@ -43,7 +43,8 @@ function atomToTs(atom: TypeAtom, ctx: DataTypeTsContext): string {
   if (
     atom.kind === 'time' ||
     atom.kind === 'date' ||
-    atom.kind === 'datetime'
+    atom.kind === 'datetime' ||
+    atom.kind === 'resource'
   ) {
     return 'string'
   }
@@ -89,9 +90,12 @@ export function dataTypeToTs(def: DataTypeDef, ctx: DataTypeTsContext): string {
     : ''
 
   if (def.kind === 'number' || def.kind === 'string' || def.kind === 'boolean') {
-    // URI 等别名：type URI = string；其余基本类型仍用 interface 空壳占位
-    if (def.kind === 'string' && name === 'URI') {
-      return `${headRemark}type URI = string\n`
+    // 兼容旧版残留的 URI 别名
+    if (
+      def.kind === 'string' &&
+      (name === 'URI' || def.id === 'type_common_URI')
+    ) {
+      return `${headRemark}type Resource = string\n`
     }
     return `${headRemark}interface ${name} {}\n`
   }

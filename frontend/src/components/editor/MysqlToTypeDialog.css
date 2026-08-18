@@ -1,0 +1,10 @@
+.to-type {
+  min-height: 200px;
+}
+
+.preview-title {
+  margin: 8px 0 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #303133;
+}

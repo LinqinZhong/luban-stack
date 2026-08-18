@@ -1,0 +1,223 @@
+{
+  "id": "c6f75b40-9035-478e-8c1c-29943ee4aa62",
+  "name": "Order",
+  "path": "/order",
+  "remark": "订单接口",
+  "apis": [
+    {
+      "id": "list",
+      "name": "订单列表",
+      "path": "/list",
+      "remark": "分页查询订单",
+      "method": "GET",
+      "inputs": [
+        {
+          "id": "ain_status",
+          "varName": "status",
+          "location": "query",
+          "type": "number",
+          "typeRef": "",
+          "genericArgs": {},
+          "required": false,
+          "remark": "状态筛选"
+        },
+        {
+          "id": "ain_page",
+          "varName": "page",
+          "location": "query",
+          "type": "json",
+          "typeRef": "type_common_QueryPageDto",
+          "genericArgs": {},
+          "required": true,
+          "remark": "分页参数"
+        }
+      ],
+      "output": {
+        "type": "json",
+        "typeRef": "type_common_QueryPageVo",
+        "itemType": "",
+        "itemTypeRef": "",
+        "itemItemType": "",
+        "itemItemTypeRef": "",
+        "keyType": "",
+        "genericArgs": {
+          "T": "OrderVo"
+        }
+      },
+      "requireAuth": false,
+      "scope": "public",
+      "debugParams": {
+        "status": null,
+        "page": {
+          "current": 1,
+          "pageSize": 10
+        }
+      },
+      "flow": {
+        "nodes": [
+          {
+            "id": "start",
+            "kind": "start",
+            "position": {
+              "x": 280,
+              "y": 40
+            },
+            "data": {}
+          },
+          {
+            "id": "input_biz",
+            "kind": "input",
+            "position": {
+              "x": 240,
+              "y": 150
+            },
+            "data": {
+              "serviceId": "svc_mrqdgnhb_3ktq2g",
+              "dataSource": "business",
+              "dataProcessorId": "81af9361-ad57-46b9-8d98-afc710f9ee23",
+              "dataMethodId": "list",
+              "varName": "result",
+              "methodLabel": "OrderBiz.list",
+              "paramBindings": {
+                "status": "status",
+                "page": "page"
+              },
+              "outputTypeExpr": {
+                "type": "json",
+                "typeRef": "type_common_QueryPageVo",
+                "genericArgs": {
+                  "T": "OrderVo"
+                }
+              }
+            }
+          },
+          {
+            "id": "end",
+            "kind": "end",
+            "position": {
+              "x": 280,
+              "y": 270
+            },
+            "data": {
+              "returnExpr": "result"
+            }
+          }
+        ],
+        "edges": [
+          {
+            "id": "e1",
+            "source": "start",
+            "target": "input_biz"
+          },
+          {
+            "id": "e2",
+            "source": "input_biz",
+            "target": "end"
+          }
+        ]
+      }
+    },
+    {
+      "id": "detail",
+      "name": "订单详情",
+      "path": "/detail",
+      "remark": "查询单个订单",
+      "method": "GET",
+      "inputs": [
+        {
+          "id": "ain_id",
+          "varName": "id",
+          "location": "query",
+          "type": "number",
+          "typeRef": "",
+          "genericArgs": {},
+          "required": true,
+          "remark": "订单ID"
+        }
+      ],
+      "output": {
+        "type": "json",
+        "typeRef": "Order",
+        "itemType": "",
+        "itemTypeRef": "",
+        "itemItemType": "",
+        "itemItemTypeRef": "",
+        "keyType": "",
+        "genericArgs": {}
+      },
+      "requireAuth": false,
+      "scope": "public",
+      "debugParams": {
+        "id": 1
+      },
+      "flow": {
+        "nodes": [
+          {
+            "id": "start",
+            "kind": "start",
+            "position": {
+              "x": 280,
+              "y": 40
+            },
+            "data": {}
+          },
+          {
+            "id": "input_api_biz",
+            "kind": "input",
+            "position": {
+              "x": 245,
+              "y": 160
+            },
+            "data": {
+              "serviceId": "svc_mrqdgnhb_3ktq2g",
+              "dataSource": "business",
+              "dataProcessorId": "81af9361-ad57-46b9-8d98-afc710f9ee23",
+              "dataMethodId": "method_msewf40h_jppj1v",
+              "headerField": "",
+              "varName": "result",
+              "methodLabel": "订单业务.one",
+              "paramBindings": {
+                "id": "id"
+              },
+              "printExpr": "",
+              "outputTypeExpr": {
+                "type": "json",
+                "typeRef": "Order",
+                "itemType": "",
+                "itemTypeRef": "",
+                "itemItemType": "",
+                "itemItemTypeRef": "",
+                "keyType": "",
+                "genericArgs": {}
+              }
+            }
+          },
+          {
+            "id": "end_api_biz",
+            "kind": "end",
+            "position": {
+              "x": 277,
+              "y": 300
+            },
+            "data": {
+              "returnExpr": "result",
+              "printExpr": ""
+            }
+          }
+        ],
+        "edges": [
+          {
+            "id": "edge_api_biz_1",
+            "source": "start",
+            "target": "input_api_biz"
+          },
+          {
+            "id": "edge_api_biz_2",
+            "source": "input_api_biz",
+            "target": "end_api_biz"
+          }
+        ]
+      }
+    }
+  ]
+}

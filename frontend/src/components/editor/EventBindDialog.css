@@ -1,0 +1,148 @@
+﻿.hint {
+  margin: 0 0 12px;
+  font-size: 12px;
+  color: #909399;
+}
+
+.event-params {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border: 1px solid #e4e7ed;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.event-params-label {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #475569;
+}
+
+.event-params-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.event-param-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #eef2ff;
+  color: #3730a3;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+
+.event-param-type {
+  color: #64748b;
+  font-weight: 400;
+}
+
+.event-params-hint {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: #94a3b8;
+}
+
+.event-params-hint code {
+  font-size: 12px;
+  color: #64748b;
+}
+
+.expr-input {
+  margin-top: 8px;
+}
+
+.bind-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.bind-card {
+  padding: 12px;
+  border: 1px solid #ebeef5;
+  border-radius: 8px;
+  background: #fafbfc;
+}
+
+.bind-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.custom-body {
+  margin-top: 10px;
+}
+
+.args {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.arg-row label {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 12px;
+  color: #606266;
+}
+
+.arg-row .type {
+  color: #909399;
+}
+
+.arg-hint {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: #94a3b8;
+}
+
+.arg-hint code {
+  font-size: 12px;
+  color: #64748b;
+}
+
+.complex-value {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 32px;
+  padding: 0 8px;
+  border: 1px solid #dcdfe6;
+  border-radius: 4px;
+  background: #fff;
+}
+
+.param-kv-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.param-kv-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.value-preview {
+  font-size: 13px;
+  color: #909399;
+}
+
+.no-args {
+  margin-top: 8px;
+  font-size: 12px;
+  color: #c0c4cc;
+}

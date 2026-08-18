@@ -1,0 +1,134 @@
+.body {
+  display: grid;
+  grid-template-columns: 200px 1fr;
+  gap: 16px;
+  min-height: 420px;
+}
+.scheme-list {
+  border-right: 1px solid #ebeef5;
+  padding-right: 12px;
+}
+.aside-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  font-weight: 600;
+}
+.scheme-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.scheme-item:hover {
+  background: #f5f7fa;
+}
+.scheme-item.active {
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+}
+.scheme-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.scheme-editor {
+  min-width: 0;
+}
+.scheme-form .ant-form-item {
+  align-items: flex-start;
+  margin-bottom: 18px;
+}
+.scheme-form .ant-form-item-label > label {
+  color: #606266;
+  line-height: 32px;
+}
+.scheme-form .ant-form-item-control {
+  min-width: 0;
+}
+.field-block {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.field-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  min-height: 32px;
+  margin-top: -2px;
+  padding: 0 12px;
+}
+.field-empty {
+  padding: 12px 14px;
+  border: 1px dashed #dcdfe6;
+  border-radius: 8px;
+  color: #909399;
+  font-size: 13px;
+  background: #fafafa;
+}
+.field-hint {
+  margin-top: 6px;
+  font-size: 12px;
+  color: #909399;
+  line-height: 1.5;
+}
+.field-hint code {
+  font-size: 11px;
+  padding: 0 4px;
+  border-radius: 3px;
+  background: #f2f3f5;
+  color: #606266;
+}
+.card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid #ebeef5;
+  border-radius: 8px;
+  background: #fff;
+}
+.card-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.card-actions {
+  flex-shrink: 0;
+  width: 7.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 4px;
+}
+.add-link,
+.add-link:hover,
+.add-link:focus {
+  color: #303133 !important;
+}
+.muted {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #909399;
+  font-size: 12px;
+}
+.type-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.module-checks {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 220px;
+  overflow: auto;
+}

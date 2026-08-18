@@ -28,6 +28,12 @@ export const DM = {
     '\u6682\u65e0\u6761\u4ef6\u5206\u7ec4\uff0c\u53ef\u6dfb\u52a0\u56fa\u5b9a\u8fc7\u6ee4\u6216\u7ed1\u5b9a\u5165\u53c2',
   groupAnd: '\u7ec4\u5185 AND',
   add: '\u6dfb\u52a0',
+  enableCond: '\u542f\u7528\u6761\u4ef6',
+  enableCondSet: '\u5df2\u914d\u7f6e\u542f\u7528\u6761\u4ef6',
+  enableCondTitle: '\u7f16\u8f91\u542f\u7528\u6761\u4ef6',
+  enableCondPh:
+    '\u4f8b\u5982\uff1areturn keyword != null && keyword !== \'\'\uff1b\u7559\u7a7a\u8868\u793a\u59cb\u7ec8\u542f\u7528',
+  enableCondHint: '\u53ef\u8bbf\u95ee\u53d8\u91cf',
   field: '\u5b57\u6bb5',
   customField: '\u81ea\u5b9a\u4e49\u5b57\u6bb5',
   custom: '\u81ea\u5b9a\u4e49',

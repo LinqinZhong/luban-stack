@@ -164,17 +164,123 @@ export function parseDynamicStyles(raw: string | undefined): DynamicStylesConfig
   if (!raw?.trim()) return { states: [] }
   try {
     const parsed = JSON.parse(raw) as unknown
-    if (!parsed || typeof parsed !== 'object' || !Array.isArray((parsed as DynamicStylesConfig).states)) {
+    // AI 常见误写：顶层数组 [{ condition/attrs }] 或 [{ field, op, value, styles }]
+    if (Array.isArray(parsed)) {
+      const converted = convertLegacyDynamicStylesArray(parsed)
+      if (converted) return converted
+      return { states: [] }
+    }
+    if (!parsed || typeof parsed !== 'object') return { states: [] }
+    const obj = parsed as DynamicStylesConfig & {
+      states?: DynamicStyleState[]
+    }
+    if (!Array.isArray(obj.states)) {
+      // 单对象误写成无 states 包装
+      if (
+        Array.isArray((obj as unknown as DynamicStyleState).scenarios) ||
+        (obj as unknown as DynamicStyleState).styles
+      ) {
+        return {
+          states: [normalizeState(obj as unknown as DynamicStyleState, 1)],
+        }
+      }
       return { states: [] }
     }
     return {
-      states: (parsed as DynamicStylesConfig).states
+      states: obj.states
         .filter((item) => item && typeof item === 'object')
         .map((item, index) => normalizeState(item, index + 1)),
     }
   } catch {
     return { states: [] }
   }
+}
+
+/** 将 AI 误写的数组形态转为标准 states 配置 */
+export function convertLegacyDynamicStylesArray(
+  rows: unknown[],
+): DynamicStylesConfig | null {
+  if (!rows.length) return null
+  const states: DynamicStyleState[] = []
+  for (let i = 0; i < rows.length; i += 1) {
+    const row = rows[i]
+    if (!row || typeof row !== 'object' || Array.isArray(row)) continue
+    const item = row as Record<string, unknown>
+
+    let field = ''
+    let op: StyleConditionOp = 'eq'
+    let value = ''
+    let styles: StyleOverrides = {}
+
+    if (item.styles && typeof item.styles === 'object' && !Array.isArray(item.styles)) {
+      styles = Object.fromEntries(
+        Object.entries(item.styles as Record<string, unknown>)
+          .filter(([, v]) => typeof v === 'string' && String(v).trim())
+          .map(([k, v]) => [k, String(v).trim()]),
+      )
+    } else if (item.attrs && typeof item.attrs === 'object' && !Array.isArray(item.attrs)) {
+      styles = Object.fromEntries(
+        Object.entries(item.attrs as Record<string, unknown>)
+          .filter(([, v]) => typeof v === 'string' && String(v).trim())
+          .map(([k, v]) => {
+            const key = k === 'backgroundColor' ? 'background' : k
+            return [key, String(v).trim()]
+          }),
+      )
+    }
+
+    if (typeof item.field === 'string' && item.field.trim()) {
+      field = item.field.trim()
+      op = (typeof item.op === 'string' ? item.op : 'eq') as StyleConditionOp
+      value = item.value == null ? '' : String(item.value)
+    } else if (item.condition && typeof item.condition === 'object' && !Array.isArray(item.condition)) {
+      const cond = item.condition as Record<string, unknown>
+      field = typeof cond.field === 'string' ? cond.field.trim() : ''
+      op = (typeof cond.op === 'string' ? cond.op : 'eq') as StyleConditionOp
+      value = cond.value == null ? '' : String(cond.value)
+    } else if (typeof item.condition === 'string' && item.condition.trim()) {
+      const m = item.condition
+        .trim()
+        .match(/^([A-Za-z_][\w]*)\s*(==|=|!=|>=|<=|>|<)\s*(.+)$/)
+      if (m) {
+        field = m[1]!
+        const sym = m[2]!
+        op =
+          sym === '!='
+            ? 'neq'
+            : sym === '>'
+              ? 'gt'
+              : sym === '>='
+                ? 'gte'
+                : sym === '<'
+                  ? 'lt'
+                  : sym === '<='
+                    ? 'lte'
+                    : 'eq'
+        value = m[3]!.replace(/^['"]|['"]$/g, '').trim()
+      }
+    }
+
+    if (!field || !Object.keys(styles).length) continue
+    states.push(
+      normalizeState(
+        {
+          id: `state_${i + 1}`,
+          name: `状态${i + 1}`,
+          scenarios: [
+            {
+              id: `scene_${i + 1}`,
+              name: '场景1',
+              conditions: [{ field, op, value }],
+            },
+          ],
+          styles,
+        },
+        i + 1,
+      ),
+    )
+  }
+  return states.length ? { states } : null
 }
 
 function normalizeState(item: DynamicStyleState, fallbackIndex: number): DynamicStyleState {
@@ -229,6 +335,59 @@ export function serializeDynamicStyles(config: DynamicStylesConfig): string {
       ),
     })),
   })
+}
+
+/** 把误写在 scenario 内的 styles 提升到 state 级（运行时只认 state.styles） */
+export function liftDynamicStylesFromScenarios(parsed: unknown): unknown {
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return parsed
+  const obj = parsed as { states?: unknown[] }
+  if (!Array.isArray(obj.states)) return parsed
+  return {
+    ...obj,
+    states: obj.states.map((state) => {
+      if (!state || typeof state !== 'object' || Array.isArray(state)) return state
+      const s = state as Record<string, unknown>
+      const existing = collectStyleOverrides(s.styles)
+      if (Object.keys(existing).length) return state
+
+      const scenarios = Array.isArray(s.scenarios) ? s.scenarios : []
+      let lifted: StyleOverrides | null = null
+      const cleaned = scenarios.map((sc) => {
+        if (!sc || typeof sc !== 'object' || Array.isArray(sc)) return sc
+        const scene = { ...(sc as Record<string, unknown>) }
+        const fromScene = collectStyleOverrides(scene.styles)
+        if (Object.keys(fromScene).length && !lifted) lifted = fromScene
+        delete scene.styles
+        return scene
+      })
+      if (!lifted) return state
+      return { ...s, scenarios: cleaned, styles: lifted }
+    }),
+  }
+}
+
+function collectStyleOverrides(raw: unknown): StyleOverrides {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {}
+  const out: StyleOverrides = {}
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof value === 'string' && value.trim()) out[key] = value.trim()
+  }
+  return out
+}
+
+/** 有条件却无 styles 覆盖 → 视为无效（AI 常写出空 styles:{}） */
+export function assertDynamicStylesHaveOverrides(config: DynamicStylesConfig): void {
+  for (const state of config.states) {
+    const hasCondition = state.scenarios.some((sc) =>
+      sc.conditions.some((c) => c.field.trim()),
+    )
+    if (!hasCondition) continue
+    const keys = Object.keys(state.styles).filter((k) => state.styles[k]?.trim())
+    if (keys.length) continue
+    throw new Error(
+      `dynamicStyles 状态「${state.name || state.id}」有条件但 styles 为空。styles 必须与 scenarios 平级且非空，例如 "styles":{"background":"#ffd700"}。禁止只写 conditions 不写覆盖样式（写入会被拒绝）。`,
+    )
+  }
 }
 
 /** StyleEditor 关心的可覆盖字段 */

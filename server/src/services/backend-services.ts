@@ -14,9 +14,13 @@ import {
   CONTROLLER_CONFIG_FILE,
   CONTROLLERS_DIR,
   createEmptyBackendServiceLibrary,
+  isProcessorUuid,
   isValidControllerId,
+  isValidControllerName,
   isValidProcessorId,
+  isValidProcessorName,
   isValidServiceId,
+  newProcessorId,
   normalizeBackendService,
   normalizeBackendServiceLibrary,
   normalizeServiceController,
@@ -29,6 +33,7 @@ import {
   SERVICE_CONFIG_FILE,
   SERVICES_DIR,
   SERVICES_LEGACY_FILE,
+  toPascalCaseProcessorName,
   type BackendService,
   type BackendServiceLibrary,
   type ProcessorLayerKind,
@@ -351,6 +356,15 @@ export async function readServiceControllers(
   serviceId: string,
 ): Promise<ServiceController[]> {
   await assertServiceExists(projectPath, serviceId)
+  await migrateServiceProcessorIdentities(projectPath, serviceId)
+  await migrateServiceControllerIdentities(projectPath, serviceId)
+  return listServiceControllersRaw(projectPath, serviceId)
+}
+
+async function listServiceControllersRaw(
+  projectPath: string,
+  serviceId: string,
+): Promise<ServiceController[]> {
   const root = controllersRoot(projectPath, serviceId)
   await mkdir(root, { recursive: true })
 
@@ -390,6 +404,8 @@ export async function saveServiceControllers(
   controllersInput: unknown,
 ): Promise<ServiceController[]> {
   await assertServiceExists(projectPath, serviceId)
+  await migrateServiceProcessorIdentities(projectPath, serviceId)
+  await migrateServiceControllerIdentities(projectPath, serviceId)
 
   const list = Array.isArray(controllersInput) ? controllersInput : []
   const controllers: ServiceController[] = []
@@ -397,9 +413,25 @@ export async function saveServiceControllers(
   const names = new Set<string>()
 
   for (const item of list) {
-    const ctrl = normalizeServiceController(item)
+    let ctrl = normalizeServiceController(item)
     if (!ctrl) {
       throw new ProjectError('控制器数据不合法', 400)
+    }
+    if (!isProcessorUuid(ctrl.id)) {
+      ctrl = { ...ctrl, id: newProcessorId() }
+    }
+    if (!isValidControllerName(ctrl.name)) {
+      const fallback = controllerNameFallback(ctrl)
+      ctrl = {
+        ...ctrl,
+        name: uniquePascalName(ctrl.name || fallback, names, fallback),
+      }
+    } else {
+      const nameKey = ctrl.name.trim().toLowerCase()
+      if (names.has(nameKey)) {
+        throw new ProjectError(`控制器名称重复：${ctrl.name}`, 400)
+      }
+      names.add(nameKey)
     }
     if (!isValidControllerId(ctrl.id)) {
       throw new ProjectError(`控制器 ID 不合法：${ctrl.id}`, 400)
@@ -408,11 +440,6 @@ export async function saveServiceControllers(
       throw new ProjectError(`控制器 ID 重复：${ctrl.id}`, 400)
     }
     ids.add(ctrl.id)
-    const nameKey = ctrl.name.trim().toLowerCase()
-    if (names.has(nameKey)) {
-      throw new ProjectError(`控制器名称重复：${ctrl.name}`, 400)
-    }
-    names.add(nameKey)
     controllers.push(ctrl)
   }
 
@@ -443,7 +470,7 @@ export async function saveServiceControllers(
     await writeControllerConfig(projectPath, serviceId, ctrl)
   }
 
-  return readServiceControllers(projectPath, serviceId)
+  return listServiceControllersRaw(projectPath, serviceId)
 }
 
 // ——— 业务层 / 数据层：处理器 ———
@@ -515,6 +542,15 @@ export async function readServiceProcessors(
   kind: ProcessorLayerKind,
 ): Promise<ServiceProcessor[]> {
   await assertServiceExists(projectPath, serviceId)
+  await migrateServiceProcessorIdentities(projectPath, serviceId)
+  return listServiceProcessorsRaw(projectPath, serviceId, kind)
+}
+
+async function listServiceProcessorsRaw(
+  projectPath: string,
+  serviceId: string,
+  kind: ProcessorLayerKind,
+): Promise<ServiceProcessor[]> {
   const root = processorsRoot(projectPath, serviceId, kind)
   await mkdir(root, { recursive: true })
 
@@ -548,6 +584,425 @@ export async function readServiceProcessors(
   return processors
 }
 
+function uniquePascalName(
+  base: string,
+  used: Set<string>,
+  fallback = 'Processor',
+): string {
+  let name = toPascalCaseProcessorName(base, fallback)
+  if (!used.has(name.toLowerCase())) {
+    used.add(name.toLowerCase())
+    return name
+  }
+  let i = 2
+  while (used.has(`${name}${i}`.toLowerCase())) i += 1
+  name = `${name}${i}`
+  used.add(name.toLowerCase())
+  return name
+}
+
+/** 从 path / 旧 id 推断控制器英文名 */
+function controllerNameFallback(ctrl: ServiceController): string {
+  const pathSeg = (ctrl.path || '')
+    .replace(/^\/+|\/+$/g, '')
+    .split('/')[0]
+    ?.trim() || ''
+  if (pathSeg && /^[A-Za-z]/.test(pathSeg)) return pathSeg
+  if (/^[A-Za-z][A-Za-z0-9]*$/.test(ctrl.id)) return ctrl.id
+  return 'Controller'
+}
+
+function remapControllerIdInText(
+  text: string,
+  remap: Map<string, string>,
+): string {
+  if (!remap.size) return text
+  let out = text
+  for (const [oldId, newId] of remap) {
+    if (oldId === newId) continue
+    out = out.split(`"controllerId":"${oldId}"`).join(`"controllerId":"${newId}"`)
+    out = out
+      .split(`"controllerId": "${oldId}"`)
+      .join(`"controllerId": "${newId}"`)
+    out = out
+      .split(`&quot;controllerId&quot;:&quot;${oldId}&quot;`)
+      .join(`&quot;controllerId&quot;:&quot;${newId}&quot;`)
+    out = out
+      .split(`\\&quot;controllerId\\&quot;:\\&quot;${oldId}\\&quot;`)
+      .join(`\\&quot;controllerId\\&quot;:\\&quot;${newId}\\&quot;`)
+  }
+  return out
+}
+
+function remapControllerIdInValue(
+  value: unknown,
+  remap: Map<string, string>,
+): unknown {
+  if (!remap.size) return value
+  if (typeof value === 'string') {
+    const trimmed = value.trim()
+    if (
+      (trimmed.startsWith('{') || trimmed.startsWith('[')) &&
+      trimmed.includes('controllerId')
+    ) {
+      try {
+        const parsed = JSON.parse(trimmed) as unknown
+        const next = remapControllerIdInValue(parsed, remap)
+        return JSON.stringify(next)
+      } catch {
+        return remapControllerIdInText(value, remap)
+      }
+    }
+    return remapControllerIdInText(value, remap)
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => remapControllerIdInValue(item, remap))
+  }
+  if (!value || typeof value !== 'object') return value
+  const obj = value as Record<string, unknown>
+  const next: Record<string, unknown> = {}
+  for (const [k, v] of Object.entries(obj)) {
+    if (k === 'controllerId' && typeof v === 'string' && remap.has(v)) {
+      next[k] = remap.get(v)!
+    } else {
+      next[k] = remapControllerIdInValue(v, remap)
+    }
+  }
+  return next
+}
+
+async function remapControllerIdsInProjectFiles(
+  projectPath: string,
+  remap: Map<string, string>,
+): Promise<void> {
+  if (!remap.size) return
+
+  const walk = async (dir: string): Promise<void> => {
+    let names: string[]
+    try {
+      names = await readdir(dir)
+    } catch {
+      return
+    }
+    for (const name of names) {
+      if (name.startsWith('.')) continue
+      const full = path.join(dir, name)
+      let info
+      try {
+        info = await stat(full)
+      } catch {
+        continue
+      }
+      if (info.isDirectory()) {
+        await walk(full)
+        continue
+      }
+      if (!info.isFile()) continue
+      const lower = name.toLowerCase()
+      if (
+        !lower.endsWith('.json') &&
+        !lower.endsWith('.xml') &&
+        !lower.endsWith('.html') &&
+        !lower.endsWith('.txt')
+      ) {
+        continue
+      }
+      let raw: string
+      try {
+        raw = await readFile(full, 'utf8')
+      } catch {
+        continue
+      }
+      if (!raw.includes('controllerId')) continue
+
+      let next = raw
+      if (lower.endsWith('.json')) {
+        try {
+          const parsed = JSON.parse(raw) as unknown
+          const remapped = remapControllerIdInValue(parsed, remap)
+          next = `${JSON.stringify(remapped, null, 2)}\n`
+        } catch {
+          next = remapControllerIdInText(raw, remap)
+        }
+      } else {
+        next = remapControllerIdInText(raw, remap)
+      }
+      if (next !== raw) {
+        await writeFile(full, next, 'utf8')
+      }
+    }
+  }
+
+  await walk(path.join(projectPath, 'pages'))
+  await walk(path.join(projectPath, 'components'))
+}
+
+/**
+ * 控制器 id → UUID，名称 → 英文大驼峰；并更新页面/组件中的 controllerId 引用
+ */
+async function migrateServiceControllerIdentities(
+  projectPath: string,
+  _serviceId: string,
+): Promise<void> {
+  const root = servicesRoot(projectPath)
+  let serviceIds: string[] = []
+  try {
+    serviceIds = (await readdir(root)).filter((name) => {
+      if (name.startsWith('.') || name === SERVICES_LEGACY_FILE) return false
+      return isValidServiceId(name)
+    })
+  } catch {
+    return
+  }
+
+  const globalRemap = new Map<string, string>()
+  let anyNeed = false
+
+  for (const serviceId of serviceIds) {
+    const list = await listServiceControllersRaw(projectPath, serviceId)
+    if (
+      list.some(
+        (c) => !isProcessorUuid(c.id) || !isValidControllerName(c.name),
+      )
+    ) {
+      anyNeed = true
+      break
+    }
+  }
+  if (!anyNeed) return
+
+  for (const serviceId of serviceIds) {
+    const list = await listServiceControllersRaw(projectPath, serviceId)
+    const usedNames = new Set<string>()
+    const nextList: ServiceController[] = []
+
+    for (const ctrl of list) {
+      const oldId = ctrl.id
+      let next: ServiceController = { ...ctrl }
+      if (!isProcessorUuid(next.id)) {
+        next = { ...next, id: newProcessorId() }
+      }
+      globalRemap.set(oldId, next.id)
+      const fallback = controllerNameFallback({ ...ctrl, id: oldId })
+      next = {
+        ...next,
+        name: uniquePascalName(next.name || fallback, usedNames, fallback),
+      }
+      nextList.push(next)
+    }
+
+    for (const next of nextList) {
+      await writeControllerConfig(projectPath, serviceId, next)
+    }
+    for (const ctrl of list) {
+      const newId = globalRemap.get(ctrl.id) ?? ctrl.id
+      if (newId === ctrl.id) continue
+      const oldDir = controllerDir(projectPath, serviceId, ctrl.id)
+      try {
+        await rm(oldDir, { recursive: true, force: true })
+      } catch {
+        // ignore
+      }
+    }
+  }
+
+  await remapControllerIdsInProjectFiles(projectPath, globalRemap)
+}
+
+function remapProcessorIdInValue(
+  value: unknown,
+  remap: Map<string, string>,
+): unknown {
+  if (!remap.size) return value
+  if (Array.isArray(value)) {
+    return value.map((item) => remapProcessorIdInValue(item, remap))
+  }
+  if (!value || typeof value !== 'object') return value
+  const obj = value as Record<string, unknown>
+  const next: Record<string, unknown> = {}
+  for (const [k, v] of Object.entries(obj)) {
+    if (
+      (k === 'dataProcessorId' || k === 'dataProcessorRef') &&
+      typeof v === 'string' &&
+      remap.has(v)
+    ) {
+      next[k] = remap.get(v)!
+    } else {
+      next[k] = remapProcessorIdInValue(v, remap)
+    }
+  }
+  return next
+}
+
+function remapProcessorRefs(
+  processor: ServiceProcessor,
+  remap: Map<string, string>,
+): ServiceProcessor {
+  const cloned = JSON.parse(JSON.stringify(processor)) as ServiceProcessor
+  if (cloned.dataProcessorRef && remap.has(cloned.dataProcessorRef)) {
+    cloned.dataProcessorRef = remap.get(cloned.dataProcessorRef)!
+  }
+  cloned.methods = (cloned.methods ?? []).map((m) => {
+    const flow = m.flow
+      ? (remapProcessorIdInValue(m.flow, remap) as typeof m.flow)
+      : m.flow
+    return { ...m, flow }
+  })
+  return cloned
+}
+
+function remapControllerRefs(
+  controller: ServiceController,
+  remap: Map<string, string>,
+): ServiceController {
+  const cloned = JSON.parse(JSON.stringify(controller)) as ServiceController
+  cloned.apis = (cloned.apis ?? []).map((api) => {
+    const flow = api.flow
+      ? (remapProcessorIdInValue(api.flow, remap) as typeof api.flow)
+      : api.flow
+    return { ...api, flow }
+  })
+  return cloned
+}
+
+/**
+ * 旧项目：名称非大驼峰、id 非 UUID → 就地迁移目录与引用。
+ * 幂等；已合规则快速返回。
+ * 按整个 services 根做全局 remap，避免跨服务 dataProcessorId 断链。
+ */
+async function migrateServiceProcessorIdentities(
+  projectPath: string,
+  _serviceId: string,
+): Promise<void> {
+  const root = servicesRoot(projectPath)
+  let serviceIds: string[] = []
+  try {
+    serviceIds = (await readdir(root)).filter((name) => {
+      if (name.startsWith('.') || name === SERVICES_LEGACY_FILE) return false
+      return isValidServiceId(name)
+    })
+  } catch {
+    return
+  }
+
+  const globalRemap = new Map<string, string>()
+  let anyNeed = false
+
+  for (const serviceId of serviceIds) {
+    const dataList = await listServiceProcessorsRaw(
+      projectPath,
+      serviceId,
+      'data',
+    )
+    const bizList = await listServiceProcessorsRaw(
+      projectPath,
+      serviceId,
+      'business',
+    )
+    if (
+      dataList.some(
+        (p) => !isProcessorUuid(p.id) || !isValidProcessorName(p.name),
+      ) ||
+      bizList.some(
+        (p) => !isProcessorUuid(p.id) || !isValidProcessorName(p.name),
+      )
+    ) {
+      anyNeed = true
+    }
+  }
+  if (!anyNeed) {
+    // 仍可能有遗留跨服务旧 id；轻量扫一遍业务/控制器
+    // 若全局已无旧目录名，直接返回
+    return
+  }
+
+  for (const serviceId of serviceIds) {
+    const dataList = await listServiceProcessorsRaw(
+      projectPath,
+      serviceId,
+      'data',
+    )
+    const bizList = await listServiceProcessorsRaw(
+      projectPath,
+      serviceId,
+      'business',
+    )
+    const usedNames = new Set<string>()
+
+    const migrateLayer = async (
+      kind: ProcessorLayerKind,
+      list: ServiceProcessor[],
+    ) => {
+      const nextList: ServiceProcessor[] = []
+      usedNames.clear()
+      for (const proc of list) {
+        const oldId = proc.id
+        let next: ServiceProcessor = { ...proc }
+        if (!isProcessorUuid(next.id)) {
+          next = { ...next, id: newProcessorId() }
+        }
+        globalRemap.set(oldId, next.id)
+        const entityFb = next.entityRef?.trim() || ''
+        const fallback =
+          (entityFb && !entityFb.startsWith('type_') ? entityFb : '') ||
+          (isProcessorUuid(oldId) ? 'Processor' : oldId) ||
+          'Processor'
+        next = {
+          ...next,
+          name: uniquePascalName(next.name || fallback, usedNames, fallback),
+        }
+        nextList.push(next)
+      }
+      for (const next of nextList) {
+        await writeProcessorConfig(projectPath, serviceId, kind, next)
+      }
+      for (const proc of list) {
+        const newId = globalRemap.get(proc.id) ?? proc.id
+        if (newId === proc.id) continue
+        const oldDir = processorDir(projectPath, serviceId, kind, proc.id)
+        try {
+          await rm(oldDir, { recursive: true, force: true })
+        } catch {
+          // ignore
+        }
+      }
+      return nextList
+    }
+
+    await migrateLayer('data', dataList)
+    let nextBiz = await migrateLayer('business', bizList)
+    nextBiz = nextBiz.map((p) => remapProcessorRefs(p, globalRemap))
+    for (const proc of nextBiz) {
+      await writeProcessorConfig(projectPath, serviceId, 'business', proc)
+    }
+
+    const controllers = await listServiceControllersRaw(projectPath, serviceId)
+    for (const ctrl of controllers) {
+      const next = remapControllerRefs(ctrl, globalRemap)
+      await writeControllerConfig(projectPath, serviceId, next)
+    }
+  }
+
+  // 第二遍：用完整 globalRemap 再刷一遍业务/控制器引用（跨服务）
+  if (!globalRemap.size) return
+  for (const serviceId of serviceIds) {
+    const bizList = await listServiceProcessorsRaw(
+      projectPath,
+      serviceId,
+      'business',
+    )
+    for (const proc of bizList) {
+      const next = remapProcessorRefs(proc, globalRemap)
+      await writeProcessorConfig(projectPath, serviceId, 'business', next)
+    }
+    const controllers = await listServiceControllersRaw(projectPath, serviceId)
+    for (const ctrl of controllers) {
+      const next = remapControllerRefs(ctrl, globalRemap)
+      await writeControllerConfig(projectPath, serviceId, next)
+    }
+  }
+}
+
 export async function saveServiceProcessors(
   projectPath: string,
   serviceId: string,
@@ -555,6 +1010,7 @@ export async function saveServiceProcessors(
   processorsInput: unknown,
 ): Promise<ServiceProcessor[]> {
   await assertServiceExists(projectPath, serviceId)
+  await migrateServiceProcessorIdentities(projectPath, serviceId)
 
   const list = Array.isArray(processorsInput) ? processorsInput : []
   const processors: ServiceProcessor[] = []
@@ -562,9 +1018,25 @@ export async function saveServiceProcessors(
   const names = new Set<string>()
 
   for (const item of list) {
-    const proc = normalizeServiceProcessor(item)
+    let proc = normalizeServiceProcessor(item)
     if (!proc) {
       throw new ProjectError('处理器数据不合法', 400)
+    }
+    if (!isProcessorUuid(proc.id)) {
+      proc = { ...proc, id: newProcessorId() }
+    }
+    if (!isValidProcessorName(proc.name)) {
+      const fallback = proc.entityRef?.trim() || proc.id
+      proc = {
+        ...proc,
+        name: uniquePascalName(proc.name || fallback, names, fallback),
+      }
+    } else {
+      const key = proc.name.trim().toLowerCase()
+      if (names.has(key)) {
+        throw new ProjectError(`处理器名称重复：${proc.name}`, 400)
+      }
+      names.add(key)
     }
     if (!isValidProcessorId(proc.id)) {
       throw new ProjectError(`处理器 ID 不合法：${proc.id}`, 400)
@@ -573,11 +1045,6 @@ export async function saveServiceProcessors(
       throw new ProjectError(`处理器 ID 重复：${proc.id}`, 400)
     }
     ids.add(proc.id)
-    const nameKey = proc.name.trim().toLowerCase()
-    if (names.has(nameKey)) {
-      throw new ProjectError(`处理器名称重复：${proc.name}`, 400)
-    }
-    names.add(nameKey)
     processors.push(proc)
   }
 
@@ -608,5 +1075,5 @@ export async function saveServiceProcessors(
     await writeProcessorConfig(projectPath, serviceId, kind, proc)
   }
 
-  return readServiceProcessors(projectPath, serviceId, kind)
+  return listServiceProcessorsRaw(projectPath, serviceId, kind)
 }

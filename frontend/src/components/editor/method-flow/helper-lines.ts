@@ -1,4 +1,4 @@
-import type { GraphNode, NodePositionChange, XYPosition } from '@vue-flow/core'
+import type { Node, NodePositionChange, XYPosition } from '@xyflow/react'
 
 export type HelperLinesResult = {
   horizontal?: number
@@ -6,13 +6,20 @@ export type HelperLinesResult = {
   snapPosition: Partial<XYPosition>
 }
 
+function nodeSize(node: Node): { width: number; height: number } {
+  const measured = node.measured
+  return {
+    width: Number(measured?.width) || Number(node.width) || 0,
+    height: Number(measured?.height) || Number(node.height) || 0,
+  }
+}
+
 /**
  * 拖拽时计算对齐辅助线与吸附位置（左右/上下/中心对齐）
- * @see https://vueflow.dev/examples/helper-lines.html
  */
 export function getHelperLines(
   change: NodePositionChange,
-  nodes: GraphNode[],
+  nodes: Node[],
   distance = 6,
 ): HelperLinesResult {
   const defaultResult: HelperLinesResult = {
@@ -23,8 +30,7 @@ export function getHelperLines(
   const nodeA = nodes.find((node) => node.id === change.id)
   if (!nodeA || !change.position) return defaultResult
 
-  const aw = Number(nodeA.dimensions?.width) || 0
-  const ah = Number(nodeA.dimensions?.height) || 0
+  const { width: aw, height: ah } = nodeSize(nodeA)
   const nodeABounds = {
     left: change.position.x,
     right: change.position.x + aw,
@@ -42,8 +48,7 @@ export function getHelperLines(
   return nodes
     .filter((node) => node.id !== nodeA.id)
     .reduce((result, nodeB) => {
-      const bw = Number(nodeB.dimensions?.width) || Number(nodeB.width) || 0
-      const bh = Number(nodeB.dimensions?.height) || Number(nodeB.height) || 0
+      const { width: bw, height: bh } = nodeSize(nodeB)
       const nodeBBounds = {
         left: nodeB.position.x,
         right: nodeB.position.x + bw,

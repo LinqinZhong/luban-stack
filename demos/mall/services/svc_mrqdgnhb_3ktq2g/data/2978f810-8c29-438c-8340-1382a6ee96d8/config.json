@@ -1,0 +1,202 @@
+{
+  "id": "2978f810-8c29-438c-8340-1382a6ee96d8",
+  "name": "Goods",
+  "remark": "",
+  "entityRef": "type_mrnx6ke8_4d7vry",
+  "dataProcessorRef": "",
+  "methods": [
+    {
+      "id": "method_ms6qgzqr_xc9kza",
+      "name": "countByKeyword",
+      "remark": "",
+      "scope": "public",
+      "params": [
+        {
+          "id": "param_ms6qhek4_dnmlhf",
+          "name": "keyword",
+          "remark": "",
+          "typeExpr": {
+            "type": "string",
+            "typeRef": "",
+            "itemType": "",
+            "itemTypeRef": "",
+            "itemItemType": "",
+            "itemItemTypeRef": "",
+            "keyType": "",
+            "genericArgs": {}
+          },
+          "required": false
+        }
+      ],
+      "output": {
+        "type": "number",
+        "typeRef": "",
+        "itemType": "",
+        "itemTypeRef": "",
+        "itemItemType": "",
+        "itemItemTypeRef": "",
+        "keyType": "",
+        "genericArgs": {}
+      },
+      "dataConfig": {
+        "source": "mysql",
+        "operation": "custom",
+        "queryFields": [],
+        "sql": "SELECT COUNT(id) FROM {TABLE_NAME} WHERE is_deleted = 0\r\n<if test=\"keyword != null\">\r\n  AND name LIKE CONCAT('%', #{keyword}, '%')\r\n</if>",
+        "fieldMappings": [
+          {
+            "field": "value",
+            "column": "COUNT(id)"
+          }
+        ],
+        "batchSourceParam": "",
+        "pageParam": "",
+        "conditionGroups": [],
+        "httpRequest": {
+          "apiUrl": "",
+          "httpMethod": "GET",
+          "mediaType": "application/json",
+          "bodyVarName": "",
+          "responseBodyType": "json",
+          "parseCode": "",
+          "headers": [],
+          "queryParams": [],
+          "formParams": []
+        }
+      },
+      "debugParams": {
+        "keyword": null
+      },
+      "flow": {
+        "nodes": [
+          {
+            "id": "start",
+            "kind": "start",
+            "position": {
+              "x": 280,
+              "y": 40
+            },
+            "data": {}
+          }
+        ],
+        "edges": []
+      }
+    },
+    {
+      "id": "method_ms6qjd77_qyh4yw",
+      "name": "pageByKeyword",
+      "remark": "",
+      "scope": "public",
+      "params": [
+        {
+          "id": "param_ms6qk31v_7nhvti",
+          "name": "keyword",
+          "remark": "",
+          "typeExpr": {
+            "type": "string",
+            "typeRef": "",
+            "itemType": "",
+            "itemTypeRef": "",
+            "itemItemType": "",
+            "itemItemTypeRef": "",
+            "keyType": "",
+            "genericArgs": {}
+          },
+          "required": false
+        },
+        {
+          "id": "param_ms6qkvm4_8yfq4t",
+          "name": "page",
+          "remark": "",
+          "typeExpr": {
+            "type": "json",
+            "typeRef": "type_common_QueryPageDto",
+            "itemType": "",
+            "itemTypeRef": "",
+            "itemItemType": "",
+            "itemItemTypeRef": "",
+            "keyType": "",
+            "genericArgs": {}
+          },
+          "required": false
+        }
+      ],
+      "output": {
+        "type": "array",
+        "typeRef": "",
+        "itemType": "json",
+        "itemTypeRef": "type_mrnx6ke8_4d7vry",
+        "itemItemType": "",
+        "itemItemTypeRef": "",
+        "keyType": "",
+        "genericArgs": {}
+      },
+      "dataConfig": {
+        "source": "mysql",
+        "operation": "query",
+        "queryFields": [
+          "id",
+          "name",
+          "price",
+          "stock",
+          "img",
+          "deliveryFee"
+        ],
+        "sql": "",
+        "fieldMappings": [],
+        "batchSourceParam": "",
+        "pageParam": "page",
+        "conditionGroups": [
+          {
+            "id": "cg_ms6ql437_e2a94x",
+            "conditions": [
+              {
+                "id": "cond_ms6ql437_7u4qa7",
+                "field": "name",
+                "customField": "",
+                "op": "like",
+                "valueKind": "param",
+                "value": "keyword",
+                "valueTo": "",
+                "enableCondition": ""
+              }
+            ],
+            "enableCondition": ""
+          }
+        ],
+        "httpRequest": {
+          "apiUrl": "",
+          "httpMethod": "GET",
+          "mediaType": "application/json",
+          "bodyVarName": "",
+          "responseBodyType": "json",
+          "parseCode": "",
+          "headers": [],
+          "queryParams": [],
+          "formParams": []
+        }
+      },
+      "debugParams": {
+        "keyword": null,
+        "page": {
+          "current": 1,
+          "pageSize": 3
+        }
+      },
+      "flow": {
+        "nodes": [
+          {
+            "id": "start",
+            "kind": "start",
+            "position": {
+              "x": 280,
+              "y": 40
+            },
+            "data": {}
+          }
+        ],
+        "edges": []
+      }
+    }
+  ]
+}

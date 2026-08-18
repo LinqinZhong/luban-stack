@@ -1,0 +1,186 @@
+﻿.bind-form {
+  padding-right: 4px;
+}
+
+.pick-row {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+}
+
+.hint {
+  margin: 0 0 8px;
+  font-size: 12px;
+  color: #909399;
+  line-height: 1.5;
+}
+
+.hint code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  padding: 0 4px;
+  border-radius: 3px;
+  background: #f2f3f5;
+  color: #606266;
+}
+
+.hint-inline {
+  font-size: 13px;
+  color: #909399;
+}
+
+.input-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+}
+
+.input-card {
+  border: 1px solid #ebeef5;
+  border-radius: 8px;
+  background: #fafafa;
+  padding: 10px 12px;
+}
+
+.input-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.loc-badge {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 4px;
+  line-height: 1.4;
+}
+
+.loc-query {
+  color: #067647;
+  background: #ecfdf3;
+}
+
+.loc-param {
+  color: #b54708;
+  background: #fffaeb;
+}
+
+.loc-body {
+  color: #6941c6;
+  background: #f4f3ff;
+}
+
+.loc-header {
+  color: #175cd3;
+  background: #eff8ff;
+}
+
+.input-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: #303133;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.req {
+  color: #f56c6c;
+  font-style: normal;
+  margin-left: 2px;
+}
+
+.input-type {
+  font-size: 12px;
+  color: #909399;
+  flex: 1;
+  min-width: 0;
+}
+
+.source-radio {
+  flex-shrink: 0;
+}
+
+.input-body {
+  width: 100%;
+}
+
+.object-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.prop-row {
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  gap: 8px;
+  align-items: center;
+}
+
+.prop-label {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.prop-name {
+  font-size: 13px;
+  color: #303133;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.prop-type {
+  font-size: 11px;
+  color: #909399;
+}
+
+.event-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+}
+
+.event-hint {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #909399;
+}
+
+.event-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid #ebeef5;
+  border-radius: 8px;
+  background: #fafafa;
+}
+
+.event-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.event-label {
+  font-size: 13px;
+  color: #303133;
+}
+
+.event-summary {
+  font-size: 12px;
+  color: #909399;
+}
+
+
+/* 避免对话框裁切 Monaco hover / suggest */
+.controller-binding-dialog .ant-modal-body {
+  overflow: visible;
+}

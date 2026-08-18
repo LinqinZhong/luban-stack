@@ -4,6 +4,14 @@ import {
   heartbeatAiAssistantLock,
   releaseAiAssistantLock,
 } from '../api/ai-assistant-log'
+import type {
+  WorkspaceNavigateCommand,
+  WorkspaceUiSnapshot,
+} from './workspace-nav'
+import type {
+  CanvasPreviewCommand,
+  CanvasPreviewSnapshot,
+} from './canvas-preview-bridge'
 
 const WINDOW_ID_KEY = 'luban.aiAssistant.windowId'
 const CHANNEL_NAME = 'luban-ai-assistant'
@@ -12,6 +20,41 @@ const HEARTBEAT_MS = 8_000
 export type AiAssistantBusEvent =
   | { type: 'lock-changed'; projectPath: string; locked: boolean; ownerId: string | null }
   | { type: 'logs-changed'; projectPath: string }
+  /** AI 改写了工程资源：工作区应重新拉取当前打开内容 */
+  | { type: 'resources-changed'; projectPath: string }
+  /** AI 请求切换工作区 UI（跨窗） */
+  | {
+      type: 'workspace-navigate'
+      projectPath: string
+      requestId: string
+      command: WorkspaceNavigateCommand
+    }
+  /** 弹窗查询当前 UI 状态 */
+  | { type: 'workspace-ui-query'; projectPath: string; requestId: string }
+  /** 工作区回传 UI 快照 */
+  | {
+      type: 'workspace-ui-snapshot'
+      projectPath: string
+      requestId?: string
+      snapshot: WorkspaceUiSnapshot
+    }
+  /** AI 请求驱动真实预览画布 */
+  | {
+      type: 'canvas-preview-command'
+      projectPath: string
+      requestId: string
+      command: CanvasPreviewCommand
+    }
+  /** 工作区回传画布预览结果 */
+  | {
+      type: 'canvas-preview-result'
+      projectPath: string
+      requestId: string
+      ok: boolean
+      snapshot?: CanvasPreviewSnapshot
+      error?: string
+      meta?: Record<string, unknown>
+    }
 
 function createId(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {

@@ -1,5 +1,9 @@
-import { defineStore } from 'pinia'
-import { ref } from 'vue'
+import { create } from 'zustand'
+import type { CanvasPreviewCommand } from '../services/canvas-preview-bridge'
+import type {
+  WorkspaceNavigateCommand,
+  WorkspaceUiSnapshot,
+} from '../services/workspace-nav'
 
 export type AiMentionOption = {
   /** 插入到文本中 @ 后的完整地址：页面:home/0:LinearLayout/1:Button */
@@ -22,6 +26,16 @@ export type AiPendingSelect = {
   nodeId: string
 }
 
+export type AiPendingNavigate = {
+  command: WorkspaceNavigateCommand
+  requestId: string
+}
+
+export type AiPendingCanvasPreview = {
+  command: CanvasPreviewCommand
+  requestId: string
+}
+
 const MENTION_RE = /@([^\s@]+)/g
 
 function escapeRegExp(text: string): string {
@@ -38,39 +52,118 @@ export function buildAiMentionAddress(options: {
   return `${kind}:${options.resourceId}/${options.nodeId}`
 }
 
-/**
- * AI 助手浮窗与对话上下文（提及节点等）。
- */
-export const useAiAssistantStore = defineStore('aiAssistant', () => {
-  const panelOpen = ref(false)
-  const composerText = ref('')
-  const mentionOptions = ref<AiMentionOption[]>([])
-  const pendingSelect = ref<AiPendingSelect | null>(null)
-  const activeResource = ref<AiActiveResource>(null)
-  /** 资源被 AI 改写后递增，工作区监听并刷新 */
-  const resourceEpoch = ref(0)
-
-  function setPanelOpen(open: boolean) {
-    panelOpen.value = open
-  }
-
-  function togglePanel() {
-    panelOpen.value = !panelOpen.value
-  }
-
-  function setActiveResource(next: AiActiveResource) {
-    activeResource.value = next
-  }
-
-  function bumpResourceEpoch() {
-    resourceEpoch.value += 1
-  }
-
-  function addWidgetMention(input: {
+type AiAssistantState = {
+  panelOpen: boolean
+  composerText: string
+  mentionOptions: AiMentionOption[]
+  pendingSelect: AiPendingSelect | null
+  pendingNavigate: AiPendingNavigate | null
+  pendingCanvasPreview: AiPendingCanvasPreview | null
+  uiSnapshot: WorkspaceUiSnapshot | null
+  pendingUiQueryId: string | null
+  activeResource: AiActiveResource
+  resourceEpoch: number
+  projectBusyByAi: boolean
+  setPanelOpen: (open: boolean) => void
+  togglePanel: () => void
+  setProjectBusyByAi: (busy: boolean) => void
+  setActiveResource: (next: AiActiveResource) => void
+  bumpResourceEpoch: () => void
+  setUiSnapshot: (snapshot: WorkspaceUiSnapshot | null) => void
+  requestNavigate: (command: WorkspaceNavigateCommand, requestId: string) => void
+  clearPendingNavigate: () => void
+  requestCanvasPreview: (
+    command: CanvasPreviewCommand,
+    requestId: string,
+  ) => void
+  clearPendingCanvasPreview: () => void
+  requestUiQuery: (requestId: string) => void
+  clearPendingUiQuery: () => void
+  setComposerText: (text: string) => void
+  addWidgetMention: (input: {
     nodeId: string
     resourceScope: 'page' | 'component'
     resourceId: string
-  }) {
+  }) => void
+  resolveMentionAt: (text: string, caret: number) => AiMentionOption | null
+  resolveMentionNodeId: (text: string, caret: number) => string | null
+  requestSelectNode: (nodeId: string) => void
+  requestSelectMention: (mention: AiMentionOption) => void
+  clearPendingSelect: () => void
+  clearComposer: () => void
+  mentionsInText: (text: string) => AiMentionOption[]
+}
+
+export const useAiAssistantStore = create<AiAssistantState>((set, get) => ({
+  panelOpen: false,
+  composerText: '',
+  mentionOptions: [],
+  pendingSelect: null,
+  pendingNavigate: null,
+  pendingCanvasPreview: null,
+  uiSnapshot: null,
+  pendingUiQueryId: null,
+  activeResource: null,
+  resourceEpoch: 0,
+  projectBusyByAi: false,
+
+  setPanelOpen(open) {
+    if (!open && get().projectBusyByAi) return
+    if (get().panelOpen === open) return
+    set({ panelOpen: open })
+  },
+
+  togglePanel() {
+    const { panelOpen, projectBusyByAi } = get()
+    if (panelOpen && projectBusyByAi) return
+    set({ panelOpen: !panelOpen })
+  },
+
+  setProjectBusyByAi(busy) {
+    set({ projectBusyByAi: busy, ...(busy ? { panelOpen: true } : {}) })
+  },
+
+  setActiveResource(next) {
+    set({ activeResource: next })
+  },
+
+  bumpResourceEpoch() {
+    set({ resourceEpoch: get().resourceEpoch + 1 })
+  },
+
+  setUiSnapshot(snapshot) {
+    set({ uiSnapshot: snapshot })
+  },
+
+  requestNavigate(command, requestId) {
+    set({ pendingNavigate: { command, requestId } })
+  },
+
+  clearPendingNavigate() {
+    set({ pendingNavigate: null })
+  },
+
+  requestCanvasPreview(command, requestId) {
+    set({ pendingCanvasPreview: { command, requestId } })
+  },
+
+  clearPendingCanvasPreview() {
+    set({ pendingCanvasPreview: null })
+  },
+
+  requestUiQuery(requestId) {
+    set({ pendingUiQueryId: requestId })
+  },
+
+  clearPendingUiQuery() {
+    set({ pendingUiQueryId: null })
+  },
+
+  setComposerText(text) {
+    set({ composerText: text })
+  },
+
+  addWidgetMention(input) {
     const nodeId = input.nodeId.trim()
     const resourceId = input.resourceId.trim()
     if (!nodeId || !resourceId) return
@@ -80,14 +173,15 @@ export const useAiAssistantStore = defineStore('aiAssistant', () => {
       resourceId,
       nodeId,
     })
-    const existing = mentionOptions.value.find((item) => item.nodeId === nodeId)
+    const mentionOptions = [...get().mentionOptions]
+    const existing = mentionOptions.find((item) => item.nodeId === nodeId)
     if (existing) {
       existing.value = value
       existing.label = value
       existing.resourceScope = input.resourceScope
       existing.resourceId = resourceId
     } else {
-      mentionOptions.value.push({
+      mentionOptions.push({
         value,
         label: value,
         nodeId,
@@ -96,16 +190,16 @@ export const useAiAssistantStore = defineStore('aiAssistant', () => {
       })
     }
 
-    const text = composerText.value
+    const text = get().composerText
     const needsSpace = text.length > 0 && !/\s$/.test(text)
-    composerText.value = `${text}${needsSpace ? ' ' : ''}@${value} `
-    panelOpen.value = true
-  }
+    set({
+      mentionOptions,
+      composerText: `${text}${needsSpace ? ' ' : ''}@${value} `,
+      panelOpen: true,
+    })
+  },
 
-  function resolveMentionAt(
-    text: string,
-    caret: number,
-  ): AiMentionOption | null {
+  resolveMentionAt(text, caret) {
     MENTION_RE.lastIndex = 0
     let match: RegExpExecArray | null
     while ((match = MENTION_RE.exec(text))) {
@@ -119,67 +213,73 @@ export const useAiAssistantStore = defineStore('aiAssistant', () => {
       let occurrence = 0
       while (occRe.exec(before)) occurrence += 1
 
-      const candidates = mentionOptions.value.filter((item) => item.value === value)
+      const candidates = get().mentionOptions.filter((item) => item.value === value)
       if (!candidates.length) return null
       return candidates[Math.min(occurrence, candidates.length - 1)] ?? null
     }
     return null
-  }
+  },
 
-  function resolveMentionNodeId(text: string, caret: number): string | null {
-    return resolveMentionAt(text, caret)?.nodeId ?? null
-  }
+  resolveMentionNodeId(text, caret) {
+    return get().resolveMentionAt(text, caret)?.nodeId ?? null
+  },
 
-  function requestSelectNode(nodeId: string) {
+  requestSelectNode(nodeId) {
     const hit =
-      mentionOptions.value.find((item) => item.nodeId === nodeId) ?? null
+      get().mentionOptions.find((item) => item.nodeId === nodeId) ?? null
     if (hit) {
-      pendingSelect.value = {
-        scope: hit.resourceScope,
-        resourceId: hit.resourceId,
-        nodeId: hit.nodeId,
-      }
+      set({
+        pendingSelect: {
+          scope: hit.resourceScope,
+          resourceId: hit.resourceId,
+          nodeId: hit.nodeId,
+        },
+      })
       return
     }
-    const active = activeResource.value
+    const active = get().activeResource
     if (!active) {
-      pendingSelect.value = null
+      set({ pendingSelect: null })
       return
     }
-    pendingSelect.value = {
-      scope: active.scope,
-      resourceId: active.id,
-      nodeId: nodeId.trim(),
-    }
-  }
+    set({
+      pendingSelect: {
+        scope: active.scope,
+        resourceId: active.id,
+        nodeId: nodeId.trim(),
+      },
+    })
+  },
 
-  function requestSelectMention(mention: AiMentionOption) {
-    pendingSelect.value = {
-      scope: mention.resourceScope,
-      resourceId: mention.resourceId,
-      nodeId: mention.nodeId,
-    }
-  }
+  requestSelectMention(mention) {
+    set({
+      pendingSelect: {
+        scope: mention.resourceScope,
+        resourceId: mention.resourceId,
+        nodeId: mention.nodeId,
+      },
+    })
+  },
 
-  function clearPendingSelect() {
-    pendingSelect.value = null
-  }
+  clearPendingSelect() {
+    set({ pendingSelect: null })
+  },
 
-  function clearComposer() {
-    composerText.value = ''
-  }
+  clearComposer() {
+    set({ composerText: '' })
+  },
 
-  function mentionsInText(text: string): AiMentionOption[] {
+  mentionsInText(text) {
     const found: AiMentionOption[] = []
     const seen = new Set<string>()
     MENTION_RE.lastIndex = 0
     let match: RegExpExecArray | null
-    let occurrenceByValue = new Map<string, number>()
+    const occurrenceByValue = new Map<string, number>()
     while ((match = MENTION_RE.exec(text))) {
       const value = match[1]
       const occ = occurrenceByValue.get(value) ?? 0
       occurrenceByValue.set(value, occ + 1)
-      const candidates = mentionOptions.value.filter((item) => item.value === value)
+      const candidates = get().mentionOptions.filter((item) => item.value === value)
       const hit = candidates[Math.min(occ, Math.max(0, candidates.length - 1))]
       if (hit && !seen.has(`${hit.resourceScope}:${hit.resourceId}:${hit.nodeId}`)) {
         seen.add(`${hit.resourceScope}:${hit.resourceId}:${hit.nodeId}`)
@@ -187,26 +287,5 @@ export const useAiAssistantStore = defineStore('aiAssistant', () => {
       }
     }
     return found
-  }
-
-  return {
-    panelOpen,
-    composerText,
-    mentionOptions,
-    pendingSelect,
-    activeResource,
-    resourceEpoch,
-    setPanelOpen,
-    togglePanel,
-    setActiveResource,
-    bumpResourceEpoch,
-    addWidgetMention,
-    resolveMentionAt,
-    resolveMentionNodeId,
-    requestSelectNode,
-    requestSelectMention,
-    clearPendingSelect,
-    clearComposer,
-    mentionsInText,
-  }
-})
+  },
+}))

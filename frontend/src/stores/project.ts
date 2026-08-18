@@ -1,5 +1,4 @@
-import { defineStore } from 'pinia'
-import { computed, ref } from 'vue'
+import { create } from 'zustand'
 import type { LubanProjectConfig } from '../api/projects'
 
 const STORAGE_KEY = 'luban.activeProject'
@@ -17,7 +16,6 @@ function loadStoredProject(): StoredProject | null {
       localStorage.getItem(LEGACY_STORAGE_KEY)
     if (!raw) return null
     const parsed = JSON.parse(raw) as StoredProject
-    // 迁移旧 key
     if (!localStorage.getItem(STORAGE_KEY)) {
       localStorage.setItem(STORAGE_KEY, raw)
       localStorage.removeItem(LEGACY_STORAGE_KEY)
@@ -28,35 +26,35 @@ function loadStoredProject(): StoredProject | null {
   }
 }
 
-export const useProjectStore = defineStore('project', () => {
-  const stored = loadStoredProject()
-  const path = ref(stored?.path ?? '')
-  const config = ref<LubanProjectConfig | null>(stored?.config ?? null)
+type ProjectState = {
+  path: string
+  config: LubanProjectConfig | null
+  hasProject: boolean
+  setProject: (nextPath: string, nextConfig: LubanProjectConfig) => void
+  clearProject: () => void
+}
 
-  const hasProject = computed(() => Boolean(path.value && config.value))
+const stored = loadStoredProject()
 
-  function setProject(nextPath: string, nextConfig: LubanProjectConfig) {
-    path.value = nextPath
-    config.value = nextConfig
+export const useProjectStore = create<ProjectState>((set) => ({
+  path: stored?.path ?? '',
+  config: stored?.config ?? null,
+  hasProject: Boolean(stored?.path && stored?.config),
+  setProject(nextPath, nextConfig) {
     localStorage.setItem(
       STORAGE_KEY,
       JSON.stringify({ path: nextPath, config: nextConfig } satisfies StoredProject),
     )
     localStorage.removeItem(LEGACY_STORAGE_KEY)
-  }
-
-  function clearProject() {
-    path.value = ''
-    config.value = null
+    set({
+      path: nextPath,
+      config: nextConfig,
+      hasProject: Boolean(nextPath && nextConfig),
+    })
+  },
+  clearProject() {
     localStorage.removeItem(STORAGE_KEY)
     localStorage.removeItem(LEGACY_STORAGE_KEY)
-  }
-
-  return {
-    path,
-    config,
-    hasProject,
-    setProject,
-    clearProject,
-  }
-})
+    set({ path: '', config: null, hasProject: false })
+  },
+}))

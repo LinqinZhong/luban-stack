@@ -1,0 +1,53 @@
+.type-tree-select {
+  position: relative;
+  width: 100%;
+}
+
+.type-dual-select {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+}
+
+.type-dual-category {
+  width: 118px;
+  flex-shrink: 0;
+}
+
+.type-dual-group {
+  width: 110px;
+  flex-shrink: 0;
+}
+
+.type-dual-leaf {
+  flex: 1;
+  min-width: 0;
+}
+
+.type-tree-select.has-override .ant-select-selection-item,
+.type-tree-select.has-override .ant-select-selection-item-content,
+.type-tree-select.has-override input {
+  color: transparent !important;
+  -webkit-text-fill-color: transparent;
+}
+
+.type-override-label {
+  position: absolute;
+  left: 11px;
+  right: 30px;
+  top: 50%;
+  transform: translateY(-50%);
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  text-align: left;
+  font-size: 13px;
+  line-height: 1.2;
+  color: #606266;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: none;
+}

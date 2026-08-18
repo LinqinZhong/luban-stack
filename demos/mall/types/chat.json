@@ -86,8 +86,7 @@
               {
                 "alternatives": [
                   {
-                    "kind": "named",
-                    "ref": "type_common_URI"
+                    "kind": "resource"
                   }
                 ]
               }
@@ -97,6 +96,28 @@
           "optional": false
         }
       ],
+      "enumMembers": [],
+      "combination": {
+        "intersections": [
+          {
+            "alternatives": [
+              {
+                "kind": "string"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "type_msergtu5_55dop8",
+      "name": "a",
+      "kind": "string",
+      "remark": "",
+      "tableName": "",
+      "category": "other",
+      "generics": [],
+      "fields": [],
       "enumMembers": [],
       "combination": {
         "intersections": [
